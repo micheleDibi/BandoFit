@@ -135,14 +135,21 @@ async def _send_via_resend(
 
 
 async def _dispatch(to_email: str, subject: str, html_body: str, text_body: str) -> bool:
-    """Invia con il provider configurato (SMTP → Resend → log). Mai raise."""
+    """Invia con il provider configurato (SMTP → Resend → log). Mai raise.
+    Ogni tentativo viene loggato, riuscito o meno: è il punto di verità
+    quando "le email non arrivano"."""
     settings = get_settings()
     subject = _sanitize_header(subject)
     try:
         if settings.smtp_host:
-            return await _send_via_smtp(settings, to_email, subject, html_body, text_body)
+            sent = await _send_via_smtp(settings, to_email, subject, html_body, text_body)
+            logger.info("Email inviata via SMTP a %s (%r)", to_email, subject)
+            return sent
         if settings.resend_api_key:
-            return await _send_via_resend(settings, to_email, subject, html_body)
+            sent = await _send_via_resend(settings, to_email, subject, html_body)
+            if sent:
+                logger.info("Email inviata via Resend a %s (%r)", to_email, subject)
+            return sent
     except Exception as exc:
         logger.error("Invio email a %s fallito: %s", to_email, exc)
         return False

@@ -1,6 +1,11 @@
 import logging
 from contextlib import asynccontextmanager
 
+# I logger applicativi (bandofit.*) devono essere visibili nei log del
+# container: senza questa configurazione i livelli INFO/WARNING dei moduli
+# (email, auth, famiglia) non venivano emessi affatto.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware

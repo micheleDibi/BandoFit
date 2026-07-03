@@ -107,7 +107,7 @@ async def recover_password(primary, email: str) -> None:
         )
     except Exception as exc:
         # Utente inesistente o errore: logghiamo e basta, la risposta non cambia.
-        logger.info("Recovery non generata per %s: %s", email, exc)
+        logger.warning("Recovery NON generata per %s: %s", email, exc)
         return
     await email_service.send_recovery_email(email, link.properties.action_link)
 
@@ -126,6 +126,6 @@ async def resend_confirmation(primary, email: str) -> None:
             }
         )
     except Exception as exc:
-        logger.info("Reinvio conferma non generato per %s: %s", email, exc)
+        logger.warning("Reinvio conferma NON generato per %s: %s", email, exc)
         return
     await email_service.send_confirmation_email(email, link.properties.action_link)

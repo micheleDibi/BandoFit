@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     env: str = "development"
 
+    # URL pubblico del frontend (redirect degli inviti, link nelle email).
+    frontend_url: str = "http://localhost:5173"
+
+    # Email transazionali via Resend. Chiave vuota = fallback log-only (dev).
+    resend_api_key: str = ""
+    email_from: str = "BandoFit <onboarding@resend.dev>"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

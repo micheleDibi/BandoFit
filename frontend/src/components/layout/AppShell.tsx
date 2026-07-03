@@ -4,6 +4,7 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { useMe } from "../../hooks/useMe";
 import { cn } from "../../lib/cn";
+import { InviteBanner } from "../shared/InviteBanner";
 import { Logo } from "./Logo";
 
 const navLinkClasses = ({ isActive }: { isActive: boolean }) =>
@@ -114,6 +115,8 @@ export function AppShell() {
           </nav>
         )}
       </header>
+
+      <InviteBanner />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
         <Outlet />

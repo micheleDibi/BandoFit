@@ -1,4 +1,4 @@
-import { Search, ShieldCheck, UserRound } from "lucide-react";
+import { Search, ShieldCheck, UserRound, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -128,6 +128,7 @@ export default function AdminUtenti() {
                 <tr className="border-b border-slate-200 bg-slate-50/70 text-xs uppercase tracking-wide text-slate-500">
                   <th className="px-4 py-3 font-medium">Utente</th>
                   <th className="px-4 py-3 font-medium">Ruolo</th>
+                  <th className="px-4 py-3 font-medium">Famiglia</th>
                   <th className="px-4 py-3 font-medium">Piano</th>
                   <th className="px-4 py-3 font-medium">Stato</th>
                   <th className="px-4 py-3 font-medium">Registrato</th>
@@ -140,6 +141,9 @@ export default function AdminUtenti() {
                   const fullName = [user.profile.nome, user.profile.cognome]
                     .filter(Boolean)
                     .join(" ");
+                  const isManagedChild =
+                    user.family?.type === "child" &&
+                    (user.family.status === "active" || user.family.status === "pending");
                   return (
                     <tr
                       key={user.profile.id}
@@ -169,8 +173,48 @@ export default function AdminUtenti() {
                         )}
                       </td>
                       <td className="px-4 py-3">
+                        {user.family?.type === "child" ? (
+                          <div>
+                            <Badge
+                              tone={
+                                user.family.status === "active"
+                                  ? "brand"
+                                  : user.family.status === "pending"
+                                    ? "amber"
+                                    : "slate"
+                              }
+                            >
+                              <UsersRound className="size-3" aria-hidden />
+                              {user.family.status === "active"
+                                ? "In famiglia"
+                                : user.family.status === "pending"
+                                  ? "Invitato"
+                                  : "Retrocesso"}
+                            </Badge>
+                            {user.family.parent_email && (
+                              <p className="mt-1 text-xs text-slate-400">
+                                di {user.family.parent_email}
+                              </p>
+                            )}
+                          </div>
+                        ) : user.family?.type === "parent" ? (
+                          <Badge tone="brand">
+                            <UsersRound className="size-3" aria-hidden />
+                            Titolare · {user.family.members_count ?? 0} collegati
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-slate-300">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
                         <select
                           value={user.subscription?.plan.id ?? ""}
+                          disabled={isManagedChild}
+                          title={
+                            isManagedChild
+                              ? "Il piano si gestisce sull'account titolare della famiglia"
+                              : undefined
+                          }
                           onChange={(e) => {
                             const planId = Number(e.target.value);
                             const plan = plans?.find((p) => p.id === planId);
@@ -180,7 +224,7 @@ export default function AdminUtenti() {
                             }
                           }}
                           aria-label={`Piano di ${user.profile.email}`}
-                          className="h-9 cursor-pointer rounded-lg border border-slate-200 bg-white px-2 text-sm focus:border-brand-400 focus:outline-none"
+                          className="h-9 cursor-pointer rounded-lg border border-slate-200 bg-white px-2 text-sm focus:border-brand-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
                         >
                           {!user.subscription && <option value="">Nessun piano</option>}
                           {user.subscription &&
@@ -195,6 +239,9 @@ export default function AdminUtenti() {
                             </option>
                           ))}
                         </select>
+                        {user.subscription?.inherited && (
+                          <p className="mt-1 text-xs text-slate-400">(ereditato)</p>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {user.profile.is_active ? (

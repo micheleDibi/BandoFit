@@ -141,9 +141,10 @@ export default function AdminUtenti() {
                   const fullName = [user.profile.nome, user.profile.cognome]
                     .filter(Boolean)
                     .join(" ");
+                  // Solo i figli ATTIVI ereditano il piano (pending/retrocessi
+                  // hanno un piano proprio, gestibile normalmente).
                   const isManagedChild =
-                    user.family?.type === "child" &&
-                    (user.family.status === "active" || user.family.status === "pending");
+                    user.family?.type === "child" && user.family.status === "active";
                   return (
                     <tr
                       key={user.profile.id}

@@ -33,17 +33,20 @@ export default function AccettaInvito() {
   const [familyName, setFamilyName] = useState<string | null>(null);
 
   // Attende la sessione creata dal link d'invito (timeout → link non valido).
+  // Una sessione che arriva DOPO il timeout (dispositivi lenti) recupera
+  // comunque lo stato "invalid" — non per i link con errore esplicito nell'hash.
   useEffect(() => {
-    if (step !== "loading") return;
-    if (session) {
+    if (hashError) return;
+    if (session && (step === "loading" || step === "invalid")) {
       setStep("password");
       return;
     }
+    if (step !== "loading") return;
     const timer = setTimeout(() => {
-      if (!session) setStep("invalid");
+      setStep((current) => (current === "loading" ? "invalid" : current));
     }, 6000);
     return () => clearTimeout(timer);
-  }, [session, step]);
+  }, [session, step, hashError]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();

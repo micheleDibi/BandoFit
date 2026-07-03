@@ -24,6 +24,7 @@ export default function Profilo() {
   const [form, setForm] = useState({ nome: "", cognome: "", azienda: "", telefono: "" });
   const [saved, setSaved] = useState(false);
   const [planToConfirm, setPlanToConfirm] = useState<Plan | null>(null);
+  const [switchNotice, setSwitchNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (me) {
@@ -67,9 +68,25 @@ export default function Profilo() {
 
   const handleSwitch = async () => {
     if (!planToConfirm) return;
+    setSwitchNotice(null);
     try {
-      await switchPlan.mutateAsync(planToConfirm.id);
+      const result = await switchPlan.mutateAsync(planToConfirm.id);
       setPlanToConfirm(null);
+      const adjustment = result.plan_switch_adjustment;
+      if (adjustment && (adjustment.demoted.length || adjustment.revoked_pending.length)) {
+        const parts: string[] = [];
+        if (adjustment.demoted.length) {
+          parts.push(
+            `${adjustment.demoted.length} account ${adjustment.demoted.length === 1 ? "retrocesso" : "retrocessi"} al piano Gratuito (${adjustment.demoted.map((d) => d.denominazione).join(", ")})`,
+          );
+        }
+        if (adjustment.revoked_pending.length) {
+          parts.push(
+            `${adjustment.revoked_pending.length} ${adjustment.revoked_pending.length === 1 ? "invito revocato" : "inviti revocati"}`,
+          );
+        }
+        setSwitchNotice(`Piano aggiornato. ${parts.join(" e ")}.`);
+      }
     } catch {
       // l'errore è mostrato nel dialog
     }
@@ -202,6 +219,12 @@ export default function Profilo() {
             )}
           </div>
         </div>
+
+        {switchNotice && (
+          <p className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800" role="status">
+            {switchNotice}
+          </p>
+        )}
 
         {plansLoading ? (
           <div className="mt-6 grid gap-5 pt-3 sm:grid-cols-2 lg:grid-cols-4">

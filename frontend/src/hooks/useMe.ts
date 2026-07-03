@@ -31,6 +31,10 @@ export function useSwitchPlan() {
   return useMutation({
     mutationFn: async (planId: number) =>
       (await api.post<Me>("/me/subscription", { plan_id: planId })).data,
-    onSuccess: (me) => queryClient.setQueryData(["me"], me),
+    onSuccess: (me) => {
+      queryClient.setQueryData(["me"], me);
+      // Un downgrade può aver retrocesso membri: la FamilyCard va aggiornata.
+      queryClient.invalidateQueries({ queryKey: ["family"] });
+    },
   });
 }

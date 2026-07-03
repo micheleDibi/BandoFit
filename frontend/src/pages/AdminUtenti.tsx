@@ -128,7 +128,7 @@ export default function AdminUtenti() {
                 <tr className="border-b border-slate-200 bg-slate-50/70 text-xs uppercase tracking-wide text-slate-500">
                   <th className="px-4 py-3 font-medium">Utente</th>
                   <th className="px-4 py-3 font-medium">Ruolo</th>
-                  <th className="px-4 py-3 font-medium">Famiglia</th>
+                  <th className="px-4 py-3 font-medium">Azienda</th>
                   <th className="px-4 py-3 font-medium">Piano</th>
                   <th className="px-4 py-3 font-medium">Stato</th>
                   <th className="px-4 py-3 font-medium">Registrato</th>
@@ -187,7 +187,7 @@ export default function AdminUtenti() {
                             >
                               <UsersRound className="size-3" aria-hidden />
                               {user.family.status === "active"
-                                ? "In famiglia"
+                                ? "In azienda"
                                 : user.family.status === "pending"
                                   ? "Invitato"
                                   : "Retrocesso"}
@@ -213,7 +213,7 @@ export default function AdminUtenti() {
                           disabled={isManagedChild}
                           title={
                             isManagedChild
-                              ? "Il piano si gestisce sull'account titolare della famiglia"
+                              ? "Il piano si gestisce sull'account titolare dell'azienda"
                               : undefined
                           }
                           onChange={(e) => {

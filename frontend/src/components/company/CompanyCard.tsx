@@ -173,7 +173,7 @@ export function CompanyCard() {
           Dati aziendali
         </h2>
         <p className="mt-1 text-sm text-slate-500">
-          Dati della famiglia, gestiti dal titolare (sola lettura).
+          Dati della tua azienda, gestiti dal titolare (sola lettura).
         </p>
         {company ? (
           <dl className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">

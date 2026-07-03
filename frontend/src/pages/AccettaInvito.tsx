@@ -91,7 +91,7 @@ export default function AccettaInvito() {
               Invito scaduto o non valido
             </h1>
             <p className="mt-2 text-sm text-slate-500">
-              Il link che hai aperto non è più utilizzabile. Chiedi al titolare della famiglia di
+              Il link che hai aperto non è più utilizzabile. Chiedi al titolare dell'azienda di
               reinviarti l'invito dalla sua pagina profilo.
             </p>
             <Link to="/" className="mt-6">
@@ -124,7 +124,7 @@ export default function AccettaInvito() {
           <>
             <h1 className="font-display text-xl font-bold text-slate-900">Benvenuto su BandoFit</h1>
             <p className="mt-1 text-sm text-slate-500">
-              Sei stato invitato a unirti a una famiglia di account. Imposta la tua password per
+              Sei stato invitato a unirti a un'azienda su BandoFit. Imposta la tua password per
               completare l'attivazione.
             </p>
             <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>

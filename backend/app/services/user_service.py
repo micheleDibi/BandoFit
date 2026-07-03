@@ -348,7 +348,7 @@ async def admin_switch_user_plan(primary, target_user_id: UUID, plan_id: int) ->
     membership = await family_service.get_membership(primary, str(target_user_id))
     if membership and membership["status"] == "active":
         raise ForbiddenError(
-            "Il piano si gestisce sull'account titolare della famiglia"
+            "Il piano si gestisce sull'account titolare dell'azienda"
         )
 
     me = await switch_plan(primary, str(target_user_id), plan_id)

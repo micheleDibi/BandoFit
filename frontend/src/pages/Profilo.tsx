@@ -192,7 +192,7 @@ export default function Profilo() {
               </>
             )}
             <p className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-400">
-              Le quote del piano sono condivise con tutta la famiglia. Solo il titolare può
+              Le quote del piano sono condivise con tutta l'azienda. Solo il titolare può
               cambiare l'abbonamento.
             </p>
           </Card>
@@ -213,7 +213,7 @@ export default function Profilo() {
             )}
             {me.family?.role === "child" && me.family.status === "demoted" && (
               <p className="mt-1 text-sm text-amber-600">
-                Il tuo account è stato retrocesso dalla famiglia: hai un piano indipendente
+                Il tuo account è stato retrocesso dall'azienda: hai un piano indipendente
                 finché il titolare non ti riattiva.
               </p>
             )}

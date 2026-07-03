@@ -57,7 +57,9 @@ Aggiorna l'anagrafica. Body (tutti opzionali): `nome`, `cognome`, `azienda`, `te
 ### `POST /me/subscription`
 Cambio piano (senza pagamento in questa fase). Body: `{"plan_id": 3}`. L'abbonamento attivo passa a `cancelled` e ne viene creato uno nuovo annuale. → come `GET /me`; se il downgrade ha retrocesso membri della famiglia, la risposta include `plan_switch_adjustment: {demoted, revoked_pending}`. Errori: `400` piano inesistente/non attivo; `403 child_plan_locked` se l'utente è un figlio attivo (il piano si gestisce sul titolare).
 
-## Famiglia di account
+## Azienda (gruppo di account)
+
+> **Terminologia**: nell'interfaccia utente il gruppo si chiama **"Azienda"**; internamente (tabelle, endpoint, tipi) resta il nome tecnico *family* (`family_members`, `/me/family`, ecc.) — non rinominare.
 
 Il limite account (`num_account_aziendali` del piano) **include il titolare**. `GET /me` restituisce `family`: per il titolare `{role:'parent', used, limit}` (presente solo se limite > 1 o se ha membri), per un membro `{role:'child', status, denominazione, parent_display_name}`; un figlio attivo riceve `subscription` del titolare con `inherited: true`.
 

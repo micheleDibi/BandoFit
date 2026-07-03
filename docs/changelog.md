@@ -2,6 +2,10 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-03 — Terminologia "Azienda"
+
+- In tutta l'interfaccia (e nelle email/messaggi d'errore) il gruppo di account si chiama ora **"Azienda"** invece di "Famiglia" — più professionale. I nomi tecnici interni (tabelle `family_members`, endpoint `/me/family`, componenti) restano invariati.
+
 ## 2026-07-03 — Branding
 
 - Loghi ufficiali BandoFit (orizzontale, verticale, icona) con sfondo reso trasparente, nuovi favicon/apple-touch-icon; logo verticale nelle pagine auth, orizzontale in topbar e footer.

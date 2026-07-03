@@ -52,9 +52,9 @@ def _invitation_html(parent_display_name: str, denominazione: str, cta_url: str)
     return _branded_html(
         "Sei stato invitato su BandoFit",
         [
-            f"<strong>{parent}</strong> ti ha invitato a unirti alla sua famiglia di account "
-            f"come <strong>{name}</strong>.",
-            "Entrando nella famiglia condividerai l'abbonamento e i dati aziendali del titolare.",
+            f"<strong>{parent}</strong> ti ha invitato a unirti alla sua azienda "
+            f"su BandoFit come <strong>{name}</strong>.",
+            "Entrando nell'azienda condividerai l'abbonamento e i dati aziendali del titolare.",
         ],
         "Vai all'invito",
         cta_url,
@@ -64,7 +64,7 @@ def _invitation_html(parent_display_name: str, denominazione: str, cta_url: str)
 
 def _plain_text(parent_display_name: str, denominazione: str, cta_url: str) -> str:
     return (
-        f"{parent_display_name} ti ha invitato a unirti alla sua famiglia di account "
+        f"{parent_display_name} ti ha invitato a unirti alla sua azienda "
         f"su BandoFit come «{denominazione}».\n\n"
         f"Vai all'invito: {cta_url}\n\n"
         "Se non ti aspettavi questo invito puoi ignorare questa email."

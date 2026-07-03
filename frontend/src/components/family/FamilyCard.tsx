@@ -293,7 +293,7 @@ export function FamilyCard() {
             <p>
               Stai per rimuovere{" "}
               <strong className="text-slate-900">{memberToRemove.denominazione}</strong> (
-              {memberToRemove.email}) dalla famiglia.
+              {memberToRemove.email}) dalla tua azienda.
             </p>
             <p className="mt-2">
               {memberToRemove.status === "pending"

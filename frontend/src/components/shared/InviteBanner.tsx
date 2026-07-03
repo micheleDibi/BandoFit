@@ -51,8 +51,7 @@ export function InviteBanner() {
           <UserPlus className="size-4" aria-hidden />
         </span>
         <p className="min-w-0 flex-1 text-sm text-brand-900">
-          <strong>{invitation.parent_display_name}</strong> ti ha invitato nella sua famiglia di
-          account come <strong>{invitation.denominazione}</strong>.
+          <strong>{invitation.parent_display_name}</strong> ti ha invitato nella sua azienda come <strong>{invitation.denominazione}</strong>.
         </p>
         <div className="flex gap-2">
           <Button size="sm" onClick={() => setConfirming(invitation)}>
@@ -77,7 +76,7 @@ export function InviteBanner() {
       <Dialog
         open={!!confirming}
         onClose={() => setConfirming(null)}
-        title="Entrare nella famiglia?"
+        title="Entrare nell'azienda?"
         footer={
           <>
             <Button variant="ghost" onClick={() => setConfirming(null)}>
@@ -90,7 +89,7 @@ export function InviteBanner() {
         }
       >
         <p>
-          Entrando nella famiglia di{" "}
+          Entrando nell'azienda di{" "}
           <strong className="text-slate-900">{invitation.parent_display_name}</strong> erediterai
           il suo abbonamento e i suoi dati aziendali.
         </p>

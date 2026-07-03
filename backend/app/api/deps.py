@@ -77,7 +77,7 @@ async def require_parent(user: CurrentUser, primary: PrimaryClient) -> dict:
     membership = await family_service.get_membership(primary, user["id"])
     if membership is not None:
         raise ForbiddenError(
-            "Solo il titolare della famiglia può gestire gli account collegati"
+            "Solo il titolare dell'azienda può gestire gli account collegati"
         )
     return user
 

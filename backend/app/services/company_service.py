@@ -83,7 +83,7 @@ async def upsert_company(primary, secondary, parent: dict, data: CompanyIn) -> C
     # i propri.
     membership = await family_service.get_membership(primary, parent["id"])
     if membership and membership["status"] == "active":
-        raise ForbiddenError("I dati aziendali della famiglia li gestisce il titolare")
+        raise ForbiddenError("I dati aziendali li gestisce il titolare dell'azienda")
 
     lookups = await lookup_service.get_lookups(secondary)
     payload = resolve_lookups(data, lookups)

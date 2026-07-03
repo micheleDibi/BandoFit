@@ -422,9 +422,16 @@ async def cleanup_revoked_new_users(primary, adjustment: dict) -> None:
                 )
 
 
-async def build_me_family(primary, user_id: str, own_plan_limit: int | None) -> MeFamilyOut | None:
-    """Contesto famiglia per GET /me. None se l'utente non c'entra con le famiglie."""
-    membership = await get_membership(primary, user_id)
+async def build_me_family(
+    primary,
+    user_id: str,
+    own_plan_limit: int | None,
+    membership: dict | None = None,
+) -> MeFamilyOut | None:
+    """Contesto famiglia per GET /me. None se l'utente non c'entra con le famiglie.
+    ``membership`` può essere passata dal chiamante per evitare una query doppia."""
+    if membership is None:
+        membership = await get_membership(primary, user_id)
     if membership:
         return MeFamilyOut(
             role="child",

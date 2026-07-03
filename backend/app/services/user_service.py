@@ -130,16 +130,17 @@ async def get_me(primary, user_id: str) -> MeOut:
     subscription = _map_subscription(row.get("user_subscriptions"))
 
     own_limit = subscription.plan.num_account_aziendali if subscription else 0
-    family = await family_service.build_me_family(primary, user_id, own_limit)
+    membership = await family_service.get_membership(primary, user_id)
+    family = await family_service.build_me_family(
+        primary, user_id, own_limit, membership=membership
+    )
 
     # Un figlio ATTIVO eredita l'abbonamento del titolare della famiglia.
-    if family and family.role == "child" and family.status == "active":
-        membership = await family_service.get_membership(primary, user_id)
-        if membership:
-            inherited = await _fetch_active_subscription(primary, membership["parent_id"])
-            if inherited:
-                inherited.inherited = True
-                subscription = inherited
+    if membership and membership["status"] == "active":
+        inherited = await _fetch_active_subscription(primary, membership["parent_id"])
+        if inherited:
+            inherited.inherited = True
+            subscription = inherited
 
     return MeOut(
         profile=ProfileOut(**{k: row[k] for k in row if k != "user_subscriptions"}),

@@ -45,8 +45,7 @@ Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo 
 ## Brand assets
 
 - Loghi in `src/assets/` (PNG trasparenti, importati da Vite): `logo-orizzontale.png` (topbar e footer), `logo-verticale.png` (pagine auth), `logo-icona.png`; favicon e apple-touch-icon in `public/`.
-- Componente `Logo` (`components/layout/Logo.tsx`) con varianti `horizontal` (default) / `vertical` / `icon`.
-- **Attribuzione EduNews24**: componente `PoweredBy` (`components/shared/PoweredBy.tsx`) — "powered by" + logo EduNews24 con link a https://edunews24.it — presente nel footer della landing, sotto le card delle pagine auth e nel footer dell'app.
+- Componente `Logo` (`components/layout/Logo.tsx`) con varianti `horizontal` (default) / `vertical` / `icon`. **Regola di brand: il logo BandoFit porta sempre con sé l'attribuzione "powered by EduNews24"** — accanto (con separatore) nella variante orizzontale, sotto nella verticale; solo la variante `icon` (favicon) ne è priva. L'attribuzione nel lockup non è cliccabile (il Logo è spesso dentro un `<Link>`); il link a https://edunews24.it vive nel componente `PoweredBy` (`components/shared/PoweredBy.tsx`), usato nel footer dell'app.
 - Gli screenshot sorgente dei loghi restano solo locali (`Screenshot *.png` in .gitignore).
 
 ## Design system

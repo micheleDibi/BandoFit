@@ -2,7 +2,6 @@ import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
-import { PoweredBy } from "../components/shared/PoweredBy";
 import { PlanCard } from "../components/shared/PlanCard";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -294,7 +293,6 @@ export default function Register() {
           </div>
         </div>
       )}
-      <PoweredBy className="mt-10" />
     </div>
   );
 }

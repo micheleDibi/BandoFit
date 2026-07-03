@@ -1,12 +1,12 @@
 import { ArrowLeft, Eye, EyeOff } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
 import { PlanCard } from "../components/shared/PlanCard";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/Field";
-import { Skeleton } from "../components/ui/states";
+import { ErrorState, Skeleton } from "../components/ui/states";
 import { usePlans } from "../hooks/usePlans";
 import { cn } from "../lib/cn";
 import { supabase } from "../lib/supabase";
@@ -31,7 +31,10 @@ const EMPTY_FORM: FormData = {
 
 function StepIndicator({ step }: { step: 1 | 2 }) {
   return (
-    <div className="flex items-center gap-2" aria-label={`Passo ${step} di 2`}>
+    <div className="flex items-center gap-2">
+      <span className="sr-only" role="status">
+        Passo {step} di 2
+      </span>
       {[1, 2].map((s) => (
         <span
           key={s}
@@ -50,7 +53,7 @@ function StepIndicator({ step }: { step: 1 | 2 }) {
 export default function Register() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { data: plans, isPending: plansLoading } = usePlans();
+  const { data: plans, isPending: plansLoading, isError: plansError, refetch } = usePlans();
 
   const [step, setStep] = useState<1 | 2>(1);
   const [form, setForm] = useState<FormData>(EMPTY_FORM);
@@ -58,7 +61,15 @@ export default function Register() {
   const [showPassword, setShowPassword] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<string>(searchParams.get("piano") ?? "gratuito");
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Se lo slug ?piano non corrisponde ad alcun piano attivo, ripiega su gratuito.
+  useEffect(() => {
+    if (plans && plans.length > 0 && !plans.some((p) => p.slug === selectedPlan)) {
+      setSelectedPlan(plans.some((p) => p.slug === "gratuito") ? "gratuito" : plans[0].slug);
+    }
+  }, [plans, selectedPlan]);
 
   const set = (key: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
@@ -81,6 +92,7 @@ export default function Register() {
 
   const handleSubmit = async () => {
     setError(null);
+    setInfo(null);
     setLoading(true);
     const { data, error: authError } = await supabase.auth.signUp({
       email: form.email,
@@ -104,8 +116,8 @@ export default function Register() {
       return;
     }
     if (!data.session) {
-      // Conferma email attiva sul progetto: informare l'utente.
-      setError(
+      // Conferma email attiva sul progetto: è un avviso, non un errore.
+      setInfo(
         "Ti abbiamo inviato una email di conferma: aprila per attivare l'account, poi accedi.",
       );
       return;
@@ -223,8 +235,15 @@ export default function Register() {
                 <Skeleton key={i} className="h-72 w-full" />
               ))}
             </div>
+          ) : plansError ? (
+            <div className="mt-8">
+              <ErrorState
+                message="Impossibile caricare i piani. Riprova."
+                onRetry={() => refetch()}
+              />
+            </div>
           ) : (
-            <div className="mt-8 grid gap-5 pt-3 sm:grid-cols-2 lg:grid-cols-4" role="radiogroup" aria-label="Piani di abbonamento">
+            <div className="mt-8 grid gap-5 pt-3 sm:grid-cols-2 lg:grid-cols-4">
               {(plans ?? []).map((plan) => (
                 <PlanCard
                   key={plan.id}
@@ -243,13 +262,26 @@ export default function Register() {
               {error}
             </p>
           )}
+          {info && (
+            <div className="mt-5 rounded-lg bg-brand-50 px-4 py-3 text-sm text-brand-800" role="status">
+              {info}{" "}
+              <Link to="/login" className="font-medium underline underline-offset-2">
+                Vai al login
+              </Link>
+            </div>
+          )}
 
           <div className="mt-8 flex items-center justify-between">
             <Button variant="ghost" onClick={() => setStep(1)}>
               <ArrowLeft className="size-4" aria-hidden />
               Indietro
             </Button>
-            <Button size="lg" onClick={handleSubmit} loading={loading}>
+            <Button
+              size="lg"
+              onClick={handleSubmit}
+              loading={loading}
+              disabled={plansLoading || plansError || !!info}
+            >
               Crea account con piano{" "}
               {plans?.find((p) => p.slug === selectedPlan)?.nome ?? selectedPlan}
             </Button>

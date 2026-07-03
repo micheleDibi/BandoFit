@@ -2,7 +2,8 @@ import { ArrowRight, Bell, Filter, Search, ShieldCheck } from "lucide-react";
 import { Link, Navigate } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
 import { PlanCard } from "../components/shared/PlanCard";
-import { Button } from "../components/ui/Button";
+import { LinkButton } from "../components/ui/Button";
+import { Skeleton } from "../components/ui/states";
 import { useAuth } from "../hooks/useAuth";
 import { usePlans } from "../hooks/usePlans";
 
@@ -35,7 +36,7 @@ const FEATURES = [
 
 export default function Landing() {
   const { session } = useAuth();
-  const { data: plans } = usePlans();
+  const { data: plans, isPending: plansLoading, isError: plansError } = usePlans();
 
   if (session) return <Navigate to="/app/bandi" replace />;
 
@@ -46,12 +47,10 @@ export default function Landing() {
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
           <Logo />
           <div className="flex items-center gap-2">
-            <Link to="/login">
-              <Button variant="ghost">Accedi</Button>
-            </Link>
-            <Link to="/registrati">
-              <Button>Registrati</Button>
-            </Link>
+            <LinkButton to="/login" variant="ghost">
+              Accedi
+            </LinkButton>
+            <LinkButton to="/registrati">Registrati</LinkButton>
           </div>
         </div>
       </header>
@@ -74,21 +73,22 @@ export default function Landing() {
               filtri intelligenti, schede chiare e scadenze sempre sotto controllo.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Link to="/registrati">
-                <Button size="lg" className="bg-white text-brand-700 hover:bg-brand-50 active:bg-brand-100">
-                  Inizia gratis
-                  <ArrowRight className="size-4" aria-hidden />
-                </Button>
-              </Link>
-              <Link to="/login">
-                <Button
-                  size="lg"
-                  variant="secondary"
-                  className="border-white/30 bg-transparent text-white hover:border-white hover:bg-white/10 hover:text-white"
-                >
-                  Ho già un account
-                </Button>
-              </Link>
+              <LinkButton
+                to="/registrati"
+                size="lg"
+                className="bg-white text-brand-700 hover:bg-brand-50 active:bg-brand-100"
+              >
+                Inizia gratis
+                <ArrowRight className="size-4" aria-hidden />
+              </LinkButton>
+              <LinkButton
+                to="/login"
+                size="lg"
+                variant="secondary"
+                className="border-white/30 bg-transparent text-white hover:border-white hover:bg-white/10 hover:text-white"
+              >
+                Ho già un account
+              </LinkButton>
             </div>
           </div>
         </div>
@@ -126,26 +126,41 @@ export default function Landing() {
           <p className="mx-auto mt-3 max-w-xl text-center text-slate-500">
             Parti gratis ed esplora il catalogo. Passa a un piano superiore quando vuoi di più.
           </p>
-          <div className="mt-10 grid gap-6 pt-3 sm:grid-cols-2 lg:grid-cols-4">
-            {(plans ?? []).map((plan) => (
-              <PlanCard
-                key={plan.id}
-                plan={plan}
-                highlighted={plan.slug === "pro"}
-                badge={plan.slug === "pro" ? "Consigliato" : undefined}
-                footer={
-                  <Link to={`/registrati?piano=${plan.slug}`} className="block">
-                    <Button
+          {plansLoading ? (
+            <div className="mt-10 grid gap-6 pt-3 sm:grid-cols-2 lg:grid-cols-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-72 w-full" />
+              ))}
+            </div>
+          ) : plansError ? (
+            <p className="mt-10 text-center text-sm text-slate-500">
+              Impossibile caricare i piani in questo momento.{" "}
+              <Link to="/registrati" className="font-medium text-brand-600 hover:underline">
+                Registrati
+              </Link>{" "}
+              per iniziare.
+            </p>
+          ) : (
+            <div className="mt-10 grid gap-6 pt-3 sm:grid-cols-2 lg:grid-cols-4">
+              {(plans ?? []).map((plan) => (
+                <PlanCard
+                  key={plan.id}
+                  plan={plan}
+                  highlighted={plan.slug === "pro"}
+                  badge={plan.slug === "pro" ? "Consigliato" : undefined}
+                  footer={
+                    <LinkButton
+                      to={`/registrati?piano=${plan.slug}`}
                       variant={plan.slug === "pro" ? "primary" : "secondary"}
                       className="w-full"
                     >
                       Scegli {plan.nome}
-                    </Button>
-                  </Link>
-                }
-              />
-            ))}
-          </div>
+                    </LinkButton>
+                  }
+                />
+              ))}
+            </div>
+          )}
         </div>
       </section>
 

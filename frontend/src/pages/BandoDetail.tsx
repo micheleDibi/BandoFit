@@ -12,7 +12,7 @@ import { Link, useParams } from "react-router-dom";
 import { ScadenzaBadge, StatoBadge } from "../components/bandi/badges";
 import { ContenutoRenderer } from "../components/bandi/ContenutoRenderer";
 import { Badge } from "../components/ui/Badge";
-import { Button } from "../components/ui/Button";
+import { buttonClasses } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { ErrorState, Skeleton } from "../components/ui/states";
 import { useBando } from "../hooks/useBandi";
@@ -153,21 +153,27 @@ export default function BandoDetail() {
               <h2 className="font-display text-sm font-semibold text-slate-900">Candidatura</h2>
               <div className="mt-3 space-y-2">
                 {linkPrincipale ? (
-                  <a href={linkPrincipale} target="_blank" rel="noopener noreferrer" className="block">
-                    <Button className="w-full">
-                      Vai al bando
-                      <ArrowUpRight className="size-4" aria-hidden />
-                    </Button>
+                  <a
+                    href={linkPrincipale}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={buttonClasses("primary", "md", "w-full")}
+                  >
+                    Vai al bando
+                    <ArrowUpRight className="size-4" aria-hidden />
                   </a>
                 ) : (
                   <p className="text-sm text-slate-500">Link di candidatura non disponibile.</p>
                 )}
                 {bando.link_bando && bando.link_bando !== linkPrincipale && (
-                  <a href={bando.link_bando} target="_blank" rel="noopener noreferrer" className="block">
-                    <Button variant="secondary" className="w-full">
-                      Fonte ufficiale
-                      <ExternalLink className="size-4" aria-hidden />
-                    </Button>
+                  <a
+                    href={bando.link_bando}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={buttonClasses("secondary", "md", "w-full")}
+                  >
+                    Fonte ufficiale
+                    <ExternalLink className="size-4" aria-hidden />
                   </a>
                 )}
               </div>

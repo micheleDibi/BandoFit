@@ -14,7 +14,8 @@ import type { Plan } from "../types";
 
 export default function Profilo() {
   const { data: me, isPending, isError, error, refetch } = useMe();
-  const { data: plans } = usePlans();
+  const { data: plans, isPending: plansLoading, isError: plansError, refetch: refetchPlans } =
+    usePlans();
   const updateProfile = useUpdateProfile();
   const switchPlan = useSwitchPlan();
 
@@ -143,35 +144,52 @@ export default function Profilo() {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-5 pt-3 sm:grid-cols-2 lg:grid-cols-4">
-          {(plans ?? []).map((plan) => {
-            const isCurrent = plan.id === currentPlanId;
-            return (
-              <PlanCard
-                key={plan.id}
-                plan={plan}
-                selected={isCurrent}
-                highlighted={plan.slug === "pro"}
-                badge={isCurrent ? "Piano attuale" : plan.slug === "pro" ? "Consigliato" : undefined}
-                footer={
-                  isCurrent ? (
-                    <Button variant="secondary" className="w-full" disabled>
-                      Attivo
-                    </Button>
-                  ) : (
-                    <Button
-                      variant={plan.slug === "pro" ? "primary" : "secondary"}
-                      className="w-full"
-                      onClick={() => setPlanToConfirm(plan)}
-                    >
-                      Passa a {plan.nome}
-                    </Button>
-                  )
-                }
-              />
-            );
-          })}
-        </div>
+        {plansLoading ? (
+          <div className="mt-6 grid gap-5 pt-3 sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-72 w-full" />
+            ))}
+          </div>
+        ) : plansError ? (
+          <div className="mt-6">
+            <ErrorState
+              message="Impossibile caricare i piani disponibili."
+              onRetry={() => refetchPlans()}
+            />
+          </div>
+        ) : (
+          <div className="mt-6 grid gap-5 pt-3 sm:grid-cols-2 lg:grid-cols-4">
+            {(plans ?? []).map((plan) => {
+              const isCurrent = plan.id === currentPlanId;
+              return (
+                <PlanCard
+                  key={plan.id}
+                  plan={plan}
+                  selected={isCurrent}
+                  highlighted={plan.slug === "pro"}
+                  badge={
+                    isCurrent ? "Piano attuale" : plan.slug === "pro" ? "Consigliato" : undefined
+                  }
+                  footer={
+                    isCurrent ? (
+                      <Button variant="secondary" className="w-full" disabled>
+                        Attivo
+                      </Button>
+                    ) : (
+                      <Button
+                        variant={plan.slug === "pro" ? "primary" : "secondary"}
+                        className="w-full"
+                        onClick={() => setPlanToConfirm(plan)}
+                      >
+                        Passa a {plan.nome}
+                      </Button>
+                    )
+                  }
+                />
+              );
+            })}
+          </div>
+        )}
         <p className="mt-4 text-xs text-slate-400">
           Il cambio piano è immediato e la durata riparte da oggi per un anno. In questa fase non è
           previsto alcun pagamento.

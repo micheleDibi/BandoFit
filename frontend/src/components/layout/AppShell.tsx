@@ -77,6 +77,7 @@ export function AppShell() {
             )}
             <Link
               to="/app/profilo"
+              aria-label="Vai al tuo profilo"
               className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg px-3 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-500"
             >
               <User className="size-4" aria-hidden />
@@ -87,6 +88,7 @@ export function AppShell() {
             <button
               type="button"
               onClick={handleSignOut}
+              aria-label="Esci dall'account"
               className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg px-3 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-500"
             >
               <LogOut className="size-4" aria-hidden />

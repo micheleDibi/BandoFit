@@ -183,6 +183,12 @@ export default function AdminUtenti() {
                           className="h-9 cursor-pointer rounded-lg border border-slate-200 bg-white px-2 text-sm focus:border-brand-400 focus:outline-none"
                         >
                           {!user.subscription && <option value="">Nessun piano</option>}
+                          {user.subscription &&
+                            !(plans ?? []).some((p) => p.id === user.subscription!.plan.id) && (
+                              <option value={user.subscription.plan.id} disabled>
+                                {user.subscription.plan.nome} (disattivato)
+                              </option>
+                            )}
                           {(plans ?? []).map((plan) => (
                             <option key={plan.id} value={plan.id}>
                               {plan.nome}

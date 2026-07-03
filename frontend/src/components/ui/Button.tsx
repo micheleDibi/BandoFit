@@ -1,15 +1,10 @@
 import { Loader2 } from "lucide-react";
 import { forwardRef, type ButtonHTMLAttributes } from "react";
+import { Link, type LinkProps } from "react-router-dom";
 import { cn } from "../../lib/cn";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 type Size = "sm" | "md" | "lg";
-
-export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: Variant;
-  size?: Size;
-  loading?: boolean;
-}
 
 const variants: Record<Variant, string> = {
   primary:
@@ -26,20 +21,30 @@ const sizes: Record<Size, string> = {
   lg: "h-12 px-6 text-base gap-2",
 };
 
+export function buttonClasses(variant: Variant = "primary", size: Size = "md", className?: string) {
+  return cn(
+    "inline-flex cursor-pointer items-center justify-center rounded-lg font-medium",
+    "transition-colors duration-150",
+    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500",
+    "disabled:pointer-events-none disabled:opacity-50",
+    variants[variant],
+    sizes[size],
+    className,
+  );
+}
+
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: Variant;
+  size?: Size;
+  loading?: boolean;
+}
+
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ variant = "primary", size = "md", loading, disabled, className, children, ...props }, ref) => (
     <button
       ref={ref}
       disabled={disabled || loading}
-      className={cn(
-        "inline-flex cursor-pointer items-center justify-center rounded-lg font-medium",
-        "transition-colors duration-150",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500",
-        "disabled:pointer-events-none disabled:opacity-50",
-        variants[variant],
-        sizes[size],
-        className,
-      )}
+      className={buttonClasses(variant, size, className)}
       {...props}
     >
       {loading && <Loader2 className="size-4 animate-spin" aria-hidden />}
@@ -48,3 +53,14 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ),
 );
 Button.displayName = "Button";
+
+/** Link con l'aspetto di un bottone: evita il pattern non valido
+ *  <Link><Button>…</Button></Link> (elemento interattivo dentro interattivo). */
+export interface LinkButtonProps extends LinkProps {
+  variant?: Variant;
+  size?: Size;
+}
+
+export function LinkButton({ variant = "primary", size = "md", className, ...props }: LinkButtonProps) {
+  return <Link className={buttonClasses(variant, size, className)} {...props} />;
+}

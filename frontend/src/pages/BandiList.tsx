@@ -1,5 +1,5 @@
 import { Search, SlidersHorizontal, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActiveFilterChips } from "../components/bandi/ActiveFilterChips";
 import { BandoCard } from "../components/bandi/BandoCard";
 import { FilterSidebar } from "../components/bandi/FilterSidebar";
@@ -24,6 +24,23 @@ export default function BandiList() {
   const { data: lookups } = useLookups();
   const { data, isPending, isError, error, refetch, isPlaceholderData } = useBandi(filters);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+
+  // Drawer filtri: chiusura con Esc, focus iniziale sul pulsante di chiusura,
+  // blocco dello scroll di sfondo mentre è aperto.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    drawerCloseRef.current?.focus();
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [drawerOpen]);
 
   // Ricerca con debounce: stato locale → URL dopo 400ms.
   const [searchInput, setSearchInput] = useState(filters.q);
@@ -163,17 +180,18 @@ export default function BandiList() {
               <div className="mb-3 flex items-center justify-between">
                 <span className="font-display text-base font-semibold">Filtri</span>
                 <button
+                  ref={drawerCloseRef}
                   type="button"
                   onClick={() => setDrawerOpen(false)}
                   aria-label="Chiudi"
-                  className="cursor-pointer rounded-md p-1.5 text-slate-500 hover:bg-slate-200"
+                  className="cursor-pointer rounded-md p-1.5 text-slate-500 hover:bg-slate-200 focus-visible:outline-2 focus-visible:outline-brand-500"
                 >
                   <X className="size-5" aria-hidden />
                 </button>
               </div>
               {sidebar}
               <Button className="mt-4 w-full" onClick={() => setDrawerOpen(false)}>
-                Mostra {data?.total ?? ""} risultati
+                {data ? `Mostra ${data.total} risultati` : "Mostra risultati"}
               </Button>
             </div>
           </div>

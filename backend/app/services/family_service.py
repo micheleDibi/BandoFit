@@ -28,7 +28,7 @@ from app.schemas.family import (
     InviteMemberOut,
     MeFamilyOut,
 )
-from app.services import email_service
+from app.services import email_service, token_service
 
 logger = logging.getLogger("bandofit.family")
 
@@ -229,22 +229,18 @@ async def invite_member(
             email, display_name, denominazione
         )
     else:
-        # Email nuova: generate_link(type='invite') crea l'utente auth (il
-        # trigger crea il profilo SENZA abbonamento grazie al metadata
-        # family_invite) e ritorna il link SENZA che Supabase invii nulla:
-        # l'email la mandiamo noi col nostro provider.
+        # Email nuova: l'utente viene creato via Admin API (nessun link GoTrue;
+        # il trigger crea il profilo SENZA abbonamento grazie al metadata
+        # family_invite). Il link nell'email è un token NOSTRO sul dominio.
         try:
-            link = await primary.auth.admin.generate_link(
+            created = await primary.auth.admin.create_user(
                 {
-                    "type": "invite",
                     "email": email,
-                    "options": {
-                        "data": {
-                            "family_invite": "true",
-                            "parent_id": str(parent_id),
-                            "denominazione": denominazione,
-                        },
-                        "redirect_to": f"{settings.frontend_url.rstrip('/')}/accetta-invito",
+                    "email_confirm": False,
+                    "user_metadata": {
+                        "family_invite": "true",
+                        "parent_id": str(parent_id),
+                        "denominazione": denominazione,
                     },
                 }
             )
@@ -255,15 +251,14 @@ async def invite_member(
                 registered = await _find_profile_by_email(primary, email)
                 if registered:
                     return await invite_member(primary, parent_profile, email, denominazione)
-            logger.error("Generazione link invito fallita per %s: %s", email, exc)
+            logger.error("Creazione utente invitato fallita per %s: %s", email, exc)
             raise UpstreamError("Invio dell'invito non riuscito, riprova") from exc
 
-        member_id = link.user.id
-        action_link = link.properties.action_link
+        member_id = str(created.user.id)
         # Upsert difensivo: se il trigger avesse inghiottito un errore, la RPC
         # fallirebbe sulla FK del profilo.
         await primary.table("profiles").upsert(
-            {"id": str(member_id), "email": email, "nome": denominazione},
+            {"id": member_id, "email": email, "nome": denominazione},
             on_conflict="id",
         ).execute()
 
@@ -276,14 +271,16 @@ async def invite_member(
             # stato appena creato e non può aver fatto login → si può eliminare
             # per liberare l'email.
             try:
-                await primary.auth.admin.delete_user(str(member_id))
+                await primary.auth.admin.delete_user(member_id)
             except Exception as cleanup_exc:  # best-effort
                 logger.error("Cleanup utente invitato %s fallito: %s", member_id, cleanup_exc)
             raise
 
+        invite_token = await token_service.issue(primary, member_id, "invite")
         display_name = await parent_display_name(primary, parent_id)
         email_sent = await email_service.send_family_invitation_email(
-            email, display_name, denominazione, cta_url=action_link
+            email, display_name, denominazione,
+            cta_url=f"{settings.frontend_url.rstrip('/')}/accetta-invito?token={invite_token}",
         )
 
     return InviteMemberOut(
@@ -321,30 +318,12 @@ async def resend_invite(primary, parent_profile: dict, membership_id: str) -> In
             row["invited_email"], display_name, row["denominazione"]
         )
     else:
-        # Utente creato dall'invito: si rigenera il link e lo si spedisce col
-        # nostro provider. Se il link d'invito non è rigenerabile (l'utente ha
-        # già aperto il primo link confermando l'email) si passa a un magiclink;
-        # come ultima spiaggia, l'email semplice che punta al profilo.
-        redirect_to = f"{settings.frontend_url.rstrip('/')}/accetta-invito"
-        action_link = None
-        for link_type in ("invite", "magiclink"):
-            try:
-                link_resp = await primary.auth.admin.generate_link(
-                    {
-                        "type": link_type,
-                        "email": row["invited_email"],
-                        "options": {"redirect_to": redirect_to},
-                    }
-                )
-                action_link = link_resp.properties.action_link
-                break
-            except Exception as exc:
-                logger.warning(
-                    "generate_link %s fallita per %s: %s",
-                    link_type, row["invited_email"], exc,
-                )
+        # Utente creato dall'invito: nuovo token nostro (invalida il
+        # precedente) e nuova email col link di dominio.
+        invite_token = await token_service.issue(primary, row["member_id"], "invite")
         email_sent = await email_service.send_family_invitation_email(
-            row["invited_email"], display_name, row["denominazione"], cta_url=action_link
+            row["invited_email"], display_name, row["denominazione"],
+            cta_url=f"{settings.frontend_url.rstrip('/')}/accetta-invito?token={invite_token}",
         )
 
     await primary.table("audit_log").insert(

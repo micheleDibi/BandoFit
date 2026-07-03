@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, EmailStr, Field
 
 from app.api.deps import PrimaryClient
@@ -24,10 +24,28 @@ class EmailIn(BaseModel):
     email: EmailStr
 
 
+class TokenIn(BaseModel):
+    token: str = Field(min_length=20, max_length=128)
+
+
+class TokenPasswordIn(TokenIn):
+    password: str = Field(min_length=8, max_length=200)
+
+
+class EmailOut(BaseModel):
+    email: str
+
+
+class InviteInfoOut(BaseModel):
+    email: str
+    denominazione: str
+    parent_display_name: str
+
+
 @router.post("/register", response_model=RegisterOut, status_code=201)
 async def register(data: RegisterIn, primary: PrimaryClient) -> RegisterOut:
-    """Registrazione con email di conferma inviata dal NOSTRO provider
-    (mai dal mailer di Supabase)."""
+    """Registrazione: utente creato via Admin API, email di conferma con
+    token e link di dominio inviata dal NOSTRO provider."""
     result = await auth_service.register(
         primary,
         email=str(data.email),
@@ -40,6 +58,12 @@ async def register(data: RegisterIn, primary: PrimaryClient) -> RegisterOut:
     return RegisterOut(**result)
 
 
+@router.post("/confirm", response_model=EmailOut)
+async def confirm_email(data: TokenIn, primary: PrimaryClient) -> EmailOut:
+    """Conferma dell'indirizzo email (consuma il token del link)."""
+    return EmailOut(**await auth_service.confirm_email(primary, data.token))
+
+
 @router.post("/recover", status_code=202)
 async def recover(data: EmailIn, primary: PrimaryClient) -> dict:
     """Richiesta di reimpostazione password. Risposta sempre neutra."""
@@ -47,8 +71,31 @@ async def recover(data: EmailIn, primary: PrimaryClient) -> dict:
     return {"ok": True}
 
 
+@router.post("/reset", response_model=EmailOut)
+async def reset_password(data: TokenPasswordIn, primary: PrimaryClient) -> EmailOut:
+    """Imposta la nuova password (consuma il token di recovery)."""
+    return EmailOut(**await auth_service.reset_password(primary, data.token, data.password))
+
+
 @router.post("/resend-confirmation", status_code=202)
 async def resend_confirmation(data: EmailIn, primary: PrimaryClient) -> dict:
     """Reinvio del link di conferma email. Risposta sempre neutra."""
     await auth_service.resend_confirmation(primary, str(data.email))
     return {"ok": True}
+
+
+@router.get("/invite-info", response_model=InviteInfoOut)
+async def invite_info(
+    primary: PrimaryClient,
+    token: str = Query(min_length=20, max_length=128),
+) -> InviteInfoOut:
+    """Contesto dell'invito azienda per la pagina di accettazione
+    (non consuma il token)."""
+    return InviteInfoOut(**await auth_service.invite_info(primary, token))
+
+
+@router.post("/accept-invite", response_model=EmailOut)
+async def accept_invite(data: TokenPasswordIn, primary: PrimaryClient) -> EmailOut:
+    """Attiva un account invitato: password + conferma email + ingresso
+    nell'azienda (consuma il token d'invito)."""
+    return EmailOut(**await auth_service.accept_invite(primary, data.token, data.password))

@@ -1,17 +1,18 @@
-"""Flussi auth con email inviate DAL BACKEND (SMTP/OVH), mai da Supabase.
+"""Flussi auth con link email 100% di dominio.
 
-I link firmati (conferma, recovery, invito) vengono generati con la Admin API
-``generate_link`` — pensata proprio per «custom email provider» — e spediti
-con i template di email_service. Il mailer di Supabase non viene mai attivato:
-il frontend non chiama signUp/resetPasswordForEmail/resend.
+Supabase è solo il deposito: gli utenti vengono creati/aggiornati via Admin
+API (create_user / update_user_by_id) e NESSUN link viene generato da GoTrue.
+I link nelle email portano token nostri (vedi token_service), verificati dal
+backend; l'effetto (conferma email, cambio password) viene applicato via
+Admin API. Il mailer di Supabase non viene mai attivato.
 """
 
 import logging
 import time
 
 from app.core.config import get_settings
-from app.core.errors import BadRequestError, ConflictError, UpstreamError
-from app.services import email_service
+from app.core.errors import BadRequestError, ConflictError, NotFoundError, UpstreamError
+from app.services import email_service, token_service
 
 logger = logging.getLogger("bandofit.auth")
 
@@ -34,8 +35,19 @@ def _check_cooldown(kind: str, email: str) -> None:
     _last_sent[key] = now
 
 
-def _redirect(path: str) -> str:
-    return f"{get_settings().frontend_url.rstrip('/')}{path}"
+def _link(path: str, token: str) -> str:
+    return f"{get_settings().frontend_url.rstrip('/')}{path}?token={token}"
+
+
+async def _find_profile_by_email(primary, email: str) -> dict | None:
+    resp = (
+        await primary.table("profiles")
+        .select("id,email")
+        .eq("email", email)
+        .limit(1)
+        .execute()
+    )
+    return resp.data[0] if resp.data else None
 
 
 async def register(
@@ -47,27 +59,21 @@ async def register(
     azienda: str | None,
     plan_slug: str,
 ) -> dict:
-    """Crea l'utente e invia l'email di conferma dal nostro SMTP.
-
-    Ritorna {"confirmation_required": bool}: False se il progetto ha la
-    conferma email disattivata (l'utente può accedere subito).
-    """
+    """Crea l'utente (Admin API, nessun link GoTrue) e invia l'email di
+    conferma col nostro token dal nostro provider."""
     email = email.strip().lower()
     _check_cooldown("register", email)
     try:
-        link = await primary.auth.admin.generate_link(
+        created = await primary.auth.admin.create_user(
             {
-                "type": "signup",
                 "email": email,
                 "password": password,
-                "options": {
-                    "data": {
-                        "nome": nome,
-                        "cognome": cognome,
-                        "azienda": azienda or None,
-                        "plan_slug": plan_slug,
-                    },
-                    "redirect_to": _redirect("/conferma-email"),
+                "email_confirm": False,
+                "user_metadata": {
+                    "nome": nome,
+                    "cognome": cognome,
+                    "azienda": azienda or None,
+                    "plan_slug": plan_slug,
                 },
             }
         )
@@ -79,53 +85,115 @@ async def register(
             ) from exc
         if "password" in message:
             raise BadRequestError("La password non rispetta i requisiti minimi") from exc
-        logger.error("generate_link signup fallita per %s: %s", email, exc)
+        logger.error("create_user fallita per %s: %s", email, exc)
         raise UpstreamError("Registrazione non riuscita, riprova") from exc
 
-    confirmation_required = link.user.email_confirmed_at is None
-    if confirmation_required:
-        email_sent = await email_service.send_confirmation_email(
-            email, link.properties.action_link
-        )
-        if not email_sent:
-            logger.error("Email di conferma non inviata a %s", email)
-    return {"confirmation_required": confirmation_required}
+    user_id = str(created.user.id)
+    token = await token_service.issue(primary, user_id, "confirm_email")
+    sent = await email_service.send_confirmation_email(email, _link("/conferma-email", token))
+    if not sent:
+        logger.error("Email di conferma non inviata a %s", email)
+    return {"confirmation_required": True}
+
+
+async def confirm_email(primary, token: str) -> dict:
+    """Applica la conferma indirizzo: consuma il token e sblocca il login."""
+    user_id = await token_service.consume(primary, token, "confirm_email")
+    if user_id is None:
+        raise NotFoundError("Link di conferma non valido o scaduto")
+    updated = await primary.auth.admin.update_user_by_id(user_id, {"email_confirm": True})
+    return {"email": updated.user.email}
 
 
 async def recover_password(primary, email: str) -> None:
-    """Invia il link di reimpostazione password. SEMPRE risposta neutra:
-    non riveliamo se l'email esiste (anti-enumerazione)."""
+    """Invia il link di reimpostazione password (token nostro). SEMPRE
+    risposta neutra: non riveliamo se l'email esiste (anti-enumerazione)."""
     email = email.strip().lower()
     _check_cooldown("recover", email)
-    try:
-        link = await primary.auth.admin.generate_link(
-            {
-                "type": "recovery",
-                "email": email,
-                "options": {"redirect_to": _redirect("/reimposta-password")},
-            }
-        )
-    except Exception as exc:
-        # Utente inesistente o errore: logghiamo e basta, la risposta non cambia.
-        logger.warning("Recovery NON generata per %s: %s", email, exc)
+    profile = await _find_profile_by_email(primary, email)
+    if profile is None:
+        logger.warning("Recovery richiesta per email non registrata: %s", email)
         return
-    await email_service.send_recovery_email(email, link.properties.action_link)
+    token = await token_service.issue(primary, profile["id"], "recovery")
+    await email_service.send_recovery_email(email, _link("/reimposta-password", token))
+
+
+async def reset_password(primary, token: str, password: str) -> dict:
+    """Consuma il token di recovery e imposta la nuova password via Admin API."""
+    user_id = await token_service.consume(primary, token, "recovery")
+    if user_id is None:
+        raise NotFoundError("Link di reimpostazione non valido o scaduto")
+    try:
+        updated = await primary.auth.admin.update_user_by_id(user_id, {"password": password})
+    except Exception as exc:
+        if "password" in str(exc).lower():
+            raise BadRequestError("La password non rispetta i requisiti minimi") from exc
+        logger.error("Reset password fallito per %s: %s", user_id, exc)
+        raise UpstreamError("Aggiornamento non riuscito, riprova") from exc
+    return {"email": updated.user.email}
 
 
 async def resend_confirmation(primary, email: str) -> None:
     """Reinvia il link di conferma a un utente non ancora confermato.
-    Risposta neutra in ogni caso. Il magiclink verificato conferma l'email."""
+    Risposta neutra in ogni caso."""
     email = email.strip().lower()
     _check_cooldown("confirm", email)
+    profile = await _find_profile_by_email(primary, email)
+    if profile is None:
+        logger.warning("Reinvio conferma per email non registrata: %s", email)
+        return
     try:
-        link = await primary.auth.admin.generate_link(
-            {
-                "type": "magiclink",
-                "email": email,
-                "options": {"redirect_to": _redirect("/conferma-email")},
-            }
+        user = (await primary.auth.admin.get_user_by_id(profile["id"])).user
+    except Exception as exc:
+        logger.warning("Reinvio conferma: utente auth %s non leggibile: %s", profile["id"], exc)
+        return
+    if user is None or user.email_confirmed_at is not None:
+        return  # già confermato: nulla da reinviare
+    token = await token_service.issue(primary, profile["id"], "confirm_email")
+    await email_service.send_confirmation_email(email, _link("/conferma-email", token))
+
+
+async def invite_info(primary, token: str) -> dict:
+    """Contesto dell'invito per la pagina /accetta-invito (NON consuma il token)."""
+    from app.services import family_service  # import locale: evita cicli
+
+    user_id = await token_service.peek(primary, token, "invite")
+    if user_id is None:
+        raise NotFoundError("Invito non valido o scaduto")
+    membership = await family_service.get_membership(primary, user_id)
+    if membership is None or membership["status"] != "pending":
+        raise NotFoundError("Invito non più valido")
+    return {
+        "email": membership["invited_email"],
+        "denominazione": membership["denominazione"],
+        "parent_display_name": await family_service.parent_display_name(
+            primary, membership["parent_id"]
+        ),
+    }
+
+
+async def accept_invite(primary, token: str, password: str) -> dict:
+    """Consuma il token d'invito: imposta la password, conferma l'email e
+    attiva la membership. Ritorna l'email per l'auto-login del frontend."""
+    from app.services import family_service  # import locale: evita cicli
+
+    user_id = await token_service.consume(primary, token, "invite")
+    if user_id is None:
+        raise NotFoundError("Invito non valido o scaduto")
+
+    membership = await family_service.get_membership(primary, user_id)
+    if membership is None or membership["status"] != "pending":
+        raise NotFoundError("Invito non più valido")
+
+    try:
+        updated = await primary.auth.admin.update_user_by_id(
+            user_id, {"password": password, "email_confirm": True}
         )
     except Exception as exc:
-        logger.warning("Reinvio conferma NON generato per %s: %s", email, exc)
-        return
-    await email_service.send_confirmation_email(email, link.properties.action_link)
+        if "password" in str(exc).lower():
+            raise BadRequestError("La password non rispetta i requisiti minimi") from exc
+        logger.error("Attivazione invitato %s fallita: %s", user_id, exc)
+        raise UpstreamError("Attivazione non riuscita, riprova") from exc
+
+    await family_service.accept_invitation(primary, user_id, membership["id"])
+    return {"email": updated.user.email}

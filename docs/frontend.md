@@ -42,6 +42,13 @@ Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo 
 - **Stati ovunque**: ogni vista dati ha skeleton (caricamento), empty state con azione di reset ed error state con retry.
 - **Conferme**: le azioni con effetto (cambio piano, sospensione utente, cambio ruolo) passano da `Dialog` (elemento `<dialog>` nativo: focus trap ed Esc inclusi).
 
+## Brand assets
+
+- Loghi in `src/assets/` (PNG trasparenti, importati da Vite): `logo-orizzontale.png` (topbar e footer), `logo-verticale.png` (pagine auth), `logo-icona.png`; favicon e apple-touch-icon in `public/`.
+- Componente `Logo` (`components/layout/Logo.tsx`) con varianti `horizontal` (default) / `vertical` / `icon`.
+- **Attribuzione EduNews24**: componente `PoweredBy` (`components/shared/PoweredBy.tsx`) — "powered by" + logo EduNews24 con link a https://edunews24.it — presente nel footer della landing, sotto le card delle pagine auth e nel footer dell'app.
+- Gli screenshot sorgente dei loghi restano solo locali (`Screenshot *.png` in .gitignore).
+
 ## Design system
 
 - **Colore primario**: blu `#1E5EFF` (scala `brand-50`→`brand-950`; hover `brand-600 #164BDB`, tint `brand-50 #EEF3FF`); neutri slate; sfondo app `#F7F9FC` (`bg-surface`).

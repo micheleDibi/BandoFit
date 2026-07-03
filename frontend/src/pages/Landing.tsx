@@ -2,6 +2,7 @@ import { ArrowRight, Bell, Filter, Search, ShieldCheck } from "lucide-react";
 import { Link, Navigate } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
 import { PlanCard } from "../components/shared/PlanCard";
+import { PoweredBy } from "../components/shared/PoweredBy";
 import { LinkButton } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/states";
 import { useAuth } from "../hooks/useAuth";
@@ -165,11 +166,12 @@ export default function Landing() {
       </section>
 
       <footer className="border-t border-slate-100 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-col items-center gap-3 px-4 py-8 text-center sm:flex-row sm:justify-between sm:text-left">
-          <Logo />
+        <div className="mx-auto flex max-w-7xl flex-col items-center gap-4 px-4 py-8 text-center sm:flex-row sm:justify-between sm:text-left">
+          <Logo className="h-10" />
           <p className="text-sm text-slate-400">
             © {new Date().getFullYear()} BandoFit — La piattaforma per trovare i bandi giusti.
           </p>
+          <PoweredBy />
         </div>
       </footer>
     </div>

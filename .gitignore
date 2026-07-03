@@ -33,3 +33,6 @@ dist-ssr/
 
 # Log
 *.log
+
+# Screenshot sorgente dei loghi (originali non compressi, solo locali)
+Screenshot *.png

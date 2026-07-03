@@ -2,6 +2,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
+import { PoweredBy } from "../components/shared/PoweredBy";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/Field";
@@ -58,7 +59,7 @@ export default function Login() {
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center bg-surface px-4 py-10">
       <Link to="/" className="mb-8 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-500">
-        <Logo />
+        <Logo variant="vertical" />
       </Link>
       <Card className="w-full max-w-md p-6 sm:p-8">
         <h1 className="font-display text-xl font-bold text-slate-900">Bentornato</h1>
@@ -142,6 +143,7 @@ export default function Login() {
           </Link>
         </p>
       </Card>
+      <PoweredBy className="mt-8" />
     </div>
   );
 }

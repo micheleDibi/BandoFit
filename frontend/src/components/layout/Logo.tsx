@@ -1,19 +1,35 @@
+import logoIcona from "../../assets/logo-icona.png";
+import logoOrizzontale from "../../assets/logo-orizzontale.png";
+import logoVerticale from "../../assets/logo-verticale.png";
 import { cn } from "../../lib/cn";
 
-export function Logo({ className, dark }: { className?: string; dark?: boolean }) {
+type Variant = "horizontal" | "vertical" | "icon";
+
+const sources: Record<Variant, string> = {
+  horizontal: logoOrizzontale,
+  vertical: logoVerticale,
+  icon: logoIcona,
+};
+
+const defaultSizes: Record<Variant, string> = {
+  horizontal: "h-9 w-auto",
+  vertical: "h-24 w-auto",
+  icon: "h-9 w-auto",
+};
+
+export function Logo({
+  variant = "horizontal",
+  className,
+}: {
+  variant?: Variant;
+  className?: string;
+}) {
   return (
-    <span className={cn("inline-flex items-center gap-2", className)}>
-      <span className="flex size-8 items-center justify-center rounded-lg bg-brand-500 font-display text-lg font-bold text-white">
-        B
-      </span>
-      <span
-        className={cn(
-          "font-display text-lg font-bold tracking-tight",
-          dark ? "text-white" : "text-slate-900",
-        )}
-      >
-        Bando<span className="text-brand-500">Fit</span>
-      </span>
-    </span>
+    <img
+      src={sources[variant]}
+      alt="BandoFit"
+      className={cn("select-none", defaultSizes[variant], className)}
+      draggable={false}
+    />
   );
 }

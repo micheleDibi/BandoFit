@@ -5,7 +5,7 @@ import { Button } from "../components/ui/Button";
 export default function NotFound() {
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center bg-surface px-4 text-center">
-      <Logo />
+      <Logo variant="vertical" />
       <p className="mt-8 font-display text-6xl font-bold text-brand-200">404</p>
       <h1 className="mt-3 font-display text-xl font-semibold text-slate-900">
         Pagina non trovata

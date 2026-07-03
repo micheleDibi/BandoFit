@@ -2,6 +2,7 @@ import { AlertTriangle, MailCheck } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
+import { PoweredBy } from "../components/shared/PoweredBy";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/Field";
@@ -50,7 +51,7 @@ export default function ConfermaEmail() {
         to="/"
         className="mb-8 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-500"
       >
-        <Logo />
+        <Logo variant="vertical" />
       </Link>
       <Card className="w-full max-w-md p-6 sm:p-8">
         {hashSession === "waiting" && (
@@ -121,6 +122,7 @@ export default function ConfermaEmail() {
           </div>
         )}
       </Card>
+      <PoweredBy className="mt-8" />
     </div>
   );
 }

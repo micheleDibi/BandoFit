@@ -5,6 +5,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { useMe } from "../../hooks/useMe";
 import { cn } from "../../lib/cn";
 import { InviteBanner } from "../shared/InviteBanner";
+import { PoweredBy } from "../shared/PoweredBy";
 import { Logo } from "./Logo";
 
 const navLinkClasses = ({ isActive }: { isActive: boolean }) =>
@@ -54,7 +55,7 @@ export function AppShell() {
   );
 
   return (
-    <div className="min-h-dvh bg-surface">
+    <div className="flex min-h-dvh flex-col bg-surface">
       <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6">
           <Link
@@ -121,6 +122,15 @@ export function AppShell() {
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
         <Outlet />
       </main>
+
+      <footer className="mt-auto border-t border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-4 sm:px-6">
+          <p className="text-xs text-slate-400">
+            © {new Date().getFullYear()} BandoFit
+          </p>
+          <PoweredBy />
+        </div>
+      </footer>
     </div>
   );
 }

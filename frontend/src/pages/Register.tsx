@@ -2,6 +2,7 @@ import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
+import { PoweredBy } from "../components/shared/PoweredBy";
 import { PlanCard } from "../components/shared/PlanCard";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -133,7 +134,7 @@ export default function Register() {
   return (
     <div className="flex min-h-dvh flex-col items-center bg-surface px-4 py-10">
       <Link to="/" className="mb-8 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-500">
-        <Logo />
+        <Logo variant="vertical" />
       </Link>
 
       {step === 1 ? (
@@ -293,6 +294,7 @@ export default function Register() {
           </div>
         </div>
       )}
+      <PoweredBy className="mt-10" />
     </div>
   );
 }

@@ -2,6 +2,10 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-03 — Link email 100% di dominio
+
+- Eliminati tutti i link `*.supabase.co` dalle email: conferma indirizzo, recupero password e inviti azienda usano **token propri** (256 bit, SHA-256 a riposo, monouso, TTL 48h/1h/48h) su link del dominio BandoFit, emessi e verificati dal backend (nuova tabella `auth_tokens`, migration 0004). GoTrue non genera più link né invia email; utenti creati/aggiornati via Admin API. Nuovi endpoint `/auth/confirm`, `/auth/reset`, `/auth/invite-info`, `/auth/accept-invite`; reset e accettazione invito fanno auto-login. Su Supabase non servono più i Redirect URLs.
+
 ## 2026-07-03 — Terminologia "Azienda"
 
 - In tutta l'interfaccia (e nelle email/messaggi d'errore) il gruppo di account si chiama ora **"Azienda"** invece di "Famiglia" — più professionale. I nomi tecnici interni (tabelle `family_members`, endpoint `/me/family`, componenti) restano invariati.

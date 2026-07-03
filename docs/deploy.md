@@ -91,14 +91,9 @@ Con questo schema frontend e API stanno sulla **stessa origine** (`https://bando
 
 ## 4. Supabase: URL pubblici
 
-Nel progetto **primario** → Authentication → URL Configuration:
-- **Site URL**: `https://bandofit.example.com`
-- **Redirect URLs**, aggiungere tutte e tre:
-  - `https://bandofit.example.com/accetta-invito` (link d'invito famiglia)
-  - `https://bandofit.example.com/reimposta-password` (recupero password)
-  - `https://bandofit.example.com/conferma-email` (conferma email alla registrazione)
+I link nelle email sono **token di dominio** gestiti interamente dal backend: su Supabase **non servono Redirect URLs** né configurazioni email. L'unica impostazione che conta è **Authentication → Sign In / Providers → Email → "Confirm email" = attivo** in produzione: è l'enforcement che impedisce il login agli utenti non confermati (la conferma la applica il backend via Admin API quando l'utente clicca il link di dominio).
 
-E in **Authentication → Sign In / Providers → Email** attivare **"Confirm email"** per la produzione (l'app gestisce conferma, avviso al login e reinvio).
+> Richiede la migration `0004_auth_tokens.sql` applicata sul progetto primario.
 
 ## 5. Primo admin e smoke test
 

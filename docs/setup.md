@@ -14,8 +14,8 @@
 1. Su [supabase.com](https://supabase.com) creare un nuovo progetto (regione consigliata: EU).
 2. Da **Project Settings → API** copiare: Project URL, `anon` key, `service_role` key.
 3. **Authentication → Sign In / Providers → Email** → opzione **"Confirm email"**:
-   - **sviluppo locale**: disattivata (la registrazione restituisce subito la sessione, niente email da cliccare);
-   - **produzione**: attivata — l'app gestisce l'intero flusso (pagina `/conferma-email`, avviso al login se l'email non è confermata, reinvio del link). Attivandola, aggiungere `/conferma-email` ai Redirect URLs (punto sotto).
+   - **sviluppo locale**: disattivata (login permesso anche senza conferma; il link di conferma compare comunque nei log del backend);
+   - **produzione**: attivata — è l'enforcement che blocca il login ai non confermati. Tutti i link email (conferma, recupero password, inviti) sono **token di dominio** gestiti dal backend: **non servono Redirect URLs** su Supabase.
 4. **SQL Editor**: eseguire in ordine i file di `supabase/migrations/`.
 
 ## 2. Variabili d'ambiente

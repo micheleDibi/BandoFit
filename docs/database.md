@@ -31,6 +31,8 @@ Contiene i dati della piattaforma. Schema in `supabase/migrations/` (eseguire in
 
 **`audit_log`** — operazioni sensibili (inviti, retrocessioni, rimozioni, cambi piano, modifiche dati aziendali), senza FK: le righe sopravvivono alla cancellazione degli utenti. Consultabile dal SQL Editor.
 
+**`auth_tokens`** (migration 0004) — token monouso per i link email di dominio (conferma indirizzo, recovery, inviti): `user_id` → profiles (cascade), `purpose`, `token_hash` (SHA-256, unico — il token in chiaro non viene mai salvato), `expires_at`, `used_at`. Consumo atomico via UPDATE condizionato.
+
 ### Funzioni e trigger
 
 - `handle_new_user()` — trigger `AFTER INSERT ON auth.users`: crea profilo + abbonamento iniziale (fallback `gratuito`); per gli utenti invitati in famiglia (metadata `family_invite='true'`) crea **solo il profilo**, senza abbonamento. **Difensiva: non solleva mai eccezioni.**

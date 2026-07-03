@@ -22,14 +22,28 @@ Nota: se un utente autenticato risulta privo di profilo (provisioning fallito a 
 ### `GET /health`
 Stato del servizio. → `{"status": "ok"}`
 
+> **Link di dominio**: tutti i link nelle email (conferma, recovery, inviti) sono token **propri** di BandoFit (256 bit, salvati solo come SHA-256 in `auth_tokens`, monouso, con scadenza) e puntano al dominio dell'app. GoTrue non genera MAI link né invia email: Supabase è solo il deposito di utenti e dati (Admin API `create_user`/`update_user_by_id`).
+
 ### `POST /auth/register` (201)
-Registrazione. Body: `email`, `password` (≥8), `nome`, `cognome`, `azienda?`, `plan_slug`. Crea l'utente via Admin API e invia l'email di conferma **dal provider del backend** (mai dal mailer di Supabase). → `{"confirmation_required": true|false}` (false se la conferma email è disattivata sul progetto: si può accedere subito). Errori: `409` email già registrata o email inviata da poco (cooldown 60s), `400` password non valida.
+Registrazione. Body: `email`, `password` (≥8), `nome`, `cognome`, `azienda?`, `plan_slug`. Crea l'utente via Admin API (non confermato) e invia l'email di conferma col link `/conferma-email?token=...`. → `{"confirmation_required": true}`. Errori: `409` email già registrata o cooldown 60s, `400` password non valida.
+
+### `POST /auth/confirm`
+Body: `{"token": "..."}` (dal link email, monouso, TTL 48h). Conferma l'indirizzo e sblocca il login. → `{"email": "..."}` (per il prefill di `/login?email=`). `404` se non valido/scaduto/già usato.
 
 ### `POST /auth/recover` (202)
-Richiesta reimpostazione password. Body: `{"email": "..."}`. Risposta **sempre neutra** `{"ok": true}` (anti-enumerazione); se l'account esiste parte l'email col link verso `/reimposta-password`. `409` se richiesta ripetuta entro 60s.
+Richiesta reimpostazione password. Body: `{"email": "..."}`. Risposta **sempre neutra** `{"ok": true}` (anti-enumerazione); se l'account esiste parte l'email con `/reimposta-password?token=...` (TTL 1h). `409` cooldown 60s.
+
+### `POST /auth/reset`
+Body: `{"token": "...", "password": "..."}`. Consuma il token di recovery e imposta la nuova password via Admin API. → `{"email"}` (il frontend fa auto-login). `404` token non valido.
 
 ### `POST /auth/resend-confirmation` (202)
-Reinvio del link di conferma (via magiclink: la verifica conferma l'email). Body: `{"email": "..."}`. Risposta sempre neutra; cooldown 60s.
+Nuovo token + email di conferma per un utente non ancora confermato. Risposta sempre neutra; cooldown 60s.
+
+### `GET /auth/invite-info?token=...`
+Contesto dell'invito azienda per la pagina di accettazione (**non consuma** il token): `{email, denominazione, parent_display_name}`. `404` se non valido.
+
+### `POST /auth/accept-invite`
+Body: `{"token", "password"}`. Consuma il token d'invito (TTL 48h): imposta la password, conferma l'email e attiva la membership. → `{"email"}` (auto-login del frontend).
 
 ### `GET /plans`
 Piani di abbonamento attivi, ordinati per `ordering`. Usato dallo step 2 della registrazione.

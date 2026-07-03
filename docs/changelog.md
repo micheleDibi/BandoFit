@@ -5,6 +5,7 @@ Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descr
 ## 2026-07-03 — Deploy
 
 - Deploy con Docker Compose: Dockerfile per backend (uvicorn) e frontend (build statica + nginx con fallback SPA), porte host configurabili da `.env` (`FRONTEND_PORT`/`BACKEND_PORT`, default bind su 127.0.0.1 per stare dietro reverse proxy), guida completa in `docs/deploy.md`.
+- Email transazionali anche via **SMTP** (es. casella OVH: `ssl0.ovh.net:465`), con selezione automatica del provider: SMTP → Resend → solo log; messaggi multipart (testo + HTML) e protezione da header injection.
 
 ## 2026-07-03 — Account famiglia (fase 2a)
 

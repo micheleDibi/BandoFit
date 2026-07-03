@@ -1,21 +1,25 @@
-"""Email transazionali via Resend.
+"""Email transazionali con provider configurabile da env.
 
-Senza RESEND_API_KEY (sviluppo) le email vengono solo loggate. Gli invii NON
-sollevano mai eccezioni: il canale affidabile per gli inviti è il banner
-in-app; l'email è una notifica best-effort.
+Priorità: SMTP (``SMTP_HOST`` valorizzato, es. casella OVH) → Resend
+(``RESEND_API_KEY``) → fallback log-only (sviluppo). Gli invii NON sollevano
+mai eccezioni: il canale affidabile per gli inviti è il banner in-app;
+l'email è una notifica best-effort.
 """
 
 import html
 import logging
+from email.headerregistry import Address
+from email.message import EmailMessage
+from email.utils import parseaddr
 
 import httpx
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 
 logger = logging.getLogger("bandofit.email")
 
 _RESEND_URL = "https://api.resend.com/emails"
-_TIMEOUT_SECONDS = 10
+_TIMEOUT_SECONDS = 15
 
 
 def _invitation_html(parent_display_name: str, denominazione: str, cta_url: str) -> str:
@@ -48,6 +52,72 @@ def _invitation_html(parent_display_name: str, denominazione: str, cta_url: str)
 </div>"""
 
 
+def _plain_text(parent_display_name: str, denominazione: str, cta_url: str) -> str:
+    return (
+        f"{parent_display_name} ti ha invitato a unirti alla sua famiglia di account "
+        f"su BandoFit come «{denominazione}».\n\n"
+        f"Vai all'invito: {cta_url}\n\n"
+        "Se non ti aspettavi questo invito puoi ignorare questa email."
+    )
+
+
+def _sanitize_header(value: str) -> str:
+    """Le intestazioni email non devono contenere newline (header injection)."""
+    return value.replace("\r", " ").replace("\n", " ").strip()
+
+
+async def _send_via_smtp(
+    settings: Settings, to_email: str, subject: str, html_body: str, text_body: str
+) -> bool:
+    import aiosmtplib
+
+    display_name, from_address = parseaddr(settings.email_from)
+    message = EmailMessage()
+    if from_address and "@" in from_address:
+        user, _, domain = from_address.partition("@")
+        message["From"] = Address(display_name or "BandoFit", user, domain)
+    else:
+        message["From"] = settings.email_from
+    message["To"] = to_email
+    message["Subject"] = subject
+    message.set_content(text_body)
+    message.add_alternative(html_body, subtype="html")
+
+    # Porta 465 = TLS implicito; 587 (o altre) = STARTTLS.
+    use_tls = settings.smtp_port == 465
+    await aiosmtplib.send(
+        message,
+        hostname=settings.smtp_host,
+        port=settings.smtp_port,
+        username=settings.smtp_user,
+        password=settings.smtp_password,
+        use_tls=use_tls,
+        start_tls=not use_tls,
+        timeout=_TIMEOUT_SECONDS,
+    )
+    return True
+
+
+async def _send_via_resend(
+    settings: Settings, to_email: str, subject: str, html_body: str
+) -> bool:
+    async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+        resp = await client.post(
+            _RESEND_URL,
+            headers={"Authorization": f"Bearer {settings.resend_api_key}"},
+            json={
+                "from": settings.email_from,
+                "to": [to_email],
+                "subject": subject,
+                "html": html_body,
+            },
+        )
+    if resp.status_code >= 400:
+        logger.error("Resend ha rifiutato l'invio (%s): %s", resp.status_code, resp.text[:300])
+        return False
+    return True
+
+
 async def send_family_invitation_email(
     to_email: str,
     parent_display_name: str,
@@ -62,32 +132,18 @@ async def send_family_invitation_email(
     """
     settings = get_settings()
     cta_url = cta_url or f"{settings.frontend_url.rstrip('/')}/app/profilo"
-    subject = f"{parent_display_name} ti ha invitato su BandoFit"
-
-    if not settings.resend_api_key:
-        logger.info(
-            "[email dev fallback] to=%s subject=%r cta=%s", to_email, subject, cta_url
-        )
-        return True
+    subject = _sanitize_header(f"{parent_display_name} ti ha invitato su BandoFit")
+    html_body = _invitation_html(parent_display_name, denominazione, cta_url)
+    text_body = _plain_text(parent_display_name, denominazione, cta_url)
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
-            resp = await client.post(
-                _RESEND_URL,
-                headers={"Authorization": f"Bearer {settings.resend_api_key}"},
-                json={
-                    "from": settings.email_from,
-                    "to": [to_email],
-                    "subject": subject,
-                    "html": _invitation_html(parent_display_name, denominazione, cta_url),
-                },
-            )
-        if resp.status_code >= 400:
-            logger.error(
-                "Invio email invito fallito (%s): %s", resp.status_code, resp.text[:300]
-            )
-            return False
-        return True
-    except httpx.HTTPError as exc:
-        logger.error("Invio email invito fallito: %s", exc)
+        if settings.smtp_host:
+            return await _send_via_smtp(settings, to_email, subject, html_body, text_body)
+        if settings.resend_api_key:
+            return await _send_via_resend(settings, to_email, subject, html_body)
+    except Exception as exc:
+        logger.error("Invio email a %s fallito: %s", to_email, exc)
         return False
+
+    logger.info("[email dev fallback] to=%s subject=%r cta=%s", to_email, subject, cta_url)
+    return True

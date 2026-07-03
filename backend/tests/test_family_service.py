@@ -102,6 +102,7 @@ class TestEmailFallback:
             "SECONDARY_SUPABASE_URL": "https://d2.supabase.co",
             "SECONDARY_SUPABASE_ANON_KEY": "k",
             "RESEND_API_KEY": "",
+            "SMTP_HOST": "",
         }.items():
             monkeypatch.setenv(key, value)
         from app.core.config import get_settings
@@ -151,3 +152,81 @@ class TestEmailFallback:
         body = json.loads(request.content)
         assert body["to"] == ["a@b.it"]
         assert "ACME" in body["subject"]
+
+    async def test_smtp_ha_priorita_e_costruisce_il_messaggio(self, monkeypatch):
+        import aiosmtplib
+
+        from app.services import email_service
+
+        monkeypatch.setenv("SMTP_HOST", "ssl0.ovh.net")
+        monkeypatch.setenv("SMTP_PORT", "465")
+        monkeypatch.setenv("SMTP_USER", "noreply@azienda.it")
+        monkeypatch.setenv("SMTP_PASSWORD", "segreta")
+        monkeypatch.setenv("EMAIL_FROM", "BandoFit <noreply@azienda.it>")
+        monkeypatch.setenv("RESEND_API_KEY", "re_ignorata")  # SMTP vince
+        from app.core.config import get_settings
+
+        get_settings.cache_clear()
+
+        sent = {}
+
+        async def fake_send(message, **kwargs):
+            sent["message"] = message
+            sent["kwargs"] = kwargs
+
+        monkeypatch.setattr(aiosmtplib, "send", fake_send)
+        ok = await email_service.send_family_invitation_email("a@b.it", "ACME Srl", "Sede 2")
+        assert ok is True
+        assert sent["kwargs"]["hostname"] == "ssl0.ovh.net"
+        assert sent["kwargs"]["port"] == 465
+        assert sent["kwargs"]["use_tls"] is True  # 465 = TLS implicito
+        assert sent["kwargs"]["start_tls"] is False
+        message = sent["message"]
+        assert message["To"] == "a@b.it"
+        assert "ACME Srl" in message["Subject"]
+        assert "noreply@azienda.it" in str(message["From"])
+        # multipart: testo semplice + alternativa HTML
+        parts = [p.get_content_type() for p in message.walk()]
+        assert "text/plain" in parts and "text/html" in parts
+
+    async def test_smtp_porta_587_usa_starttls(self, monkeypatch):
+        import aiosmtplib
+
+        from app.services import email_service
+
+        monkeypatch.setenv("SMTP_HOST", "ssl0.ovh.net")
+        monkeypatch.setenv("SMTP_PORT", "587")
+        monkeypatch.setenv("SMTP_USER", "noreply@azienda.it")
+        monkeypatch.setenv("SMTP_PASSWORD", "segreta")
+        from app.core.config import get_settings
+
+        get_settings.cache_clear()
+
+        captured = {}
+
+        async def fake_send(message, **kwargs):
+            captured.update(kwargs)
+
+        monkeypatch.setattr(aiosmtplib, "send", fake_send)
+        assert await email_service.send_family_invitation_email("a@b.it", "ACME", "Sede")
+        assert captured["use_tls"] is False
+        assert captured["start_tls"] is True
+
+    async def test_errore_smtp_non_solleva(self, monkeypatch):
+        import aiosmtplib
+
+        from app.services import email_service
+
+        monkeypatch.setenv("SMTP_HOST", "ssl0.ovh.net")
+        monkeypatch.setenv("SMTP_USER", "u")
+        monkeypatch.setenv("SMTP_PASSWORD", "p")
+        from app.core.config import get_settings
+
+        get_settings.cache_clear()
+
+        async def fake_send(message, **kwargs):
+            raise aiosmtplib.SMTPAuthenticationError(535, "auth failed")
+
+        monkeypatch.setattr(aiosmtplib, "send", fake_send)
+        ok = await email_service.send_family_invitation_email("a@b.it", "ACME", "Sede")
+        assert ok is False

@@ -24,8 +24,18 @@ class Settings(BaseSettings):
     # URL pubblico del frontend (redirect degli inviti, link nelle email).
     frontend_url: str = "http://localhost:5173"
 
-    # Email transazionali via Resend. Chiave vuota = fallback log-only (dev).
+    # Email transazionali. Provider scelto automaticamente:
+    # SMTP se smtp_host è valorizzato → altrimenti Resend se c'è la API key →
+    # altrimenti le email vengono solo loggate (sviluppo).
+    # SMTP (es. OVH: host ssl0.ovh.net, porta 465 SSL o 587 STARTTLS)
+    smtp_host: str = ""
+    smtp_port: int = 465
+    smtp_user: str = ""
+    smtp_password: str = ""
+    # Resend (alternativa API HTTP)
     resend_api_key: str = ""
+    # Mittente, es. "BandoFit <noreply@tuodominio.it>" — con SMTP deve essere
+    # un indirizzo autorizzato della casella/dominio.
     email_from: str = "BandoFit <onboarding@resend.dev>"
 
     @property

@@ -34,7 +34,21 @@ Compila `.env`:
 | `CORS_ORIGINS` e `FRONTEND_URL` | l'origine pubblica, es. `https://bandofit.example.com` |
 | `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` | URL e **anon key** del PRIMARIO (solo auth) |
 | `VITE_API_BASE_URL` | come il **browser** raggiunge il backend: `https://bandofit.example.com/api/v1` |
-| `RESEND_API_KEY` | opzionale: senza, le email di invito famiglia vengono solo loggate |
+| `SMTP_HOST/PORT/USER/PASSWORD` + `EMAIL_FROM` | casella SMTP per le email di invito (es. OVH, vedi sotto); in alternativa `RESEND_API_KEY`; senza nessuno dei due le email vengono solo loggate |
+
+### Email via SMTP (es. casella OVH)
+
+Il backend invia email (inviti famiglia a utenti già registrati, reinvii) tramite il primo provider configurato: **SMTP** se `SMTP_HOST` è valorizzato, altrimenti **Resend**. Per una casella OVH (MX Plan):
+
+```env
+SMTP_HOST=ssl0.ovh.net
+SMTP_PORT=465            # 465 = SSL/TLS implicito; 587 = STARTTLS
+SMTP_USER=noreply@tuodominio.it   # l'indirizzo COMPLETO della casella
+SMTP_PASSWORD=la-password-della-casella
+EMAIL_FROM=BandoFit <noreply@tuodominio.it>
+```
+
+> Le email di **invito ai nuovi utenti** (e conferme/reset password) le manda invece **Supabase** con il suo mailer. Per farle uscire anch'esse dal tuo dominio, configura la stessa casella in **Project Settings → Auth → SMTP Settings** del progetto primario (stessi parametri host/porta/utente/password). Facoltativo ma consigliato in produzione: il mailer integrato di Supabase ha limiti orari molto bassi.
 
 > Le variabili `VITE_*` vengono **cotte nel bundle** alla build del frontend: se le cambi, serve `docker compose up -d --build frontend`.
 

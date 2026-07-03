@@ -67,6 +67,10 @@ _RPC_ERRORS: dict[str, tuple[type[AppError], str]] = {
         "Il piano si gestisce sull'account titolare della famiglia",
     ),
     "plan_not_available": (BadRequestError, "Piano inesistente o non attivo"),
+    "free_plan_missing": (
+        UpstreamError,
+        "Configurazione dei piani incompleta: piano Gratuito mancante",
+    ),
 }
 
 
@@ -166,10 +170,12 @@ async def get_family_overview(primary, parent_id: str) -> FamilyOut:
 
 
 async def _find_profile_by_email(primary, email: str) -> dict | None:
+    # Uguaglianza esatta sul lowercase (GoTrue normalizza le email in minuscolo).
+    # NON usare ilike: '_' e '%' sono jolly LIKE e sono caratteri leciti nelle email.
     resp = (
         await primary.table("profiles")
         .select("id,email,role,is_active")
-        .ilike("email", email)  # senza wildcard = uguaglianza case-insensitive
+        .eq("email", email.strip().lower())
         .limit(1)
         .execute()
     )
@@ -201,6 +207,15 @@ async def invite_member(
     email = email.strip().lower()
     parent_id = parent_profile["id"]
     email_sent = True
+
+    # Pre-validazione PRIMA di qualsiasi effetto collaterale (l'invito Supabase
+    # spedisce subito un'email reale): evita che account senza piano famiglia
+    # usino l'endpoint come cannone spara-email. La RPC resta l'arbitro atomico.
+    overview = await get_family_overview(primary, parent_id)
+    if overview.limit <= 1:
+        raise ForbiddenError("Il tuo piano non prevede account aggiuntivi")
+    if overview.used + 1 > overview.limit:
+        raise ConflictError("Hai raggiunto il numero massimo di account del tuo piano")
 
     existing = await _find_profile_by_email(primary, email)
 
@@ -250,8 +265,10 @@ async def invite_member(
             await _create_membership_rpc(
                 primary, parent_id, member_id, denominazione, email, "new_user"
             )
-        except AppError:
-            # Compensazione: l'invito non è valido, liberiamo l'email.
+        except Exception:
+            # Compensazione su QUALSIASI errore (anche di rete): l'utente auth è
+            # stato appena creato e non può aver fatto login → si può eliminare
+            # per liberare l'email.
             try:
                 await primary.auth.admin.delete_user(str(member_id))
             except Exception as cleanup_exc:  # best-effort
@@ -294,7 +311,9 @@ async def resend_invite(primary, parent_profile: dict, membership_id: str) -> In
         )
     else:
         # Utente creato dall'invito: GoTrue rifiuta un secondo /invite, quindi
-        # si rigenera il link d'invito e lo si spedisce via Resend.
+        # si rigenera il link d'invito e lo si spedisce via Resend. Se anche il
+        # link è rifiutato (email già confermata: l'utente ha aperto il primo
+        # invito senza completare), si manda l'email semplice col link al login.
         redirect_to = f"{settings.frontend_url.rstrip('/')}/accetta-invito"
         try:
             await primary.auth.admin.invite_user_by_email(
@@ -315,8 +334,13 @@ async def resend_invite(primary, parent_profile: dict, membership_id: str) -> In
                     cta_url=action_link,
                 )
             except Exception as exc:
-                logger.error("Reinvio invito fallito per %s: %s", row["invited_email"], exc)
-                raise UpstreamError("Reinvio dell'invito non riuscito, riprova") from exc
+                logger.warning(
+                    "Link invito non rigenerabile per %s (%s): fallback email semplice",
+                    row["invited_email"], exc,
+                )
+                email_sent = await email_service.send_family_invitation_email(
+                    row["invited_email"], display_name, row["denominazione"]
+                )
 
     await primary.table("audit_log").insert(
         {
@@ -333,6 +357,24 @@ async def resend_invite(primary, parent_profile: dict, membership_id: str) -> In
     )
 
 
+async def _cleanup_invited_auth_user(primary, member_id: str) -> None:
+    """Pulizia di un invito 'new_user' revocato (best-effort, mai raise).
+
+    L'utente auth viene ELIMINATO solo se non ha mai fatto login (invito mai
+    aperto: si libera l'email). Se invece ha già impostato la password e usato
+    l'account, l'account resta e riceve un piano Gratuito (il trigger di signup
+    non gliene aveva assegnato uno)."""
+    try:
+        resp = await primary.auth.admin.get_user_by_id(str(member_id))
+        user = getattr(resp, "user", None)
+        if user is not None and user.last_sign_in_at is None:
+            await primary.auth.admin.delete_user(str(member_id))
+        else:
+            await primary.rpc("fn_grant_free_plan", {"p_user_id": str(member_id)}).execute()
+    except Exception as exc:
+        logger.error("Cleanup utente invitato %s fallito: %s", member_id, exc)
+
+
 async def remove_member(primary, parent_profile: dict, membership_id: str) -> FamilyOut:
     parent_id = parent_profile["id"]
     try:
@@ -344,13 +386,8 @@ async def remove_member(primary, parent_profile: dict, membership_id: str) -> Fa
         raise_from_rpc(exc)
 
     result = resp.data or {}
-    # Un invito a email nuova mai accettato lascia un utente auth senza password:
-    # lo si elimina per liberare l'email (best-effort).
     if result.get("prior_status") == "pending" and result.get("invite_kind") == "new_user":
-        try:
-            await primary.auth.admin.delete_user(result["member_id"])
-        except Exception as exc:
-            logger.error("Cleanup utente invitato %s fallito: %s", result.get("member_id"), exc)
+        await _cleanup_invited_auth_user(primary, result["member_id"])
 
     return await get_family_overview(primary, parent_id)
 
@@ -410,16 +447,11 @@ async def decline_invitation(primary, user_id: str, membership_id: str) -> None:
 
 
 async def cleanup_revoked_new_users(primary, adjustment: dict) -> None:
-    """Dopo un downgrade: elimina gli utenti auth degli inviti 'new_user' revocati
-    (non hanno mai impostato una password; si libera l'email)."""
+    """Dopo un downgrade: pulizia degli inviti 'new_user' revocati (delete solo
+    se l'utente non ha mai fatto login, altrimenti piano Gratuito)."""
     for revoked in adjustment.get("revoked_pending", []):
         if revoked.get("invite_kind") == "new_user":
-            try:
-                await primary.auth.admin.delete_user(revoked["member_id"])
-            except Exception as exc:
-                logger.error(
-                    "Cleanup utente invitato %s fallito: %s", revoked.get("member_id"), exc
-                )
+            await _cleanup_invited_auth_user(primary, revoked["member_id"])
 
 
 async def build_me_family(

@@ -367,6 +367,16 @@ begin
 
   perform 1 from public.profiles where id = v_row.parent_id for update;
 
+  -- Ri-lettura SOTTO lock: l'invito può essere stato revocato/consumato tra la
+  -- prima lettura e l'acquisizione del lock (revoca del padre o downgrade
+  -- concorrenti); senza questa ri-verifica l'accept lo "resusciterebbe".
+  select * into v_row from public.family_members
+  where id = p_membership_id and member_id = p_user_id and status = 'pending';
+  if not found then
+    raise exception 'Invito non trovato o non più valido'
+      using detail = 'invitation_not_found';
+  end if;
+
   -- Ri-verifica del posto contando i soli attivi: intercetta il caso di un
   -- limite di piano abbassato dall'admin dopo l'invio dell'invito.
   v_limit := public.fn_family_limit(v_row.parent_id);
@@ -411,6 +421,15 @@ begin
   if not found then
     raise exception 'Invito non trovato o non più valido'
       using detail = 'invitation_not_found';
+  end if;
+
+  -- Un invitato "new_user" non ha mai ricevuto un abbonamento (il trigger lo
+  -- salta): senza questo grant resterebbe un account senza alcun piano.
+  if not exists (
+    select 1 from public.user_subscriptions
+    where user_id = p_user_id and status = 'active'
+  ) then
+    perform public.fn_grant_free_plan(p_user_id);
   end if;
 
   insert into public.audit_log (actor_id, action, target_user_id, family_parent_id, payload)

@@ -4,7 +4,7 @@ I riferimenti ad ATECO, settore e regione puntano alle lookup del DB
 SECONDARIO: alla scrittura si risolvono gli id e si denormalizzano le copie
 testuali (nessuna FK cross-database)."""
 
-from app.core.errors import BadRequestError
+from app.core.errors import BadRequestError, ForbiddenError
 from app.schemas.company import CompanyIn, CompanyOut, CompanyResponse
 from app.services import family_service, lookup_service
 
@@ -78,6 +78,13 @@ def resolve_lookups(data: CompanyIn, lookups) -> dict:
 
 
 async def upsert_company(primary, secondary, parent: dict, data: CompanyIn) -> CompanyResponse:
+    # Stessa regola di editabilità di get_company: solo un figlio ATTIVO è
+    # bloccato (eredita i dati della famiglia); pending e retrocessi scrivono
+    # i propri.
+    membership = await family_service.get_membership(primary, parent["id"])
+    if membership and membership["status"] == "active":
+        raise ForbiddenError("I dati aziendali della famiglia li gestisce il titolare")
+
     lookups = await lookup_service.get_lookups(secondary)
     payload = resolve_lookups(data, lookups)
     payload["parent_id"] = parent["id"]

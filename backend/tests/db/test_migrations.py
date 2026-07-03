@@ -184,6 +184,25 @@ class TestAcceptDecline:
         mid = create_member(db, PADRE, FIGLIO1, "f1@test.it")
         db.execute("select public.fn_decline_invitation(%s, %s)", (mid, FIGLIO1))
         assert member_status(db, FIGLIO1) is None  # declined è terminale
+        # un invitato new_user che rifiuta non deve restare senza piano
+        assert active_plan_slug(db, FIGLIO1) == "gratuito"
+
+    def test_decline_utente_esistente_mantiene_il_suo_piano(self, db):
+        signup(db, PADRE, "padre@test.it", '{"plan_slug":"pro"}')
+        signup(db, ELENA, "e@test.it", '{"plan_slug":"smart"}')
+        mid = create_member(db, PADRE, ELENA, "e@test.it", "existing_user")
+        db.execute("select public.fn_decline_invitation(%s, %s)", (mid, ELENA))
+        assert active_plan_slug(db, ELENA) == "smart"
+
+    def test_accept_dopo_revoca_fallisce(self, db):
+        # la revoca (o un downgrade) concorrente non deve essere "resuscitata"
+        signup(db, PADRE, "padre@test.it", '{"plan_slug":"pro"}')
+        invite(db, FIGLIO1, "f1@test.it")
+        mid = create_member(db, PADRE, FIGLIO1, "f1@test.it")
+        db.execute("select public.fn_remove_family_member(%s, %s)", (PADRE, mid))
+        with pytest.raises(psycopg.errors.RaiseException) as exc:
+            db.execute("select public.fn_accept_invitation(%s, %s)", (mid, FIGLIO1))
+        assert detail_of(exc) == "invitation_not_found"
 
     def test_family_full_se_limite_abbassato_dopo_invito(self, db):
         # advisor: padre + 2 inviti; l'admin abbassa il limite a 2 -> il secondo accept fallisce

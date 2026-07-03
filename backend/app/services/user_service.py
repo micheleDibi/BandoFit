@@ -341,9 +341,12 @@ async def admin_switch_user_plan(primary, target_user_id: UUID, plan_id: int) ->
     if not exists.data:
         raise NotFoundError("Utente non trovato")
 
-    # I piani sono a livello famiglia: per un figlio si agisce sul titolare.
+    # I piani sono a livello famiglia: per un figlio ATTIVO si agisce sul
+    # titolare. Un invitato pending è ancora un account indipendente con un
+    # piano proprio, e un retrocesso ha il suo piano Gratuito: entrambi
+    # restano gestibili singolarmente.
     membership = await family_service.get_membership(primary, str(target_user_id))
-    if membership and membership["status"] in ("pending", "active"):
+    if membership and membership["status"] == "active":
         raise ForbiddenError(
             "Il piano si gestisce sull'account titolare della famiglia"
         )

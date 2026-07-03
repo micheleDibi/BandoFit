@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.deps import CurrentUser, ParentUser, PrimaryClient, SecondaryClient
+from app.api.deps import CurrentUser, PrimaryClient, SecondaryClient
 from app.schemas.company import CompanyIn, CompanyResponse
 from app.services import company_service
 
@@ -17,8 +17,11 @@ async def get_company(user: CurrentUser, primary: PrimaryClient) -> CompanyRespo
 @router.put("", response_model=CompanyResponse)
 async def save_company(
     data: CompanyIn,
-    parent: ParentUser,
+    user: CurrentUser,
     primary: PrimaryClient,
     secondary: SecondaryClient,
 ) -> CompanyResponse:
-    return await company_service.upsert_company(primary, secondary, parent, data)
+    """Scrittura: bloccata SOLO per i figli attivi (che ereditano i dati della
+    famiglia); pending e retrocessi sono account indipendenti con dati propri —
+    la coerenza con `editable` di GET è verificata nel service."""
+    return await company_service.upsert_company(primary, secondary, user, data)

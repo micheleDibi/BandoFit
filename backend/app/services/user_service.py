@@ -3,7 +3,7 @@
 import re
 from uuid import UUID
 
-from app.core.errors import BadRequestError, NotFoundError
+from app.core.errors import BadRequestError, NotFoundError, UnauthorizedError
 from app.schemas.common import Page
 from app.schemas.plan import PlanOut
 from app.schemas.user import (
@@ -40,6 +40,50 @@ def _map_subscription(rows: list | None) -> SubscriptionOut | None:
         data_scadenza=sub["data_scadenza"],
         plan=PlanOut(**plan),
     )
+
+
+async def ensure_profile(primary, user_id: str, claims: dict) -> dict:
+    """Crea un profilo (e un abbonamento Gratuito) per un utente autenticato che
+    ne è privo, ripristinando un provisioning fallito a monte. Idempotente."""
+    meta = claims.get("user_metadata") or {}
+    await primary.table("profiles").upsert(
+        {
+            "id": user_id,
+            "email": claims.get("email") or f"{user_id}@sconosciuta.local",
+            "nome": (meta.get("nome") or None),
+            "cognome": (meta.get("cognome") or None),
+            "azienda": (meta.get("azienda") or None),
+        },
+        on_conflict="id",
+    ).execute()
+
+    active = (
+        await primary.table("user_subscriptions")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("status", "active")
+        .limit(1)
+        .execute()
+    )
+    if not active.data:
+        plan = (
+            await primary.table("subscription_plans")
+            .select("id")
+            .eq("slug", "gratuito")
+            .limit(1)
+            .execute()
+        )
+        if plan.data:
+            await primary.table("user_subscriptions").insert(
+                {"user_id": user_id, "plan_id": plan.data[0]["id"]}
+            ).execute()
+
+    resp = (
+        await primary.table("profiles").select(PROFILE_SELECT).eq("id", user_id).limit(1).execute()
+    )
+    if not resp.data:
+        raise UnauthorizedError("Impossibile creare il profilo per questo account")
+    return resp.data[0]
 
 
 async def get_me(primary, user_id: str) -> MeOut:
@@ -83,8 +127,9 @@ async def switch_plan(primary, user_id: str, plan_id: int) -> MeOut:
 
 
 def _sanitize_search(term: str) -> str:
-    """Rimuove i caratteri che romperebbero la grammatica ``or=(...)`` di PostgREST."""
-    return re.sub(r"[,()\\%*]", " ", term).strip()
+    """Rimuove i caratteri che romperebbero la grammatica ``or=(...)`` di PostgREST
+    (inclusi doppi apici, che aprirebbero un token quotato mai chiuso)."""
+    return re.sub(r'[,()\\%*"]', " ", term).strip()
 
 
 async def admin_list_users(

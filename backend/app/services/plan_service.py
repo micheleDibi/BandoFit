@@ -2,7 +2,7 @@
 
 from postgrest.exceptions import APIError
 
-from app.core.errors import ConflictError, NotFoundError
+from app.core.errors import BadRequestError, ConflictError, NotFoundError
 from app.schemas.plan import PlanCreate, PlanOut, PlanUpdate
 
 PLAN_SELECT = (
@@ -46,7 +46,7 @@ async def create_plan(primary, data: PlanCreate) -> PlanOut:
 async def update_plan(primary, plan_id: int, data: PlanUpdate) -> PlanOut:
     changes = data.model_dump(mode="json", exclude_unset=True)
     if not changes:
-        raise NotFoundError("Nessun campo da aggiornare")
+        raise BadRequestError("Nessun campo da aggiornare")
     resp = (
         await primary.table("subscription_plans")
         .update(changes)

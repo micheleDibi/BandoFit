@@ -27,3 +27,9 @@ as $$
   set role = 'admin'
   where lower(email) = lower(p_email);
 $$;
+
+-- CRITICO: senza questa revoca la funzione sarebbe esposta da PostgREST come
+-- RPC pubblica (default privileges Supabase) e CHIUNQUE, anche anonimo,
+-- potrebbe auto-promuoversi admin. Resta eseguibile solo da postgres
+-- (SQL Editor) e service_role.
+revoke execute on function public.promote_to_admin(text) from public, anon, authenticated;

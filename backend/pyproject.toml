@@ -6,7 +6,10 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
-    "supabase>=2.15",
+    "supabase>=2.15,<3",
+    # postgrest è importato direttamente (APIError, query builder nei test):
+    # va dichiarato esplicitamente e non solo come dipendenza transitiva di supabase.
+    "postgrest>=0.16",
     "PyJWT[crypto]>=2.9",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",

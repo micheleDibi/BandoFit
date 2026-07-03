@@ -8,9 +8,11 @@ perché la stessa junction può comparire anche come embed di visualizzazione.
 Semantica: OR dentro la stessa faccetta, AND tra faccette diverse.
 """
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from typing import Any
 
 from app.core.errors import NotFoundError
 from app.schemas.bando import BandoDetail, BandoListItem
@@ -72,8 +74,26 @@ class BandiFilters:
 
 
 def sanitize_fts_term(term: str) -> str:
-    """Rimuove i caratteri che romperebbero la grammatica di ``or=(...)`` di PostgREST."""
-    return re.sub(r"[,()\\]", " ", term).strip()
+    """Rimuove i caratteri che romperebbero la grammatica di ``or=(...)`` di PostgREST
+    (virgole, parentesi, backslash e doppi apici che aprirebbero un token quotato)."""
+    return re.sub(r'[,()\\"]', " ", term).strip()
+
+
+def normalize_contenuto(value: Any) -> dict | None:
+    """Alcune righe del DB secondario hanno ``contenuto`` come stringa JSON
+    doppio-encodata invece che come oggetto: va decodificata, altrimenti il
+    modello (dict) rifiuterebbe la stringa e il dettaglio andrebbe in errore."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (ValueError, TypeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
 
 
 def build_list_select(filters: BandiFilters) -> str:
@@ -166,7 +186,7 @@ def map_detail(row: dict) -> BandoDetail:
         tematica=row.get("tematica") or [],
         link_bando=row.get("link_bando"),
         link_candidatura=row.get("link_candidatura"),
-        contenuto=row.get("contenuto"),
+        contenuto=normalize_contenuto(row.get("contenuto")),
         allegati=row.get("allegati") or [],
         programma=_lookup(row.get("programmi")),
         settori=_flatten_junction(row.get("bando_settori"), "settori"),

@@ -195,3 +195,10 @@ alter table public.user_subscriptions enable row level security;
 revoke all on public.subscription_plans from anon, authenticated;
 revoke all on public.profiles from anon, authenticated;
 revoke all on public.user_subscriptions from anon, authenticated;
+
+-- CRITICO: Supabase concede EXECUTE su ogni funzione di public ad anon e
+-- authenticated (default privileges) e PostgREST la espone come
+-- POST /rest/v1/rpc/<nome>. fn_switch_plan è SECURITY DEFINER e bypassa la
+-- RLS: senza questa revoca chiunque potrebbe cambiare piano a chiunque.
+-- Deve restare invocabile solo dal backend (service_role).
+revoke execute on function public.fn_switch_plan(uuid, bigint) from public, anon, authenticated;

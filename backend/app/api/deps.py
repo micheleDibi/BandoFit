@@ -6,7 +6,7 @@ from supabase import AsyncClient
 
 from app.core.errors import ForbiddenError, UnauthorizedError
 from app.core.security import decode_supabase_jwt
-from app.services.user_service import PROFILE_SELECT
+from app.services.user_service import PROFILE_SELECT, ensure_profile
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -44,9 +44,14 @@ async def get_current_user(
         .execute()
     )
     if not resp.data:
-        raise UnauthorizedError("Profilo non trovato per questo account")
+        # Il trigger di provisioning è difensivo e non solleva mai: in rari casi
+        # (email nullable, errore transitorio) può restare un utente auth senza
+        # profilo. Lo ripariamo al volo, così l'account non resta bloccato in un
+        # loop di logout invece di aspettare un intervento manuale.
+        profile = await ensure_profile(primary, user_id, claims)
+    else:
+        profile = resp.data[0]
 
-    profile = resp.data[0]
     if not profile["is_active"]:
         raise ForbiddenError("Account disattivato. Contatta l'assistenza.")
     return profile

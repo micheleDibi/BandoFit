@@ -15,6 +15,7 @@ from app.services.bandi_service import (
     build_list_select,
     map_detail,
     map_list_item,
+    normalize_contenuto,
     sanitize_fts_term,
 )
 
@@ -115,6 +116,10 @@ class TestFullText:
         assert sanitize_fts_term("a,b(c)d\\e") == "a b c d e"
         assert sanitize_fts_term("  PNRR  ") == "PNRR"
 
+    def test_sanitize_strips_double_quotes(self):
+        # I doppi apici aprirebbero un token quotato mai chiuso in or=(...).
+        assert '"' not in sanitize_fts_term('"bando energia" 2024')
+
     def test_blank_term_after_sanitize_adds_no_or(self, client):
         params = params_of(build(client, BandiFilters(q="(),")))
         assert "or" not in params
@@ -188,3 +193,31 @@ class TestMapping:
         item = map_list_item(row)
         assert item.tipologia is None
         assert item.regioni == []
+
+    def test_map_detail_decodes_double_encoded_contenuto(self):
+        # 5 righe reali del DB hanno contenuto come stringa JSON doppio-encodata.
+        row = {**self.ROW, "contenuto": '{"sections": [{"type": "h2", "text": "Chi"}]}'}
+        detail = map_detail(row)
+        assert isinstance(detail.contenuto, dict)
+        assert detail.contenuto["sections"][0]["text"] == "Chi"
+
+    def test_map_detail_contenuto_object_passthrough(self):
+        row = {**self.ROW, "contenuto": {"sections": []}}
+        assert map_detail(row).contenuto == {"sections": []}
+
+
+class TestNormalizeContenuto:
+    def test_none(self):
+        assert normalize_contenuto(None) is None
+
+    def test_dict_passthrough(self):
+        assert normalize_contenuto({"sections": [1]}) == {"sections": [1]}
+
+    def test_json_string(self):
+        assert normalize_contenuto('{"sections": []}') == {"sections": []}
+
+    def test_invalid_string_becomes_none(self):
+        assert normalize_contenuto("non è json") is None
+
+    def test_json_non_object_becomes_none(self):
+        assert normalize_contenuto("[1, 2, 3]") is None

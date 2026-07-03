@@ -8,7 +8,9 @@ Base URL: `http://localhost:8000/api/v1` (sviluppo). Documentazione interattiva:
 ```json
 { "error": { "code": "not_found", "message": "Bando non trovato" } }
 ```
-Codici: `unauthorized` (401), `forbidden` (403), `not_found` (404), `bad_request` (400), `conflict` (409), `validation_error` (422), `search_timeout` (504), `upstream_error` (502), `upstream_timeout` (504).
+Codici: `unauthorized` (401), `forbidden` (403), `not_found` (404), `bad_request` (400), `conflict` (409), `validation_error` (422), `auth_unavailable` (503, verifica token temporaneamente impossibile — es. JWKS irraggiungibile: è un errore transitorio, **non** una sessione scaduta), `search_timeout` (504), `upstream_error` (502), `upstream_timeout` (504).
+
+Nota: se un utente autenticato risulta privo di profilo (provisioning fallito a monte), il backend lo crea al volo alla prima richiesta (con abbonamento Gratuito), evitando che l'account resti bloccato.
 
 **Paginazione** (risposta uniforme per gli elenchi):
 ```json

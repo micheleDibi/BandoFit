@@ -109,14 +109,113 @@ export interface Subscription {
   data_inizio: string;
   data_scadenza: string;
   plan: Plan;
+  /** true se è l'abbonamento del titolare della famiglia (figlio attivo) */
+  inherited?: boolean;
+}
+
+export type FamilyMemberStatus = "pending" | "active" | "demoted" | "removed" | "declined";
+
+export interface FamilyMember {
+  id: string; // id della membership
+  member_id: string;
+  denominazione: string;
+  email: string;
+  status: FamilyMemberStatus;
+  invite_kind: "new_user" | "existing_user";
+  invited_at: string;
+  joined_at: string | null;
+  demoted_at: string | null;
+}
+
+export interface Family {
+  limit: number;
+  used: number;
+  members: FamilyMember[];
+}
+
+export interface InviteMemberResult {
+  family: Family;
+  email_sent: boolean;
+}
+
+export interface Invitation {
+  id: string;
+  denominazione: string;
+  parent_display_name: string;
+  invited_at: string;
+}
+
+export interface MeFamily {
+  role: "parent" | "child";
+  // padre
+  limit?: number | null;
+  used?: number | null;
+  // figlio
+  status?: FamilyMemberStatus | null;
+  denominazione?: string | null;
+  parent_display_name?: string | null;
+}
+
+export interface PlanSwitchAdjustment {
+  demoted: Array<{ member_id: string; denominazione: string }>;
+  revoked_pending: Array<{ member_id: string; denominazione: string }>;
 }
 
 export interface Me {
   profile: Profile;
   subscription: Subscription | null;
+  family: MeFamily | null;
+  plan_switch_adjustment?: PlanSwitchAdjustment | null;
+}
+
+export interface AdminFamilyInfo {
+  type: "parent" | "child";
+  status?: FamilyMemberStatus | null;
+  parent_email?: string | null;
+  members_count?: number | null;
 }
 
 export interface AdminUser {
   profile: Profile;
   subscription: Subscription | null;
+  family: AdminFamilyInfo | null;
+}
+
+export type ClasseDimensionale = "micro" | "piccola" | "media" | "grande";
+export type FasciaFatturato =
+  | "fino_100k"
+  | "100k_500k"
+  | "500k_2m"
+  | "2m_10m"
+  | "10m_50m"
+  | "oltre_50m";
+
+export interface CompanyProfile {
+  ragione_sociale: string;
+  forma_giuridica: string | null;
+  partita_iva: string;
+  codice_fiscale: string | null;
+  ateco_id: number | null;
+  ateco_codice: string | null;
+  ateco_descrizione: string | null;
+  settore_id: number | null;
+  settore_nome: string | null;
+  regione_id: number | null;
+  regione_nome: string | null;
+  anno_fondazione: number | null;
+  indirizzo: string | null;
+  comune: string | null;
+  provincia: string | null;
+  cap: string | null;
+  classe_dimensionale: ClasseDimensionale | null;
+  numero_dipendenti: number | null;
+  fascia_fatturato: FasciaFatturato | null;
+  pec: string | null;
+  telefono: string | null;
+  sito_web: string | null;
+}
+
+export interface CompanyResponse {
+  editable: boolean;
+  company: CompanyProfile | null;
 }

@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AdminRoute, ProtectedRoute } from "./components/layout/guards";
 import { AppShell } from "./components/layout/AppShell";
+import AccettaInvito from "./pages/AccettaInvito";
 import AdminPiani from "./pages/AdminPiani";
 import AdminUtenti from "./pages/AdminUtenti";
 import BandiList from "./pages/BandiList";
@@ -17,6 +18,7 @@ export default function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
       <Route path="/registrati" element={<Register />} />
+      <Route path="/accetta-invito" element={<AccettaInvito />} />
       <Route
         path="/app"
         element={

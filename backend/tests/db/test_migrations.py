@@ -370,6 +370,45 @@ class TestGuards:
                 (ELENA, FIGLIO1),
             )
 
+    def test_auth_tokens_vincoli(self, db):
+        signup(db, PADRE, "padre@test.it", '{"plan_slug":"pro"}')
+        db.execute(
+            "insert into public.auth_tokens (user_id, purpose, token_hash, expires_at) "
+            "values (%s, 'recovery', 'h1', now() + interval '1 hour')",
+            (PADRE,),
+        )
+        # hash duplicato -> unique violation
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            db.execute(
+                "insert into public.auth_tokens (user_id, purpose, token_hash, expires_at) "
+                "values (%s, 'invite', 'h1', now() + interval '1 hour')",
+                (PADRE,),
+            )
+        # purpose fuori lista -> check violation
+        with pytest.raises(psycopg.errors.CheckViolation):
+            db.execute(
+                "insert into public.auth_tokens (user_id, purpose, token_hash, expires_at) "
+                "values (%s, 'altro', 'h2', now() + interval '1 hour')",
+                (PADRE,),
+            )
+        # consumo atomico monouso: il secondo UPDATE non trova righe
+        first = db.execute(
+            "update public.auth_tokens set used_at = now() "
+            "where token_hash = 'h1' and used_at is null returning user_id"
+        ).fetchall()
+        second = db.execute(
+            "update public.auth_tokens set used_at = now() "
+            "where token_hash = 'h1' and used_at is null returning user_id"
+        ).fetchall()
+        assert len(first) == 1 and len(second) == 0
+        # cascade: eliminando il profilo spariscono i token
+        db.execute("delete from public.profiles where id = %s", (PADRE,))
+        assert db.execute("select count(*) from public.auth_tokens").fetchone()[0] == 0
+        # RLS/grant: i ruoli client non leggono
+        assert not db.execute(
+            "select has_table_privilege('anon','public.auth_tokens','select')"
+        ).fetchone()[0]
+
     def test_audit_registrato(self, db):
         signup(db, PADRE, "padre@test.it", '{"plan_slug":"pro"}')
         invite(db, FIGLIO1, "f1@test.it")

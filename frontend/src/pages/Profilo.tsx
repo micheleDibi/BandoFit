@@ -1,6 +1,8 @@
-import { BadgeCheck, CalendarDays } from "lucide-react";
+import { BadgeCheck, CalendarDays, Check, Users } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
-import { PlanCard } from "../components/shared/PlanCard";
+import { CompanyCard } from "../components/company/CompanyCard";
+import { FamilyCard } from "../components/family/FamilyCard";
+import { PlanCard, planFeatures } from "../components/shared/PlanCard";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Dialog } from "../components/ui/Dialog";
@@ -48,6 +50,7 @@ export default function Profilo() {
   }
 
   const currentPlanId = me.subscription?.plan.id;
+  const isActiveChild = me.family?.role === "child" && me.family.status === "active";
 
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
@@ -127,7 +130,57 @@ export default function Profilo() {
         </form>
       </Card>
 
-      {/* Abbonamento */}
+      {/* Dati aziendali (form per il titolare, sola lettura per i figli) */}
+      <div className="mt-6">
+        <CompanyCard />
+      </div>
+
+      {/* Gestione account collegati: solo per il titolare con piano multi-account */}
+      {me.family?.role === "parent" && (
+        <div className="mt-6">
+          <FamilyCard />
+        </div>
+      )}
+
+      {/* Abbonamento: un figlio ATTIVO eredita il piano della famiglia */}
+      {isActiveChild ? (
+        <section className="mt-10">
+          <h2 className="font-display text-xl font-bold tracking-tight text-slate-900">
+            Il tuo abbonamento
+          </h2>
+          <Card className="mt-4 max-w-lg border-brand-200 p-6">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200">
+                <Users className="size-3.5" aria-hidden />
+                Piano ereditato da {me.family?.parent_display_name ?? "il titolare"}
+              </span>
+            </div>
+            {me.subscription && (
+              <>
+                <p className="mt-3 font-display text-2xl font-bold text-slate-900">
+                  {me.subscription.plan.nome}
+                </p>
+                <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-slate-500">
+                  <CalendarDays className="size-4" aria-hidden />
+                  Attivo fino al {formatDate(me.subscription.data_scadenza)}
+                </p>
+                <ul className="mt-4 space-y-2">
+                  {planFeatures(me.subscription.plan).map((feature) => (
+                    <li key={feature} className="flex items-start gap-2 text-sm text-slate-600">
+                      <Check className="mt-0.5 size-4 shrink-0 text-brand-500" aria-hidden />
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <p className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-400">
+              Le quote del piano sono condivise con tutta la famiglia. Solo il titolare può
+              cambiare l'abbonamento.
+            </p>
+          </Card>
+        </section>
+      ) : (
       <section className="mt-10">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
@@ -139,6 +192,12 @@ export default function Profilo() {
                 <CalendarDays className="size-4" aria-hidden />
                 Piano <strong className="text-slate-700">{me.subscription.plan.nome}</strong> attivo
                 fino al {formatDate(me.subscription.data_scadenza)}
+              </p>
+            )}
+            {me.family?.role === "child" && me.family.status === "demoted" && (
+              <p className="mt-1 text-sm text-amber-600">
+                Il tuo account è stato retrocesso dalla famiglia: hai un piano indipendente
+                finché il titolare non ti riattiva.
               </p>
             )}
           </div>
@@ -195,6 +254,7 @@ export default function Profilo() {
           previsto alcun pagamento.
         </p>
       </section>
+      )}
 
       {/* Conferma cambio piano */}
       <Dialog
@@ -220,6 +280,14 @@ export default function Profilo() {
               <strong className="text-slate-900">{planToConfirm.nome}</strong>. Il nuovo
               abbonamento annuale parte da oggi.
             </p>
+            {me.family?.role === "parent" &&
+              (me.family.used ?? 1) > (planToConfirm.num_account_aziendali ?? 1) && (
+                <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-amber-800">
+                  Attenzione: il piano {planToConfirm.nome} prevede al massimo{" "}
+                  {planToConfirm.num_account_aziendali} account (incluso il tuo). Gli account più
+                  recenti oltre il limite verranno retrocessi al piano Gratuito.
+                </p>
+              )}
             {switchPlan.isError && (
               <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-red-700" role="alert">
                 {apiErrorMessage(switchPlan.error)}

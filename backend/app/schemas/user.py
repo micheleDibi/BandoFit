@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.family import MeFamilyOut, PlanSwitchAdjustment
 from app.schemas.plan import PlanOut
 
 
@@ -13,6 +14,8 @@ class SubscriptionOut(BaseModel):
     data_inizio: date
     data_scadenza: date
     plan: PlanOut
+    # True se l'abbonamento è quello del titolare della famiglia (figlio attivo).
+    inherited: bool = False
 
 
 class ProfileOut(BaseModel):
@@ -30,6 +33,9 @@ class ProfileOut(BaseModel):
 class MeOut(BaseModel):
     profile: ProfileOut
     subscription: SubscriptionOut | None = None
+    family: MeFamilyOut | None = None
+    # Presente solo nella risposta di un cambio piano che ha causato retrocessioni.
+    plan_switch_adjustment: PlanSwitchAdjustment | None = None
 
 
 class ProfileUpdate(BaseModel):
@@ -43,9 +49,19 @@ class SwitchPlanIn(BaseModel):
     plan_id: int
 
 
+class AdminFamilyInfo(BaseModel):
+    type: Literal["parent", "child"]
+    # figlio
+    status: str | None = None
+    parent_email: str | None = None
+    # padre
+    members_count: int | None = None
+
+
 class AdminUserOut(BaseModel):
     profile: ProfileOut
     subscription: SubscriptionOut | None = None
+    family: AdminFamilyInfo | None = None
 
 
 class AdminUserUpdate(BaseModel):

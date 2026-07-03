@@ -67,3 +67,19 @@ async def require_admin(user: CurrentUser) -> dict:
 
 
 AdminUser = Annotated[dict, Depends(require_admin)]
+
+
+async def require_parent(user: CurrentUser, primary: PrimaryClient) -> dict:
+    """L'utente non deve essere membro (corrente) di una famiglia altrui:
+    solo il titolare gestisce gli account collegati e i dati aziendali."""
+    from app.services import family_service  # import locale: evita cicli
+
+    membership = await family_service.get_membership(primary, user["id"])
+    if membership is not None:
+        raise ForbiddenError(
+            "Solo il titolare della famiglia può gestire gli account collegati"
+        )
+    return user
+
+
+ParentUser = Annotated[dict, Depends(require_parent)]

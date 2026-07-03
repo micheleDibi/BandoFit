@@ -8,6 +8,7 @@ import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/Field";
 import { ErrorState, Skeleton } from "../components/ui/states";
 import { usePlans } from "../hooks/usePlans";
+import { api, apiErrorMessage } from "../lib/api";
 import { cn } from "../lib/cn";
 import { supabase } from "../lib/supabase";
 
@@ -94,36 +95,39 @@ export default function Register() {
     setError(null);
     setInfo(null);
     setLoading(true);
-    const { data, error: authError } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/conferma-email`,
-        data: {
-          nome: form.nome.trim(),
-          cognome: form.cognome.trim(),
-          azienda: form.azienda.trim() || undefined,
-          plan_slug: selectedPlan,
-        },
-      },
-    });
-    setLoading(false);
-    if (authError) {
-      setError(
-        authError.message.includes("already registered")
-          ? "Esiste già un account con questa email. Prova ad accedere."
-          : "Registrazione non riuscita. Riprova tra qualche istante.",
-      );
-      return;
+    try {
+      // La registrazione passa dal backend: l'email di conferma parte dal
+      // NOSTRO provider (SMTP/OVH), mai dal mailer di Supabase.
+      const { data } = await api.post<{ confirmation_required: boolean }>("/auth/register", {
+        email: form.email.trim(),
+        password: form.password,
+        nome: form.nome.trim(),
+        cognome: form.cognome.trim(),
+        azienda: form.azienda.trim() || null,
+        plan_slug: selectedPlan,
+      });
+      if (data.confirmation_required) {
+        setLoading(false);
+        setInfo(
+          "Ti abbiamo inviato una email di conferma: aprila per attivare l'account, poi accedi.",
+        );
+        return;
+      }
+      // Conferma email disattivata sul progetto: accesso immediato.
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: form.email.trim(),
+        password: form.password,
+      });
+      setLoading(false);
+      if (signInError) {
+        navigate("/login", { replace: true });
+        return;
+      }
+      navigate("/app/bandi", { replace: true });
+    } catch (err) {
+      setLoading(false);
+      setError(apiErrorMessage(err, "Registrazione non riuscita. Riprova tra qualche istante."));
     }
-    if (!data.session) {
-      // Conferma email attiva sul progetto: è un avviso, non un errore.
-      setInfo(
-        "Ti abbiamo inviato una email di conferma: aprila per attivare l'account, poi accedi.",
-      );
-      return;
-    }
-    navigate("/app/bandi", { replace: true });
   };
 
   return (

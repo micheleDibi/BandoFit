@@ -10,6 +10,7 @@ from postgrest.exceptions import APIError
 from app.api.routers import (
     admin_plans,
     admin_users,
+    auth,
     bandi,
     company,
     family,
@@ -94,6 +95,7 @@ async def httpx_error_handler(_: Request, exc: httpx.HTTPError) -> JSONResponse:
 
 for router in (
     health.router,
+    auth.router,
     plans.router,
     me.router,
     family.router,

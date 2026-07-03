@@ -2,6 +2,10 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-03 — Tutte le email dal backend (mai dal mailer Supabase)
+
+- Registrazione, recupero password, reinvio conferma e inviti famiglia ora generano i link firmati via Admin API (`generate_link`) e inviano le email **esclusivamente col provider del backend** (SMTP/OVH o Resend), con template brandizzati in italiano. Nuovi endpoint pubblici `POST /auth/register`, `/auth/recover`, `/auth/resend-confirmation` con risposta anti-enumerazione e cooldown anti-abuso (60s per destinatario).
+
 ## 2026-07-03 — Recupero password e conferma email
 
 - **Recupero password**: link "Password dimenticata?" nel login, pagina `/recupera-password` (invio del link via Supabase, messaggio neutro anti-enumerazione) e `/reimposta-password` (atterraggio del link con gestione scadenza e form nuova password).

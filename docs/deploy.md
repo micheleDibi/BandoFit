@@ -48,7 +48,7 @@ SMTP_PASSWORD=la-password-della-casella
 EMAIL_FROM=BandoFit <noreply@tuodominio.it>
 ```
 
-> Le email di **invito ai nuovi utenti** (e conferme/reset password) le manda invece **Supabase** con il suo mailer. Per farle uscire anch'esse dal tuo dominio, configura la stessa casella in **Project Settings → Auth → SMTP Settings** del progetto primario (stessi parametri host/porta/utente/password). Facoltativo ma consigliato in produzione: il mailer integrato di Supabase ha limiti orari molto bassi.
+> **TUTTE le email della piattaforma escono da qui**: conferma registrazione, recupero password, inviti famiglia. Il mailer di Supabase non viene mai usato — i link firmati vengono generati via Admin API (`generate_link`) e spediti dal backend col provider configurato. Non serve configurare nulla nelle SMTP Settings di Supabase.
 
 > Le variabili `VITE_*` vengono **cotte nel bundle** alla build del frontend: se le cambi, serve `docker compose up -d --build frontend`.
 

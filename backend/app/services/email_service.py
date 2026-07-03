@@ -22,34 +22,44 @@ _RESEND_URL = "https://api.resend.com/emails"
 _TIMEOUT_SECONDS = 15
 
 
-def _invitation_html(parent_display_name: str, denominazione: str, cta_url: str) -> str:
-    parent = html.escape(parent_display_name)
-    name = html.escape(denominazione)
+def _branded_html(heading: str, paragraphs: list[str], cta_label: str, cta_url: str, footer: str) -> str:
+    """Wrapper HTML comune a tutte le email transazionali (i paragrafi sono
+    già HTML: l'escaping dei dati utente avviene nei chiamanti)."""
+    body = "".join(
+        f'<p style="font-size:15px;line-height:1.6;margin:0 0 12px">{p}</p>' for p in paragraphs
+    )
     return f"""\
 <div style="font-family:Inter,Arial,sans-serif;max-width:520px;margin:0 auto;color:#1e293b">
   <div style="background:#1E5EFF;border-radius:12px 12px 0 0;padding:20px 28px">
     <span style="color:#fff;font-size:20px;font-weight:700">BandoFit</span>
   </div>
   <div style="border:1px solid #e2e8f0;border-top:none;border-radius:0 0 12px 12px;padding:28px">
-    <h1 style="font-size:18px;margin:0 0 12px">Sei stato invitato su BandoFit</h1>
-    <p style="font-size:15px;line-height:1.6;margin:0 0 8px">
-      <strong>{parent}</strong> ti ha invitato a unirti alla sua famiglia di account
-      come <strong>{name}</strong>.
-    </p>
-    <p style="font-size:15px;line-height:1.6;margin:0 0 20px">
-      Entrando nella famiglia condividerai l'abbonamento e i dati aziendali del titolare.
-    </p>
+    <h1 style="font-size:18px;margin:0 0 12px">{html.escape(heading)}</h1>
+    {body}
     <a href="{cta_url}"
        style="display:inline-block;background:#1E5EFF;color:#fff;text-decoration:none;
-              font-weight:600;font-size:15px;padding:12px 24px;border-radius:8px">
-      Vai all'invito
+              font-weight:600;font-size:15px;padding:12px 24px;border-radius:8px;margin-top:8px">
+      {html.escape(cta_label)}
     </a>
-    <p style="font-size:13px;color:#64748b;margin:20px 0 0">
-      Se non ti aspettavi questo invito puoi ignorare questa email o rifiutarlo
-      dalla piattaforma.
-    </p>
+    <p style="font-size:13px;color:#64748b;margin:20px 0 0">{html.escape(footer)}</p>
   </div>
 </div>"""
+
+
+def _invitation_html(parent_display_name: str, denominazione: str, cta_url: str) -> str:
+    parent = html.escape(parent_display_name)
+    name = html.escape(denominazione)
+    return _branded_html(
+        "Sei stato invitato su BandoFit",
+        [
+            f"<strong>{parent}</strong> ti ha invitato a unirti alla sua famiglia di account "
+            f"come <strong>{name}</strong>.",
+            "Entrando nella famiglia condividerai l'abbonamento e i dati aziendali del titolare.",
+        ],
+        "Vai all'invito",
+        cta_url,
+        "Se non ti aspettavi questo invito puoi ignorare questa email o rifiutarlo dalla piattaforma.",
+    )
 
 
 def _plain_text(parent_display_name: str, denominazione: str, cta_url: str) -> str:
@@ -118,6 +128,61 @@ async def _send_via_resend(
     return True
 
 
+async def _dispatch(to_email: str, subject: str, html_body: str, text_body: str) -> bool:
+    """Invia con il provider configurato (SMTP → Resend → log). Mai raise."""
+    settings = get_settings()
+    subject = _sanitize_header(subject)
+    try:
+        if settings.smtp_host:
+            return await _send_via_smtp(settings, to_email, subject, html_body, text_body)
+        if settings.resend_api_key:
+            return await _send_via_resend(settings, to_email, subject, html_body)
+    except Exception as exc:
+        logger.error("Invio email a %s fallito: %s", to_email, exc)
+        return False
+    logger.info("[email dev fallback] to=%s subject=%r", to_email, subject)
+    return True
+
+
+async def send_confirmation_email(to_email: str, cta_url: str) -> bool:
+    """Email di conferma indirizzo dopo la registrazione."""
+    html_body = _branded_html(
+        "Conferma il tuo indirizzo email",
+        [
+            "Benvenuto su BandoFit! Per attivare il tuo account conferma il tuo "
+            "indirizzo email con il pulsante qui sotto.",
+        ],
+        "Conferma la mia email",
+        cta_url,
+        "Se non ti sei registrato tu su BandoFit puoi ignorare questa email.",
+    )
+    text = (
+        "Benvenuto su BandoFit! Conferma il tuo indirizzo email aprendo questo link:\n\n"
+        f"{cta_url}\n\nSe non ti sei registrato tu, ignora questa email."
+    )
+    return await _dispatch(to_email, "Conferma il tuo indirizzo email — BandoFit", html_body, text)
+
+
+async def send_recovery_email(to_email: str, cta_url: str) -> bool:
+    """Email con il link per reimpostare la password."""
+    html_body = _branded_html(
+        "Reimposta la tua password",
+        [
+            "Abbiamo ricevuto una richiesta di reimpostazione della password per il "
+            "tuo account BandoFit. Il link vale una sola volta e per un tempo limitato.",
+        ],
+        "Reimposta la password",
+        cta_url,
+        "Se non hai richiesto tu la reimpostazione puoi ignorare questa email: "
+        "la tua password resterà invariata.",
+    )
+    text = (
+        "Reimposta la password del tuo account BandoFit aprendo questo link:\n\n"
+        f"{cta_url}\n\nSe non l'hai richiesto tu, ignora questa email."
+    )
+    return await _dispatch(to_email, "Reimposta la tua password — BandoFit", html_body, text)
+
+
 async def send_family_invitation_email(
     to_email: str,
     parent_display_name: str,
@@ -132,18 +197,9 @@ async def send_family_invitation_email(
     """
     settings = get_settings()
     cta_url = cta_url or f"{settings.frontend_url.rstrip('/')}/app/profilo"
-    subject = _sanitize_header(f"{parent_display_name} ti ha invitato su BandoFit")
-    html_body = _invitation_html(parent_display_name, denominazione, cta_url)
-    text_body = _plain_text(parent_display_name, denominazione, cta_url)
-
-    try:
-        if settings.smtp_host:
-            return await _send_via_smtp(settings, to_email, subject, html_body, text_body)
-        if settings.resend_api_key:
-            return await _send_via_resend(settings, to_email, subject, html_body)
-    except Exception as exc:
-        logger.error("Invio email a %s fallito: %s", to_email, exc)
-        return False
-
-    logger.info("[email dev fallback] to=%s subject=%r cta=%s", to_email, subject, cta_url)
-    return True
+    return await _dispatch(
+        to_email,
+        f"{parent_display_name} ti ha invitato su BandoFit",
+        _invitation_html(parent_display_name, denominazione, cta_url),
+        _plain_text(parent_display_name, denominazione, cta_url),
+    )

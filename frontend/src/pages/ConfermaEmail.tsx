@@ -6,7 +6,7 @@ import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/Field";
 import { useHashSession } from "../hooks/useHashSession";
-import { supabase } from "../lib/supabase";
+import { api, apiErrorMessage } from "../lib/api";
 
 /** Pagina di atterraggio del link "conferma email" dopo la registrazione. */
 export default function ConfermaEmail() {
@@ -33,17 +33,15 @@ export default function ConfermaEmail() {
       return;
     }
     setResendState("sending");
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email: resendEmail.trim(),
-      options: { emailRedirectTo: `${window.location.origin}/conferma-email` },
-    });
-    if (error) {
+    try {
+      await api.post("/auth/resend-confirmation", { email: resendEmail.trim() });
+      setResendState("sent");
+    } catch (err) {
       setResendState("idle");
-      setResendError("Invio non riuscito: verifica l'indirizzo o riprova tra qualche minuto.");
-      return;
+      setResendError(
+        apiErrorMessage(err, "Invio non riuscito: verifica l'indirizzo o riprova tra qualche minuto."),
+      );
     }
-    setResendState("sent");
   };
 
   return (

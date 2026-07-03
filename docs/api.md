@@ -22,6 +22,15 @@ Nota: se un utente autenticato risulta privo di profilo (provisioning fallito a 
 ### `GET /health`
 Stato del servizio. → `{"status": "ok"}`
 
+### `POST /auth/register` (201)
+Registrazione. Body: `email`, `password` (≥8), `nome`, `cognome`, `azienda?`, `plan_slug`. Crea l'utente via Admin API e invia l'email di conferma **dal provider del backend** (mai dal mailer di Supabase). → `{"confirmation_required": true|false}` (false se la conferma email è disattivata sul progetto: si può accedere subito). Errori: `409` email già registrata o email inviata da poco (cooldown 60s), `400` password non valida.
+
+### `POST /auth/recover` (202)
+Richiesta reimpostazione password. Body: `{"email": "..."}`. Risposta **sempre neutra** `{"ok": true}` (anti-enumerazione); se l'account esiste parte l'email col link verso `/reimposta-password`. `409` se richiesta ripetuta entro 60s.
+
+### `POST /auth/resend-confirmation` (202)
+Reinvio del link di conferma (via magiclink: la verifica conferma l'email). Body: `{"email": "..."}`. Risposta sempre neutra; cooldown 60s.
+
 ### `GET /plans`
 Piani di abbonamento attivi, ordinati per `ordering`. Usato dallo step 2 della registrazione.
 

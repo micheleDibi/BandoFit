@@ -5,6 +5,7 @@ import { Logo } from "../components/layout/Logo";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/Field";
+import { api } from "../lib/api";
 import { supabase } from "../lib/supabase";
 
 export default function Login() {
@@ -45,13 +46,13 @@ export default function Login() {
 
   const handleResendConfirmation = async () => {
     setResendState("sending");
-    const { error: resendError } = await supabase.auth.resend({
-      type: "signup",
-      email: email.trim(),
-      options: { emailRedirectTo: `${window.location.origin}/conferma-email` },
-    });
-    setResendState(resendError ? "idle" : "sent");
-    if (resendError) setError("Reinvio non riuscito, riprova tra qualche minuto.");
+    try {
+      await api.post("/auth/resend-confirmation", { email: email.trim() });
+      setResendState("sent");
+    } catch {
+      setResendState("idle");
+      setError("Reinvio non riuscito, riprova tra qualche minuto.");
+    }
   };
 
   return (

@@ -5,7 +5,7 @@ import { Logo } from "../components/layout/Logo";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/Field";
-import { supabase } from "../lib/supabase";
+import { api, apiErrorMessage } from "../lib/api";
 
 export default function RecuperaPassword() {
   const [email, setEmail] = useState("");
@@ -21,16 +21,15 @@ export default function RecuperaPassword() {
       return;
     }
     setLoading(true);
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: `${window.location.origin}/reimposta-password`,
-    });
-    setLoading(false);
-    if (resetError) {
-      // Messaggio generico: non riveliamo se l'email esiste o meno.
-      setError("Invio non riuscito, riprova tra qualche istante.");
-      return;
+    try {
+      // Il link parte dal backend con il nostro provider email (mai da Supabase).
+      await api.post("/auth/recover", { email: email.trim() });
+      setSent(true);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Invio non riuscito, riprova tra qualche istante."));
+    } finally {
+      setLoading(false);
     }
-    setSent(true);
   };
 
   return (

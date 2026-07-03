@@ -1,17 +1,18 @@
 import { AlertTriangle, Eye, EyeOff } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
 import { Button, LinkButton } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/Field";
-import { useHashSession } from "../hooks/useHashSession";
+import { api, apiErrorMessage } from "../lib/api";
 import { supabase } from "../lib/supabase";
 
-/** Pagina di atterraggio del link "reimposta password" di Supabase. */
+/** Pagina di atterraggio del link "reimposta password" (token di dominio). */
 export default function ReimpostaPassword() {
   const navigate = useNavigate();
-  const hashSession = useHashSession();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get("token");
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -19,6 +20,7 @@ export default function ReimpostaPassword() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
+  const [expired, setExpired] = useState(!token);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -32,18 +34,31 @@ export default function ReimpostaPassword() {
       return;
     }
     setSaving(true);
-    const { error: updateError } = await supabase.auth.updateUser({ password });
-    setSaving(false);
-    if (updateError) {
-      setError(
-        updateError.message.includes("different from the old")
-          ? "La nuova password deve essere diversa da quella attuale."
-          : "Aggiornamento non riuscito, riprova.",
+    try {
+      const { data } = await api.post<{ email: string }>("/auth/reset", { token, password });
+      setDone(true);
+      // Auto-login con le credenziali appena impostate.
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: data.email,
+        password,
+      });
+      setTimeout(
+        () =>
+          navigate(
+            signInError ? `/login?email=${encodeURIComponent(data.email)}` : "/app/bandi",
+            { replace: true },
+          ),
+        1200,
       );
-      return;
+    } catch (err) {
+      setSaving(false);
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 404) {
+        setExpired(true);
+        return;
+      }
+      setError(apiErrorMessage(err, "Aggiornamento non riuscito, riprova."));
     }
-    setDone(true);
-    setTimeout(() => navigate("/app/bandi", { replace: true }), 1500);
   };
 
   return (
@@ -55,14 +70,7 @@ export default function ReimpostaPassword() {
         <Logo variant="vertical" />
       </Link>
       <Card className="w-full max-w-md p-6 sm:p-8">
-        {hashSession === "waiting" && (
-          <div className="flex flex-col items-center py-8 text-center" role="status">
-            <div className="size-8 animate-spin rounded-full border-3 border-brand-200 border-t-brand-500" />
-            <p className="mt-4 text-sm text-slate-500">Verifica del link in corso…</p>
-          </div>
-        )}
-
-        {hashSession === "invalid" && (
+        {expired ? (
           <div className="flex flex-col items-center py-4 text-center">
             <div className="rounded-full bg-amber-100 p-3 text-amber-600">
               <AlertTriangle className="size-7" aria-hidden />
@@ -71,16 +79,31 @@ export default function ReimpostaPassword() {
               Link scaduto o non valido
             </h1>
             <p className="mt-2 text-sm text-slate-500">
-              I link di recupero valgono una sola volta e per un tempo limitato. Richiedine uno
-              nuovo.
+              I link di recupero valgono una sola volta e per un'ora. Richiedine uno nuovo.
             </p>
             <LinkButton to="/recupera-password" className="mt-6">
               Richiedi un nuovo link
             </LinkButton>
           </div>
-        )}
-
-        {hashSession === "ready" && !done && (
+        ) : done ? (
+          <div className="flex flex-col items-center py-6 text-center" role="status">
+            <div className="flex size-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+              <svg viewBox="0 0 24 24" fill="none" className="size-7" aria-hidden>
+                <path
+                  d="M5 13l4 4L19 7"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
+            <h1 className="mt-4 font-display text-lg font-bold text-slate-900">
+              Password aggiornata
+            </h1>
+            <p className="mt-2 text-sm text-slate-500">Ti stiamo facendo entrare…</p>
+          </div>
+        ) : (
           <>
             <h1 className="font-display text-xl font-bold text-slate-900">
               Imposta la nuova password
@@ -127,26 +150,6 @@ export default function ReimpostaPassword() {
               </Button>
             </form>
           </>
-        )}
-
-        {done && (
-          <div className="flex flex-col items-center py-6 text-center" role="status">
-            <div className="flex size-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
-              <svg viewBox="0 0 24 24" fill="none" className="size-7" aria-hidden>
-                <path
-                  d="M5 13l4 4L19 7"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </div>
-            <h1 className="mt-4 font-display text-lg font-bold text-slate-900">
-              Password aggiornata
-            </h1>
-            <p className="mt-2 text-sm text-slate-500">Ti stiamo portando ai bandi…</p>
-          </div>
         )}
       </Card>
     </div>

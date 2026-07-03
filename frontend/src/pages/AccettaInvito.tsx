@@ -1,36 +1,44 @@
 import { AlertTriangle, Eye, EyeOff } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/Field";
-import { useHashSession } from "../hooks/useHashSession";
 import { api, apiErrorMessage } from "../lib/api";
 import { supabase } from "../lib/supabase";
-import type { Invitation, Me } from "../types";
 
-type Step = "loading" | "invalid" | "password" | "accepting" | "done" | "no_invite";
+type Step = "loading" | "invalid" | "password" | "accepting" | "done";
 
-/** Pagina di atterraggio del link d'invito Supabase. */
+interface InviteInfo {
+  email: string;
+  denominazione: string;
+  parent_display_name: string;
+}
+
+/** Pagina di atterraggio del link d'invito azienda (token di dominio). */
 export default function AccettaInvito() {
   const navigate = useNavigate();
-  const hashSession = useHashSession();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get("token");
 
-  const [step, setStep] = useState<Step>("loading");
+  const [step, setStep] = useState<Step>(token ? "loading" : "invalid");
+  const [invite, setInvite] = useState<InviteInfo | null>(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [familyName, setFamilyName] = useState<string | null>(null);
 
   useEffect(() => {
-    if (hashSession === "ready" && (step === "loading" || step === "invalid")) {
-      setStep("password");
-    } else if (hashSession === "invalid" && step === "loading") {
-      setStep("invalid");
-    }
-  }, [hashSession, step]);
+    if (!token) return;
+    api
+      .get<InviteInfo>("/auth/invite-info", { params: { token } })
+      .then(({ data }) => {
+        setInvite(data);
+        setStep("password");
+      })
+      .catch(() => setStep("invalid"));
+  }, [token]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -45,21 +53,30 @@ export default function AccettaInvito() {
     }
     setStep("accepting");
     try {
-      const { error: pwError } = await supabase.auth.updateUser({ password });
-      if (pwError) throw pwError;
-
-      const { data: invitations } = await api.get<Invitation[]>("/me/invitations");
-      if (!invitations.length) {
-        // Invito revocato nel frattempo (o già accettato).
-        setStep("no_invite");
+      const { data } = await api.post<{ email: string }>("/auth/accept-invite", {
+        token,
+        password,
+      });
+      setStep("done");
+      // Auto-login con le credenziali appena impostate.
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: data.email,
+        password,
+      });
+      setTimeout(
+        () =>
+          navigate(
+            signInError ? `/login?email=${encodeURIComponent(data.email)}` : "/app/bandi",
+            { replace: true },
+          ),
+        1500,
+      );
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 404) {
+        setStep("invalid");
         return;
       }
-      const invitation = invitations[0];
-      const { data: me } = await api.post<Me>(`/me/invitations/${invitation.id}/accept`);
-      setFamilyName(me.family?.parent_display_name ?? invitation.parent_display_name);
-      setStep("done");
-      setTimeout(() => navigate("/app/bandi", { replace: true }), 1800);
-    } catch (err) {
       setStep("password");
       setError(apiErrorMessage(err, "Qualcosa è andato storto, riprova."));
     }
@@ -102,30 +119,15 @@ export default function AccettaInvito() {
           </div>
         )}
 
-        {step === "no_invite" && (
-          <div className="flex flex-col items-center py-4 text-center">
-            <div className="rounded-full bg-amber-100 p-3 text-amber-600">
-              <AlertTriangle className="size-7" aria-hidden />
-            </div>
-            <h1 className="mt-4 font-display text-lg font-bold text-slate-900">
-              Invito non più disponibile
-            </h1>
-            <p className="mt-2 text-sm text-slate-500">
-              L'invito è stato revocato o già utilizzato. La tua password è comunque stata
-              impostata: puoi accedere normalmente.
-            </p>
-            <Button className="mt-6" onClick={() => navigate("/app/bandi")}>
-              Vai alla piattaforma
-            </Button>
-          </div>
-        )}
-
         {(step === "password" || step === "accepting") && (
           <>
             <h1 className="font-display text-xl font-bold text-slate-900">Benvenuto su BandoFit</h1>
             <p className="mt-1 text-sm text-slate-500">
-              Sei stato invitato a unirti a un'azienda su BandoFit. Imposta la tua password per
-              completare l'attivazione.
+              <strong className="text-slate-700">{invite?.parent_display_name}</strong> ti ha
+              invitato nella sua azienda come{" "}
+              <strong className="text-slate-700">{invite?.denominazione}</strong>. Imposta la tua
+              password per completare l'attivazione di{" "}
+              <strong className="text-slate-700">{invite?.email}</strong>.
             </p>
             <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
               <div className="relative">
@@ -175,11 +177,17 @@ export default function AccettaInvito() {
           <div className="flex flex-col items-center py-6 text-center" role="status">
             <div className="flex size-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
               <svg viewBox="0 0 24 24" fill="none" className="size-7" aria-hidden>
-                <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path
+                  d="M5 13l4 4L19 7"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
             </div>
             <h1 className="mt-4 font-display text-lg font-bold text-slate-900">
-              Sei dentro{familyName ? `, con ${familyName}` : ""}!
+              Sei dentro{invite ? `, con ${invite.parent_display_name}` : ""}!
             </h1>
             <p className="mt-2 text-sm text-slate-500">Ti stiamo portando ai bandi…</p>
           </div>

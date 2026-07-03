@@ -1,6 +1,6 @@
 import { Eye, EyeOff } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -11,7 +11,9 @@ import { supabase } from "../lib/supabase";
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [email, setEmail] = useState("");
+  const [searchParams] = useSearchParams();
+  // Prefill dell'email dai flussi di conferma/reset (?email=...)
+  const [email, setEmail] = useState(() => searchParams.get("email") ?? "");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);

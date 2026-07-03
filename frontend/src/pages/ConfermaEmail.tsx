@@ -1,29 +1,39 @@
 import { AlertTriangle, MailCheck } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
-import { Button } from "../components/ui/Button";
+import { Button, LinkButton } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/Field";
-import { useHashSession } from "../hooks/useHashSession";
 import { api, apiErrorMessage } from "../lib/api";
 
-/** Pagina di atterraggio del link "conferma email" dopo la registrazione. */
+type Step = "confirming" | "done" | "invalid";
+
+/** Pagina di atterraggio del link di conferma email (token di dominio). */
 export default function ConfermaEmail() {
   const navigate = useNavigate();
-  const hashSession = useHashSession();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get("token");
+
+  const [step, setStep] = useState<Step>(token ? "confirming" : "invalid");
+  const [confirmedEmail, setConfirmedEmail] = useState<string | null>(null);
+  const requested = useRef(false);
 
   const [resendEmail, setResendEmail] = useState("");
   const [resendState, setResendState] = useState<"idle" | "sending" | "sent">("idle");
   const [resendError, setResendError] = useState<string | null>(null);
 
-  // Email confermata → sessione attiva → dritto ai bandi.
   useEffect(() => {
-    if (hashSession === "ready") {
-      const timer = setTimeout(() => navigate("/app/bandi", { replace: true }), 1500);
-      return () => clearTimeout(timer);
-    }
-  }, [hashSession, navigate]);
+    if (!token || requested.current) return;
+    requested.current = true; // StrictMode: il token è monouso, una sola chiamata
+    api
+      .post<{ email: string }>("/auth/confirm", { token })
+      .then(({ data }) => {
+        setConfirmedEmail(data.email);
+        setStep("done");
+      })
+      .catch(() => setStep("invalid"));
+  }, [token]);
 
   const handleResend = async (e: FormEvent) => {
     e.preventDefault();
@@ -53,14 +63,14 @@ export default function ConfermaEmail() {
         <Logo variant="vertical" />
       </Link>
       <Card className="w-full max-w-md p-6 sm:p-8">
-        {hashSession === "waiting" && (
+        {step === "confirming" && (
           <div className="flex flex-col items-center py-8 text-center" role="status">
             <div className="size-8 animate-spin rounded-full border-3 border-brand-200 border-t-brand-500" />
             <p className="mt-4 text-sm text-slate-500">Conferma in corso…</p>
           </div>
         )}
 
-        {hashSession === "ready" && (
+        {step === "done" && (
           <div className="flex flex-col items-center py-6 text-center" role="status">
             <div className="rounded-full bg-emerald-100 p-3 text-emerald-600">
               <MailCheck className="size-7" aria-hidden />
@@ -68,11 +78,23 @@ export default function ConfermaEmail() {
             <h1 className="mt-4 font-display text-lg font-bold text-slate-900">
               Email confermata, benvenuto!
             </h1>
-            <p className="mt-2 text-sm text-slate-500">Ti stiamo portando ai bandi…</p>
+            <p className="mt-2 text-sm text-slate-500">
+              Il tuo account è attivo: accedi con la tua password.
+            </p>
+            <Button
+              className="mt-6"
+              onClick={() =>
+                navigate(
+                  confirmedEmail ? `/login?email=${encodeURIComponent(confirmedEmail)}` : "/login",
+                )
+              }
+            >
+              Accedi
+            </Button>
           </div>
         )}
 
-        {hashSession === "invalid" && (
+        {step === "invalid" && (
           <div className="flex flex-col items-center py-4 text-center">
             <div className="rounded-full bg-amber-100 p-3 text-amber-600">
               <AlertTriangle className="size-7" aria-hidden />
@@ -112,12 +134,9 @@ export default function ConfermaEmail() {
                 </form>
               </>
             )}
-            <Link
-              to="/login"
-              className="mt-5 text-sm font-medium text-brand-600 underline-offset-2 hover:underline"
-            >
+            <LinkButton to="/login" variant="ghost" className="mt-5">
               Torna all'accesso
-            </Link>
+            </LinkButton>
           </div>
         )}
       </Card>

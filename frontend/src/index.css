@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@theme {
+  /* Brand — blu BandoFit */
+  --color-brand-50: #eef3ff;
+  --color-brand-100: #dce7ff;
+  --color-brand-200: #b9ceff;
+  --color-brand-300: #8fadff;
+  --color-brand-400: #5c84ff;
+  --color-brand-500: #1e5eff;
+  --color-brand-600: #164bdb;
+  --color-brand-700: #113ab0;
+  --color-brand-800: #0e2f8c;
+  --color-brand-900: #0c2668;
+  --color-brand-950: #071740;
+
+  /* Superfici e testo */
+  --color-surface: #f7f9fc;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: "Sora", "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.05), 0 1px 3px 0 rgb(15 23 42 / 0.06);
+  --shadow-card-hover: 0 4px 6px -1px rgb(15 23 42 / 0.07), 0 10px 15px -3px rgb(15 23 42 / 0.08);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-surface font-sans text-slate-800 antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  @apply font-display;
+}
+
+/* Cifre tabellari per importi e date nelle tabelle/card */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Backdrop del <dialog> nativo */
+dialog::backdrop {
+  background: rgb(7 23 64 / 0.5);
+}

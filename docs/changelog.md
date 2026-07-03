@@ -2,6 +2,10 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-03 — Deploy
+
+- Deploy con Docker Compose: Dockerfile per backend (uvicorn) e frontend (build statica + nginx con fallback SPA), porte host configurabili da `.env` (`FRONTEND_PORT`/`BACKEND_PORT`, default bind su 127.0.0.1 per stare dietro reverse proxy), guida completa in `docs/deploy.md`.
+
 ## 2026-07-03 — Account famiglia (fase 2a)
 
 - **Famiglie di account**: il titolare di un piano multi-account (Pro, Advisor) invita account collegati entro il limite del piano (che include il titolare). Doppio flusso di invito: email nuove via invito nativo Supabase (pagina `/accetta-invito` per impostare la password), email già registrate via invito in piattaforma + notifica Resend. I figli attivi ereditano l'abbonamento (quote condivise, non ripartite) e non possono cambiarlo.

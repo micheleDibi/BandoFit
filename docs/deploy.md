@@ -1,0 +1,113 @@
+# Deploy su server (Docker Compose)
+
+BandoFit gira in due container: `backend` (FastAPI/uvicorn) e `frontend` (build statica servita da nginx interno al container). Le porte pubblicate sull'host e tutte le credenziali si configurano nel file `.env` alla radice del repo (mai committato).
+
+```
+Internet ──HTTPS──▶ reverse proxy del server ──▶ 127.0.0.1:FRONTEND_PORT (frontend)
+                          └── /api/ ──────────▶ 127.0.0.1:BACKEND_PORT  (backend)
+```
+
+## Prerequisiti
+
+- Docker + plugin Compose sul server (`docker compose version`).
+- Progetto Supabase **primario** creato con le 3 migration eseguite (vedi [setup.md](setup.md)).
+- Credenziali del **secondario** (URL + anon key).
+- Un dominio puntato al server, con il reverse proxy già in uso (nginx/caddy/traefik).
+
+## 1. Clona e configura
+
+```bash
+git clone https://github.com/micheleDibi/BandoFit.git
+cd BandoFit
+cp .env.example .env
+nano .env
+```
+
+Compila `.env`:
+
+| Variabile | Valore |
+|---|---|
+| `FRONTEND_PORT` / `BACKEND_PORT` | Porte libere sull'host (es. 3001 / 3002) |
+| `BIND_ADDRESS` | `127.0.0.1` dietro reverse proxy (default); `0.0.0.0` solo per esporre direttamente |
+| `PRIMARY_SUPABASE_URL` + `PRIMARY_SUPABASE_SERVICE_ROLE_KEY` | dal progetto primario (Project Settings → API) |
+| `SECONDARY_SUPABASE_URL` + `SECONDARY_SUPABASE_ANON_KEY` | dal progetto secondario |
+| `CORS_ORIGINS` e `FRONTEND_URL` | l'origine pubblica, es. `https://bandofit.example.com` |
+| `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` | URL e **anon key** del PRIMARIO (solo auth) |
+| `VITE_API_BASE_URL` | come il **browser** raggiunge il backend: `https://bandofit.example.com/api/v1` |
+| `RESEND_API_KEY` | opzionale: senza, le email di invito famiglia vengono solo loggate |
+
+> Le variabili `VITE_*` vengono **cotte nel bundle** alla build del frontend: se le cambi, serve `docker compose up -d --build frontend`.
+
+## 2. Avvia
+
+```bash
+docker compose up -d --build
+docker compose ps           # entrambi i servizi "running"
+curl http://127.0.0.1:3002/api/v1/health   # {"status":"ok"}
+curl -I http://127.0.0.1:3001/             # 200
+```
+
+## 3. Reverse proxy
+
+Esempio di virtual host **nginx** (adattare dominio e porte; per caddy/traefik la logica è identica: `/api/` → backend, tutto il resto → frontend):
+
+```nginx
+server {
+    server_name bandofit.example.com;
+
+    # API: il backend serve già i percorsi /api/v1/*, nessuna riscrittura
+    location /api/ {
+        proxy_pass http://127.0.0.1:3002;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # Frontend (SPA)
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_set_header Host $host;
+    }
+
+    # ... blocco listen 443/ssl gestito come per gli altri servizi (certbot ecc.)
+}
+```
+
+Con questo schema frontend e API stanno sulla **stessa origine** (`https://bandofit.example.com`), quindi CORS non entra mai in gioco lato browser.
+
+## 4. Supabase: URL pubblici
+
+Nel progetto **primario** → Authentication → URL Configuration:
+- **Site URL**: `https://bandofit.example.com`
+- **Redirect URLs**: aggiungere `https://bandofit.example.com/accetta-invito` (serve ai link d'invito famiglia).
+
+## 5. Primo admin e smoke test
+
+1. `https://bandofit.example.com/registrati` → registrati con un piano.
+2. SQL Editor del primario: `select public.promote_to_admin('tua-email');` → ricarica: compaiono le sezioni admin.
+3. Verifica: elenco bandi popolato e filtri funzionanti, dettaglio bando, cambio piano, dati aziendali, invito famiglia.
+
+## Operazioni ricorrenti
+
+```bash
+# aggiornamento all'ultima versione
+git pull && docker compose up -d --build
+
+# log
+docker compose logs -f backend
+docker compose logs -f frontend
+
+# cambiare porta: modifica .env, poi
+docker compose up -d
+
+# stop
+docker compose down
+```
+
+## Risoluzione problemi
+
+- **502 dal proxy** → `docker compose ps` (container su?), porte in `.env` allineate col vhost.
+- **Errore CORS nel browser** → `CORS_ORIGINS` deve essere l'origine esatta del frontend (con `https://`, senza slash finale). Con il proxy stessa-origine di sopra non dovrebbe mai comparire.
+- **Login ok ma dati vuoti/errore** → `VITE_API_BASE_URL` sbagliato (ricorda: rebuild del frontend dopo la modifica).
+- **Link d'invito che non reindirizza** → Redirect URLs su Supabase (passo 4).
+- **`docker compose logs backend`** mostra anche le email loggate quando `RESEND_API_KEY` è vuota.

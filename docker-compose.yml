@@ -1,0 +1,36 @@
+# BandoFit — deploy con Docker Compose.
+# Tutte le porte e le credenziali si configurano nel file .env accanto a questo
+# file (vedi .env.example). Di default i servizi sono pubblicati SOLO su
+# 127.0.0.1 (pensati per stare dietro un reverse proxy sullo stesso server):
+# per esporli direttamente impostare BIND_ADDRESS=0.0.0.0.
+
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${BACKEND_PORT:-3002}:8000"
+    environment:
+      PRIMARY_SUPABASE_URL: ${PRIMARY_SUPABASE_URL}
+      PRIMARY_SUPABASE_SERVICE_ROLE_KEY: ${PRIMARY_SUPABASE_SERVICE_ROLE_KEY}
+      PRIMARY_SUPABASE_JWT_SECRET: ${PRIMARY_SUPABASE_JWT_SECRET:-}
+      SECONDARY_SUPABASE_URL: ${SECONDARY_SUPABASE_URL}
+      SECONDARY_SUPABASE_ANON_KEY: ${SECONDARY_SUPABASE_ANON_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      FRONTEND_URL: ${FRONTEND_URL}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-BandoFit <onboarding@resend.dev>}
+      ENV: production
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-3001}:80"
+    depends_on:
+      - backend

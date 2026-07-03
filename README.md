@@ -40,4 +40,5 @@ La documentazione completa vive in [`/docs`](docs/README.md) e **va aggiornata a
 - [API](docs/api.md) — endpoint del backend con esempi
 - [Frontend](docs/frontend.md) — route, design system, pattern
 - [Setup](docs/setup.md) — configurazione ambienti e primo avvio
+- [Deploy](docs/deploy.md) — messa in produzione con Docker Compose (porte configurabili)
 - [Changelog](docs/changelog.md) — storico delle funzionalità

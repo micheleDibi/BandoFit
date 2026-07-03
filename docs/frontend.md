@@ -9,9 +9,10 @@ Stack: **Vite + React 18 + TypeScript**, **Tailwind CSS v4** (token di tema in `
 | `/` | Landing (hero, feature, piani) | pubblico (redirect a `/app/bandi` se loggato) |
 | `/login` | Accesso | pubblico |
 | `/registrati` | Registrazione in 2 step (dati → scelta piano) | pubblico |
+| `/accetta-invito` | Atterraggio del link d'invito famiglia (set password + accettazione) | pubblico |
 | `/app/bandi` | Elenco bandi con filtri | autenticato |
 | `/app/bandi/:slug` | Dettaglio bando | autenticato |
-| `/app/profilo` | Profilo + gestione abbonamento | autenticato |
+| `/app/profilo` | Profilo, dati aziendali, gestione account collegati, abbonamento | autenticato |
 | `/app/admin/utenti` | Gestione utenti | solo admin |
 | `/app/admin/piani` | Gestione piani di abbonamento | solo admin |
 
@@ -22,6 +23,13 @@ Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo 
 - `src/lib/supabase.ts`: client del progetto **primario**, usato solo per `signUp` / `signInWithPassword` / sessione.
 - La registrazione invia i metadata `{nome, cognome, azienda, plan_slug}`: il trigger DB crea profilo e abbonamento.
 - `src/lib/api.ts`: istanza Axios con interceptor che allega `Authorization: Bearer <token>`; su `401` fa `signOut` e riporta al login. `apiErrorMessage()` estrae il messaggio dal formato errori del backend.
+
+## Famiglia di account
+
+- **Profilo del titolare** (`Profilo.tsx`): card «Dati aziendali» (`CompanyCard`, form con `Combobox` con ricerca per ATECO/settori/regioni dalle lookup) e «Gestione account» (`FamilyCard`: contatore X di N, badge stato In attesa/Attivo/Retrocesso, azioni Reinvia/Riattiva/Rimuovi con conferma, dialog di invito). Il dialog di cambio piano avvisa se il downgrade retrocederà account.
+- **Profilo del figlio attivo**: dati aziendali in sola lettura, card «Piano ereditato da …» al posto della griglia piani (nessuno switch).
+- **Inviti**: `InviteBanner` (in `AppShell`) mostra agli utenti esistenti l'invito con Accetta (avvisando che l'abbonamento attuale verrà annullato) / Rifiuta; `/accetta-invito` gestisce il link Supabase degli utenti nuovi — cattura l'hash **prima** che supabase-js lo consumi per riconoscere i link scaduti (`otp_expired`), poi form password e accettazione automatica.
+- **Admin**: colonna Famiglia (badge Titolare/In famiglia/Invitato/Retrocesso + email del titolare), piano «(ereditato)» e select disabilitata per i figli.
 
 ## Pattern chiave
 

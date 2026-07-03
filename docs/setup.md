@@ -18,8 +18,10 @@
 
 ## 2. Variabili d'ambiente
 
-- `backend/.env` (da `backend/.env.example`): URL e chiavi del primario e del secondario.
+- `backend/.env` (da `backend/.env.example`): URL e chiavi del primario e del secondario; `FRONTEND_URL` (redirect degli inviti famiglia); `RESEND_API_KEY` + `EMAIL_FROM` per le email di invito agli utenti esistenti (chiave vuota = le email vengono solo loggate, utile in sviluppo — gli inviti a email nuove usano comunque le email native di Supabase).
 - `frontend/.env` (da `frontend/.env.example`): URL e anon key del **primario** + base URL del backend.
+
+> Per gli inviti famiglia a email nuove, verifica in **Authentication → URL Configuration** che `FRONTEND_URL` (es. `http://localhost:5173`) sia tra i **Redirect URLs** consentiti, altrimenti il link d'invito non reindirizzerà a `/accetta-invito`.
 
 I file `.env` sono in `.gitignore` e non vanno mai committati.
 

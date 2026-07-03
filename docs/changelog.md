@@ -2,6 +2,14 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-03 — Account famiglia (fase 2a)
+
+- **Famiglie di account**: il titolare di un piano multi-account (Pro, Advisor) invita account collegati entro il limite del piano (che include il titolare). Doppio flusso di invito: email nuove via invito nativo Supabase (pagina `/accetta-invito` per impostare la password), email già registrate via invito in piattaforma + notifica Resend. I figli attivi ereditano l'abbonamento (quote condivise, non ripartite) e non possono cambiarlo.
+- **Dati aziendali**: sezione dedicata nel profilo del titolare (ragione sociale, P.IVA, ATECO/settore/regione dalle lookup del catalogo bandi, sede, dimensione, fatturato, contatti), condivisi in sola lettura con i figli.
+- **Adeguamento automatico al cambio piano**: al downgrade vengono revocati gli inviti in attesa e retrocessi a Gratuito i figli più recenti, atomicamente; il titolare non è mai retrocesso. I retrocessi restano in elenco e sono riattivabili con un clic quando si libera un posto.
+- **Gestione**: reinvio inviti, rimozione con conferma, banner di invito in-app, indicatori famiglia e piani ereditati nell'area admin (piano dei figli gestibile solo dal titolare), audit log delle operazioni sensibili.
+- Email transazionali via Resend con fallback log-only in sviluppo; harness di test delle migration su Postgres usa-e-getta (27 test) + test dei servizi famiglia/azienda.
+
 ## 2026-07-03
 
 - Frontend completo (fase 1): app shell con topbar responsive, lista bandi con ricerca full-text, sidebar filtri a faccette (stato, tipologia, regioni, settori, beneficiari, ATECO, modalità, programmi, importi, scadenze) con filtri serializzati nell'URL, card bando con badge/countdown, dettaglio con renderer del contenuto strutturato, pagina profilo con cambio piano, area admin (utenti e piani). Design system blu (Sora + Inter), stati loading/empty/error ovunque.

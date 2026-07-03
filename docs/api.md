@@ -46,7 +46,43 @@ Profilo dell'utente corrente + abbonamento attivo con il piano.
 Aggiorna l'anagrafica. Body (tutti opzionali): `nome`, `cognome`, `azienda`, `telefono`. → come `GET /me`.
 
 ### `POST /me/subscription`
-Cambio piano (senza pagamento in questa fase). Body: `{"plan_id": 3}`. L'abbonamento attivo passa a `cancelled` e ne viene creato uno nuovo annuale. → come `GET /me`. Errori: `400` se il piano non esiste o non è attivo.
+Cambio piano (senza pagamento in questa fase). Body: `{"plan_id": 3}`. L'abbonamento attivo passa a `cancelled` e ne viene creato uno nuovo annuale. → come `GET /me`; se il downgrade ha retrocesso membri della famiglia, la risposta include `plan_switch_adjustment: {demoted, revoked_pending}`. Errori: `400` piano inesistente/non attivo; `403 child_plan_locked` se l'utente è un figlio attivo (il piano si gestisce sul titolare).
+
+## Famiglia di account
+
+Il limite account (`num_account_aziendali` del piano) **include il titolare**. `GET /me` restituisce `family`: per il titolare `{role:'parent', used, limit}` (presente solo se limite > 1 o se ha membri), per un membro `{role:'child', status, denominazione, parent_display_name}`; un figlio attivo riceve `subscription` del titolare con `inherited: true`.
+
+### `GET /me/family` *(solo titolare)*
+`{ "limit": 3, "used": 2, "members": [{ "id": "membership-uuid", "member_id": "uuid", "denominazione": "Sede di Bari", "email": "...", "status": "pending|active|demoted", "invite_kind": "new_user|existing_user", "invited_at": "...", "joined_at": null, "demoted_at": null }] }`
+
+### `POST /me/family/members` (201) *(solo titolare)*
+Body: `{"email": "...", "denominazione": "..."}`. Email nuova → invito nativo Supabase (l'utente imposta la password da `/accetta-invito`); email già registrata → invito in piattaforma + email di notifica via Resend (best-effort: `email_sent` in risposta). → `{family, email_sent}`. Errori (409 salvo indicato): `family_limit_reached`, `already_in_family`, `invite_already_pending`, `target_is_admin`, `target_is_parent`, `cannot_invite_self` (400), `not_family_parent` (403).
+
+### `POST /me/family/members/{id}/resend` *(solo titolare)*
+Reinvia l'invito (pending): per gli utenti creati dall'invito rigenera il link Supabase, per gli esistenti reinvia l'email.
+
+### `POST /me/family/members/{id}/reactivate` *(solo titolare)*
+Riattiva un membro retrocesso se c'è un posto libero (`409 family_limit_reached` altrimenti). Il suo abbonamento proprio viene annullato: torna a ereditare.
+
+### `DELETE /me/family/members/{id}` *(solo titolare)*
+Rimuove un membro: un attivo diventa indipendente con piano Gratuito; un invito pending viene annullato (e l'utente mai attivato eliminato). → `family` aggiornata.
+
+### `GET /me/invitations`
+Inviti in attesa ricevuti dall'utente: `[{id, denominazione, parent_display_name, invited_at}]` (alimenta il banner in-app).
+
+### `POST /me/invitations/{id}/accept`
+Accetta l'invito: l'eventuale abbonamento proprio viene annullato, da lì si eredita quello della famiglia. → come `GET /me`. `409 family_full` se non c'è più posto.
+
+### `POST /me/invitations/{id}/decline`
+Rifiuta l'invito. → elenco inviti aggiornato.
+
+## Dati aziendali
+
+### `GET /me/company`
+`{ "editable": true|false, "company": {...} | null }` — il titolare (o un utente singolo) vede e modifica i propri; un **figlio attivo** vede quelli della famiglia in sola lettura (`editable: false`).
+
+### `PUT /me/company` *(solo titolare)*
+Upsert dei dati aziendali. Campi: `ragione_sociale`*, `forma_giuridica`, `partita_iva`* (11 cifre, prefisso IT tollerato), `codice_fiscale`, `ateco_id`/`settore_id`/`regione_id` (id delle lookup del DB secondario → il backend denormalizza `ateco_codice`, `settore_nome`, `regione_nome`; `400` se sconosciuti), `anno_fondazione` (1800-2100), `indirizzo`, `comune`, `provincia`, `cap` (5 cifre), `classe_dimensionale` (`micro|piccola|media|grande`), `numero_dipendenti`, `fascia_fatturato` (`fino_100k|100k_500k|500k_2m|2m_10m|10m_50m|oltre_50m`), `pec`, `telefono`, `sito_web`.
 
 ### `GET /lookups`
 Valori delle faccette di filtro, dal DB secondario (cache server 1h, `Cache-Control: private, max-age=3600`):
@@ -81,13 +117,13 @@ Dettaglio completo: campi dell'elenco + `area_geografica`, `tematica[]`, `link_b
 ## Endpoint admin
 
 ### `GET /admin/users`
-Elenco utenti con abbonamento attivo. Parametri: `q` (cerca in email/nome/cognome/azienda), `role` (`admin`|`cliente`), `page`, `page_size` (max 100). Item: `{ "profile": {...}, "subscription": {...} | null }`.
+Elenco utenti con abbonamento attivo. Parametri: `q` (cerca in email/nome/cognome/azienda), `role` (`admin`|`cliente`), `page`, `page_size` (max 100). Item: `{ "profile": {...}, "subscription": {...} | null, "family": {...} | null }` — per i figli `family = {type:'child', status, parent_email}` e `subscription` è quella ereditata (`inherited: true`); per i titolari `family = {type:'parent', members_count}`.
 
 ### `PATCH /admin/users/{user_id}`
 Body (opzionali): `role` (`admin`|`cliente`), `is_active` (bool). Protezioni: un admin non può togliersi il ruolo né disattivarsi da solo (`400`).
 
 ### `POST /admin/users/{user_id}/subscription`
-Cambio piano forzato per un utente. Body: `{"plan_id": 2}`.
+Cambio piano forzato per un utente. Body: `{"plan_id": 2}`. `403` sui figli di famiglia (pending/attivi): il piano si gestisce sull'account titolare; forzare il piano di un titolare applica le stesse retrocessioni automatiche del cambio normale.
 
 ### `GET /admin/plans`
 Tutti i piani, inclusi i disattivati.

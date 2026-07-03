@@ -93,7 +93,12 @@ Con questo schema frontend e API stanno sulla **stessa origine** (`https://bando
 
 Nel progetto **primario** → Authentication → URL Configuration:
 - **Site URL**: `https://bandofit.example.com`
-- **Redirect URLs**: aggiungere `https://bandofit.example.com/accetta-invito` (serve ai link d'invito famiglia).
+- **Redirect URLs**, aggiungere tutte e tre:
+  - `https://bandofit.example.com/accetta-invito` (link d'invito famiglia)
+  - `https://bandofit.example.com/reimposta-password` (recupero password)
+  - `https://bandofit.example.com/conferma-email` (conferma email alla registrazione)
+
+E in **Authentication → Sign In / Providers → Email** attivare **"Confirm email"** per la produzione (l'app gestisce conferma, avviso al login e reinvio).
 
 ## 5. Primo admin e smoke test
 

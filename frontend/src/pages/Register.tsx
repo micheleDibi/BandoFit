@@ -98,6 +98,7 @@ export default function Register() {
       email: form.email,
       password: form.password,
       options: {
+        emailRedirectTo: `${window.location.origin}/conferma-email`,
         data: {
           nome: form.nome.trim(),
           cognome: form.cognome.trim(),

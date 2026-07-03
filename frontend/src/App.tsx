@@ -6,11 +6,14 @@ import AdminPiani from "./pages/AdminPiani";
 import AdminUtenti from "./pages/AdminUtenti";
 import BandiList from "./pages/BandiList";
 import BandoDetail from "./pages/BandoDetail";
+import ConfermaEmail from "./pages/ConfermaEmail";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import Profilo from "./pages/Profilo";
+import RecuperaPassword from "./pages/RecuperaPassword";
 import Register from "./pages/Register";
+import ReimpostaPassword from "./pages/ReimpostaPassword";
 
 export default function App() {
   return (
@@ -19,6 +22,9 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/registrati" element={<Register />} />
       <Route path="/accetta-invito" element={<AccettaInvito />} />
+      <Route path="/recupera-password" element={<RecuperaPassword />} />
+      <Route path="/reimposta-password" element={<ReimpostaPassword />} />
+      <Route path="/conferma-email" element={<ConfermaEmail />} />
       <Route
         path="/app"
         element={

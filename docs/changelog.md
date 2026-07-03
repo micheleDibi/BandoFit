@@ -2,6 +2,12 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-03 — Recupero password e conferma email
+
+- **Recupero password**: link "Password dimenticata?" nel login, pagina `/recupera-password` (invio del link via Supabase, messaggio neutro anti-enumerazione) e `/reimposta-password` (atterraggio del link con gestione scadenza e form nuova password).
+- **Conferma email** alla registrazione (da attivare su Supabase in produzione): pagina `/conferma-email` con redirect automatico, gestione link scaduto con **reinvio**, avviso dedicato al login per email non confermate con pulsante di reinvio.
+- Estratto l'hook `useHashSession` che unifica la gestione dei link Supabase (hash, sessione, scadenza, recupero tardivo) per inviti, reset e conferme.
+
 ## 2026-07-03 — Deploy
 
 - Deploy con Docker Compose: Dockerfile per backend (uvicorn) e frontend (build statica + nginx con fallback SPA), porte host configurabili da `.env` (`FRONTEND_PORT`/`BACKEND_PORT`, default bind su 127.0.0.1 per stare dietro reverse proxy), guida completa in `docs/deploy.md`.

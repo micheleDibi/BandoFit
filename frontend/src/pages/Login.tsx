@@ -14,6 +14,8 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notConfirmed, setNotConfirmed] = useState(false);
+  const [resendState, setResendState] = useState<"idle" | "sending" | "sent">("idle");
   const [loading, setLoading] = useState(false);
 
   const from = (location.state as { from?: string } | null)?.from ?? "/app/bandi";
@@ -21,18 +23,35 @@ export default function Login() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+    setNotConfirmed(false);
     setLoading(true);
     const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
     if (authError) {
-      setError(
-        authError.message === "Invalid login credentials"
-          ? "Email o password non corretti."
-          : "Accesso non riuscito. Riprova tra qualche istante.",
-      );
+      if (authError.message.toLowerCase().includes("not confirmed")) {
+        setNotConfirmed(true);
+        setError("Devi prima confermare la tua email: controlla la casella (e lo spam).");
+      } else {
+        setError(
+          authError.message === "Invalid login credentials"
+            ? "Email o password non corretti."
+            : "Accesso non riuscito. Riprova tra qualche istante.",
+        );
+      }
       return;
     }
     navigate(from, { replace: true });
+  };
+
+  const handleResendConfirmation = async () => {
+    setResendState("sending");
+    const { error: resendError } = await supabase.auth.resend({
+      type: "signup",
+      email: email.trim(),
+      options: { emailRedirectTo: `${window.location.origin}/conferma-email` },
+    });
+    setResendState(resendError ? "idle" : "sent");
+    if (resendError) setError("Reinvio non riuscito, riprova tra qualche minuto.");
   };
 
   return (
@@ -74,10 +93,37 @@ export default function Login() {
             </button>
           </div>
 
+          <div className="text-right">
+            <Link
+              to="/recupera-password"
+              className="text-sm font-medium text-brand-600 underline-offset-2 hover:underline"
+            >
+              Password dimenticata?
+            </Link>
+          </div>
+
           {error && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
               {error}
-            </p>
+              {notConfirmed && (
+                <div className="mt-2">
+                  {resendState === "sent" ? (
+                    <span className="font-medium text-emerald-700" role="status">
+                      Email di conferma reinviata!
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleResendConfirmation}
+                      disabled={resendState === "sending"}
+                      className="cursor-pointer font-medium underline underline-offset-2 disabled:opacity-50"
+                    >
+                      {resendState === "sending" ? "Invio in corso…" : "Reinvia email di conferma"}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
           <Button type="submit" className="w-full" size="lg" loading={loading}>

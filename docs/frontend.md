@@ -10,6 +10,9 @@ Stack: **Vite + React 18 + TypeScript**, **Tailwind CSS v4** (token di tema in `
 | `/login` | Accesso | pubblico |
 | `/registrati` | Registrazione in 2 step (dati → scelta piano) | pubblico |
 | `/accetta-invito` | Atterraggio del link d'invito famiglia (set password + accettazione) | pubblico |
+| `/recupera-password` | Richiesta del link di reset via email | pubblico |
+| `/reimposta-password` | Atterraggio del link di reset (nuova password) | pubblico |
+| `/conferma-email` | Atterraggio del link di conferma registrazione (con reinvio se scaduto) | pubblico |
 | `/app/bandi` | Elenco bandi con filtri | autenticato |
 | `/app/bandi/:slug` | Dettaglio bando | autenticato |
 | `/app/profilo` | Profilo, dati aziendali, gestione account collegati, abbonamento | autenticato |

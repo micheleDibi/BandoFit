@@ -1,0 +1,34 @@
+# Environment — mai committare credenziali
+.env
+.env.*
+!.env.example
+
+# Dump del DB secondario: dati proprietari, solo riferimento locale
+database_secondario_dump/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+uv.lock
+
+# Node / frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Log
+*.log

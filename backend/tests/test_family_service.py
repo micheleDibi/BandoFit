@@ -185,6 +185,9 @@ class TestEmailFallback:
         assert message["To"] == "a@b.it"
         assert "ACME Srl" in message["Subject"]
         assert "noreply@azienda.it" in str(message["From"])
+        # header anti-spam: senza Message-ID e Date Gmail/Outlook penalizzano
+        assert message["Message-ID"] and "azienda.it" in message["Message-ID"]
+        assert message["Date"]
         # multipart: testo semplice + alternativa HTML
         parts = [p.get_content_type() for p in message.walk()]
         assert "text/plain" in parts and "text/html" in parts

@@ -10,7 +10,7 @@ import html
 import logging
 from email.headerregistry import Address
 from email.message import EmailMessage
-from email.utils import parseaddr
+from email.utils import formatdate, make_msgid, parseaddr
 
 import httpx
 
@@ -83,13 +83,19 @@ async def _send_via_smtp(
 
     display_name, from_address = parseaddr(settings.email_from)
     message = EmailMessage()
+    sender_domain = None
     if from_address and "@" in from_address:
         user, _, domain = from_address.partition("@")
+        sender_domain = domain
         message["From"] = Address(display_name or "BandoFit", user, domain)
     else:
         message["From"] = settings.email_from
     message["To"] = to_email
     message["Subject"] = subject
+    # Message-ID e Date NON vengono aggiunti automaticamente da EmailMessage:
+    # la loro assenza è un forte segnale di spam per Gmail/Outlook.
+    message["Message-ID"] = make_msgid(domain=sender_domain)
+    message["Date"] = formatdate(localtime=True)
     message.set_content(text_body)
     message.add_alternative(html_body, subtype="html")
 

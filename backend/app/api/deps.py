@@ -1,0 +1,64 @@
+from typing import Annotated
+
+from fastapi import Depends, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from supabase import AsyncClient
+
+from app.core.errors import ForbiddenError, UnauthorizedError
+from app.core.security import decode_supabase_jwt
+from app.services.user_service import PROFILE_SELECT
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+def get_primary(request: Request) -> AsyncClient:
+    return request.app.state.primary
+
+
+def get_secondary(request: Request) -> AsyncClient:
+    return request.app.state.secondary
+
+
+PrimaryClient = Annotated[AsyncClient, Depends(get_primary)]
+SecondaryClient = Annotated[AsyncClient, Depends(get_secondary)]
+
+
+async def get_current_user(
+    primary: PrimaryClient,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> dict:
+    """Verifica il JWT di Supabase e carica il profilo. Ritorna il profilo come dict."""
+    if credentials is None:
+        raise UnauthorizedError("Autenticazione richiesta")
+
+    claims = await decode_supabase_jwt(credentials.credentials)
+    user_id = claims.get("sub")
+    if not user_id:
+        raise UnauthorizedError("Token privo del soggetto")
+
+    resp = (
+        await primary.table("profiles")
+        .select(PROFILE_SELECT)
+        .eq("id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not resp.data:
+        raise UnauthorizedError("Profilo non trovato per questo account")
+
+    profile = resp.data[0]
+    if not profile["is_active"]:
+        raise ForbiddenError("Account disattivato. Contatta l'assistenza.")
+    return profile
+
+
+CurrentUser = Annotated[dict, Depends(get_current_user)]
+
+
+async def require_admin(user: CurrentUser) -> dict:
+    if user["role"] != "admin":
+        raise ForbiddenError("Riservato agli amministratori")
+    return user
+
+
+AdminUser = Annotated[dict, Depends(require_admin)]

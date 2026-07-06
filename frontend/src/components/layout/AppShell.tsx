@@ -36,6 +36,9 @@ export function AppShell() {
       <NavLink to="/app/azienda" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
         Azienda
       </NavLink>
+      <NavLink to="/app/preferenze" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
+        Preferenze
+      </NavLink>
       {isAdmin && (
         <>
           <NavLink

@@ -2,7 +2,7 @@ import { BadgeCheck, CalendarDays, Check, ShieldCheck, Users } from "lucide-reac
 import { useEffect, useState, type FormEvent } from "react";
 import { CompanyCard } from "../components/company/CompanyCard";
 import { FamilyCard } from "../components/family/FamilyCard";
-import { PreferenzeCard } from "../components/preferences/PreferenzeCard";
+import { PreferenzeTeaser } from "../components/preferences/PreferenzeTeaser";
 import { PlanCard, planFeatures } from "../components/shared/PlanCard";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -229,9 +229,9 @@ export default function Profilo() {
         <CompanyCard />
       </div>
 
-      {/* Preferenze bandi: personali, anche per gli account collegati */}
+      {/* Preferenze bandi: l'editor completo vive in /app/preferenze */}
       <div className="mt-6">
-        <PreferenzeCard />
+        <PreferenzeTeaser />
       </div>
 
       {/* Gestione account collegati: solo per il titolare con piano multi-account */}

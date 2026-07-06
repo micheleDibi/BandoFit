@@ -44,8 +44,8 @@ Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo 
 
 ## Preferenze e «Bandi per te»
 
-- **`PreferenzeCard`** (in Profilo, dopo i dati aziendali, per TUTTI gli utenti — anche gli account collegati hanno le proprie): multi-select per le 7 faccette dei bandi riusando `FacetGroup` (checkbox con ricerca), chip rimovibili dei valori scelti, «Salva preferenze» attivo solo se ci sono modifiche (PUT dell'intero set).
-- **`BandiPerTeButton`** (toolbar di BandiList): preset che applica ai filtri URL l'**unione** dei valori reali dell'azienda (ATECO/settore/regione) e delle preferenze personali; evidenziato quando i filtri correnti coincidono, secondo click = rimozione del preset. Visibile solo se c'è almeno un valore.
+- **Pagina «Preferenze»** (`/app/preferenze`, voce in navigazione; nel Profilo resta un rimando compatto `PreferenzeTeaser`): layout a due colonne — a sinistra il riquadro fisso **«La tua azienda»** con i valori **ereditati** dai dati aziendali (ATECO, settore, regione e beneficiari derivati dall'import) come chip bloccate con icona edificio (sempre inclusi in «Bandi per te», si modificano dai dati aziendali) + contatore dei valori seguiti; a destra una card per ciascuna delle 7 faccette con chip ereditate/rimovibili e **`TagSelect`** (nuovo componente ui: multi-selezione con ricerca in stile Combobox, tendina che resta aperta, valori ereditati marcati e non selezionabili). **Barra di salvataggio fissa** in basso che compare solo con modifiche non salvate (Annulla/Salva), più link «Vedi i bandi per te» che apre la lista con il preset applicato.
+- **`BandiPerTeButton`** (toolbar di BandiList): preset che applica ai filtri URL l'**unione** dei valori reali dell'azienda e delle preferenze personali (helper condiviso `lib/bandiPreset.ts`); evidenziato quando i filtri correnti coincidono, secondo click = rimozione del preset. Visibile solo se c'è almeno un valore.
 
 ## Pattern chiave
 

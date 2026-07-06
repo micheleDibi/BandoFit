@@ -2,6 +2,10 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-06 — Pagina Preferenze
+
+- Le preferenze bandi hanno una **pagina dedicata** (`/app/preferenze`, in navigazione): a sinistra il profilo **ereditato dall'azienda** (ATECO, settore, regione, beneficiari derivati — chip bloccate, sempre incluse in «Bandi per te»), a destra le 7 faccette con chip rimovibili e un nuovo multi-select con ricerca (`TagSelect`) che marca i valori già coperti dall'azienda. Barra di salvataggio fissa solo a modifiche presenti; nel Profilo resta un rimando compatto.
+
 ## 2026-07-06 — Visura camerale ufficiale
 
 - **«Richiedi visura»** nella pagina Azienda: il PDF ufficiale del Registro Imprese (2,90 € imprese individuali/enti REA – 4,90 € società, +IVA) richiesto via openapi.it con flusso asincrono (di solito evaso in pochi secondi). Il tipo d'impresa giusto viene individuato **per tentativi a costo zero** (i rifiuti del Registro sono gratuiti), ordinati in base alla forma giuridica nota dall'import; gli enti iscritti solo al REA sono serviti dal canale impresa individuale (verificato sul campo).

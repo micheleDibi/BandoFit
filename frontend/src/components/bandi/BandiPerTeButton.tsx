@@ -3,16 +3,8 @@ import { useMemo } from "react";
 import { useCompany } from "../../hooks/useCompany";
 import { usePreferences } from "../../hooks/usePreferences";
 import { useBandiFilters, type FacetKey } from "../../hooks/useBandiFilters";
+import { buildBandiPerTePreset, presetHasValues } from "../../lib/bandiPreset";
 import { cn } from "../../lib/cn";
-
-const union = (...groups: Array<number | number[] | null | undefined>): number[] => {
-  const out = new Set<number>();
-  for (const group of groups) {
-    if (group === null || group === undefined) continue;
-    for (const id of Array.isArray(group) ? group : [group]) out.add(id);
-  }
-  return [...out].sort((a, b) => a - b);
-};
 
 const sameSet = (a: number[], b: number[]) =>
   a.length === b.length && [...a].sort((x, y) => x - y).join(",") === b.join(",");
@@ -24,20 +16,12 @@ export function BandiPerTeButton() {
   const { data: companyData } = useCompany();
   const { data: preferences } = usePreferences();
 
-  const preset = useMemo(() => {
-    const company = companyData?.company;
-    return {
-      regioni: union(company?.regione_id, preferences?.regioni),
-      settori: union(company?.settore_id, preferences?.settori),
-      ateco: union(company?.ateco_id, preferences?.codici_ateco),
-      beneficiari: union(preferences?.beneficiari),
-      tipologie: union(preferences?.tipologie),
-      modalita: union(preferences?.modalita),
-      programmi: union(preferences?.programmi),
-    } satisfies Record<FacetKey, number[]>;
-  }, [companyData, preferences]);
+  const preset = useMemo(
+    () => buildBandiPerTePreset(companyData?.company, preferences),
+    [companyData, preferences],
+  );
 
-  const hasPreset = Object.values(preset).some((ids) => ids.length > 0);
+  const hasPreset = presetHasValues(preset);
   const active = useMemo(
     () =>
       hasPreset &&

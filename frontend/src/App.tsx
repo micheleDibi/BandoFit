@@ -11,6 +11,7 @@ import ConfermaEmail from "./pages/ConfermaEmail";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
+import Preferenze from "./pages/Preferenze";
 import Profilo from "./pages/Profilo";
 import RecuperaPassword from "./pages/RecuperaPassword";
 import Register from "./pages/Register";
@@ -38,6 +39,7 @@ export default function App() {
         <Route path="bandi" element={<BandiList />} />
         <Route path="bandi/:slug" element={<BandoDetail />} />
         <Route path="azienda" element={<Azienda />} />
+        <Route path="preferenze" element={<Preferenze />} />
         <Route path="profilo" element={<Profilo />} />
         <Route
           path="admin/utenti"

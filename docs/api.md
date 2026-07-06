@@ -119,6 +119,16 @@ Errori: `400 bad_request` (P.IVA assente/checksum errata), `403 forbidden` (figl
 ### `GET /me/company/dossier`
 Dossier certificato importato: `{ editable, imported, fetched_at, sandbox, dossier: {anagrafica, attivita, sede, contatti, dipendenti, bilanci, partecipazioni, flags} | null, people: [...], derived: {...} }`. Stessa visibilità di `GET /me/company` (figlio attivo → sola lettura). `sandbox: true` = dati di test. Il payload grezzo del provider non viene mai esposto integralmente.
 
+## Preferenze
+
+### `GET /me/preferences` · `PUT /me/preferences`
+Preferenze di filtro/notifica **personali** (anche gli account collegati hanno le proprie): valori "seguiti" IN AGGIUNTA a quelli reali dell'azienda (es. un ATECO in più). Forma (uguale in lettura e scrittura, `PUT` = sostituzione dell'intero set):
+```json
+{ "regioni": [9], "settori": [], "beneficiari": [], "codici_ateco": [45],
+  "tipologie": [], "modalita": [], "programmi": [] }
+```
+Gli id puntano alle lookup del catalogo (`GET /lookups`; `tipologie`/`modalita` → `tipologie_bando`/`modalita_erogazione`); id sconosciuto → `400`. Il backend denormalizza le etichette (nessuna FK cross-DB) e scrive a diff. Il preset «Bandi per te» del frontend unisce questi id ai valori aziendali reali e li applica ai filtri di `GET /bandi`.
+
 ### `GET /lookups`
 Valori delle faccette di filtro, dal DB secondario (cache server 1h, `Cache-Control: private, max-age=3600`):
 ```json

@@ -23,6 +23,7 @@ from app.api.routers import (
     lookups,
     me,
     plans,
+    preferences,
 )
 from app.clients.openapi import OpenapiClient
 from app.clients.supabase import create_primary_client, create_secondary_client
@@ -110,6 +111,7 @@ for router in (
     me.router,
     family.router,
     company.router,
+    preferences.router,
     lookups.router,
     bandi.router,
     admin_users.router,

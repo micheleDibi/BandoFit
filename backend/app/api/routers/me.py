@@ -1,8 +1,8 @@
 from fastapi import APIRouter
 
-from app.api.deps import CurrentUser, PrimaryClient
-from app.schemas.user import MeOut, ProfileUpdate, SwitchPlanIn
-from app.services import user_service
+from app.api.deps import CurrentUser, OpenapiDep, PrimaryClient
+from app.schemas.user import MeOut, ProfileUpdate, SwitchPlanIn, VerifyCfIn, VerifyCfOut
+from app.services import openapi_service, user_service
 
 router = APIRouter(prefix="/me", tags=["me"])
 
@@ -20,3 +20,13 @@ async def update_me(data: ProfileUpdate, user: CurrentUser, primary: PrimaryClie
 @router.post("/subscription", response_model=MeOut)
 async def switch_my_plan(data: SwitchPlanIn, user: CurrentUser, primary: PrimaryClient) -> MeOut:
     return await user_service.switch_plan(primary, user["id"], data.plan_id)
+
+
+@router.post("/verify-cf", response_model=VerifyCfOut)
+async def verify_cf(
+    data: VerifyCfIn, user: CurrentUser, primary: PrimaryClient, openapi: OpenapiDep
+) -> VerifyCfOut:
+    """Verifica il codice fiscale all'Anagrafe Tributaria (openapi.it,
+    A PAGAMENTO ~0,05 €). Idempotente sullo stesso CF già verificato."""
+    result = await openapi_service.verify_cf(primary, openapi, user, data.codice_fiscale)
+    return VerifyCfOut(**result)

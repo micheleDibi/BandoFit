@@ -68,6 +68,9 @@ Profilo dell'utente corrente + abbonamento attivo con il piano.
 ### `PATCH /me`
 Aggiorna l'anagrafica. Body (tutti opzionali): `nome`, `cognome`, `azienda`, `telefono`. → come `GET /me`.
 
+### `POST /me/verify-cf`
+Verifica il **codice fiscale personale** all'Anagrafe Tributaria via openapi.it (**a pagamento**, ~0,05 € + IVA). Body: `{ "codice_fiscale": "..." }`. La validazione strutturale (checksum, omocodia inclusa) è locale e gratuita: gli input malformati non generano spesa. Idempotente: lo stesso CF già verificato risponde senza nuova chiamata. Esiti: `200 {codice_fiscale, cf_verified_at}`; `400 cf_invalid` (malformato) / `400 cf_not_valid` (formalmente corretto ma non registrato — il CF viene comunque salvato, non verificato); `503 openapi_not_configured`. Il profilo (`GET /me`, `PATCH /me`) espone/accetta anche `codice_fiscale` (il cambio del CF azzera la verifica).
+
 ### `POST /me/subscription`
 Cambio piano (senza pagamento in questa fase). Body: `{"plan_id": 3}`. L'abbonamento attivo passa a `cancelled` e ne viene creato uno nuovo annuale. → come `GET /me`; se il downgrade ha retrocesso membri della famiglia, la risposta include `plan_switch_adjustment: {demoted, revoked_pending}`. Errori: `400` piano inesistente/non attivo; `403 child_plan_locked` se l'utente è un figlio attivo (il piano si gestisce sul titolare).
 

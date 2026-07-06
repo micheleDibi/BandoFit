@@ -20,7 +20,10 @@ from app.schemas.user import (
 )
 from app.services import family_service
 
-PROFILE_SELECT = "id,email,nome,cognome,azienda,telefono,role,is_active,created_at"
+PROFILE_SELECT = (
+    "id,email,nome,cognome,azienda,telefono,codice_fiscale,cf_verified_at,"
+    "role,is_active,created_at"
+)
 
 # Embed dell'abbonamento attivo con il piano; il filtro sullo status va
 # applicato dal chiamante con .eq("user_subscriptions.status", "active").

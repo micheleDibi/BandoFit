@@ -28,6 +28,7 @@ from app.schemas.openapi_data import (
     SuggestionsOut,
 )
 from app.services import company_service, family_service, lookup_service
+from app.services.codice_fiscale import is_valid_cf, normalize_cf
 from app.services.openapi_mapping import (
     build_autofill,
     build_derived,
@@ -300,6 +301,92 @@ async def import_company(
         suggestions=SuggestionsOut(**suggestions),
         fetched_at=fetched_at,
         sandbox=openapi.sandbox,
+    )
+
+
+def _mask_cf(cf: str) -> str:
+    """CF mascherato per i log/registri: mai il dato personale in chiaro."""
+    return cf[:6] + "*" * 7 + cf[13:] if len(cf) == 16 else "***"
+
+
+async def verify_cf(primary, openapi: OpenapiClient, user: dict, codice_fiscale: str) -> dict:
+    """Verifica il CF personale all'Anagrafe Tributaria (A PAGAMENTO, ~0,05 €).
+
+    La validazione strutturale locale è gratuita e blocca gli input malformati
+    prima di spendere. Idempotente: lo stesso CF già verificato non ripaga."""
+    cf = normalize_cf(codice_fiscale)
+    if not is_valid_cf(cf):
+        raise AppError(400, "cf_invalid", "Il codice fiscale non è formalmente valido")
+
+    profile_resp = (
+        await primary.table("profiles")
+        .select("codice_fiscale,cf_verified_at")
+        .eq("id", str(user["id"]))
+        .limit(1)
+        .execute()
+    )
+    current = profile_resp.data[0] if profile_resp.data else {}
+    if current.get("codice_fiscale") == cf and current.get("cf_verified_at"):
+        return {"codice_fiscale": cf, "cf_verified_at": current["cf_verified_at"]}
+
+    if not openapi.enabled:
+        raise OpenapiNotConfiguredError()
+
+    membership = await family_service.get_membership(primary, user["id"])
+    family_parent_id = (
+        str(membership["parent_id"])
+        if membership and membership["status"] == "active"
+        else str(user["id"])
+    )
+    cost = 0 if openapi.sandbox else COST_VERIFICA_CF_CENTS
+    meta = {"cf": _mask_cf(cf)}
+
+    try:
+        valid = await openapi.verifica_cf(cf)
+    except OpenapiInvalidIdError:
+        await record_usage(
+            primary, user_id=str(user["id"]), family_parent_id=family_parent_id,
+            service="IT-verifica_cf", outcome="error", cost_cents=0, meta=meta,
+        )
+        raise AppError(400, "cf_invalid", "Il codice fiscale non è formalmente valido") from None
+    except OpenapiTimeoutError:
+        await record_usage(
+            primary, user_id=str(user["id"]), family_parent_id=family_parent_id,
+            service="IT-verifica_cf", outcome="timeout_unknown", cost_cents=cost, meta=meta,
+        )
+        raise
+    except AppError:
+        await record_usage(
+            primary, user_id=str(user["id"]), family_parent_id=family_parent_id,
+            service="IT-verifica_cf", outcome="error", cost_cents=0, meta=meta,
+        )
+        raise
+
+    await record_usage(
+        primary, user_id=str(user["id"]), family_parent_id=family_parent_id,
+        service="IT-verifica_cf", outcome="success", cost_cents=cost,
+        meta={**meta, "valid": valid},
+    )
+
+    if valid:
+        verified_at = datetime.now(timezone.utc).isoformat()
+        # CF + marca temporale nello STESSO update: il trigger DB rispetta
+        # il valore esplicito di cf_verified_at.
+        await primary.table("profiles").update(
+            {"codice_fiscale": cf, "cf_verified_at": verified_at}
+        ).eq("id", str(user["id"])).execute()
+        return {"codice_fiscale": cf, "cf_verified_at": verified_at}
+
+    # CF formalmente corretto ma non registrato: lo salviamo comunque (non
+    # verificato) così l'utente non lo riscrive da zero.
+    if current.get("codice_fiscale") != cf:
+        await primary.table("profiles").update({"codice_fiscale": cf}).eq(
+            "id", str(user["id"])
+        ).execute()
+    raise AppError(
+        400,
+        "cf_not_valid",
+        "Il codice fiscale non risulta registrato all'Anagrafe Tributaria",
     )
 
 

@@ -2,7 +2,7 @@ from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.family import MeFamilyOut, PlanSwitchAdjustment
 from app.schemas.plan import PlanOut
@@ -25,6 +25,8 @@ class ProfileOut(BaseModel):
     cognome: str | None = None
     azienda: str | None = None
     telefono: str | None = None
+    codice_fiscale: str | None = None
+    cf_verified_at: datetime | None = None
     role: Literal["admin", "cliente"]
     is_active: bool
     created_at: datetime
@@ -43,10 +45,34 @@ class ProfileUpdate(BaseModel):
     cognome: str | None = Field(default=None, max_length=100)
     azienda: str | None = Field(default=None, max_length=200)
     telefono: str | None = Field(default=None, max_length=50)
+    # Salvabile anche senza verifica (il trigger DB azzera cf_verified_at se
+    # cambia); la verifica all'Anagrafe è POST /me/verify-cf.
+    codice_fiscale: str | None = Field(default=None, max_length=16)
+
+    @field_validator("codice_fiscale")
+    @classmethod
+    def check_codice_fiscale(cls, value: str | None) -> str | None:
+        from app.services.codice_fiscale import is_valid_cf, normalize_cf
+
+        if value is None or value.strip() == "":
+            return None
+        cleaned = normalize_cf(value)
+        if not is_valid_cf(cleaned):
+            raise ValueError("Il codice fiscale non è formalmente valido")
+        return cleaned
 
 
 class SwitchPlanIn(BaseModel):
     plan_id: int
+
+
+class VerifyCfIn(BaseModel):
+    codice_fiscale: str = Field(min_length=16, max_length=16)
+
+
+class VerifyCfOut(BaseModel):
+    codice_fiscale: str
+    cf_verified_at: datetime | None = None
 
 
 class AdminFamilyInfo(BaseModel):

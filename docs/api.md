@@ -106,8 +106,15 @@ Rifiuta l'invito. → elenco inviti aggiornato.
 ### `GET /me/company`
 `{ "editable": true|false, "company": {...} | null }` — il titolare (o un utente singolo) vede e modifica i propri; un **figlio attivo** vede quelli della famiglia in sola lettura (`editable: false`).
 
-### `PUT /me/company` *(solo titolare)*
-Upsert dei dati aziendali. Campi: `ragione_sociale`*, `forma_giuridica`, `partita_iva`* (11 cifre, prefisso IT tollerato), `codice_fiscale`, `ateco_id`/`settore_id`/`regione_id` (id delle lookup del DB secondario → il backend denormalizza `ateco_codice`, `settore_nome`, `regione_nome`; `400` se sconosciuti), `anno_fondazione` (1800-2100), `indirizzo`, `comune`, `provincia`, `cap` (5 cifre), `classe_dimensionale` (`micro|piccola|media|grande`), `numero_dipendenti`, `fascia_fatturato` (`fino_100k|100k_500k|500k_2m|2m_10m|10m_50m|oltre_50m`), `pec`, `telefono`, `sito_web`.
+### `PUT /me/company`
+Upsert dei dati aziendali. Bloccato (`403`) SOLO per i **figli attivi**, che ereditano i dati della famiglia; titolari, utenti singoli, pending e retrocessi scrivono i propri. Campi: `ragione_sociale`*, `forma_giuridica`, `partita_iva`* (11 cifre, prefisso IT tollerato), `codice_fiscale`, `ateco_id`/`settore_id`/`regione_id` (id delle lookup del DB secondario → il backend denormalizza `ateco_codice`, `settore_nome`, `regione_nome`; `400` se sconosciuti), `anno_fondazione` (1800-2100), `indirizzo`, `comune`, `provincia`, `cap` (5 cifre), `classe_dimensionale` (`micro|piccola|media|grande`), `numero_dipendenti`, `fascia_fatturato` (`fino_100k|100k_500k|500k_2m|2m_10m|10m_50m|oltre_50m`), `pec`, `telefono`, `sito_web`.
+
+### `POST /me/company/import` (201)
+Importa la **visura completa** da openapi.it (endpoint IT-full, **a pagamento**, ~0,30 € + IVA per chiamata) e compila i campi aziendali **vuoti** (i valori inseriti dall'utente non vengono mai sovrascritti). Body: `{ "partita_iva": "..." }` (facoltativa: default quella salvata). Risposta: `{ company, dossier, people, autofill: {applied, conflicts}, suggestions: {codici_ateco}, fetched_at, sandbox }` — `conflicts` elenca i campi in cui il valore utente differisce dal certificato; `suggestions.codici_ateco` sono le divisioni degli ATECO secondari da aggiungere alle preferenze con un click.
+Errori: `400 bad_request` (P.IVA assente/checksum errata), `403 forbidden` (figlio attivo), `404 not_found` (P.IVA non nel Registro Imprese), `409 import_cooldown` (import recente) / `409 import_in_progress` (lock), `502 openapi_error`, `503 openapi_not_configured`, `504 openapi_timeout` (esito ignoto: nessun retry automatico).
+
+### `GET /me/company/dossier`
+Dossier certificato importato: `{ editable, imported, fetched_at, sandbox, dossier: {anagrafica, attivita, sede, contatti, dipendenti, bilanci, partecipazioni, flags} | null, people: [...], derived: {...} }`. Stessa visibilità di `GET /me/company` (figlio attivo → sola lettura). `sandbox: true` = dati di test. Il payload grezzo del provider non viene mai esposto integralmente.
 
 ### `GET /lookups`
 Valori delle faccette di filtro, dal DB secondario (cache server 1h, `Cache-Control: private, max-age=3600`):

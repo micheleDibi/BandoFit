@@ -33,6 +33,20 @@ Contiene i dati della piattaforma. Schema in `supabase/migrations/` (eseguire in
 
 **`auth_tokens`** (migration 0004) — token monouso per i link email di dominio (conferma indirizzo, recovery, inviti): `user_id` → profiles (cascade), `purpose`, `token_hash` (SHA-256, unico — il token in chiaro non viene mai salvato), `expires_at`, `used_at`. Consumo atomico via UPDATE condizionato.
 
+### Dati certificati, preferenze e consumi (migration 0005)
+
+**`profiles`** (colonne aggiunte) — `codice_fiscale` (16 caratteri maiuscoli, check di formato) e `cf_verified_at` (verifica all'Anagrafe Tributaria via openapi.it). Il trigger `fn_reset_cf_verification` azzera la verifica se il CF cambia, tranne quando lo statement imposta esplicitamente anche `cf_verified_at` (flusso di verifica).
+
+**`company_data`** — la "visura" certificata da openapi.it (endpoint IT-full), **una riga per azienda** (`company_profile_id` unico → company_profiles, cascade): `raw` jsonb è il payload completo (fonte di verità), `derived` jsonb i valori calcolati all'import (divisione ATECO, match regione, beneficiari derivati, fasce), più estratti "caldi" (`denominazione`, `stato_impresa`), `piva_fetched` (check 11 cifre), `sandbox`, `fetch_count`, `fetched_at`. Solo l'ultima versione: lo storico dei recuperi vive in `audit_log` + `api_usage_events`.
+
+**`company_people`** — persone estratte dalla visura a ogni import (replace-all): `kind` (`manager`/`shareholder`/`auditor`), anagrafica, `ruoli` jsonb, `is_legale_rappresentante`, `quota_percentuale`, frammento `raw` originale. Cascade da company_profiles.
+
+**`user_preferences`** — preferenze di filtro/notifica **per utente** (anche i figli hanno le proprie): una riga per (utente, faccetta, id lookup del secondario) con `facet` vincolata alle 7 faccette dei bandi, `label` denormalizzata (nessuna FK cross-DB), unique su (user_id, facet, ref_id). Cascade da profiles.
+
+**`api_usage_events`** — registro dei consumi API a pagamento, **senza FK** (come audit_log: sopravvive alle cancellazioni): provider/service/outcome (`success`/`error`/`timeout_unknown`), `cost_cents`, `response_status`, `request_meta` (mai dati personali in chiaro). Servirà anche al conteggio delle quote AI-check (`service='ai_check'`).
+
+**`company_import_locks`** + `fn_acquire_import_lock(parent_id, ttl)` / `fn_release_import_lock(parent_id)` — lock anti doppia-spesa per l'import: la chiamata HTTP esterna avviene tra statement PostgREST, quindi il claim è un INSERT atomico con "furto" solo se il lock esistente è scaduto (TTL clampato a 600s).
+
 ### Funzioni e trigger
 
 - `handle_new_user()` — trigger `AFTER INSERT ON auth.users`: crea profilo + abbonamento iniziale (fallback `gratuito`); per gli utenti invitati in famiglia (metadata `family_invite='true'`) crea **solo il profilo**, senza abbonamento. **Difensiva: non solleva mai eccezioni.**

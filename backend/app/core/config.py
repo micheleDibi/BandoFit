@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     # un indirizzo autorizzato della casella/dominio.
     email_from: str = "BandoFit <onboarding@resend.dev>"
 
+    # openapi.it (dati aziendali certificati / verifica CF). Credenziali vuote
+    # = integrazione disattivata (le rotte rispondono 503 openapi_not_configured).
+    # ATTENZIONE: le chiavi API di sandbox e produzione sono DIVERSE — la chiave
+    # deve corrispondere all'ambiente scelto in openapi_env.
+    openapi_email: str = ""
+    openapi_api_key: str = ""
+    openapi_env: str = "sandbox"  # sandbox | production
+    openapi_timeout_seconds: float = 30.0
+    # Minuti minimi tra due import della stessa azienda (ogni import costa credito).
+    company_import_cooldown_minutes: int = 10
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

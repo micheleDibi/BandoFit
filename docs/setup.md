@@ -21,6 +21,7 @@
 ## 2. Variabili d'ambiente
 
 - `backend/.env` (da `backend/.env.example`): URL e chiavi del primario e del secondario; `FRONTEND_URL` (redirect degli inviti famiglia); per le email di invito agli utenti esistenti, **SMTP** (`SMTP_HOST/PORT/USER/PASSWORD`, es. casella OVH) oppure `RESEND_API_KEY`, più `EMAIL_FROM` (tutto vuoto = le email vengono solo loggate, utile in sviluppo — gli inviti a email nuove usano comunque le email native di Supabase).
+- **openapi.it** (import dati aziendali + verifica CF): `OPENAPI_EMAIL`, `OPENAPI_API_KEY`, `OPENAPI_ENV`. In sviluppo usare `OPENAPI_ENV=sandbox` con la **chiave di test** (gratuita, dati finti); in produzione `production` con la chiave reale — ogni import IT-full costa ~0,30 € + IVA. Le API "Company" e "Risk" vanno attivate una tantum dalla **Libreria API** di console.openapi.com. Credenziali vuote = pulsanti di import/verifica disattivati, il resto dell'app funziona normalmente.
 - `frontend/.env` (da `frontend/.env.example`): URL e anon key del **primario** + base URL del backend.
 
 > Per gli inviti famiglia a email nuove, verifica in **Authentication → URL Configuration** che `FRONTEND_URL` (es. `http://localhost:5173`) sia tra i **Redirect URLs** consentiti, altrimenti il link d'invito non reindirizzerà a `/accetta-invito`.

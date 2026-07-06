@@ -24,6 +24,9 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:-BandoFit <onboarding@resend.dev>}
+      OPENAPI_EMAIL: ${OPENAPI_EMAIL:-}
+      OPENAPI_API_KEY: ${OPENAPI_API_KEY:-}
+      OPENAPI_ENV: ${OPENAPI_ENV:-production}
       ENV: production
 
   frontend:

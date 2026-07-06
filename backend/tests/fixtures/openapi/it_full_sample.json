@@ -1,0 +1,421 @@
+{
+  "data": {
+    "atecoClassification": {
+      "ateco": {
+        "code": "85592",
+        "description": "Computer training and professional examination review courses"
+      },
+      "firstLevel": {
+        "ateco": {
+          "code": "P",
+          "description": "P - Education"
+        },
+        "ateco2025": {
+          "code": "Q",
+          "description": "Q - Education"
+        }
+      },
+      "secondaryAteco": "855209",
+      "ateco2022": {
+        "code": "85592",
+        "description": "Professional training courses"
+      },
+      "secondaryAteco2022": "855209"
+    },
+    "ecofin": {
+      "enterpriseSize": {
+        "code": "ND99",
+        "description": "N. a."
+      }
+    },
+    "branches": {
+      "numberOfBranches": 4
+    },
+    "companyDetails": {
+      "cciaa": "RM",
+      "companyName": "ENTE RICERCA SCIENTIFICA ED ALTA FORMAZIONE",
+      "officeType": {
+        "code": "SSL",
+        "description": "Administrative headquarter and registered office"
+      },
+      "reaCode": "1627112",
+      "taxCode": "97905810582",
+      "vatCode": "14061981008",
+      "lastUpdateDate": "2026-06-23T18:33:39.0000000Z",
+      "openapiNumber": "IT90DF0E0FS0001"
+    },
+    "legalForm": {
+      "detailedLegalForm": {
+        "code": "AC",
+        "description": "Association"
+      },
+      "legalForm": {
+        "code": "AL",
+        "description": "Company of other forms"
+      }
+    },
+    "companyDates": {
+      "incorporationDate": "2020-12-19T23:00:00",
+      "startDate": "2020-12-19T23:00:00"
+    },
+    "address": {
+      "zipCode": "00187",
+      "province": {
+        "code": "RM",
+        "description": "ROMA"
+      },
+      "region": {
+        "code": "12",
+        "description": "LAZIO"
+      },
+      "country": {
+        "code": "IT",
+        "description": "Italia"
+      },
+      "streetName": "PIAZZA DEL POPOLO, 18",
+      "town": "ROMA"
+    },
+    "marketable": {
+      "isMarketable": true
+    },
+    "internationalClassification": {
+      "nace": {
+        "code": "8559",
+        "description": "Other education n.e.c."
+      },
+      "firstLevel": {
+        "nace": {
+          "code": "85",
+          "description": "85 - Educationâ "
+        },
+        "primarySic": {
+          "code": "COD_09",
+          "description": "I - Various services"
+        }
+      },
+      "primarySic": {
+        "code": "8299",
+        "description": "Misc schools & educational services"
+      },
+      "secondarySic": "8221, 7391"
+    },
+    "companyStatus": {
+      "activityStatus": {
+        "code": "A",
+        "description": "Enable"
+      }
+    },
+    "pec": "ERSAF@PEC.IT",
+    "employeesStatistic": {
+      "apprentice": 0,
+      "whiteCollar": 67,
+      "fixedTermContract": 44,
+      "fullTimeContract": 4,
+      "partialTimeContract": 96,
+      "permanentContract": 56,
+      "blueCollar": 33
+    },
+    "webAndSocial": {
+      "hasSocial": false
+    },
+    "mail": {
+      "email": ""
+    },
+    "contacts": {
+      "fax": "",
+      "telephoneNumber": "0692949895"
+    },
+    "employees": {
+      "employee": 9,
+      "employeeRange": {
+        "code": "ER3",
+        "description": "6 - 10"
+      },
+      "employeeTrend": -18.18
+    },
+    "foreignTrade": {
+      "isExporter": false,
+      "isImporter": false
+    },
+    "innovativeSmeAndSu": {
+      "isInnovativeSme": false,
+      "isInnovativeStartUp": false
+    },
+    "affiliateCompanies": [
+      {
+        "companyName": "UNIVERSO SRL",
+        "percentShare": 92,
+        "taxCode": "03930330794"
+      }
+    ],
+    "managers": [
+      {
+        "isLegalRepresentative": true,
+        "age": 41,
+        "birthDate": "1985-06-03T22:00:00",
+        "birthTown": "CERIGNOLA (FG)",
+        "name": "MICHELE",
+        "roles": [
+          {
+            "role": {
+              "code": "LER",
+              "description": "Legal representative"
+            },
+            "roleStartDate": "2022-05-31T22:00:00"
+          }
+        ],
+        "gender": {
+          "code": "M",
+          "description": "Man"
+        },
+        "surname": "MANZI",
+        "taxCode": "MNZMHL85H040000X"
+      }
+    ],
+    "subsidiaries": [
+      {
+        "streetName": "VIA PO 58",
+        "town": "LAMEZIA TERME",
+        "companyName": "UNIVERSO SRL",
+        "zipCode": "88046",
+        "province": {
+          "code": "CZ",
+          "description": "CATANZARO"
+        },
+        "taxCode": "03930330794"
+      }
+    ],
+    "artisanBusinessRegistry": {
+      "belongsToArtisanBusinessRegistry": false
+    },
+    "corporateGroups": {
+      "belongsToGroup": true,
+      "groupName": "ENTE RICERCA SCIENTIFICA ED ALTA FORMAZIONE",
+      "totalGroupSubsidiaries": 1,
+      "hasForeignParents": false,
+      "hasForeignSubsidiaries": false,
+      "holdingCountry": {
+        "code": "IT",
+        "description": "Italia"
+      },
+      "holdingCompanyName": "ENTE RICERCA SCIENTIFICA ED ALTA FORMAZIONE",
+      "nationalParentCompany": {
+        "companyName": "ENTE RICERCA SCIENTIFICA ED ALTA FORMAZIONE",
+        "streetName": "PIAZZA DEL POPOLO 18",
+        "town": "ROMA",
+        "country": {
+          "code": "IT",
+          "description": "Italia"
+        },
+        "province": {
+          "code": "RM",
+          "description": "ROMA"
+        },
+        "zipCode": "00187"
+      },
+      "hasForeignParentCompany": false
+    },
+    "soaCertification": {
+      "hasSoaCertification": false
+    },
+    "sae": {
+      "code": "501",
+      "description": "Istituzioni ed enti con finalità di assistenza, beneficenza, istruzione, culturali, sindacali, politiche, sportive, ricreative e simili"
+    },
+    "allOffices": [
+      {
+        "companyDetails": {
+          "cciaa": "BA",
+          "companyName": "ENTE RICERCA SCIENTIFICA ED ALTA FORMAZIONE",
+          "officeType": {
+            "code": "UL",
+            "description": "Local units"
+          },
+          "reaCode": "634622",
+          "taxCode": "97905810582",
+          "vatCode": "14061981008",
+          "lastUpdateDate": "2026-06-23T18:33:39.0000000Z",
+          "openapiNumber": "IT90DF0E0FUC001"
+        },
+        "address": {
+          "zipCode": "76121",
+          "province": {
+            "code": "BT",
+            "description": "BARLETTA-ANDRIA-TRANI"
+          },
+          "region": {
+            "code": "16",
+            "description": "PUGLIA"
+          },
+          "country": {
+            "code": "IT",
+            "description": "Italia"
+          },
+          "streetName": "VIA FILIPPO BRUNELLESCHI, 16",
+          "town": "BARLETTA"
+        },
+        "companyStatus": {
+          "activityStatus": {
+            "code": "A",
+            "description": "Enable"
+          }
+        }
+      },
+      {
+        "companyDetails": {
+          "cciaa": "CZ",
+          "companyName": "ENTE RICERCA SCIENTIFICA ED ALTA FORMAZIONE",
+          "officeType": {
+            "code": "UL",
+            "description": "Local units"
+          },
+          "reaCode": "213914",
+          "taxCode": "97905810582",
+          "vatCode": "14061981008",
+          "lastUpdateDate": "2026-06-23T18:33:39.0000000Z",
+          "openapiNumber": "IT90DF0E0FU2001"
+        },
+        "address": {
+          "zipCode": "88046",
+          "province": {
+            "code": "CZ",
+            "description": "CATANZARO"
+          },
+          "region": {
+            "code": "18",
+            "description": "CALABRIA"
+          },
+          "country": {
+            "code": "IT",
+            "description": "Italia"
+          },
+          "streetName": "VIA LISSANIA, 28",
+          "town": "LAMEZIA TERME"
+        },
+        "companyStatus": {
+          "activityStatus": {
+            "code": "A",
+            "description": "Enable"
+          }
+        }
+      },
+      {
+        "companyDetails": {
+          "cciaa": "FG",
+          "companyName": "ENTE RICERCA SCIENTIFICA ED ALTA FORMAZIONE",
+          "officeType": {
+            "code": "UL",
+            "description": "Local units"
+          },
+          "reaCode": "320440",
+          "taxCode": "97905810582",
+          "vatCode": "14061981008",
+          "lastUpdateDate": "2026-06-23T18:33:39.0000000Z",
+          "openapiNumber": "IT90DF0E0FU4001"
+        },
+        "address": {
+          "zipCode": "71121",
+          "province": {
+            "code": "FG",
+            "description": "FOGGIA"
+          },
+          "region": {
+            "code": "16",
+            "description": "PUGLIA"
+          },
+          "country": {
+            "code": "IT",
+            "description": "Italia"
+          },
+          "streetName": "VIA FIUME, 5",
+          "town": "FOGGIA"
+        },
+        "companyStatus": {
+          "activityStatus": {
+            "code": "A",
+            "description": "Enable"
+          }
+        }
+      },
+      {
+        "companyDetails": {
+          "cciaa": "FG",
+          "companyName": "ENTE RICERCA SCIENTIFICA ED ALTA FORMAZIONE",
+          "officeType": {
+            "code": "UL",
+            "description": "Local units"
+          },
+          "reaCode": "320440",
+          "taxCode": "97905810582",
+          "vatCode": "14061981008",
+          "lastUpdateDate": "2026-06-23T18:33:39.0000000Z",
+          "openapiNumber": "IT90DF0E0FU8001"
+        },
+        "address": {
+          "zipCode": "71042",
+          "province": {
+            "code": "FG",
+            "description": "FOGGIA"
+          },
+          "region": {
+            "code": "16",
+            "description": "PUGLIA"
+          },
+          "country": {
+            "code": "IT",
+            "description": "Italia"
+          },
+          "streetName": "STRADA PROVINCIALE 153,",
+          "town": "CERIGNOLA"
+        },
+        "companyStatus": {
+          "activityStatus": {
+            "code": "A",
+            "description": "Enable"
+          }
+        }
+      },
+      {
+        "companyDetails": {
+          "cciaa": "RM",
+          "companyName": "ENTE RICERCA SCIENTIFICA ED ALTA FORMAZIONE",
+          "officeType": {
+            "code": "SSL",
+            "description": "Administrative headquarter and registered office"
+          },
+          "reaCode": "1627112",
+          "taxCode": "97905810582",
+          "vatCode": "14061981008",
+          "lastUpdateDate": "2026-06-23T18:33:39.0000000Z",
+          "openapiNumber": "IT90DF0E0FS0001"
+        },
+        "address": {
+          "zipCode": "00187",
+          "province": {
+            "code": "RM",
+            "description": "ROMA"
+          },
+          "region": {
+            "code": "12",
+            "description": "LAZIO"
+          },
+          "country": {
+            "code": "IT",
+            "description": "Italia"
+          },
+          "streetName": "PIAZZA DEL POPOLO, 18",
+          "town": "ROMA"
+        },
+        "companyStatus": {
+          "activityStatus": {
+            "code": "A",
+            "description": "Enable"
+          }
+        }
+      }
+    ]
+  },
+  "success": true,
+  "message": "",
+  "error": null
+}

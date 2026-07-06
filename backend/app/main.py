@@ -24,6 +24,7 @@ from app.api.routers import (
     me,
     plans,
 )
+from app.clients.openapi import OpenapiClient
 from app.clients.supabase import create_primary_client, create_secondary_client
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
@@ -38,7 +39,11 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.primary = await create_primary_client(settings)
     app.state.secondary = await create_secondary_client(settings)
+    app.state.openapi = OpenapiClient(settings)
+    if not app.state.openapi.enabled:
+        logger.warning("openapi.it non configurato: import dati e verifica CF disattivati")
     yield
+    await app.state.openapi.aclose()
 
 
 app = FastAPI(

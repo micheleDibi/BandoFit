@@ -1,0 +1,12 @@
+{
+  "scopes": [
+    "GET:company.openapi.com/IT-full",
+    "GET:company.openapi.com/IT-check_id",
+    "GET:risk.openapi.com/IT-verifica_cf"
+  ],
+  "expire": 1783445553,
+  "token": "xxxxxxxxxxxxxxxxxxxxxxxx",
+  "success": true,
+  "message": "",
+  "error": null
+}

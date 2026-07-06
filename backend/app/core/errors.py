@@ -46,6 +46,28 @@ class UpstreamError(AppError):
         super().__init__(502, "upstream_error", message)
 
 
+class OpenapiNotConfiguredError(AppError):
+    """Credenziali openapi.it assenti: integrazione disattivata su questo ambiente."""
+
+    def __init__(self, message: str = "Importazione dati non configurata su questo ambiente"):
+        super().__init__(503, "openapi_not_configured", message)
+
+
+class OpenapiUpstreamError(AppError):
+    """Errore del marketplace openapi.it (indisponibilità, risposta malformata)."""
+
+    def __init__(self, message: str = "Il servizio dati esterni non è al momento disponibile, riprova più tardi"):
+        super().__init__(502, "openapi_error", message)
+
+
+class OpenapiTimeoutError(AppError):
+    """Timeout verso openapi.it: l'esito (e l'eventuale addebito) è ignoto,
+    quindi NESSUN retry automatico — decide l'utente se riprovare."""
+
+    def __init__(self, message: str = "L'operazione non è andata a buon fine. Se il problema persiste riprova tra qualche minuto"):
+        super().__init__(504, "openapi_timeout", message)
+
+
 def _error_body(code: str, message: str) -> dict:
     return {"error": {"code": code, "message": message}}
 

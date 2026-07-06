@@ -4,6 +4,7 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from supabase import AsyncClient
 
+from app.clients.openapi import OpenapiClient as _OpenapiClient
 from app.core.errors import ForbiddenError, UnauthorizedError
 from app.core.security import decode_supabase_jwt
 from app.services.user_service import PROFILE_SELECT, ensure_profile
@@ -19,8 +20,13 @@ def get_secondary(request: Request) -> AsyncClient:
     return request.app.state.secondary
 
 
+def get_openapi(request: Request) -> _OpenapiClient:
+    return request.app.state.openapi
+
+
 PrimaryClient = Annotated[AsyncClient, Depends(get_primary)]
 SecondaryClient = Annotated[AsyncClient, Depends(get_secondary)]
+OpenapiDep = Annotated[_OpenapiClient, Depends(get_openapi)]
 
 
 async def get_current_user(

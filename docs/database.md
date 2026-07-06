@@ -45,7 +45,11 @@ Contiene i dati della piattaforma. Schema in `supabase/migrations/` (eseguire in
 
 **`api_usage_events`** — registro dei consumi API a pagamento, **senza FK** (come audit_log: sopravvive alle cancellazioni): provider/service/outcome (`success`/`error`/`timeout_unknown`), `cost_cents`, `response_status`, `request_meta` (mai dati personali in chiaro). Servirà anche al conteggio delle quote AI-check (`service='ai_check'`).
 
-**`company_import_locks`** + `fn_acquire_import_lock(parent_id, ttl)` / `fn_release_import_lock(parent_id)` — lock anti doppia-spesa per l'import: la chiamata HTTP esterna avviene tra statement PostgREST, quindi il claim è un INSERT atomico con "furto" solo se il lock esistente è scaduto (TTL clampato a 600s).
+**`company_import_locks`** + `fn_acquire_import_lock(parent_id, ttl)` / `fn_release_import_lock(parent_id)` — lock anti doppia-spesa per l'import: la chiamata HTTP esterna avviene tra statement PostgREST, quindi il claim è un INSERT atomico con "furto" solo se il lock esistente è scaduto (TTL clampato a 600s). Riusato anche dalla verifica CF e dalle richieste di documenti.
+
+### Documenti ufficiali (migration 0006)
+
+**`company_documents`** — visure camerali richieste a openapi.it (documenti asincroni): `kind` (`visura`), `endpoint` (la variante che ha accettato: capitale/persone/impresa-individuale — il tipo giusto si scopre per tentativi, i rifiuti sono gratuiti), `request_id` del provider, `status` (`pending`→`ready`/`error`), riferimento al PDF nel bucket Storage **`company-documents`** (`file_path`), **`extracted_text`** (testo del PDF via pypdf: oggetto sociale e poteri inclusi — input per l'AI-check), `cost_cents`, `sandbox`. Indice unico parziale: al massimo UNA richiesta `pending` per azienda e tipo. Cascade da company_profiles; il file nel bucket viene rimosso dal backend alla cancellazione.
 
 ### Funzioni e trigger
 

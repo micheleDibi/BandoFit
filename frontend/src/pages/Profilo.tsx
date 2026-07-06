@@ -34,6 +34,7 @@ export default function Profilo() {
   const [planToConfirm, setPlanToConfirm] = useState<Plan | null>(null);
   const [switchNotice, setSwitchNotice] = useState<string | null>(null);
   const [verifyOpen, setVerifyOpen] = useState(false);
+  const [cfError, setCfError] = useState<string | null>(null);
 
   useEffect(() => {
     if (me) {
@@ -70,6 +71,13 @@ export default function Profilo() {
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     setSaved(false);
+    setCfError(null);
+    // Validazione locale: un CF incompleto non deve bloccare il salvataggio
+    // degli altri campi con un errore generico del backend.
+    if (cfInput && cfInput.length !== 16) {
+      setCfError("Il codice fiscale deve avere 16 caratteri (o lascialo vuoto).");
+      return;
+    }
     await updateProfile.mutateAsync({
       nome: form.nome.trim(),
       cognome: form.cognome.trim(),
@@ -189,6 +197,11 @@ export default function Profilo() {
             {!cfVerified && cfInput.length === 16 && (
               <p className="mt-1 text-xs text-slate-400">
                 Da verificare: conferma il codice fiscale all'Anagrafe Tributaria.
+              </p>
+            )}
+            {cfError && (
+              <p className="mt-1 text-xs text-red-600" role="alert">
+                {cfError}
               </p>
             )}
           </div>

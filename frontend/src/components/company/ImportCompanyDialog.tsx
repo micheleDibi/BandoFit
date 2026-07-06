@@ -49,6 +49,9 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
   const [error, setError] = useState<string | null>(null);
   const [addedAteco, setAddedAteco] = useState<number[]>([]);
 
+  // Reset SOLO all'apertura: durante il primo import defaultPiva cambia
+  // (viene creato il profilo aziendale) e non deve azzerare l'esito appena
+  // mostrato.
   useEffect(() => {
     if (open) {
       setPiva(defaultPiva ?? "");
@@ -56,7 +59,8 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
       setError(null);
       setAddedAteco([]);
     }
-  }, [open, defaultPiva]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();

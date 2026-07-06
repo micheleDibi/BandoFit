@@ -2,6 +2,16 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-06 — Dati aziendali certificati (openapi.it), preferenze e registro consumi
+
+- **Import da P.IVA**: con un click il titolare importa la **visura completa** dell'azienda dal Registro Imprese via openapi.it (endpoint IT-full, ~0,30 € + IVA a chiamata): anagrafica, ATECO (anche secondari e storici), sede e unità locali, cariche/legale rappresentante/soci, dipendenti, dati economici, flag (startup innovativa, import/export, artigiana, SOA…). Il payload grezzo è persistito come fonte di verità (`company_data.raw`, migration 0005); l'autofill compila **solo i campi vuoti** del form aziendale (mai sovrascrivere l'utente: le differenze sono segnalate come conflitti) e gli ATECO secondari diventano suggerimenti per le preferenze.
+- **Pagina «Azienda»** (`/app/azienda`): dossier certificato a sezioni collassabili con badge stato impresa/«Dati di test», persone e cariche, bottone «Aggiorna». Sola lettura per gli account collegati.
+- **Protezioni di spesa**: validazione P.IVA locale gratuita (checksum), cooldown di 10 minuti tra import, lock atomico anti-concorrenza per azienda (`fn_acquire_import_lock`), retry mai su chiamate potenzialmente addebitate (timeout → esito ignoto, riprova l'utente), sandbox openapi per lo sviluppo a costo zero.
+- **Verifica codice fiscale**: campo CF nei dati personali con validazione locale gratuita (checksum + omocodia) e verifica all'Anagrafe Tributaria (~0,05 €, `POST /me/verify-cf`, idempotente); badge «Verificato», il cambio del CF fa decadere la verifica (trigger DB). Niente servizi anagrafici persona (riservati contrattualmente al recupero crediti): i dati delle persone arrivano dalla visura aziendale.
+- **Preferenze bandi per utente** (`user_preferences`, `GET/PUT /me/preferences`, card nel profilo): valori "seguiti" in aggiunta a quelli reali dell'azienda su tutte le 7 faccette dei filtri; preset **«Bandi per te»** sulla lista bandi = unione dati aziendali reali ∪ preferenze.
+- **Registro consumi** (`api_usage_events`, senza FK): ogni chiamata a pagamento annotata con esito e costo — servirà anche al conteggio delle quote AI-check.
+- Client openapi.it con token OAuth in-memory, switch sandbox/produzione, flusso asincrono IT-full → polling gratuito IT-check_id; fixture reali registrate per i test (197 test backend).
+
 ## 2026-07-03 — Link email 100% di dominio
 
 - Eliminati tutti i link `*.supabase.co` dalle email: conferma indirizzo, recupero password e inviti azienda usano **token propri** (256 bit, SHA-256 a riposo, monouso, TTL 48h/1h/48h) su link del dominio BandoFit, emessi e verificati dal backend (nuova tabella `auth_tokens`, migration 0004). GoTrue non genera più link né invia email; utenti creati/aggiornati via Admin API. Nuovi endpoint `/auth/confirm`, `/auth/reset`, `/auth/invite-info`, `/auth/accept-invite`; reset e accettazione invito fanno auto-login. Su Supabase non servono più i Redirect URLs.

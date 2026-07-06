@@ -1,6 +1,7 @@
 import { Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ActiveFilterChips } from "../components/bandi/ActiveFilterChips";
+import { BandiPerTeButton } from "../components/bandi/BandiPerTeButton";
 import { BandoCard } from "../components/bandi/BandoCard";
 import { FilterSidebar } from "../components/bandi/FilterSidebar";
 import { Button } from "../components/ui/Button";
@@ -114,6 +115,7 @@ export default function BandiList() {
           />
         </div>
         <div className="flex items-center gap-3">
+          <BandiPerTeButton />
           <label className="sr-only" htmlFor="sort-select">
             Ordina per
           </label>

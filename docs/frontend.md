@@ -41,6 +41,11 @@ Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo 
 - **Import** (`ImportCompanyDialog`, aperto anche da `CompanyCard`): dialog con P.IVA precompilata e nota costo (~0,30 € + IVA), poi esito con campi compilati automaticamente, differenze rispetto ai valori utente (mai sovrascritti) e chip «ATECO secondari» da aggiungere alle preferenze con un click.
 - **Hook**: `useCompanyDossier` (query key `["company-dossier"]`) e `useImportCompany` (aggiorna anche `["company"]`); `usePreferences`/`useSavePreferences` (key `["preferences"]`).
 
+## Preferenze e «Bandi per te»
+
+- **`PreferenzeCard`** (in Profilo, dopo i dati aziendali, per TUTTI gli utenti — anche gli account collegati hanno le proprie): multi-select per le 7 faccette dei bandi riusando `FacetGroup` (checkbox con ricerca), chip rimovibili dei valori scelti, «Salva preferenze» attivo solo se ci sono modifiche (PUT dell'intero set).
+- **`BandiPerTeButton`** (toolbar di BandiList): preset che applica ai filtri URL l'**unione** dei valori reali dell'azienda (ATECO/settore/regione) e delle preferenze personali; evidenziato quando i filtri correnti coincidono, secondo click = rimozione del preset. Visibile solo se c'è almeno un valore.
+
 ## Pattern chiave
 
 - **Filtri nell'URL** (`src/hooks/useBandiFilters.ts`): tutti i filtri della lista bandi vivono nei searchParams (csv per le faccette). L'URL è condivisibile, il back del browser funziona, e i parametri sono la query key di TanStack Query. Ogni modifica ai filtri riporta a pagina 1; la ricerca testuale ha debounce di 400 ms.

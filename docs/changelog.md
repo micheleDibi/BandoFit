@@ -2,6 +2,12 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-06 — Visura camerale ufficiale
+
+- **«Richiedi visura»** nella pagina Azienda: il PDF ufficiale del Registro Imprese (2,90 € imprese individuali/enti REA – 4,90 € società, +IVA) richiesto via openapi.it con flusso asincrono (di solito evaso in pochi secondi). Il tipo d'impresa giusto viene individuato **per tentativi a costo zero** (i rifiuti del Registro sono gratuiti), ordinati in base alla forma giuridica nota dall'import; gli enti iscritti solo al REA sono serviti dal canale impresa individuale (verificato sul campo).
+- Il PDF è archiviato nel **bucket Storage `company-documents`** e scaricabile da titolare e account collegati; il **testo estratto** (pypdf) — oggetto sociale e poteri da statuto compresi — resta server-side come input pregiato per il futuro AI-check (tabella `company_documents`, migration 0006).
+- Stesse protezioni di spesa delle altre chiamate a pagamento: lock per azienda, una sola richiesta in lavorazione per volta (indice unico parziale), registro consumi su ogni tentativo, nessun retry su esiti ignoti.
+
 ## 2026-07-06 — Dati aziendali certificati (openapi.it), preferenze e registro consumi
 
 - **Import da P.IVA**: con un click il titolare importa la **visura completa** dell'azienda dal Registro Imprese via openapi.it (endpoint IT-full, ~0,30 € + IVA a chiamata): anagrafica, ATECO (anche secondari e storici), sede e unità locali, cariche/legale rappresentante/soci, dipendenti, dati economici, flag (startup innovativa, import/export, artigiana, SOA…). Il payload grezzo è persistito come fonte di verità (`company_data.raw`, migration 0005); l'autofill compila **solo i campi vuoti** del form aziendale (mai sovrascrivere l'utente: le differenze sono segnalate come conflitti) e gli ATECO secondari diventano suggerimenti per le preferenze.

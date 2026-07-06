@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import zipfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -125,9 +126,12 @@ class TestRichiesta:
         assert result.endpoint == "ordinaria-impresa-individuale"
         inserted = primary.ops_for("company_documents", "insert")[0]
         assert inserted["request_id"] == ACCEPTED["id"]
-        # ledger: costo della variante accettata (impresa individuale 2,90)
+        # ledger: costo della variante accettata (impresa individuale 2,90) e
+        # request_id nel meta — se l'insert fallisse, il documento pagato
+        # resterebbe comunque recuperabile.
         events = primary.ops_for("api_usage_events", "insert")
         assert events[0]["outcome"] == "success" and events[0]["cost_cents"] == 290
+        assert events[0]["request_meta"]["request_id"] == ACCEPTED["id"]
         # lock rilasciato
         assert ("fn_release_import_lock", {"p_parent_id": USER["id"]}) in primary.rpcs
 
@@ -156,8 +160,12 @@ class TestRichiesta:
         with pytest.raises(BadRequestError):
             await document_service.request_document(primary, openapi, USER)
         events = primary.ops_for("api_usage_events", "insert")
+        # UNA sola riga di errore nel registro (niente doppioni dal ramo AppError)
+        assert len(events) == 1
         assert events[0]["outcome"] == "error" and events[0]["cost_cents"] == 0
         assert primary.ops_for("company_documents", "insert") == []
+        released = [n for n, _ in primary.rpcs if n == "fn_release_import_lock"]
+        assert released == ["fn_release_import_lock"]  # rilasciato una volta sola
 
     async def test_timeout_ledger_e_lock_non_rilasciato(self):
         primary = FakePrimary(
@@ -182,23 +190,50 @@ class TestRichiesta:
         assert openapi.calls["request"] == []
 
 
-class TestEvasione:
-    PENDING_ROW = {
+def pending_row(**overrides) -> dict:
+    """Riga pending RECENTE (created_at dinamico: il failsafe 24h non scatta)."""
+    row = {
         "id": "d0000000-0000-0000-0000-000000000001",
         "company_profile_id": COMPANY["id"],
         "kind": "visura", "endpoint": "ordinaria-impresa-individuale",
         "request_id": ACCEPTED["id"], "status": "pending", "error_detail": None,
         "file_path": None, "file_name": None, "file_size": None, "pages": None,
         "extracted_text": None, "cost_cents": 290, "sandbox": False,
-        "created_at": "2026-07-06T12:00:00+00:00", "ready_at": None,
+        "created_at": datetime.now(timezone.utc).isoformat(), "ready_at": None,
     }
+    row.update(overrides)
+    return row
+
+
+class TestEvasione:
+    PENDING_ROW = pending_row()
 
     async def test_ancora_in_erogazione_resta_pending(self):
         primary = FakePrimary()
         openapi = fake_openapi(status_result=ACCEPTED)  # "In erogazione"
-        row = await document_service._try_complete(primary, openapi, dict(self.PENDING_ROW))
+        row = await document_service._try_complete(primary, openapi, pending_row())
         assert row["status"] == "pending"
         assert openapi.calls["allegati"] == []
+
+    async def test_esito_negativo_marca_errore(self):
+        primary = FakePrimary()
+        openapi = fake_openapi(
+            status_result={"stato_richiesta": "Richiesta annullata", "allegati": []}
+        )
+        row = await document_service._try_complete(primary, openapi, pending_row())
+        assert row["status"] == "error"
+        update = primary.ops_for("company_documents", "update")[0]
+        assert update["status"] == "error"
+
+    async def test_pending_scaduta_dopo_24h_marca_errore(self):
+        old = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+        primary = FakePrimary()
+        openapi = fake_openapi(status_result=ACCEPTED)  # ancora "In erogazione"
+        row = await document_service._try_complete(
+            primary, openapi, pending_row(created_at=old)
+        )
+        assert row["status"] == "error"
+        assert "scaduta" in (row["error_detail"] or "")
 
     async def test_evasa_scarica_estrae_e_archivia(self):
         zip_bytes = make_zip_with_pdf()

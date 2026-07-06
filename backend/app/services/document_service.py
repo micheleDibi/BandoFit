@@ -14,7 +14,7 @@ import base64
 import io
 import logging
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.clients.openapi import (
     VISURA_VARIANTS,
@@ -54,6 +54,12 @@ DOCUMENT_SELECT = (
 )
 
 _PENDING_STATES = {"in erogazione"}
+# Parole che nei messaggi di stato del provider indicano un esito negativo
+# definitivo: la richiesta va marcata error, non lasciata pending per sempre.
+_FAILED_KEYWORDS = ("annullat", "errore", "rifiutat", "non evadibile", "respint")
+# Failsafe: una richiesta senza esito entro questo tempo viene chiusa come
+# error, così l'indice unico sul pending non blocca nuove richieste all'infinito.
+_STALE_AFTER = timedelta(hours=24)
 
 
 def _to_out(row: dict) -> DocumentOut:
@@ -161,6 +167,10 @@ async def request_document(primary, openapi: OpenapiClient, user: dict) -> Docum
             "C'è già una visura in lavorazione: attendi che venga completata",
         )
 
+    # La lettura della forma giuridica avviene PRIMA del lock: se fallisse
+    # dopo, il lock resterebbe trattenuto per l'intero TTL senza motivo.
+    hint = await _legal_form_hint(primary, company["id"])
+
     if not await _acquire_lock(primary, owner_id, DOC_LOCK_TTL_SECONDS):
         raise AppError(
             409,
@@ -168,7 +178,6 @@ async def request_document(primary, openapi: OpenapiClient, user: dict) -> Docum
             "Un'altra operazione è in corso per questa azienda: riprova tra qualche istante",
         )
 
-    hint = await _legal_form_hint(primary, company["id"])
     accepted: dict | None = None
     variant_used: str | None = None
     try:
@@ -179,14 +188,6 @@ async def request_document(primary, openapi: OpenapiClient, user: dict) -> Docum
                 break
             except OpenapiWrongTypeError:
                 continue  # rifiuto gratuito: variante successiva
-        if accepted is None or variant_used is None:
-            await record_usage(
-                primary, user_id=owner_id, family_parent_id=owner_id,
-                service="visura", outcome="error", cost_cents=0, meta={"piva": piva},
-            )
-            raise BadRequestError(
-                "Il Registro Imprese non fornisce la visura per questo tipo di impresa"
-            )
     except OpenapiInvalidIdError:
         await record_usage(
             primary, user_id=owner_id, family_parent_id=owner_id,
@@ -204,39 +205,61 @@ async def request_document(primary, openapi: OpenapiClient, user: dict) -> Docum
         )
         raise
     except AppError:
-        if accepted is None:
-            await record_usage(
-                primary, user_id=owner_id, family_parent_id=owner_id,
-                service="visura", outcome="error", cost_cents=0, meta={"piva": piva},
-            )
-            await _release_lock(primary, owner_id)
+        await record_usage(
+            primary, user_id=owner_id, family_parent_id=owner_id,
+            service="visura", outcome="error", cost_cents=0, meta={"piva": piva},
+        )
+        await _release_lock(primary, owner_id)
         raise
 
+    # Fuori dal try: il rifiuto di tutte le varianti non deve essere
+    # ri-processato dal ramo AppError (doppia riga nel registro consumi).
+    if accepted is None or variant_used is None:
+        await record_usage(
+            primary, user_id=owner_id, family_parent_id=owner_id,
+            service="visura", outcome="error", cost_cents=0, meta={"piva": piva},
+        )
+        await _release_lock(primary, owner_id)
+        raise BadRequestError(
+            "Il Registro Imprese non fornisce la visura per questo tipo di impresa"
+        )
+
     cost = 0 if openapi.sandbox else VISURA_COST_CENTS.get(variant_used, 490)
+    request_id = str(accepted.get("id"))
     try:
+        # Il request_id va nel registro consumi: se l'insert sotto fallisse,
+        # resterebbe comunque un riferimento per recuperare il documento pagato.
         await record_usage(
             primary, user_id=owner_id, family_parent_id=owner_id,
             service="visura", outcome="success", cost_cents=cost,
-            meta={"piva": piva, "variant": variant_used},
+            meta={"piva": piva, "variant": variant_used, "request_id": request_id},
         )
-        insert = (
-            await primary.table("company_documents")
-            .insert(
-                {
-                    "company_profile_id": company["id"],
-                    "kind": "visura",
-                    "endpoint": variant_used,
-                    "request_id": str(accepted.get("id")),
-                    "status": "pending",
-                    "cost_cents": cost,
-                    "sandbox": openapi.sandbox,
-                    "requested_by": str(user["id"]),
-                }
+        document_row = {
+            "company_profile_id": company["id"],
+            "kind": "visura",
+            "endpoint": variant_used,
+            "request_id": request_id,
+            "status": "pending",
+            "cost_cents": cost,
+            "sandbox": openapi.sandbox,
+            "requested_by": str(user["id"]),
+        }
+        try:
+            insert = await primary.table("company_documents").insert(document_row).execute()
+        except Exception:
+            # La visura è GIÀ pagata: perdere questa riga significherebbe
+            # perdere il documento. Un ritento, poi si propaga (il request_id
+            # è recuperabile dal registro consumi e da questo log).
+            logger.exception(
+                "visura pagata ma insert fallito: ritento (request_id=%s, variant=%s)",
+                request_id, variant_used,
             )
-            .execute()
-        )
+            insert = await primary.table("company_documents").insert(document_row).execute()
         row = insert.data[0] if insert.data else None
         if row is None:  # pragma: no cover — solo per robustezza
+            logger.error(
+                "visura pagata senza riga documento (request_id=%s)", request_id
+            )
             raise OpenapiUpstreamError()
 
         await primary.table("audit_log").insert(
@@ -297,19 +320,51 @@ async def _upload_pdf(primary, path: str, pdf_bytes: bytes) -> None:
     )
 
 
+async def _mark_error(primary, row: dict, detail: str) -> dict:
+    await primary.table("company_documents").update(
+        {"status": "error", "error_detail": detail}
+    ).eq("id", row["id"]).eq("status", "pending").execute()
+    return {**row, "status": "error", "error_detail": detail}
+
+
+def _is_stale(row: dict) -> bool:
+    try:
+        created = datetime.fromisoformat(str(row.get("created_at")).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - created > _STALE_AFTER
+
+
 async def _try_complete(primary, openapi: OpenapiClient, row: dict) -> dict:
     """Se la richiesta è stata evasa dal provider, scarica l'allegato, estrae
-    PDF+testo e archivia. Idempotente: l'update è condizionato su pending."""
+    PDF+testo e archivia. Idempotente: l'update è condizionato su pending.
+    Gli esiti negativi del provider (o le richieste senza esito da oltre 24h)
+    vengono chiusi come error, così non bloccano nuove richieste per sempre."""
     if row.get("status") != "pending" or not row.get("request_id"):
         return row
     try:
         status = await openapi.visura_status(row["endpoint"], row["request_id"])
     except AppError:
-        return row  # transitorio: si riproverà alla prossima lettura
+        # Transitorio: si riproverà alla prossima lettura — ma non all'infinito.
+        if _is_stale(row):
+            return await _mark_error(
+                primary, row, "Richiesta scaduta senza esito dal Registro Imprese"
+            )
+        return row
 
     stato = str(status.get("stato_richiesta") or "").strip().lower()
     allegati = status.get("allegati") or []
+    if any(keyword in stato for keyword in _FAILED_KEYWORDS):
+        return await _mark_error(
+            primary, row, f"Richiesta non evasa dal Registro Imprese ({stato})"
+        )
     if stato in _PENDING_STATES or not allegati:
+        if _is_stale(row):
+            return await _mark_error(
+                primary, row, "Richiesta scaduta senza esito dal Registro Imprese"
+            )
         return row
 
     try:

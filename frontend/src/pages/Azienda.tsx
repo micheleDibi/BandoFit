@@ -13,6 +13,7 @@ import {
 import { useState } from "react";
 import { useCompany } from "../hooks/useCompany";
 import { useCompanyDossier } from "../hooks/useCompanyDossier";
+import { DocumentiCard } from "../components/company/DocumentiCard";
 import { ImportCompanyDialog } from "../components/company/ImportCompanyDialog";
 import { DossierGrid, DossierRow, DossierSection } from "../components/company/dossier/DossierSection";
 import { PeopleTable } from "../components/company/dossier/PeopleTable";
@@ -93,6 +94,11 @@ export default function Azienda() {
             }
           />
         </div>
+        {defaultPiva && (
+          <div className="mt-4">
+            <DocumentiCard />
+          </div>
+        )}
         <ImportCompanyDialog
           open={importOpen}
           onClose={() => setImportOpen(false)}
@@ -323,6 +329,8 @@ export default function Azienda() {
             </div>
           </DossierSection>
         )}
+
+        <DocumentiCard />
 
         <p className="pb-2 text-xs text-slate-400">
           Dati provenienti da fonti pubbliche (Registro Imprese) tramite openapi.it, per uso

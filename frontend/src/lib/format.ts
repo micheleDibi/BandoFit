@@ -17,6 +17,12 @@ const dateFormatter = new Intl.DateTimeFormat("it-IT", {
   year: "numeric",
 });
 
+const numericDateFormatter = new Intl.DateTimeFormat("it-IT", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+});
+
 export function formatEur(value: number | string | null | undefined): string {
   if (value === null || value === undefined || value === "") return "—";
   const num = typeof value === "string" ? Number(value) : value;
@@ -36,6 +42,14 @@ export function formatDate(iso: string | null | undefined): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "—";
   return dateFormatter.format(date);
+}
+
+/** Data in formato numerico gg/mm/aaaa. */
+export function formatDateNumeric(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return numericDateFormatter.format(date);
 }
 
 /** Giorni interi da oggi alla data (negativo se passata). */

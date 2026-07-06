@@ -4,6 +4,7 @@ import { AppShell } from "./components/layout/AppShell";
 import AccettaInvito from "./pages/AccettaInvito";
 import AdminPiani from "./pages/AdminPiani";
 import AdminUtenti from "./pages/AdminUtenti";
+import Azienda from "./pages/Azienda";
 import BandiList from "./pages/BandiList";
 import BandoDetail from "./pages/BandoDetail";
 import ConfermaEmail from "./pages/ConfermaEmail";
@@ -36,6 +37,7 @@ export default function App() {
         <Route index element={<Navigate to="/app/bandi" replace />} />
         <Route path="bandi" element={<BandiList />} />
         <Route path="bandi/:slug" element={<BandoDetail />} />
+        <Route path="azienda" element={<Azienda />} />
         <Route path="profilo" element={<Profilo />} />
         <Route
           path="admin/utenti"

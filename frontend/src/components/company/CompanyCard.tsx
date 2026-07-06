@@ -1,4 +1,4 @@
-import { BadgeCheck, Building2 } from "lucide-react";
+import { BadgeCheck, Building2, Download } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useCompany, useSaveCompany, type CompanyPayload } from "../../hooks/useCompany";
 import { useLookups } from "../../hooks/useLookups";
@@ -9,6 +9,7 @@ import { Card } from "../ui/Card";
 import { Combobox } from "../ui/Combobox";
 import { SelectField, TextField } from "../ui/Field";
 import { Skeleton } from "../ui/states";
+import { ImportCompanyDialog } from "./ImportCompanyDialog";
 
 const CLASSI = [
   { value: "micro", label: "Micro impresa (< 10 dipendenti)" },
@@ -145,6 +146,7 @@ export function CompanyCard() {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     if (data) setForm(toFormState(data.company));
@@ -236,13 +238,26 @@ export function CompanyCard() {
 
   return (
     <Card className="p-6">
-      <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
-        <Building2 className="size-4 text-brand-500" aria-hidden />
-        Dati aziendali
-      </h2>
-      <p className="mt-1 text-sm text-slate-500">
-        Servono per i futuri AI-check e vengono condivisi con gli account collegati.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
+            <Building2 className="size-4 text-brand-500" aria-hidden />
+            Dati aziendali
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Servono per i futuri AI-check e vengono condivisi con gli account collegati.
+          </p>
+        </div>
+        <Button variant="secondary" size="sm" onClick={() => setImportOpen(true)}>
+          <Download className="size-4" aria-hidden />
+          Importa da P.IVA
+        </Button>
+      </div>
+      <ImportCompanyDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        defaultPiva={form.partita_iva || null}
+      />
 
       <form onSubmit={handleSubmit} className="mt-5 space-y-5">
         <div className="grid gap-4 sm:grid-cols-2">

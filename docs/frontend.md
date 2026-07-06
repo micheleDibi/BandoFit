@@ -15,6 +15,7 @@ Stack: **Vite + React 18 + TypeScript**, **Tailwind CSS v4** (token di tema in `
 | `/conferma-email` | Atterraggio del link di conferma registrazione (con reinvio se scaduto) | pubblico |
 | `/app/bandi` | Elenco bandi con filtri | autenticato |
 | `/app/bandi/:slug` | Dettaglio bando | autenticato |
+| `/app/azienda` | Dossier aziendale certificato (import openapi.it) | autenticato |
 | `/app/profilo` | Profilo, dati aziendali, gestione account collegati, abbonamento | autenticato |
 | `/app/admin/utenti` | Gestione utenti | solo admin |
 | `/app/admin/piani` | Gestione piani di abbonamento | solo admin |
@@ -33,6 +34,12 @@ Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo 
 - **Profilo del figlio attivo**: dati aziendali in sola lettura, card «Piano ereditato da …» al posto della griglia piani (nessuno switch).
 - **Inviti**: `InviteBanner` (in `AppShell`) mostra agli utenti esistenti l'invito con Accetta (avvisando che l'abbonamento attuale verrà annullato) / Rifiuta; `/accetta-invito` gestisce il link Supabase degli utenti nuovi — cattura l'hash **prima** che supabase-js lo consumi per riconoscere i link scaduti (`otp_expired`), poi form password e accettazione automatica.
 - **Admin**: colonna Famiglia (badge Titolare/In famiglia/Invitato/Retrocesso + email del titolare), piano «(ereditato)» e select disabilitata per i figli.
+
+## Dossier aziendale (openapi.it)
+
+- **Pagina «Azienda»** (`pages/Azienda.tsx`): dossier certificato a sezioni collassabili (`DossierSection`/`DossierRow` nascondono i campi vuoti) — Anagrafica, Attività e ATECO, Sede e unità locali, Persone e cariche (`PeopleTable`), Partecipazioni, Dipendenti, Dati economici, Contatti, Attributi. Header con badge stato impresa, «Startup innovativa» e «Dati di test» (sandbox), data di aggiornamento gg/mm/aaaa e bottone «Aggiorna» (solo per chi può modificare). Empty state con CTA «Importa da P.IVA» (o messaggio passivo per i figli attivi).
+- **Import** (`ImportCompanyDialog`, aperto anche da `CompanyCard`): dialog con P.IVA precompilata e nota costo (~0,30 € + IVA), poi esito con campi compilati automaticamente, differenze rispetto ai valori utente (mai sovrascritti) e chip «ATECO secondari» da aggiungere alle preferenze con un click.
+- **Hook**: `useCompanyDossier` (query key `["company-dossier"]`) e `useImportCompany` (aggiorna anche `["company"]`); `usePreferences`/`useSavePreferences` (key `["preferences"]`).
 
 ## Pattern chiave
 

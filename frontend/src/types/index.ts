@@ -98,6 +98,8 @@ export interface Profile {
   cognome: string | null;
   azienda: string | null;
   telefono: string | null;
+  codice_fiscale: string | null;
+  cf_verified_at: string | null;
   role: UserRole;
   is_active: boolean;
   created_at: string;
@@ -218,4 +220,141 @@ export interface CompanyProfile {
 export interface CompanyResponse {
   editable: boolean;
   company: CompanyProfile | null;
+}
+
+// ---- Dossier certificato (import openapi.it) -------------------------------
+
+export interface DossierRuolo {
+  code: string | null;
+  description: string | null;
+  start: string | null;
+}
+
+export interface DossierPerson {
+  kind: "manager" | "shareholder" | "auditor";
+  nome: string | null;
+  cognome: string | null;
+  denominazione: string | null;
+  codice_fiscale: string | null;
+  data_nascita: string | null;
+  luogo_nascita: string | null;
+  genere: string | null;
+  ruoli: DossierRuolo[];
+  is_legale_rappresentante: boolean;
+  quota_percentuale: number | null;
+  data_inizio_carica: string | null;
+}
+
+export interface DossierUnitaLocale {
+  tipo: string | null;
+  indirizzo: string | null;
+  comune: string | null;
+  provincia: string | null;
+  cap: string | null;
+  regione: string | null;
+  stato: string | null;
+}
+
+export interface CompanyDossier {
+  anagrafica: {
+    denominazione: string | null;
+    partita_iva: string | null;
+    codice_fiscale: string | null;
+    forma_giuridica: string | null;
+    forma_giuridica_dettaglio: string | null;
+    rea: string | null;
+    cciaa: string | null;
+    data_costituzione: string | null;
+    data_inizio_attivita: string | null;
+    stato: string | null;
+    gruppo_societario: string | null;
+    capogruppo: string | null;
+  };
+  attivita: {
+    ateco: { codice: string | null; descrizione: string | null };
+    ateco_2022: { codice: string | null; descrizione: string | null };
+    ateco_secondari: string[];
+    nace: string | null;
+    sae: string | null;
+  };
+  sede: {
+    indirizzo: string | null;
+    comune: string | null;
+    provincia: string | null;
+    cap: string | null;
+    regione: string | null;
+    numero_sedi: number | null;
+    unita_locali: DossierUnitaLocale[];
+  };
+  contatti: {
+    pec: string | null;
+    email: string | null;
+    telefono: string | null;
+    fax: string | null;
+    sito_web: string | null;
+  };
+  dipendenti: {
+    numero: number | null;
+    fascia: string | null;
+    trend: number | null;
+    percentuali_contratti: Record<string, number | null> | null;
+  };
+  bilanci: {
+    dimensione_impresa: string | null;
+    fatturato: number | null;
+    capitale_sociale: number | null;
+    patrimonio_netto: number | null;
+    ebitda: number | null;
+    utile: number | null;
+  };
+  partecipazioni: Array<{
+    denominazione: string | null;
+    codice_fiscale: string | null;
+    quota: number | null;
+  }>;
+  flags: Record<string, boolean | null>;
+}
+
+export interface DossierResponse {
+  editable: boolean;
+  imported: boolean;
+  fetched_at: string | null;
+  sandbox: boolean | null;
+  dossier: CompanyDossier | null;
+  people: DossierPerson[];
+  derived: Record<string, unknown>;
+}
+
+export interface ImportConflict {
+  campo: string;
+  valore_attuale: string | number | null;
+  valore_certificato: string | number | null;
+}
+
+export interface AtecoSuggestion {
+  id: number;
+  codice: string;
+  descrizione: string | null;
+}
+
+export interface ImportResult {
+  company: CompanyResponse;
+  dossier: CompanyDossier;
+  people: DossierPerson[];
+  autofill: { applied: string[]; conflicts: ImportConflict[] };
+  suggestions: { codici_ateco: AtecoSuggestion[] };
+  fetched_at: string;
+  sandbox: boolean;
+}
+
+// ---- Preferenze per utente -------------------------------------------------
+
+export interface Preferences {
+  regioni: number[];
+  settori: number[];
+  beneficiari: number[];
+  codici_ateco: number[];
+  tipologie: number[];
+  modalita: number[];
+  programmi: number[];
 }

@@ -1,0 +1,18 @@
+{
+  "data": {
+    "cf_piva_id": "14061981008",
+    "tipo": "ordinaria-impresa-individuale",
+    "callback": false,
+    "owner": "account@example.com",
+    "stato_richiesta": "Dati disponibili",
+    "timestamp_creation": 1783363351,
+    "timestamp_last_update": 1783363391,
+    "allegati": [
+      "6a4bf722c37dff237809ed75_0.pdf"
+    ],
+    "id": "6a4bf7252ba8a578e60896f2"
+  },
+  "success": true,
+  "message": "",
+  "error": null
+}

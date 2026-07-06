@@ -13,7 +13,11 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from app.clients.openapi import OpenapiClient, OpenapiInvalidIdError
+from app.clients.openapi import (
+    OpenapiClient,
+    OpenapiInvalidIdError,
+    OpenapiWrongTypeError,
+)
 from app.core.errors import (
     OpenapiNotConfiguredError,
     OpenapiTimeoutError,
@@ -69,6 +73,10 @@ class FakeHTTP:
 
     async def get(self, url, **kwargs):
         self.requests.append(("GET", url))
+        return self._next()
+
+    async def request(self, method, url, **kwargs):
+        self.requests.append((method.upper(), url))
         return self._next()
 
     async def aclose(self):
@@ -234,6 +242,45 @@ class TestItFull:
             await client.it_full("14061981008")
         # nessun poll effettuato: solo POST token + prima GET
         assert len(http.requests) == 2
+
+
+class TestVisure:
+    async def test_richiesta_accettata(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, fixture("visura_request_accepted")))
+        data = await client.visura_request("ordinaria-impresa-individuale", "14061981008")
+        assert data["id"] and data["stato_richiesta"] == "In erogazione"
+        # POST sull'endpoint della variante
+        assert ("POST" in [m for m, u in http.requests if "ordinaria-impresa-individuale" in u][0])
+
+    async def test_tipo_sbagliato_gratuito(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(404, fixture("visura_wrong_type")))
+        with pytest.raises(OpenapiWrongTypeError):
+            await client.visura_request("ordinaria-societa-capitale", "14061981008")
+
+    async def test_status_evasa(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, fixture("visura_ready")))
+        data = await client.visura_status("ordinaria-impresa-individuale", "6a4bf7252ba8a578e60896f2")
+        assert data["stato_richiesta"] == "Dati disponibili"
+        assert data["allegati"]
+
+    async def test_allegati_senza_file_errore(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, {"data": {"nome": "x.zip"}, "success": True, "message": "", "error": None}))
+        with pytest.raises(OpenapiUpstreamError):
+            await client.visura_allegati("ordinaria-impresa-individuale", "req1")
+
+    def test_scope_visure_incluse(self):
+        client, _ = make_client()
+        scopes = client._scopes()
+        assert "POST:visurecamerali.openapi.it/ordinaria-societa-capitale" in scopes
+        assert "GET:visurecamerali.openapi.it/ordinaria-impresa-individuale" in scopes
 
 
 class TestVerificaCf:

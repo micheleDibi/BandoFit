@@ -1,9 +1,17 @@
-from fastapi import APIRouter
+from urllib.parse import quote
+
+from fastapi import APIRouter, Response
 
 from app.api.deps import CurrentUser, OpenapiDep, PrimaryClient, SecondaryClient
 from app.schemas.company import CompanyIn, CompanyResponse
-from app.schemas.openapi_data import DossierResponse, ImportIn, ImportResult
-from app.services import company_service, openapi_service
+from app.schemas.openapi_data import (
+    DocumentOut,
+    DocumentsResponse,
+    DossierResponse,
+    ImportIn,
+    ImportResult,
+)
+from app.services import company_service, document_service, openapi_service
 
 router = APIRouter(prefix="/me/company", tags=["company"])
 
@@ -48,3 +56,38 @@ async def get_dossier(user: CurrentUser, primary: PrimaryClient) -> DossierRespo
     """Dossier certificato importato da openapi.it: proprio per il titolare,
     in sola lettura per un figlio attivo."""
     return await openapi_service.get_dossier(primary, user)
+
+
+@router.post("/documents", response_model=DocumentOut, status_code=201)
+async def request_document(
+    user: CurrentUser, primary: PrimaryClient, openapi: OpenapiDep
+) -> DocumentOut:
+    """Richiede la visura camerale ufficiale (A PAGAMENTO, ~2,90–4,90 €).
+    Asincrona: torna `pending` se il Registro non ha ancora evaso."""
+    return await document_service.request_document(primary, openapi, user)
+
+
+@router.get("/documents", response_model=DocumentsResponse)
+async def list_documents(
+    user: CurrentUser, primary: PrimaryClient, openapi: OpenapiDep
+) -> DocumentsResponse:
+    """Documenti ufficiali dell'azienda; le richieste in corso vengono
+    completate qui appena il Registro le evade (controllo gratuito)."""
+    return await document_service.list_documents(primary, openapi, user)
+
+
+@router.get("/documents/{document_id}/file")
+async def download_document(
+    document_id: str, user: CurrentUser, primary: PrimaryClient
+) -> Response:
+    """Scarica il PDF del documento (titolare e account collegati)."""
+    pdf_bytes, file_name = await document_service.download_document(
+        primary, user, document_id
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(file_name)}"
+        },
+    )

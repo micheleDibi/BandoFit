@@ -51,7 +51,40 @@ class FakeQuery:
         self._primary.ops.append((self._table, self._op, self._payload))
         if self._op == "select":
             return SimpleNamespace(data=self._primary.selects.get(self._table, []))
+        if self._op == "insert" and isinstance(self._payload, dict):
+            # come PostgREST: l'insert ritorna la riga (id/created_at generati)
+            return SimpleNamespace(
+                data=[
+                    {
+                        "id": f"gen-{self._table}-{len(self._primary.ops)}",
+                        "created_at": "2026-07-06T12:00:00+00:00",
+                        **self._payload,
+                    }
+                ]
+            )
         return SimpleNamespace(data=[])
+
+
+class FakeStorage:
+    """Storage Supabase finto: registra bucket creati, upload e download."""
+
+    def __init__(self):
+        self.buckets: list[str] = []
+        self.uploads: list[tuple[str, bytes]] = []
+        self.files: dict[str, bytes] = {}
+
+    async def create_bucket(self, bucket_id, name=None, options=None):
+        self.buckets.append(bucket_id)
+
+    def from_(self, bucket):
+        return self
+
+    async def upload(self, path, file, file_options=None):
+        self.uploads.append((path, file))
+        self.files[path] = file
+
+    async def download(self, path):
+        return self.files[path]
 
 
 class FakePrimary:
@@ -62,6 +95,7 @@ class FakePrimary:
         self.lock = lock
         self.ops: list = []
         self.rpcs: list = []
+        self.storage = FakeStorage()
 
     def table(self, name: str) -> FakeQuery:
         return FakeQuery(self, name)

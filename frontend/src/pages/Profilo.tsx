@@ -1,4 +1,4 @@
-import { BadgeCheck, CalendarDays, Check, Users } from "lucide-react";
+import { BadgeCheck, CalendarDays, Check, ShieldCheck, Users } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { CompanyCard } from "../components/company/CompanyCard";
 import { FamilyCard } from "../components/family/FamilyCard";
@@ -8,7 +8,7 @@ import { Card } from "../components/ui/Card";
 import { Dialog } from "../components/ui/Dialog";
 import { TextField } from "../components/ui/Field";
 import { ErrorState, Skeleton } from "../components/ui/states";
-import { useMe, useSwitchPlan, useUpdateProfile } from "../hooks/useMe";
+import { useMe, useSwitchPlan, useUpdateProfile, useVerifyCf } from "../hooks/useMe";
 import { usePlans } from "../hooks/usePlans";
 import { apiErrorMessage } from "../lib/api";
 import { formatDate } from "../lib/format";
@@ -20,11 +20,19 @@ export default function Profilo() {
     usePlans();
   const updateProfile = useUpdateProfile();
   const switchPlan = useSwitchPlan();
+  const verifyCf = useVerifyCf();
 
-  const [form, setForm] = useState({ nome: "", cognome: "", azienda: "", telefono: "" });
+  const [form, setForm] = useState({
+    nome: "",
+    cognome: "",
+    azienda: "",
+    telefono: "",
+    codice_fiscale: "",
+  });
   const [saved, setSaved] = useState(false);
   const [planToConfirm, setPlanToConfirm] = useState<Plan | null>(null);
   const [switchNotice, setSwitchNotice] = useState<string | null>(null);
+  const [verifyOpen, setVerifyOpen] = useState(false);
 
   useEffect(() => {
     if (me) {
@@ -33,6 +41,7 @@ export default function Profilo() {
         cognome: me.profile.cognome ?? "",
         azienda: me.profile.azienda ?? "",
         telefono: me.profile.telefono ?? "",
+        codice_fiscale: me.profile.codice_fiscale ?? "",
       });
     }
   }, [me]);
@@ -53,6 +62,10 @@ export default function Profilo() {
   const currentPlanId = me.subscription?.plan.id;
   const isActiveChild = me.family?.role === "child" && me.family.status === "active";
 
+  const cfInput = form.codice_fiscale.trim().toUpperCase();
+  const cfVerified =
+    !!me?.profile.cf_verified_at && cfInput === (me.profile.codice_fiscale ?? "");
+
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     setSaved(false);
@@ -61,9 +74,19 @@ export default function Profilo() {
       cognome: form.cognome.trim(),
       azienda: form.azienda.trim(),
       telefono: form.telefono.trim(),
+      codice_fiscale: cfInput || null,
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
+  };
+
+  const handleVerifyCf = async () => {
+    try {
+      await verifyCf.mutateAsync(cfInput);
+      setVerifyOpen(false);
+    } catch {
+      // errore mostrato nel dialog
+    }
   };
 
   const handleSwitch = async () => {
@@ -128,6 +151,46 @@ export default function Profilo() {
             onChange={(e) => setForm((f) => ({ ...f, telefono: e.target.value }))}
             autoComplete="tel"
           />
+          <div className="sm:col-span-2">
+            <div className="flex items-end gap-2">
+              <div className="max-w-xs flex-1">
+                <TextField
+                  label="Codice fiscale"
+                  placeholder="16 caratteri"
+                  value={form.codice_fiscale}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, codice_fiscale: e.target.value.toUpperCase() }))
+                  }
+                  autoComplete="off"
+                />
+              </div>
+              {cfVerified ? (
+                <span
+                  className="mb-2 inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600"
+                  role="status"
+                >
+                  <ShieldCheck className="size-4" aria-hidden />
+                  Verificato
+                </span>
+              ) : (
+                cfInput.length === 16 && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setVerifyOpen(true)}
+                  >
+                    <ShieldCheck className="size-4" aria-hidden />
+                    Verifica
+                  </Button>
+                )
+              )}
+            </div>
+            {!cfVerified && cfInput.length === 16 && (
+              <p className="mt-1 text-xs text-slate-400">
+                Da verificare: conferma il codice fiscale all'Anagrafe Tributaria.
+              </p>
+            )}
+          </div>
           <div className="flex items-center gap-3 sm:col-span-2">
             <Button type="submit" loading={updateProfile.isPending}>
               Salva modifiche
@@ -278,6 +341,36 @@ export default function Profilo() {
         </p>
       </section>
       )}
+
+      {/* Verifica codice fiscale */}
+      <Dialog
+        open={verifyOpen}
+        onClose={() => setVerifyOpen(false)}
+        title="Verifica il codice fiscale"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setVerifyOpen(false)}>
+              Annulla
+            </Button>
+            <Button onClick={handleVerifyCf} loading={verifyCf.isPending}>
+              Verifica ora
+            </Button>
+          </>
+        }
+      >
+        <p>
+          Verifichiamo che <strong className="text-slate-900">{cfInput}</strong> sia
+          registrato all'Anagrafe Tributaria (Agenzia delle Entrate) tramite openapi.it.
+        </p>
+        <p className="mt-2 text-xs text-slate-400">
+          La verifica utilizza il credito del servizio dati (circa 0,05 € + IVA).
+        </p>
+        {verifyCf.isError && (
+          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-red-700" role="alert">
+            {apiErrorMessage(verifyCf.error)}
+          </p>
+        )}
+      </Dialog>
 
       {/* Conferma cambio piano */}
       <Dialog

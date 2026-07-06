@@ -21,8 +21,38 @@ export function useUpdateProfile() {
       cognome?: string;
       azienda?: string;
       telefono?: string;
+      codice_fiscale?: string | null;
     }) => (await api.patch<Me>("/me", data)).data,
     onSuccess: (me) => queryClient.setQueryData(["me"], me),
+  });
+}
+
+/** Verifica del codice fiscale all'Anagrafe Tributaria (operazione A
+ * PAGAMENTO lato server: il bottone mostra sempre la nota costo). */
+export function useVerifyCf() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (codiceFiscale: string) =>
+      (
+        await api.post<{ codice_fiscale: string; cf_verified_at: string | null }>(
+          "/me/verify-cf",
+          { codice_fiscale: codiceFiscale },
+        )
+      ).data,
+    onSuccess: (result) => {
+      queryClient.setQueryData<Me | undefined>(["me"], (me) =>
+        me
+          ? {
+              ...me,
+              profile: {
+                ...me.profile,
+                codice_fiscale: result.codice_fiscale,
+                cf_verified_at: result.cf_verified_at,
+              },
+            }
+          : me,
+      );
+    },
   });
 }
 

@@ -7,6 +7,7 @@ annotata in api_usage_events QUALUNQUE sia l'esito.
 """
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 
 from app.clients.openapi import OpenapiClient, OpenapiInvalidIdError
@@ -42,7 +43,16 @@ logger = logging.getLogger("bandofit.openapi")
 
 COST_IT_FULL_CENTS = 30
 COST_VERIFICA_CF_CENTS = 5
-LOCK_TTL_SECONDS = 120
+# Più lungo della deadline complessiva del client (240s, vedi clients/openapi.py):
+# il lock NON deve scadere mentre l'import è ancora in corso, o un secondo
+# import concorrente pagherebbe una seconda chiamata.
+LOCK_TTL_SECONDS = 300
+VERIFY_LOCK_TTL_SECONDS = 30
+# Cooldown (in-memory) tra verifiche CF A PAGAMENTO dello stesso utente:
+# il lock copre la concorrenza, questo evita il drenaggio di credito con
+# tentativi in serie.
+VERIFY_COOLDOWN_SECONDS = 30.0
+_last_paid_verify: dict[str, float] = {}
 
 PEOPLE_SELECT = (
     "kind,nome,cognome,denominazione,codice_fiscale,data_nascita,luogo_nascita,"
@@ -112,10 +122,10 @@ async def _fetch_company_data(primary, company_profile_id: str) -> dict | None:
     return resp.data[0] if resp.data else None
 
 
-async def _acquire_lock(primary, parent_id: str) -> bool:
+async def _acquire_lock(primary, parent_id: str, ttl_seconds: int = LOCK_TTL_SECONDS) -> bool:
     resp = await primary.rpc(
         "fn_acquire_import_lock",
-        {"p_parent_id": str(parent_id), "p_ttl_seconds": LOCK_TTL_SECONDS},
+        {"p_parent_id": str(parent_id), "p_ttl_seconds": ttl_seconds},
     ).execute()
     return bool(resp.data)
 
@@ -332,62 +342,93 @@ async def verify_cf(primary, openapi: OpenapiClient, user: dict, codice_fiscale:
     if not openapi.enabled:
         raise OpenapiNotConfiguredError()
 
+    user_id = str(user["id"])
+
+    # Cooldown tra tentativi A PAGAMENTO in serie (il lock sotto copre la
+    # concorrenza): protegge il credito da spam di verifiche.
+    last_paid = _last_paid_verify.get(user_id)
+    if last_paid is not None and time.monotonic() - last_paid < VERIFY_COOLDOWN_SECONDS:
+        raise AppError(
+            429,
+            "verify_cooldown",
+            "Hai appena richiesto una verifica: attendi qualche secondo e riprova",
+        )
+
     membership = await family_service.get_membership(primary, user["id"])
     family_parent_id = (
         str(membership["parent_id"])
         if membership and membership["status"] == "active"
-        else str(user["id"])
+        else user_id
     )
     cost = 0 if openapi.sandbox else COST_VERIFICA_CF_CENTS
     meta = {"cf": _mask_cf(cf)}
 
+    # Stesso principio dell'import: la chiamata a pagamento avviene tra
+    # statement PostgREST, serve un lock esplicito contro il doppio addebito
+    # (doppio click, due tab).
+    if not await _acquire_lock(primary, user_id, VERIFY_LOCK_TTL_SECONDS):
+        raise AppError(
+            409,
+            "verify_in_progress",
+            "Una verifica è già in corso: attendi qualche istante",
+        )
+
     try:
         valid = await openapi.verifica_cf(cf)
+        _last_paid_verify[user_id] = time.monotonic()
     except OpenapiInvalidIdError:
         await record_usage(
-            primary, user_id=str(user["id"]), family_parent_id=family_parent_id,
+            primary, user_id=user_id, family_parent_id=family_parent_id,
             service="IT-verifica_cf", outcome="error", cost_cents=0, meta=meta,
         )
+        await _release_lock(primary, user_id)
         raise AppError(400, "cf_invalid", "Il codice fiscale non è formalmente valido") from None
     except OpenapiTimeoutError:
+        # Esito (e addebito) ignoto: cooldown attivo e lock lasciato scadere.
+        _last_paid_verify[user_id] = time.monotonic()
         await record_usage(
-            primary, user_id=str(user["id"]), family_parent_id=family_parent_id,
+            primary, user_id=user_id, family_parent_id=family_parent_id,
             service="IT-verifica_cf", outcome="timeout_unknown", cost_cents=cost, meta=meta,
         )
         raise
     except AppError:
         await record_usage(
-            primary, user_id=str(user["id"]), family_parent_id=family_parent_id,
+            primary, user_id=user_id, family_parent_id=family_parent_id,
             service="IT-verifica_cf", outcome="error", cost_cents=0, meta=meta,
         )
+        await _release_lock(primary, user_id)
         raise
 
-    await record_usage(
-        primary, user_id=str(user["id"]), family_parent_id=family_parent_id,
-        service="IT-verifica_cf", outcome="success", cost_cents=cost,
-        meta={**meta, "valid": valid},
-    )
+    try:
+        await record_usage(
+            primary, user_id=user_id, family_parent_id=family_parent_id,
+            service="IT-verifica_cf", outcome="success", cost_cents=cost,
+            meta={**meta, "valid": valid},
+        )
 
-    if valid:
-        verified_at = datetime.now(timezone.utc).isoformat()
-        # CF + marca temporale nello STESSO update: il trigger DB rispetta
-        # il valore esplicito di cf_verified_at.
-        await primary.table("profiles").update(
-            {"codice_fiscale": cf, "cf_verified_at": verified_at}
-        ).eq("id", str(user["id"])).execute()
-        return {"codice_fiscale": cf, "cf_verified_at": verified_at}
+        if valid:
+            verified_at = datetime.now(timezone.utc).isoformat()
+            # CF + marca temporale nello STESSO update: il trigger DB rispetta
+            # il valore esplicito di cf_verified_at.
+            await primary.table("profiles").update(
+                {"codice_fiscale": cf, "cf_verified_at": verified_at}
+            ).eq("id", user_id).execute()
+            return {"codice_fiscale": cf, "cf_verified_at": verified_at}
 
-    # CF formalmente corretto ma non registrato: lo salviamo comunque (non
-    # verificato) così l'utente non lo riscrive da zero.
-    if current.get("codice_fiscale") != cf:
-        await primary.table("profiles").update({"codice_fiscale": cf}).eq(
-            "id", str(user["id"])
-        ).execute()
-    raise AppError(
-        400,
-        "cf_not_valid",
-        "Il codice fiscale non risulta registrato all'Anagrafe Tributaria",
-    )
+        # CF formalmente corretto ma non registrato: lo salviamo SOLO se
+        # l'utente non ha già un CF verificato — una verifica fallita non deve
+        # mai cancellare un dato buono (il trigger DB azzererebbe la marca).
+        if current.get("codice_fiscale") != cf and not current.get("cf_verified_at"):
+            await primary.table("profiles").update({"codice_fiscale": cf}).eq(
+                "id", user_id
+            ).execute()
+        raise AppError(
+            400,
+            "cf_not_valid",
+            "Il codice fiscale non risulta registrato all'Anagrafe Tributaria",
+        )
+    finally:
+        await _release_lock(primary, user_id)
 
 
 async def get_dossier(primary, user: dict) -> DossierResponse:

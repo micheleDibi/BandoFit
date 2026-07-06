@@ -223,6 +223,18 @@ class TestItFull:
         with pytest.raises(OpenapiTimeoutError):
             await client.it_full("14061981008")
 
+    async def test_deadline_complessiva(self, monkeypatch):
+        # La durata totale deve restare sotto il TTL del lock di import:
+        # oltre la deadline si interrompe anche se i tentativi non sono finiti.
+        monkeypatch.setattr("app.clients.openapi._TOTAL_DEADLINE_SECONDS", -1.0)
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(302, fixture("it_full_pending")))
+        with pytest.raises(OpenapiTimeoutError):
+            await client.it_full("14061981008")
+        # nessun poll effettuato: solo POST token + prima GET
+        assert len(http.requests) == 2
+
 
 class TestVerificaCf:
     async def test_validita_true_e_false(self):

@@ -48,6 +48,13 @@ def fake_openapi(valid=True, error: Exception | None = None, enabled=True, sandb
 PROFILE_EMPTY = {"codice_fiscale": None, "cf_verified_at": None}
 
 
+@pytest.fixture(autouse=True)
+def reset_verify_cooldown():
+    openapi_service._last_paid_verify.clear()
+    yield
+    openapi_service._last_paid_verify.clear()
+
+
 class TestVerificaCf:
     async def test_formato_invalido_niente_chiamata(self):
         primary = FakePrimary()
@@ -106,3 +113,48 @@ class TestVerificaCf:
             primary, fake_openapi(valid=True, sandbox=True), USER, CF_OK
         )
         assert primary.ops_for("api_usage_events", "insert")[0]["cost_cents"] == 0
+
+    async def test_verifica_fallita_non_cancella_un_cf_verificato(self):
+        # L'utente ha già un CF VERIFICATO; verifica un CF diverso non
+        # registrato: il dato buono non deve essere toccato.
+        primary = FakePrimary(
+            selects={
+                "profiles": [
+                    {"codice_fiscale": "VRDLGI85B02F205X", "cf_verified_at": "2026-07-01T00:00:00+00:00"}
+                ]
+            }
+        )
+        with pytest.raises(AppError) as exc:
+            await openapi_service.verify_cf(primary, fake_openapi(valid=False), USER, CF_OK)
+        assert exc.value.code == "cf_not_valid"
+        assert primary.ops_for("profiles", "update") == []  # nessuna sovrascrittura
+
+    async def test_lock_occupato_niente_chiamata(self):
+        primary = FakePrimary(selects={"profiles": [PROFILE_EMPTY]}, lock=False)
+        called = []
+
+        from types import SimpleNamespace
+
+        async def verifica_cf(cf):
+            called.append(cf)
+
+        openapi = SimpleNamespace(enabled=True, sandbox=False, verifica_cf=verifica_cf)
+        with pytest.raises(AppError) as exc:
+            await openapi_service.verify_cf(primary, openapi, USER, CF_OK)
+        assert exc.value.code == "verify_in_progress"
+        assert called == []  # la chiamata a pagamento non parte
+
+    async def test_lock_rilasciato_dopo_il_successo(self):
+        primary = FakePrimary(selects={"profiles": [PROFILE_EMPTY]})
+        await openapi_service.verify_cf(primary, fake_openapi(valid=True), USER, CF_OK)
+        assert ("fn_release_import_lock", {"p_parent_id": USER["id"]}) in primary.rpcs
+
+    async def test_cooldown_tra_tentativi_a_pagamento(self):
+        primary = FakePrimary(selects={"profiles": [PROFILE_EMPTY]})
+        with pytest.raises(AppError):  # cf_not_valid (primo tentativo, pagato)
+            await openapi_service.verify_cf(primary, fake_openapi(valid=False), USER, CF_OK)
+        with pytest.raises(AppError) as exc:  # secondo tentativo immediato
+            await openapi_service.verify_cf(primary, fake_openapi(valid=False), USER, CF_OK)
+        assert exc.value.code == "verify_cooldown"
+        # una sola riga nel registro consumi: il secondo tentativo non è partito
+        assert len(primary.ops_for("api_usage_events", "insert")) == 1

@@ -50,8 +50,21 @@ _HOSTS = {
 _TOKEN_TTL_SECONDS = 30 * 24 * 3600  # mint gratuito: token brevi, rigenerati al volo
 _TOKEN_EXPIRY_MARGIN = 300
 _POLL_INTERVAL_SECONDS = 3.0
-_POLL_MAX_ATTEMPTS = 25  # ~75s, entro il TTL del lock di import (120s)
+_POLL_MAX_ATTEMPTS = 25
+# Durata massima complessiva di it_full (prima chiamata + polling): DEVE
+# restare sotto il TTL del lock di import (300s), o un import concorrente
+# potrebbe partire mentre questo è ancora in corso e pagare due volte.
+_TOTAL_DEADLINE_SECONDS = 240.0
 _PENDING_STATES = {"PENDING", "IN_PROGRESS", "RUNNING"}
+
+
+def _mask_url(url: str) -> str:
+    """URL per i log con l'identificativo finale mascherato: i path contengono
+    P.IVA o CODICI FISCALI (dato personale) e non devono finire nei log."""
+    base, _, last = url.rpartition("/")
+    if not base or not last:
+        return url
+    return f"{base}/***"
 
 
 class OpenapiInvalidIdError(Exception):
@@ -140,14 +153,16 @@ class OpenapiClient:
         try:
             resp = await self._http.get(url, headers=headers)
         except httpx.ConnectError:
-            logger.warning("openapi: errore di connessione, ritento una volta (%s)", url)
+            logger.warning(
+                "openapi: errore di connessione, ritento una volta (%s)", _mask_url(url)
+            )
             try:
                 resp = await self._http.get(url, headers=headers)
             except httpx.HTTPError as exc:
                 raise OpenapiUpstreamError() from exc
         except httpx.TimeoutException as exc:
             # Esito ignoto (possibile addebito): nessun retry automatico.
-            logger.error("openapi: timeout su %s", url)
+            logger.error("openapi: timeout su %s", _mask_url(url))
             raise OpenapiTimeoutError() from exc
         except httpx.HTTPError as exc:
             raise OpenapiUpstreamError() from exc
@@ -160,7 +175,9 @@ class OpenapiClient:
         try:
             body = resp.json()
         except ValueError as exc:
-            logger.error("openapi: risposta non JSON da %s (HTTP %s)", url, resp.status_code)
+            logger.error(
+                "openapi: risposta non JSON da %s (HTTP %s)", _mask_url(url), resp.status_code
+            )
             raise OpenapiUpstreamError() from exc
         return resp.status_code, body
 
@@ -175,7 +192,7 @@ class OpenapiClient:
             raise OpenapiInvalidIdError(message)
         logger.error(
             "openapi: errore da %s: HTTP %s, message=%r, error=%s",
-            url, status, message, body.get("error"),
+            _mask_url(url), status, message, body.get("error"),
         )
         raise OpenapiUpstreamError()
 
@@ -184,7 +201,9 @@ class OpenapiClient:
     async def it_full(self, piva: str) -> dict:
         """Visura completa IT-full. Gestisce il flusso asincrono: se il dato non
         è in cache al provider, la prima risposta è PENDING e si fa polling
-        sull'endpoint gratuito IT-check_id."""
+        sull'endpoint gratuito IT-check_id — con deadline complessiva sotto il
+        TTL del lock di import."""
+        started = time.monotonic()
         url = f"{self._hosts['company']}/IT-full/{piva}"
         status, body = await self._get(url)
         data = self._check_envelope(status, body, url)
@@ -193,11 +212,17 @@ class OpenapiClient:
         while isinstance(data, dict) and str(data.get("state", "")).upper() in _PENDING_STATES:
             request_id = data.get("id")
             if not request_id:
-                logger.error("openapi: risposta PENDING senza id da %s", url)
+                logger.error("openapi: risposta PENDING senza id da %s", _mask_url(url))
                 raise OpenapiUpstreamError()
             attempts += 1
-            if attempts > _POLL_MAX_ATTEMPTS:
-                logger.error("openapi: IT-full ancora PENDING dopo %s tentativi", attempts - 1)
+            if (
+                attempts > _POLL_MAX_ATTEMPTS
+                or time.monotonic() - started > _TOTAL_DEADLINE_SECONDS
+            ):
+                logger.error(
+                    "openapi: IT-full ancora PENDING dopo %s tentativi (%.0fs)",
+                    attempts - 1, time.monotonic() - started,
+                )
                 raise OpenapiTimeoutError()
             await asyncio.sleep(_POLL_INTERVAL_SECONDS)
             poll_url = f"{self._hosts['company']}/IT-check_id/{request_id}"

@@ -18,6 +18,7 @@ from app.api.routers import (
     ai_check,
     auth,
     bandi,
+    calendar,
     company,
     family,
     health,
@@ -25,6 +26,7 @@ from app.api.routers import (
     me,
     plans,
     preferences,
+    saved_bandi,
 )
 from app.clients.anthropic_ai import AiCheckClient
 from app.clients.openapi import OpenapiClient
@@ -119,6 +121,8 @@ for router in (
     company.router,
     preferences.router,
     ai_check.router,
+    saved_bandi.router,
+    calendar.router,
     lookups.router,
     bandi.router,
     admin_users.router,

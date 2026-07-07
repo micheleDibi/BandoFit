@@ -73,6 +73,53 @@ export function formatDateNumeric(iso: string | null | undefined): string {
 // fuso del browser darebbe badge in contrasto con l'ordinamento.
 const romeDateFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Rome" });
 
+const monthYearFormatter = new Intl.DateTimeFormat("it-IT", {
+  month: "long",
+  year: "numeric",
+});
+
+const weekdayLongFormatter = new Intl.DateTimeFormat("it-IT", {
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+});
+
+/** Data locale in YYYY-MM-DD SENZA passare da toISOString (che a cavallo
+ *  della mezzanotte UTC slitterebbe di un giorno). */
+export function toLocalIsoDate(d: Date): string {
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+/** Oggi nel fuso italiano, formato YYYY-MM-DD. */
+export function todayItalyIso(): string {
+  return romeDateFormatter.format(new Date());
+}
+
+/** "luglio 2026" per l'intestazione del calendario. */
+export function formatMonthYear(anno: number, mese: number): string {
+  return monthYearFormatter.format(new Date(anno, mese - 1, 1));
+}
+
+/** "lunedì 7 luglio" per l'agenda del giorno (input YYYY-MM-DD). */
+export function formatWeekdayLong(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return weekdayLongFormatter.format(new Date(y, m - 1, d));
+}
+
+/** Etichette brevi dei giorni, lunedì per primo ("lun", "mar", …). */
+export function weekdayShortLabels(): string[] {
+  const formatter = new Intl.DateTimeFormat("it-IT", { weekday: "short" });
+  // Il 1° gennaio 2024 è un lunedì: settimana campione.
+  return Array.from({ length: 7 }, (_, i) => formatter.format(new Date(2024, 0, 1 + i)));
+}
+
+/** "HH:MM" da un orario "HH:MM:SS" (nessun parsing di Date). */
+export function formatTime(t: string | null | undefined): string {
+  return t ? t.slice(0, 5) : "";
+}
+
 /** Giorni interi da oggi (fuso italiano) alla data (negativo se passata). */
 export function daysUntil(iso: string | null | undefined): number | null {
   if (!iso) return null;

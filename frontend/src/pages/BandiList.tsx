@@ -2,7 +2,7 @@ import { Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ActiveFilterChips } from "../components/bandi/ActiveFilterChips";
 import { BandiPerTeButton } from "../components/bandi/BandiPerTeButton";
-import { BandoCard } from "../components/bandi/BandoCard";
+import { SavableBandoCard } from "../components/bandi/SavableBandoCard";
 import { FilterSidebar } from "../components/bandi/FilterSidebar";
 import { Button } from "../components/ui/Button";
 import { Pagination } from "../components/ui/Pagination";
@@ -235,7 +235,9 @@ export default function BandiList() {
                   "grid gap-4 xl:grid-cols-2" + (isPlaceholderData ? " opacity-60 transition-opacity" : "")
                 }
               >
-                {data?.items.map((bando) => <BandoCard key={bando.id} bando={bando} />)}
+                {data?.items.map((bando) => (
+                  <SavableBandoCard key={bando.id} bando={bando} />
+                ))}
               </div>
               <div className="mt-8">
                 <Pagination

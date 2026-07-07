@@ -1,4 +1,10 @@
-import { forwardRef, useId, type InputHTMLAttributes, type SelectHTMLAttributes } from "react";
+import {
+  forwardRef,
+  useId,
+  type InputHTMLAttributes,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
+} from "react";
 import { cn } from "../../lib/cn";
 
 const inputClasses =
@@ -65,6 +71,37 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(
   },
 );
 TextField.displayName = "TextField";
+
+export interface TextareaFieldProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
+  label: string;
+  error?: string;
+  helper?: string;
+}
+
+export const TextareaField = forwardRef<HTMLTextAreaElement, TextareaFieldProps>(
+  ({ label, error, helper, required, id, className, ...props }, ref) => {
+    const autoId = useId();
+    const fieldId = id ?? autoId;
+    return (
+      <FieldWrapper label={label} required={required} error={error} helper={helper} htmlFor={fieldId}>
+        <textarea
+          ref={ref}
+          id={fieldId}
+          required={required}
+          aria-invalid={!!error}
+          className={cn(
+            inputClasses,
+            "h-auto min-h-20 resize-y py-2 leading-relaxed",
+            error && "border-red-400 focus:border-red-500",
+            className,
+          )}
+          {...props}
+        />
+      </FieldWrapper>
+    );
+  },
+);
+TextareaField.displayName = "TextareaField";
 
 export interface SelectFieldProps extends SelectHTMLAttributes<HTMLSelectElement> {
   label: string;

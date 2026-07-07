@@ -191,6 +191,45 @@ Item della risposta: `id`, `slug`, `titolo`, `titolo_breve`, `descrizione_breve`
 ### `GET /bandi/{slug}`
 Dettaglio completo: campi dell'elenco + `area_geografica`, `tematica[]`, `link_bando`, `link_candidatura`, `contenuto` (JSON strutturato a sezioni/segmenti, renderizzato dal frontend), `allegati[]`, `programma`, `settori[]`, `beneficiari[]`, `codici_ateco[]`. `404` se lo slug non esiste o il bando non è pubblicabile.
 
+## Bandi salvati
+
+Preferiti **per utente** sul DB primario: RIFERIMENTI al catalogo (bando_id + snapshot di slug/titolo/scadenza/stato), non copie. Se il bando sparisce dal catalogo la riga resta e viene servita dallo snapshot con `disponibile: false`. Cap: 200 bandi salvati per utente.
+
+### `POST /me/saved-bandi` (201)
+Body `{ "bando_slug": "..." }`. **Idempotente** (è un toggle): già salvato → ritorna la riga esistente. Risposta `SavedBandoItem`: `{ bando: <item della lista bandi>, disponibile, in_calendario, salvato_il }`.
+Errori: `404 not_found` (bando non nel catalogo), `400 bad_request` (limite raggiunto).
+
+### `GET /me/saved-bandi?page=&page_size=`
+Elenco paginato (`page_size` max 50, i salvati più di recente per primi): pagina sul primario, poi UNA query al catalogo per i dati vivi della pagina; i bandi spariti arrivano dallo snapshot con `disponibile: false`. `in_calendario` indica se la scadenza è già in calendario.
+
+### `GET /me/saved-bandi/ids`
+`{ "bando_ids": [int] }` — id salvati (per lo stato dei toggle nelle liste, chiamata leggera).
+
+### `DELETE /me/saved-bandi/{bando_id}` (204)
+Idempotente. L'eventuale evento scadenza in calendario NON viene toccato (indipendenti).
+
+## Calendario
+
+Eventi **per utente** sul DB primario, vista mensile. Date e orari sono di **calendario italiano** (wall-clock, senza fuso): il client li mostra così come sono. Due tipi: `personale` (CRUD completo) e `bando` (scadenza derivata dal catalogo: **data in sola lettura**, modificabili solo titolo e note). Cap: 500 eventi per utente. Niente ricorrenze in v1.
+
+### `GET /me/calendar?anno=&mese=`
+Eventi del mese (`anno` 2000-2100, `mese` 1-12): `{ items: [{id, titolo, data, tutto_il_giorno, ora_inizio, ora_fine, note, tipo, bando_id, bando_slug, created_at, updated_at}] }`, ordinati per data e ora (i «tutto il giorno» in testa). Non tocca mai il DB secondario.
+
+### `POST /me/calendar` (201)
+Crea un evento **personale** (il `tipo` non arriva mai dal client). Body: `titolo` (≤200, non vuoto), `data` (anno 2000-2100, l'intervallo visualizzabile), `tutto_il_giorno` (default true — azzera gli orari), `ora_inizio`/`ora_fine` opzionali (con orari serve l'inizio; la fine deve seguire l'inizio), `note` (≤2000).
+Errori: `422 validation_error`, `400 bad_request` (limite raggiunto).
+
+### `POST /me/calendar/bando` (201)
+Body `{ "bando_slug": "..." }`. Aggiunge la **scadenza del bando** come evento tipo `bando` (data derivata dal catalogo, titolo «Scadenza: …», tutto il giorno). **Idempotente**: evento già presente → lo ritorna (una sola scadenza per bando per utente). Non richiede che il bando sia tra i salvati.
+Errori: `404 not_found` (bando sparito), `400 bad_request` (bando senza scadenza / limite raggiunto).
+
+### `PATCH /me/calendar/{event_id}`
+Aggiorna i campi passati (tutti opzionali). Per gli eventi `bando` sono modificabili SOLO `titolo` e `note` (`400 bad_request` sugli altri: la data è la scadenza ufficiale). La coerenza degli orari viene rivalidata sul merge.
+Errori: `404 not_found` (evento inesistente/altrui/id malformato), `400 bad_request`.
+
+### `DELETE /me/calendar/{event_id}` (204)
+Elimina l'evento (`404` se inesistente o di un altro utente). Per gli eventi `bando` NON tocca il bando salvato.
+
 ## Endpoint admin
 
 ### `GET /admin/users`

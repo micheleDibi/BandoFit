@@ -503,3 +503,27 @@ export interface AiChecksResponse {
   items: AiCheck[];
   total: number;
 }
+
+// ---- Bandi salvati e calendario -------------------------------------------
+
+export interface SavedBandoItem {
+  bando: BandoListItem;
+  disponibile: boolean;
+  in_calendario: boolean;
+  salvato_il: string;
+}
+
+export interface CalendarEvent {
+  id: string;
+  titolo: string;
+  data: string; // YYYY-MM-DD (calendario italiano, wall-clock)
+  tutto_il_giorno: boolean;
+  ora_inizio: string | null; // HH:MM:SS
+  ora_fine: string | null;
+  note: string | null;
+  tipo: "personale" | "bando";
+  bando_id: number | null;
+  bando_slug: string | null;
+  created_at: string;
+  updated_at: string;
+}

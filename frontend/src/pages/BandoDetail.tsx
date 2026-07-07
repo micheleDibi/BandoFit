@@ -3,7 +3,9 @@ import {
   ArrowUpRight,
   Banknote,
   Building2,
+  CalendarCheck,
   CalendarDays,
+  CalendarPlus,
   ExternalLink,
   FileText,
   Landmark,
@@ -13,11 +15,13 @@ import { AiCheckCard } from "../components/bandi/AiCheckCard";
 import { AiCheckReport } from "../components/bandi/AiCheckReport";
 import { ScadenzaBadge, StatoBadge } from "../components/bandi/badges";
 import { ContenutoRenderer } from "../components/bandi/ContenutoRenderer";
+import { SaveBandoButton } from "../components/bandi/SaveBandoButton";
 import { Badge } from "../components/ui/Badge";
-import { buttonClasses } from "../components/ui/Button";
+import { Button, buttonClasses, LinkButton } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { ErrorState, Skeleton } from "../components/ui/states";
 import { useBando } from "../hooks/useBandi";
+import { useAddBandoDeadline } from "../hooks/useCalendar";
 import { apiErrorMessage } from "../lib/api";
 import { formatDate, formatEur } from "../lib/format";
 
@@ -44,6 +48,7 @@ function MetaTile({
 export default function BandoDetail() {
   const { slug } = useParams<{ slug: string }>();
   const { data: bando, isPending, isError, error, refetch } = useBando(slug);
+  const addDeadline = useAddBandoDeadline();
 
   if (isPending) {
     return (
@@ -132,6 +137,38 @@ export default function BandoDetail() {
             </span>
           )}
           <ScadenzaBadge dataScadenza={bando.data_scadenza} />
+        </div>
+
+        {/* Azioni: salva + scadenza in calendario */}
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <SaveBandoButton bando={{ id: bando.id, slug: bando.slug }} variant="inline" />
+          {bando.data_scadenza &&
+            (addDeadline.isSuccess ? (
+              <LinkButton
+                to={`/app/calendario?m=${bando.data_scadenza.slice(0, 7)}`}
+                variant="secondary"
+                size="sm"
+              >
+                <CalendarCheck className="size-4 text-emerald-600" aria-hidden />
+                Nel calendario
+              </LinkButton>
+            ) : (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                loading={addDeadline.isPending}
+                onClick={() => addDeadline.mutate(bando.slug)}
+              >
+                <CalendarPlus className="size-4" aria-hidden />
+                Aggiungi scadenza al calendario
+              </Button>
+            ))}
+          {addDeadline.isError && (
+            <span className="text-sm text-red-600" role="alert">
+              {apiErrorMessage(addDeadline.error)}
+            </span>
+          )}
         </div>
       </header>
 

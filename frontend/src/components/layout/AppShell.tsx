@@ -33,6 +33,12 @@ export function AppShell() {
       <NavLink to="/app/bandi" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
         Bandi
       </NavLink>
+      <NavLink to="/app/salvati" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
+        Salvati
+      </NavLink>
+      <NavLink to="/app/calendario" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
+        Calendario
+      </NavLink>
       <NavLink to="/app/azienda" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
         Azienda
       </NavLink>
@@ -75,7 +81,9 @@ export function AppShell() {
             <Logo />
           </Link>
 
-          <nav className="ml-4 hidden items-center gap-1 md:flex" aria-label="Navigazione principale">
+          {/* Con 6 voci (+2 admin) la nav non entra a 768px: desktop da lg,
+              sotto resta il menu hamburger. */}
+          <nav className="ml-4 hidden items-center gap-1 lg:flex" aria-label="Navigazione principale">
             {navLinks}
           </nav>
 
@@ -107,7 +115,7 @@ export function AppShell() {
             </button>
             <button
               type="button"
-              className="inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500 md:hidden"
+              className="inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500 lg:hidden"
               onClick={() => setMobileOpen((v) => !v)}
               aria-expanded={mobileOpen}
               aria-label={mobileOpen ? "Chiudi menu" : "Apri menu"}
@@ -118,7 +126,7 @@ export function AppShell() {
         </div>
         {mobileOpen && (
           <nav
-            className="flex flex-col gap-1 border-t border-slate-200 px-4 py-3 md:hidden"
+            className="flex flex-col gap-1 border-t border-slate-200 px-4 py-3 lg:hidden"
             aria-label="Navigazione mobile"
           >
             {navLinks}

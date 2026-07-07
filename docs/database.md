@@ -57,6 +57,12 @@ Contiene i dati della piattaforma. Schema in `supabase/migrations/` (eseguire in
 
 **`ai_checks`** — report di compatibilità azienda↔bando (**storico versionato**: ogni generazione è una nuova riga, la più recente è in evidenza): `company_profile_id` (cascade), `user_id` (richiedente, senza FK), `family_parent_id` (chiave di visibilità e quota), `bando_id`/`bando_slug`/`bando_titolo` denormalizzati (lo storico sopravvive al bando), `status` (`pending`→`ready`/`error`), **`esito`** (`ammissibile`/`non_ammissibile`/`da_verificare`), **`punteggio`** (0-100) e **`tipo_punteggio`** (`stima`/`euristico`) come colonne per le liste, **`report` jsonb** completo (requisiti con verdetti e citazioni, criteri, verifiche strutturate, punti di forza/debolezza, dati mancanti), `model`, `prompt_version`, `extraction_cached`, token e `cost_cents` reali. Indice unico parziale: al massimo UNA analisi `pending` per coppia azienda×bando.
 
+### Bandi salvati e calendario (migration 0008)
+
+**`saved_bandi`** — preferiti per utente: riferimento al catalogo del secondario **senza FK cross-database** (`bando_id` intero) con snapshot denormalizzati (`bando_slug`, `bando_titolo`, `data_scadenza`, `stato_bando`) che sopravvivono alla scomparsa del bando e fanno da fallback di visualizzazione. `unique (user_id, bando_id)`; cascade da profiles; righe immutabili (niente updated_at).
+
+**`calendar_events`** — eventi del calendario personale: `titolo` (1-200), **`data` `date` + `ora_inizio`/`ora_fine` `time` senza fuso** (calendario italiano wall-clock, come `data_scadenza` del catalogo), `tutto_il_giorno`, `note` (≤2000), `tipo` (`personale`/`bando`). CHECK di coerenza: `tipo='bando'` ⇔ `bando_id`+`bando_slug` presenti; tutto il giorno ⇒ niente orari, con orari ⇒ inizio obbligatorio e fine successiva. Indice unico parziale `(user_id, bando_id) where tipo='bando'`: **una sola scadenza in calendario per bando per utente** (idempotenza). Nessuna FK verso saved_bandi: preferiti ed eventi sono indipendenti.
+
 ### Funzioni e trigger
 
 - `handle_new_user()` — trigger `AFTER INSERT ON auth.users`: crea profilo + abbonamento iniziale (fallback `gratuito`); per gli utenti invitati in famiglia (metadata `family_invite='true'`) crea **solo il profilo**, senza abbonamento. **Difensiva: non solleva mai eccezioni.**

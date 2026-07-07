@@ -625,17 +625,18 @@ async def list_checks(
 async def get_check(primary, user: dict, check_id: str) -> AiCheckOut:
     """Singolo report, completo (anche per i figli attivi)."""
     try:
-        uuid.UUID(str(check_id))
+        # Forma CANONICA: Python accetta anche urn:uuid:/graffe che Postgres
+        # rifiuterebbe con 22P02 (→ 502) — la query usa l'UUID normalizzato.
+        normalized = str(uuid.UUID(str(check_id)))
     except ValueError:
-        # Un id malformato manderebbe PostgREST in errore 22P02 (→ 502):
-        # per il chiamante è semplicemente un report inesistente.
+        # Un id malformato è, per il chiamante, un report inesistente.
         raise NotFoundError("Report non trovato") from None
     owner_id, _ = await _owner_and_editable(primary, user)
     await _close_stale(primary, owner_id)
     resp = (
         await primary.table("ai_checks")
         .select(CHECK_SELECT)
-        .eq("id", str(check_id))
+        .eq("id", normalized)
         .eq("family_parent_id", str(owner_id))  # mai report di altre aziende
         .limit(1)
         .execute()

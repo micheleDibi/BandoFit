@@ -13,7 +13,7 @@ export function BandoCard({ bando }: { bando: BandoListItem }) {
   return (
     <Link
       to={`/app/bandi/${bando.slug}`}
-      className="group block rounded-xl border border-slate-200 bg-white p-5 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-card-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
+      className="group block h-full rounded-xl border border-slate-200 bg-white p-5 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-card-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
     >
       <div className="flex flex-wrap items-center gap-2">
         <StatoBadge stato={bando.stato_bando} />

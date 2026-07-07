@@ -2,6 +2,11 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-07 — Bandi salvati e Calendario
+
+- **Bandi salvati**: segnalibro su ogni card (lista e dettaglio) con stato ottimista; nuova scheda **«Salvati»** con i preferiti dell'utente. I preferiti sono **riferimenti** al catalogo (migration 0008, `saved_bandi`, snapshot denormalizzato senza FK cross-DB): un bando sparito dal catalogo resta visibile dallo snapshot con «Non più disponibile» e si può rimuovere; uno scaduto si mostra normalmente. Cap 200 per utente; salvataggio/rimozione idempotenti.
+- **Calendario** (nuova scheda, vista mensile): griglia nativa `Intl it-IT` (lunedì per primo, nessuna libreria di date), agenda del giorno selezionato, CRUD eventi personali (titolo, data, «tutto il giorno», orari opzionali, note) con dialog e conferma di eliminazione a due passi. Da un bando (dettaglio o salvati) si aggiunge la **scadenza al calendario** con un click: evento di tipo «bando» evidenziato in ambra, **data in sola lettura** (deriva dal bando ufficiale, modificabili solo titolo e note), una sola scadenza per bando (idempotente). Preferiti ed eventi sono **indipendenti** (rimuovere l'uno non tocca l'altro). Date e orari in calendario italiano (wall-clock, senza fusi). Cap 500 eventi; 375 test backend (48 nuovi). Hardening da review multi-agente avversariale (18 difetti confermati e corretti prima del rilascio: scoping nei test, limiti int4/UUID normalizzati, titoli vuoti e date fuori intervallo respinti come 400, paginazione e selezione del mese senza stati orfani, nav desktop da lg, altezze uniformi delle card).
+
 ## 2026-07-07 — Rifiniture AI-check e dettaglio bando
 
 - **Elenchi e FAQ finalmente visibili nella scheda bando**: il renderer del contenuto gestiva solo il tipo `list`, ma il catalogo usa `bullet_list`/`numbered_list` (1.454 sezioni saltate in tutto il catalogo!) e `faq` — ora resi come elenchi puntati/numerati e riquadri domanda/risposta; i link dei segmenti leggono anche la chiave reale `url`.

@@ -15,6 +15,8 @@ Stack: **Vite + React 18 + TypeScript**, **Tailwind CSS v4** (token di tema in `
 | `/conferma-email` | Atterraggio del link di conferma registrazione (con reinvio se scaduto) | pubblico |
 | `/app/bandi` | Elenco bandi con filtri | autenticato |
 | `/app/bandi/:slug` | Dettaglio bando | autenticato |
+| `/app/salvati` | Bandi salvati (preferiti) | autenticato |
+| `/app/calendario` | Calendario mensile con eventi personali e scadenze bandi | autenticato |
 | `/app/azienda` | Tutto sull'azienda: dati aziendali, dossier certificato, documenti | autenticato |
 | `/app/ai-check` | Cruscotto AI-check (quota del piano e storico per bando) | autenticato |
 | `/app/profilo` | Profilo personale, gestione account collegati, abbonamento | autenticato |
@@ -52,6 +54,12 @@ Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo 
 - **Pagina «AI-check»** (`/app/ai-check`, voce in navigazione): cruscotto con la quota del piano (disponibili quest'anno, con barra di consumo) e storico **raggruppato per bando** — l'analisi più recente in evidenza con badge, mini-barra punteggio, numero versioni e bottone «Apri report» che porta al report sul dettaglio bando (`useAiChecks`, key `["ai-checks"]`, polling 10s se c'è un'analisi in corso).
 - Hook in `hooks/useAiCheck.ts`; `useRequestAiCheck` invalida `["ai-check", slug]` e `["ai-checks"]`.
 
+## Bandi salvati e Calendario
+
+- **Salvataggio** (`SaveBandoButton`): toggle segnalibro con stato **ottimista sul Set degli id** (`useSavedIds`, key `["saved-bandi","ids"]`; rollback su errore, poi invalidazione della lista). Sulle card della lista il bottone è un **fratello sovrapposto** al link (`SavableBandoCard`: wrapper `relative` + bottone `absolute` — mai annidato nel `<Link>`, vedi Pattern chiave); sul dettaglio bando è un bottone inline accanto ad «Aggiungi scadenza al calendario» (visibile solo con una scadenza).
+- **Pagina «Salvati»** (`/app/salvati`): griglia di `SavableBandoCard` con azione «Aggiungi scadenza al calendario» sotto ogni card (o link «Nel calendario» se già presente); i bandi **spariti dal catalogo** restano visibili come card tratteggiata non-cliccabile costruita dallo snapshot (badge «Non più disponibile», data di salvataggio, bottone Rimuovi). Paginazione a 20, hook `useSavedBandi(page)` (key `["saved-bandi", page]`).
+- **Pagina «Calendario»** (`/app/calendario`, mese nell'URL `?m=YYYY-MM`): griglia mensile nativa (lunedì per primo, 6 settimane fisse, `Intl it-IT` per nomi di mesi/giorni — nessuna libreria di date). Ogni cella è **un solo bottone** di selezione del giorno; i chip degli eventi dentro sono presentazionali (barrette col titolo su ≥sm, pallini su mobile; brand = personale, ambra = scadenza bando). L'interazione coi singoli eventi vive nell'**agenda del giorno** sotto la griglia (riga → dialog di modifica; «Aggiungi evento» precompila la data). `EventDialog`: titolo, data (`type="date"`), «Tutto il giorno», orari (`type="time"`), note (`TextareaField`, nuovo componente ui); per gli eventi bando la data è una riga fissa («deriva dal bando ufficiale») con link al bando; eliminazione con conferma a due passi. Hook `useCalendarEvents(anno, mese)` (key `["calendar", anno, mese]`); le mutazioni invalidano il prefisso `["calendar"]`; `useAddBandoDeadline` invalida anche `["saved-bandi"]`.
+
 ## Preferenze e «Bandi per te»
 
 - **Pagina «Preferenze»** (`/app/preferenze`, voce in navigazione; nel Profilo resta un rimando compatto `PreferenzeTeaser`): layout a due colonne — a sinistra il riquadro fisso **«La tua azienda»** con i valori **ereditati** dai dati aziendali (ATECO, settore, regione e beneficiari derivati dall'import) come chip bloccate con icona edificio (sempre inclusi in «Bandi per te», si modificano dai dati aziendali) + contatore dei valori seguiti; a destra una card per ciascuna delle 7 faccette con chip ereditate/rimovibili e **`TagSelect`** (nuovo componente ui: multi-selezione con ricerca in stile Combobox, tendina che resta aperta, valori ereditati marcati e non selezionabili). **Barra di salvataggio fissa** in basso che compare solo con modifiche non salvate (Annulla/Salva), più link «Vedi i bandi per te» che apre la lista con il preset applicato.
@@ -64,6 +72,7 @@ Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo 
 - **Contenuto ricco** (`ContenutoRenderer`): il campo `contenuto` del bando è JSON strutturato (sections → segments) e viene mappato a elementi React puri — mai `dangerouslySetInnerHTML`.
 - **Stati ovunque**: ogni vista dati ha skeleton (caricamento), empty state con azione di reset ed error state con retry.
 - **Conferme**: le azioni con effetto (cambio piano, sospensione utente, cambio ruolo) passano da `Dialog` (elemento `<dialog>` nativo: focus trap ed Esc inclusi).
+- **Azioni sopra le card-link**: mai un bottone DENTRO un `<Link>` (interattivi annidati vietati) — il pattern è un wrapper `relative` con la card-link e il bottone come **fratello** `absolute` (es. `SavableBandoCard`); nelle celle del calendario, un solo bottone per cella e contenuti presentazionali.
 
 ## Brand assets
 

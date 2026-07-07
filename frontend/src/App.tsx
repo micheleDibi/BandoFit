@@ -8,6 +8,7 @@ import AiCheck from "./pages/AiCheck";
 import Azienda from "./pages/Azienda";
 import BandiList from "./pages/BandiList";
 import BandoDetail from "./pages/BandoDetail";
+import Calendario from "./pages/Calendario";
 import ConfermaEmail from "./pages/ConfermaEmail";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
@@ -17,6 +18,7 @@ import Profilo from "./pages/Profilo";
 import RecuperaPassword from "./pages/RecuperaPassword";
 import Register from "./pages/Register";
 import ReimpostaPassword from "./pages/ReimpostaPassword";
+import Salvati from "./pages/Salvati";
 
 export default function App() {
   return (
@@ -39,6 +41,8 @@ export default function App() {
         <Route index element={<Navigate to="/app/bandi" replace />} />
         <Route path="bandi" element={<BandiList />} />
         <Route path="bandi/:slug" element={<BandoDetail />} />
+        <Route path="salvati" element={<Salvati />} />
+        <Route path="calendario" element={<Calendario />} />
         <Route path="azienda" element={<Azienda />} />
         <Route path="ai-check" element={<AiCheck />} />
         <Route path="preferenze" element={<Preferenze />} />

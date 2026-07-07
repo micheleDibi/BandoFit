@@ -151,11 +151,13 @@ Valori delle faccette di filtro, dal DB secondario (cache server 1h, `Cache-Cont
 ### `GET /bandi`
 Elenco paginato dei bandi (solo quelli pubblicabili: `stato_processing='completed'`).
 
+**I bandi chiusi vanno sempre in coda**, qualunque ordinamento: "chiuso" = `stato_bando='chiuso'` **oppure** `data_scadenza` passata rispetto a oggi nel fuso italiano (robusto anche se lo stato nel catalogo non è aggiornato). PostgREST non ordina per espressioni, quindi l'elenco è servito da due query complementari (non chiusi + chiusi) con paginazione che unisce le due code; con `scadenza_asc` i chiusi in coda sono ordinati dalla chiusura più recente.
+
 Parametri query:
 | Parametro | Tipo | Note |
 |---|---|---|
 | `page` / `page_size` | int | default 1 / 20, `page_size` max 50 |
-| `sort` | string | `scadenza_asc` (default), `scadenza_desc`, `pubblicazione_desc`, `importo_desc` |
+| `sort` | string | `pubblicazione_desc` (default: più recenti prima), `scadenza_asc`, `scadenza_desc`, `importo_desc` |
 | `q` | string | ricerca full-text italiana (websearch) su titolo e descrizione |
 | `stato` | csv | tra `aperto`, `chiuso`, `in apertura prossimamente` |
 | `livello` | string | `flash_bando` o `guida_bando` |

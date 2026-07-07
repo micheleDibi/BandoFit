@@ -13,10 +13,11 @@ import { useDebounce } from "../hooks/useDebounce";
 import { useLookups } from "../hooks/useLookups";
 import { apiErrorMessage } from "../lib/api";
 
+// Il backend mette sempre i bandi chiusi in coda, qualunque ordinamento.
 const SORT_LABELS: Record<string, string> = {
+  pubblicazione_desc: "Più recenti",
   scadenza_asc: "Scadenza più vicina",
   scadenza_desc: "Scadenza più lontana",
-  pubblicazione_desc: "Più recenti",
   importo_desc: "Importo più alto",
 };
 

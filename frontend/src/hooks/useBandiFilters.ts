@@ -35,7 +35,7 @@ export type FacetKey = (typeof NUMERIC_FACETS)[number];
 
 const LIST_KEYS = ["stato", ...NUMERIC_FACETS] as const;
 
-const DEFAULT_SORT = "scadenza_asc";
+const DEFAULT_SORT = "pubblicazione_desc";
 
 function parseCsvNumbers(raw: string | null): number[] {
   if (!raw) return [];

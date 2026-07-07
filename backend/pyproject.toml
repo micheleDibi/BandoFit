@@ -18,6 +18,9 @@ dependencies = [
     "aiosmtplib>=3.0",
     # estrazione del testo dalle visure camerali (PDF)
     "pypdf>=5.0",
+    # database IANA dei fusi orari per zoneinfo (le immagini slim non hanno
+    # /usr/share/zoneinfo): serve per calcolare "oggi" su Europe/Rome
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]

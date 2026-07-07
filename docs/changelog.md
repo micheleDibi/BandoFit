@@ -2,6 +2,11 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-07 — Ordinamento bandi: chiusi sempre in coda, default «Più recenti»
+
+- **I bandi chiusi vanno sempre in fondo all'elenco**, con qualunque ordinamento: "chiuso" significa stato `chiuso` nel catalogo **oppure** scadenza passata (rispetto a oggi nel fuso italiano), così l'ordine è corretto anche se lo stato non è aggiornato dalla pipeline. Implementato con due query complementari (PostgREST non ordina per espressioni) e paginazione che unisce le due code.
+- L'ordinamento di **default diventa «Più recenti»** (`pubblicazione_desc`); con «Scadenza più vicina» la prima pagina mostra i bandi che scadono da oggi in poi (prima i bandi scaduti finivano in testa), e tra i chiusi in coda compare prima la chiusura più recente.
+
 ## 2026-07-06 — Pagina Preferenze
 
 - Le preferenze bandi hanno una **pagina dedicata** (`/app/preferenze`, in navigazione): a sinistra il profilo **ereditato dall'azienda** (ATECO, settore, regione, beneficiari derivati — chip bloccate, sempre incluse in «Bandi per te»), a destra le 7 faccette con chip rimovibili e un nuovo multi-select con ricerca (`TagSelect`) che marca i valori già coperti dall'azienda. Barra di salvataggio fissa solo a modifiche presenti; nel Profilo resta un rimando compatto.

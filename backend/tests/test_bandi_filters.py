@@ -5,18 +5,23 @@ query e si ispezionano i parametri URL generati.
 """
 
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
 from postgrest import AsyncPostgrestClient
 
 from app.services.bandi_service import (
     BandiFilters,
+    apply_closed_tier,
     apply_filters,
+    apply_open_tier,
     build_list_select,
+    fetch_bandi,
     map_detail,
     map_list_item,
     normalize_contenuto,
     sanitize_fts_term,
+    today_italy,
 )
 
 TODAY = date(2026, 7, 3)
@@ -135,6 +140,194 @@ class TestSorting:
         assert "importo_totale_eur.desc" in value
         assert "nullsfirst" not in value
         assert value.endswith("id.asc")
+
+
+class TestTiers:
+    """I due segmenti (non chiusi / chiusi) devono essere complementari e
+    null-safe: la partizione è il contratto su cui poggia la paginazione."""
+
+    def test_open_tier_excludes_chiusi_and_scaduti(self, client):
+        params = params_of(apply_open_tier(build(client, BandiFilters()), TODAY))
+        assert params["or"] == [
+            "(stato_bando.neq.chiuso,stato_bando.is.null)",
+            "(data_scadenza.gte.2026-07-03,data_scadenza.is.null)",
+        ]
+
+    def test_closed_tier_matches_stato_or_scadenza_passata(self, client):
+        params = params_of(apply_closed_tier(build(client, BandiFilters()), TODAY))
+        assert params["or"] == ["(stato_bando.eq.chiuso,data_scadenza.lt.2026-07-03)"]
+
+    def test_tier_or_coexists_with_fts_or(self, client):
+        # PostgREST mette in AND i parametri ``or`` ripetuti: la ricerca
+        # full-text e il segmento devono restare condizioni separate.
+        params = params_of(apply_open_tier(build(client, BandiFilters(q="energia")), TODAY))
+        assert len(params["or"]) == 3
+        assert params["or"][0].startswith("(titolo_raw.wfts")
+
+    def test_today_italy_is_a_date(self):
+        assert isinstance(today_italy(), date)
+
+
+def bando_row(id_: int) -> dict:
+    return {**TestMapping.ROW, "id": id_, "slug": f"bando-{id_}"}
+
+
+class FakeBandiQuery:
+    """Registra la catena di chiamate del builder e risponde con dati canned."""
+
+    def __init__(self, response: SimpleNamespace):
+        self._response = response
+        self.select_kwargs: dict = {}
+        self.or_filters: list[str] = []
+        self.orders: list[tuple] = []
+        self.range_args: tuple | None = None
+        self.limit_arg: int | None = None
+
+    def select(self, *args, **kwargs):
+        self.select_kwargs = kwargs
+        return self
+
+    def eq(self, *args):
+        return self
+
+    @property
+    def not_(self):
+        return self
+
+    def is_(self, *args):
+        return self
+
+    def in_(self, *args):
+        return self
+
+    def gte(self, *args):
+        return self
+
+    def lte(self, *args):
+        return self
+
+    def or_(self, filters: str):
+        self.or_filters.append(filters)
+        return self
+
+    def order(self, column, desc=False, nullsfirst=None):
+        self.orders.append((column, desc, nullsfirst))
+        return self
+
+    def range(self, start, end):
+        self.range_args = (start, end)
+        return self
+
+    def limit(self, size):
+        self.limit_arg = size
+        return self
+
+    async def execute(self):
+        return self._response
+
+
+class FakeSecondary:
+    """Consegna una risposta per query nell'ordine di creazione
+    (fetch_bandi interroga prima i non chiusi, poi i chiusi)."""
+
+    def __init__(self, responses: list[SimpleNamespace]):
+        self._responses = list(responses)
+        self.queries: list[FakeBandiQuery] = []
+
+    def table(self, name):
+        query = FakeBandiQuery(self._responses.pop(0))
+        self.queries.append(query)
+        return query
+
+
+class TestFetchBandi:
+    async def test_page_of_open_still_counts_closed_in_total(self):
+        secondary = FakeSecondary([
+            SimpleNamespace(data=[bando_row(1), bando_row(2)], count=5),
+            SimpleNamespace(data=[bando_row(99)], count=7),
+        ])
+        page = await fetch_bandi(secondary, BandiFilters(), 1, 2, "pubblicazione_desc")
+        open_q, closed_q = secondary.queries
+        assert [item.id for item in page.items] == [1, 2]
+        assert page.total == 12
+        assert open_q.range_args == (0, 1)
+        # i conteggi guidano offset del segmento chiusi e totale:
+        # entrambe le query DEVONO chiederli esatti
+        assert open_q.select_kwargs == {"count": "exact"}
+        assert closed_q.select_kwargs == {"count": "exact"}
+        # pagina già piena: dei chiusi serve solo il conteggio
+        assert closed_q.limit_arg == 1
+        assert closed_q.range_args is None
+
+    async def test_page_straddling_boundary_merges_the_two_tails(self):
+        # 4 non chiusi, pagina 2 da 3 (offset 3): 1 non chiuso + 2 chiusi.
+        secondary = FakeSecondary([
+            SimpleNamespace(data=[bando_row(4)], count=4),
+            SimpleNamespace(data=[bando_row(101), bando_row(102)], count=6),
+        ])
+        page = await fetch_bandi(secondary, BandiFilters(), 2, 3, "pubblicazione_desc")
+        _, closed_q = secondary.queries
+        assert [item.id for item in page.items] == [4, 101, 102]
+        assert page.total == 10
+        # il segmento dei chiusi riparte dal proprio inizio
+        assert closed_q.range_args == (0, 1)
+
+    async def test_page_fully_inside_closed_tier_offsets_into_it(self):
+        # 3 non chiusi, pagina 3 da 2 (offset 4): tutta nel segmento chiusi.
+        secondary = FakeSecondary([
+            SimpleNamespace(data=[], count=3),
+            SimpleNamespace(data=[bando_row(103), bando_row(104)], count=6),
+        ])
+        page = await fetch_bandi(secondary, BandiFilters(), 3, 2, "scadenza_asc")
+        _, closed_q = secondary.queries
+        assert [item.id for item in page.items] == [103, 104]
+        assert page.total == 9
+        assert closed_q.range_args == (1, 2)
+
+    async def test_scadenza_asc_flips_direction_for_closed_tier(self):
+        # tra i non chiusi la scadenza più vicina, tra i chiusi la chiusura
+        # più recente (non i bandi scaduti da più tempo)
+        secondary = FakeSecondary([
+            SimpleNamespace(data=[bando_row(1)], count=1),
+            SimpleNamespace(data=[bando_row(2)], count=1),
+        ])
+        await fetch_bandi(secondary, BandiFilters(), 1, 2, "scadenza_asc")
+        open_q, closed_q = secondary.queries
+        # nullsfirst=False: i bandi senza scadenza in fondo al proprio segmento
+        assert open_q.orders == [("data_scadenza", False, False), ("id", False, None)]
+        assert closed_q.orders == [("data_scadenza", True, False), ("id", False, None)]
+
+    async def test_tier_filters_are_applied_to_both_queries(self):
+        secondary = FakeSecondary([
+            SimpleNamespace(data=[], count=0),
+            SimpleNamespace(data=[], count=0),
+        ])
+        await fetch_bandi(secondary, BandiFilters(), 1, 20, "pubblicazione_desc")
+        open_q, closed_q = secondary.queries
+        assert any("stato_bando.neq.chiuso" in f for f in open_q.or_filters)
+        assert any("data_scadenza.gte." in f for f in open_q.or_filters)
+        assert any("stato_bando.eq.chiuso" in f for f in closed_q.or_filters)
+
+    async def test_unknown_sort_falls_back_to_most_recent(self):
+        secondary = FakeSecondary([
+            SimpleNamespace(data=[], count=0),
+            SimpleNamespace(data=[], count=0),
+        ])
+        page = await fetch_bandi(secondary, BandiFilters(), 1, 20, "boh")
+        open_q, _ = secondary.queries
+        assert open_q.orders[0] == ("data_pubblicazione", True, False)
+        assert page.total == 0
+        assert page.total_pages == 0
+
+    async def test_row_flipping_tier_between_queries_is_deduplicated(self):
+        # Le due query non condividono uno snapshot: un bando che diventa
+        # chiuso tra l'una e l'altra comparirebbe in entrambe le code.
+        secondary = FakeSecondary([
+            SimpleNamespace(data=[bando_row(1), bando_row(2)], count=2),
+            SimpleNamespace(data=[bando_row(2), bando_row(50)], count=4),
+        ])
+        page = await fetch_bandi(secondary, BandiFilters(), 1, 4, "pubblicazione_desc")
+        assert [item.id for item in page.items] == [1, 2, 50]
 
 
 class TestMapping:

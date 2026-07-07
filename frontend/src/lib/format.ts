@@ -52,13 +52,17 @@ export function formatDateNumeric(iso: string | null | undefined): string {
   return numericDateFormatter.format(date);
 }
 
-/** Giorni interi da oggi alla data (negativo se passata). */
+// "Oggi" nel fuso italiano (formato YYYY-MM-DD): le scadenze dei bandi sono
+// date di calendario italiane e il backend le confronta su Europe/Rome — il
+// fuso del browser darebbe badge in contrasto con l'ordinamento.
+const romeDateFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Rome" });
+
+/** Giorni interi da oggi (fuso italiano) alla data (negativo se passata). */
 export function daysUntil(iso: string | null | undefined): number | null {
   if (!iso) return null;
-  const target = new Date(iso);
-  if (Number.isNaN(target.getTime())) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  target.setHours(0, 0, 0, 0);
-  return Math.round((target.getTime() - today.getTime()) / 86_400_000);
+  // Confronto tra date di calendario, entrambe ancorate a mezzanotte UTC.
+  const target = Date.parse(`${iso.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(target)) return null;
+  const today = Date.parse(`${romeDateFormatter.format(new Date())}T00:00:00Z`);
+  return Math.round((target - today) / 86_400_000);
 }

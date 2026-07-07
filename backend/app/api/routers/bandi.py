@@ -8,7 +8,7 @@ from app.core.errors import BadRequestError
 from app.schemas.bando import BandoDetail, BandoListItem
 from app.schemas.common import Page
 from app.services import bandi_service
-from app.services.bandi_service import SORT_OPTIONS, BandiFilters
+from app.services.bandi_service import DEFAULT_SORT, SORT_OPTIONS, BandiFilters
 
 router = APIRouter(prefix="/bandi", tags=["bandi"])
 
@@ -74,7 +74,7 @@ async def list_bandi(
     filters: Annotated[BandiFilters, Depends(parse_filters)],
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=50),
-    sort: str = Query(default="scadenza_asc"),
+    sort: str = Query(default=DEFAULT_SORT),
 ) -> Page[BandoListItem]:
     if sort not in SORT_OPTIONS:
         raise BadRequestError(f"Ordinamento non valido: {sort}")

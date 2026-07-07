@@ -11,8 +11,9 @@ Semantica: OR dentro la stessa faccetta, AND tra faccette diverse.
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app.core.errors import NotFoundError
 from app.schemas.bando import BandoDetail, BandoListItem
@@ -46,12 +47,23 @@ JUNCTION_FACETS = {
     "codici_ateco": ("f_ate", "bando_codici_ateco", "codice_ateco_id"),
 }
 
+# ordinamento -> (colonna, desc tra i non chiusi, desc tra i chiusi).
+# I chiusi vanno sempre in coda: con "scadenza più vicina" tra i chiusi si
+# mostra prima la chiusura più recente (asc mostrerebbe prima i più vecchi).
 SORT_OPTIONS = {
-    "scadenza_asc": ("data_scadenza", False),
-    "scadenza_desc": ("data_scadenza", True),
-    "pubblicazione_desc": ("data_pubblicazione", True),
-    "importo_desc": ("importo_totale_eur", True),
+    "scadenza_asc": ("data_scadenza", False, True),
+    "scadenza_desc": ("data_scadenza", True, True),
+    "pubblicazione_desc": ("data_pubblicazione", True, True),
+    "importo_desc": ("importo_totale_eur", True, True),
 }
+
+DEFAULT_SORT = "pubblicazione_desc"
+
+
+def today_italy() -> date:
+    """Le date dei bandi sono date italiane: "oggi" va calcolato su Europe/Rome,
+    non sul fuso del server (in UTC la data cambia due ore dopo)."""
+    return datetime.now(ZoneInfo("Europe/Rome")).date()
 
 
 @dataclass
@@ -107,7 +119,7 @@ def build_list_select(filters: BandiFilters) -> str:
 
 def apply_filters(query, filters: BandiFilters, today: date | None = None):
     """Applica tutti i filtri a un query builder PostgREST (elenco bandi)."""
-    today = today or date.today()
+    today = today or today_italy()
 
     # Ridondante rispetto alla RLS del secondario, ma esplicita il contratto.
     query = query.eq("stato_processing", "completed").not_.is_("slug", "null")
@@ -147,6 +159,26 @@ def apply_filters(query, filters: BandiFilters, today: date | None = None):
             query = query.in_(f"{alias}.{id_col}", ids)
 
     return query
+
+
+# Un bando è "chiuso" se lo dice il catalogo O se la scadenza è passata: la
+# doppia condizione regge anche quando stato_bando non è aggiornato dalla
+# pipeline. I due filtri sono complementari (null-safe): ogni riga finisce in
+# esattamente uno dei due segmenti. PostgREST mette in AND i parametri ``or``
+# ripetuti, quindi convivono anche con l'``or`` della ricerca full-text.
+
+
+def apply_open_tier(query, today: date):
+    """Solo i bandi non chiusi: stato diverso da 'chiuso' E scadenza non passata
+    (i null contano come non chiusi: bandi a sportello o senza data)."""
+    return query.or_("stato_bando.neq.chiuso,stato_bando.is.null").or_(
+        f"data_scadenza.gte.{today.isoformat()},data_scadenza.is.null"
+    )
+
+
+def apply_closed_tier(query, today: date):
+    """Solo i bandi chiusi: stato 'chiuso' O scadenza passata."""
+    return query.or_(f"stato_bando.eq.chiuso,data_scadenza.lt.{today.isoformat()}")
 
 
 def _lookup(value: dict | None) -> dict | None:
@@ -202,20 +234,57 @@ async def fetch_bandi(
     page_size: int,
     sort: str,
 ) -> Page[BandoListItem]:
-    column, desc = SORT_OPTIONS.get(sort, SORT_OPTIONS["scadenza_asc"])
+    """Elenco paginato in due segmenti: prima i bandi non chiusi, poi i chiusi
+    — sempre in coda, qualunque ordinamento. PostgREST non sa ordinare per
+    espressioni, quindi il confine è realizzato con due query complementari;
+    la pagina a cavallo del confine unisce le due code."""
+    column, desc_open, desc_closed = SORT_OPTIONS.get(sort, SORT_OPTIONS[DEFAULT_SORT])
     offset = (page - 1) * page_size
+    today = today_italy()
+    select = build_list_select(filters)
 
-    query = secondary.table("bando").select(build_list_select(filters), count="exact")
-    query = apply_filters(query, filters)
-    query = (
-        query.order(column, desc=desc, nullsfirst=False)
+    open_q = secondary.table("bando").select(select, count="exact")
+    open_q = apply_open_tier(apply_filters(open_q, filters, today), today)
+    open_q = (
+        open_q.order(column, desc=desc_open, nullsfirst=False)
         .order("id", desc=False)
         .range(offset, offset + page_size - 1)
     )
+    open_resp = await open_q.execute()
+    open_count = open_resp.count or 0
+    rows = list(open_resp.data)
 
-    resp = await query.execute()
-    items = [map_list_item(row) for row in resp.data]
-    return Page.build(items, resp.count or 0, page, page_size)
+    closed_q = secondary.table("bando").select(select, count="exact")
+    closed_q = apply_closed_tier(apply_filters(closed_q, filters, today), today)
+    closed_q = closed_q.order(column, desc=desc_closed, nullsfirst=False).order(
+        "id", desc=False
+    )
+
+    need = page_size - len(rows)
+    if need > 0:
+        # Offset dentro il segmento dei chiusi: 0 se la pagina è a cavallo del
+        # confine, oltre se la pagina è tutta nel segmento dei chiusi.
+        closed_offset = max(0, offset - open_count)
+        closed_resp = await closed_q.range(closed_offset, closed_offset + need - 1).execute()
+        rows.extend(closed_resp.data)
+    else:
+        # Pagina piena di non chiusi: serve comunque il conteggio dei chiusi
+        # per il totale della paginazione.
+        closed_resp = await closed_q.limit(1).execute()
+
+    total = open_count + (closed_resp.count or 0)
+
+    # Le due query non condividono uno snapshot: un bando che cambia segmento
+    # tra l'una e l'altra (pipeline di ingestione) comparirebbe in entrambe le
+    # code — dedup per id, la pagina si riassesta al refetch successivo.
+    seen_ids: set = set()
+    items = []
+    for row in rows:
+        if row["id"] in seen_ids:
+            continue
+        seen_ids.add(row["id"])
+        items.append(map_list_item(row))
+    return Page.build(items, total, page, page_size)
 
 
 async def fetch_bando_by_slug(secondary, slug: str) -> BandoDetail:

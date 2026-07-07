@@ -76,17 +76,25 @@ export default function Calendario() {
     goToMonth(base.getFullYear(), base.getMonth() + 1);
   };
 
-  const handleSelectDay = (iso: string) => {
-    // Click su un giorno di un altro mese: naviga lì mantenendo la selezione.
-    if (!iso.startsWith(monthParam(anno, mese))) {
+  // Click sul giorno: seleziona (l'agenda si aggiorna) E apre subito il form
+  // di creazione con la data precompilata. Su un giorno di un altro mese
+  // prima si naviga lì.
+  const handleCreateDay = (iso: string) => {
+    if (!iso.startsWith(monthKey)) {
       goToMonth(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)), iso);
-      return;
+    } else {
+      setSelectedDay(iso);
     }
-    setSelectedDay(iso);
+    setDialog({ mode: "create", date: iso });
+  };
+
+  const handleOpenEvent = (event: CalendarEvent) => {
+    setSelectedDay(event.data);
+    setDialog({ mode: "edit", event });
   };
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div>
       {/* Intestazione: navigazione mese + legenda */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="inline-flex items-center gap-2 font-display text-2xl font-bold tracking-tight text-slate-900">
@@ -135,6 +143,9 @@ export default function Calendario() {
           <span className="size-2 rounded-full bg-amber-500" aria-hidden />
           Scadenze bandi
         </span>
+        <span className="text-slate-400">
+          Clicca su un giorno per aggiungere un evento, su un evento per modificarlo.
+        </span>
       </div>
 
       {isPending ? (
@@ -147,21 +158,26 @@ export default function Calendario() {
           <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
         </div>
       ) : (
-        <div className="mt-5 space-y-4">
+        // La griglia occupa tutta la larghezza; su desktop l'agenda del
+        // giorno selezionato affianca come colonna fissa.
+        <div className="mt-5 grid items-start gap-6 xl:grid-cols-[1fr_340px]">
           <MonthGrid
             anno={anno}
             mese={mese}
             eventsByDay={eventsByDay}
             todayIso={todayIso}
             selectedDay={selectedDay}
-            onSelectDay={handleSelectDay}
+            onCreateDay={handleCreateDay}
+            onOpenEvent={handleOpenEvent}
           />
-          <DayAgenda
-            dayIso={selectedDay}
-            events={eventsByDay.get(selectedDay) ?? []}
-            onCreate={() => setDialog({ mode: "create", date: selectedDay })}
-            onOpenEvent={(event) => setDialog({ mode: "edit", event })}
-          />
+          <div className="xl:sticky xl:top-20">
+            <DayAgenda
+              dayIso={selectedDay}
+              events={eventsByDay.get(selectedDay) ?? []}
+              onCreate={() => setDialog({ mode: "create", date: selectedDay })}
+              onOpenEvent={handleOpenEvent}
+            />
+          </div>
         </div>
       )}
 

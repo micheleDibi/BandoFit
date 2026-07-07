@@ -8,22 +8,28 @@ interface MonthGridProps {
   eventsByDay: Map<string, CalendarEvent[]>;
   todayIso: string;
   selectedDay: string;
-  onSelectDay: (iso: string) => void;
+  /** Click sul giorno (area vuota della cella): seleziona E apre il form. */
+  onCreateDay: (iso: string) => void;
+  /** Click su un chip evento: apre la modifica di quell'evento. */
+  onOpenEvent: (event: CalendarEvent) => void;
 }
 
 const WEEKDAYS = weekdayShortLabels();
+const MAX_CHIPS = 4;
 
-/** Griglia mensile (lunedì per primo, 6 settimane fisse). Ogni cella è UN
- *  SOLO bottone di selezione del giorno: i chip degli eventi al suo interno
- *  sono presentazionali (niente interattivi annidati) — l'interazione con i
- *  singoli eventi vive nell'agenda del giorno sotto la griglia. */
+/** Griglia mensile (lunedì per primo, 6 settimane fisse). Ogni cella è un
+ *  div con DUE livelli di bottoni FRATELLI (mai annidati): uno di sfondo che
+ *  copre la cella (click = crea evento in quel giorno) e i chip degli eventi
+ *  sopra (click = apri l'evento). Su mobile i chip diventano pallini
+ *  presentazionali: gli eventi si aprono dall'agenda sotto la griglia. */
 export function MonthGrid({
   anno,
   mese,
   eventsByDay,
   todayIso,
   selectedDay,
-  onSelectDay,
+  onCreateDay,
+  onOpenEvent,
 }: MonthGridProps) {
   const first = new Date(anno, mese - 1, 1);
   const lead = (first.getDay() + 6) % 7; // lunedì = 0
@@ -38,7 +44,7 @@ export function MonthGrid({
         {WEEKDAYS.map((label) => (
           <div
             key={label}
-            className="bg-white px-2 py-2 text-center text-xs font-medium uppercase tracking-wide text-slate-400"
+            className="bg-white px-2 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-slate-400"
           >
             {label}
           </div>
@@ -53,27 +59,34 @@ export function MonthGrid({
           const isSelected = iso === selectedDay;
 
           return (
-            <button
+            <div
               key={iso}
-              type="button"
-              onClick={() => onSelectDay(iso)}
-              aria-pressed={isSelected}
-              aria-label={
-                formatWeekdayLong(iso) +
-                (events.length
-                  ? `, ${events.length} ${events.length === 1 ? "evento" : "eventi"}`
-                  : "")
-              }
               className={cn(
-                "flex min-h-16 cursor-pointer flex-col items-stretch gap-1 p-1.5 text-left align-top transition-colors sm:min-h-24",
-                "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-500",
-                inMonth ? "bg-white hover:bg-slate-50" : "bg-slate-50/70 hover:bg-slate-100",
-                isSelected && "bg-brand-50 hover:bg-brand-50",
+                "relative flex min-h-20 flex-col gap-1 p-1.5 sm:min-h-28 sm:p-2 xl:min-h-32",
+                inMonth ? "bg-white" : "bg-slate-50/70",
+                isSelected && "bg-brand-50",
               )}
             >
+              {/* Bottone di sfondo: seleziona il giorno e apre il form */}
+              <button
+                type="button"
+                onClick={() => onCreateDay(iso)}
+                aria-label={`Aggiungi un evento — ${formatWeekdayLong(iso)}${
+                  events.length
+                    ? `, ${events.length} ${events.length === 1 ? "evento presente" : "eventi presenti"}`
+                    : ""
+                }`}
+                className={cn(
+                  "absolute inset-0 cursor-pointer transition-colors",
+                  "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-500",
+                  inMonth ? "hover:bg-slate-100/60" : "hover:bg-slate-100",
+                  isSelected && "hover:bg-brand-100/40",
+                )}
+              />
+
               <span
                 className={cn(
-                  "inline-flex size-6 items-center justify-center self-end rounded-full text-xs font-medium",
+                  "pointer-events-none relative z-10 inline-flex size-6 items-center justify-center self-end rounded-full text-xs font-medium sm:size-7 sm:text-sm",
                   inMonth ? "text-slate-700" : "text-slate-300",
                   isToday && "bg-brand-500 font-semibold text-white",
                 )}
@@ -81,30 +94,35 @@ export function MonthGrid({
                 {day.getDate()}
               </span>
 
-              {/* Chip presentazionali: barrette con titolo su schermi larghi, pallini su mobile */}
               {events.length > 0 && (
                 <>
-                  <span className="hidden flex-col gap-0.5 sm:flex">
-                    {events.slice(0, 3).map((event) => (
-                      <span
+                  {/* ≥sm: chip cliccabili (fratelli del bottone di sfondo) */}
+                  <div className="relative z-10 hidden flex-col gap-1 sm:flex">
+                    {events.slice(0, MAX_CHIPS).map((event) => (
+                      <button
                         key={event.id}
+                        type="button"
+                        onClick={() => onOpenEvent(event)}
+                        title={event.titolo}
                         className={cn(
-                          "truncate rounded px-1 py-0.5 text-[11px] leading-tight",
+                          "cursor-pointer truncate rounded-md px-1.5 py-1 text-left text-xs leading-tight transition-colors",
+                          "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand-500",
                           event.tipo === "bando"
-                            ? "bg-amber-100 font-medium text-amber-800"
-                            : "bg-brand-100 text-brand-800",
+                            ? "bg-amber-100 font-medium text-amber-800 hover:bg-amber-200"
+                            : "bg-brand-100 text-brand-800 hover:bg-brand-200",
                         )}
                       >
                         {event.titolo}
-                      </span>
+                      </button>
                     ))}
-                    {events.length > 3 && (
-                      <span className="px-1 text-[11px] text-slate-400">
-                        +{events.length - 3}
+                    {events.length > MAX_CHIPS && (
+                      <span className="pointer-events-none px-1 text-[11px] text-slate-400">
+                        +{events.length - MAX_CHIPS} altri
                       </span>
                     )}
-                  </span>
-                  <span className="flex gap-0.5 sm:hidden">
+                  </div>
+                  {/* mobile: pallini presentazionali (eventi nell'agenda) */}
+                  <span className="pointer-events-none relative z-10 flex gap-1 sm:hidden">
                     {events.slice(0, 4).map((event) => (
                       <span
                         key={event.id}
@@ -117,7 +135,7 @@ export function MonthGrid({
                   </span>
                 </>
               )}
-            </button>
+            </div>
           );
         })}
       </div>

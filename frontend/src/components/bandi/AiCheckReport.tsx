@@ -14,6 +14,7 @@ import { Link } from "react-router-dom";
 import { useAiChecksForBando } from "../../hooks/useAiCheck";
 import { fieldLabel } from "../../lib/aiCheckFields";
 import { formatDateTime } from "../../lib/format";
+import { scoreColorClasses } from "../../lib/scoreColor";
 import type { AiCheck, AiCriterioReport, AiRequisitoReport, AiVerdetto } from "../../types";
 import { Badge } from "../ui/Badge";
 import { Card } from "../ui/Card";
@@ -40,8 +41,16 @@ function VerdettoIcon({ verdetto }: { verdetto: AiVerdetto }) {
 }
 
 /** Riga espandibile con il dettaglio verificabile del verdetto: citazione del
- *  bando (sezione inclusa) e dato aziendale usato per il confronto. */
-function VoceRow({ voce, punti }: { voce: AiRequisitoReport | AiCriterioReport; punti?: string }) {
+ *  bando (sezione inclusa) e — per i criteri — il dato aziendale usato. */
+function VoceRow({
+  voce,
+  punti,
+  mostraDato = true,
+}: {
+  voce: AiRequisitoReport | AiCriterioReport;
+  punti?: string;
+  mostraDato?: boolean;
+}) {
   const titolo =
     ("nome" in voce ? voce.nome : undefined) ||
     ("testo" in voce ? voce.testo : undefined) ||
@@ -69,16 +78,17 @@ function VoceRow({ voce, punti }: { voce: AiRequisitoReport | AiCriterioReport; 
           </p>
           <p className="mt-1 italic text-slate-600">«{voce.riferimento_bando.testo}»</p>
         </div>
-        {voce.dato_azienda ? (
-          <p className="text-xs text-slate-500">
-            Dato aziendale usato: {fieldLabel(voce.dato_azienda.campo)} —{" "}
-            <span className="font-medium text-slate-700">{voce.dato_azienda.valore}</span>
-          </p>
-        ) : (
-          <p className="text-xs text-amber-600">
-            Nessun dato aziendale disponibile per questa verifica.
-          </p>
-        )}
+        {mostraDato &&
+          (voce.dato_azienda ? (
+            <p className="text-xs text-slate-500">
+              Dato aziendale usato: {fieldLabel(voce.dato_azienda.campo)} —{" "}
+              <span className="font-medium text-slate-700">{voce.dato_azienda.valore}</span>
+            </p>
+          ) : (
+            <p className="text-xs text-amber-600">
+              Nessun dato aziendale disponibile per questa verifica.
+            </p>
+          ))}
       </div>
     </details>
   );
@@ -100,12 +110,7 @@ export function AiCheckReport({ slug }: { slug: string }) {
   const report = current.report;
   const punteggio = report.punteggio_totale;
   const daApprofondire = report.esito_ammissibilita === "non_ammissibile";
-  const barTone =
-    report.esito_ammissibilita === "ammissibile"
-      ? "bg-brand-500"
-      : report.esito_ammissibilita === "da_verificare"
-        ? "bg-amber-400"
-        : "bg-slate-400";
+  const colori = punteggio !== null ? scoreColorClasses(punteggio) : null;
 
   return (
     <section id="ai-check-report" aria-label="Report AI-check" className="mt-10 scroll-mt-24">
@@ -155,14 +160,14 @@ export function AiCheckReport({ slug }: { slug: string }) {
                   <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
                     Punteggio di compatibilità
                   </span>
-                  <span className="tabular font-display text-xl font-bold text-slate-900">
+                  <span className={`tabular font-display text-xl font-bold ${colori?.text}`}>
                     {punteggio}
                     <span className="text-xs font-medium text-slate-400">/100</span>
                   </span>
                 </div>
                 <div className="mt-1.5 h-2 rounded-full bg-slate-100">
                   <div
-                    className={`h-2 rounded-full ${barTone}`}
+                    className={`h-2 rounded-full ${colori?.bar}`}
                     style={{ width: `${punteggio}%` }}
                   />
                 </div>
@@ -185,12 +190,6 @@ export function AiCheckReport({ slug }: { slug: string }) {
                 </span>
               )}
             </div>
-            {report.tipo_punteggio === "euristico" && report.griglia.fonte === "allegato" && (
-              <p className="mt-1.5 text-xs text-slate-500">
-                La griglia di valutazione ufficiale è negli allegati del bando (non analizzati):
-                il punteggio è una stima interna.
-              </p>
-            )}
             {daApprofondire && (
               <p className="mt-1.5 text-xs text-slate-500">
                 L'analisi segnala alcuni requisiti da approfondire: guarda i dettagli qui
@@ -217,7 +216,7 @@ export function AiCheckReport({ slug }: { slug: string }) {
             </p>
             <div className="mt-3 space-y-2">
               {report.requisiti.map((r) => (
-                <VoceRow key={r.id} voce={r} />
+                <VoceRow key={r.id} voce={r} mostraDato={false} />
               ))}
             </div>
           </div>

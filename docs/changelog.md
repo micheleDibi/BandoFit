@@ -2,6 +2,12 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-07 — Rifiniture AI-check e dettaglio bando
+
+- **Punteggio a colori** ovunque (report, card, cruscotto): rosso 0–39, arancione 40–59, giallo 60–79, verde 80–100 — numero e barra (`lib/scoreColor.ts`).
+- Report più asciutto: via la nota sulla griglia negli allegati e via il «Dato aziendale usato» dai requisiti di ammissibilità (resta nei criteri).
+- **Dettaglio bando senza box vuote**: i riquadri Dotazione/Max per progetto/Apertura/Scadenza compaiono solo se valorizzati, e la card «Candidatura» solo se esiste un link.
+
 ## 2026-07-07 — Tutti i dati aziendali nella pagina Azienda
 
 - La pagina **Azienda** (`/app/azienda`) è ora l'unica casa dei dati aziendali, in tre sezioni: **«Dati aziendali»** (riepilogo leggibile dei campi compilati; il form completo si apre solo col bottone «Modifica», con Salva/Annulla — e non viene mai risincronizzato mentre si scrive), **«Dossier certificato»** dal Registro Imprese (con badge, data di aggiornamento e «Aggiorna») e **«Documenti ufficiali»**. Il titolo della pagina è la denominazione dell'azienda.

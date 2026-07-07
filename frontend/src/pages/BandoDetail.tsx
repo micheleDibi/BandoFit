@@ -80,6 +80,29 @@ export default function BandoDetail() {
   const linkPrincipale = bando.link_candidatura ?? bando.link_bando;
   const allegati = (bando.allegati ?? []).filter((a) => a && (a.url || a.link));
 
+  // Solo i riquadri con un dato reale: niente box con "—".
+  const metaTiles: { icon: typeof Banknote; label: string; value: string }[] = [];
+  if (bando.importo_totale_eur !== null) {
+    metaTiles.push({
+      icon: Banknote,
+      label: "Dotazione totale",
+      value: formatEur(bando.importo_totale_eur),
+    });
+  }
+  if (bando.importo_max_per_progetto_eur !== null) {
+    metaTiles.push({
+      icon: Landmark,
+      label: "Max per progetto",
+      value: formatEur(bando.importo_max_per_progetto_eur),
+    });
+  }
+  if (bando.data_apertura) {
+    metaTiles.push({ icon: CalendarDays, label: "Apertura", value: formatDate(bando.data_apertura) });
+  }
+  if (bando.data_scadenza) {
+    metaTiles.push({ icon: CalendarDays, label: "Scadenza", value: formatDate(bando.data_scadenza) });
+  }
+
   return (
     <div className="mx-auto max-w-6xl">
       <Link
@@ -112,21 +135,14 @@ export default function BandoDetail() {
         </div>
       </header>
 
-      {/* Meta tiles */}
-      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <MetaTile
-          icon={Banknote}
-          label="Dotazione totale"
-          value={formatEur(bando.importo_totale_eur)}
-        />
-        <MetaTile
-          icon={Landmark}
-          label="Max per progetto"
-          value={formatEur(bando.importo_max_per_progetto_eur)}
-        />
-        <MetaTile icon={CalendarDays} label="Apertura" value={formatDate(bando.data_apertura)} />
-        <MetaTile icon={CalendarDays} label="Scadenza" value={formatDate(bando.data_scadenza)} />
-      </div>
+      {/* Meta tiles (solo quelli valorizzati) */}
+      {metaTiles.length > 0 && (
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {metaTiles.map((tile) => (
+            <MetaTile key={tile.label} icon={tile.icon} label={tile.label} value={tile.value} />
+          ))}
+        </div>
+      )}
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_320px]">
         {/* Contenuto */}
@@ -153,10 +169,10 @@ export default function BandoDetail() {
           <div className="sticky top-20 space-y-4">
             <AiCheckCard slug={bando.slug} />
 
-            <Card className="p-5">
-              <h2 className="font-display text-sm font-semibold text-slate-900">Candidatura</h2>
-              <div className="mt-3 space-y-2">
-                {linkPrincipale ? (
+            {linkPrincipale && (
+              <Card className="p-5">
+                <h2 className="font-display text-sm font-semibold text-slate-900">Candidatura</h2>
+                <div className="mt-3 space-y-2">
                   <a
                     href={linkPrincipale}
                     target="_blank"
@@ -166,22 +182,20 @@ export default function BandoDetail() {
                     Vai al bando
                     <ArrowUpRight className="size-4" aria-hidden />
                   </a>
-                ) : (
-                  <p className="text-sm text-slate-500">Link di candidatura non disponibile.</p>
-                )}
-                {bando.link_bando && bando.link_bando !== linkPrincipale && (
-                  <a
-                    href={bando.link_bando}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={buttonClasses("secondary", "md", "w-full")}
-                  >
-                    Fonte ufficiale
-                    <ExternalLink className="size-4" aria-hidden />
-                  </a>
-                )}
-              </div>
-            </Card>
+                  {bando.link_bando && bando.link_bando !== linkPrincipale && (
+                    <a
+                      href={bando.link_bando}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={buttonClasses("secondary", "md", "w-full")}
+                    >
+                      Fonte ufficiale
+                      <ExternalLink className="size-4" aria-hidden />
+                    </a>
+                  )}
+                </div>
+              </Card>
+            )}
 
             {allegati.length > 0 && (
               <Card className="p-5">

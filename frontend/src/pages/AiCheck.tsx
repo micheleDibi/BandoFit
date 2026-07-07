@@ -9,6 +9,7 @@ import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
 import { useAiChecks } from "../hooks/useAiCheck";
 import { apiErrorMessage } from "../lib/api";
 import { formatDateTime } from "../lib/format";
+import { scoreColorClasses } from "../lib/scoreColor";
 import type { AiCheck } from "../types";
 
 /** Un gruppo per bando: l'analisi più recente in evidenza + numero versioni. */
@@ -51,15 +52,14 @@ function StatTile({
   );
 }
 
-function ScoreBar({ punteggio, esito }: { punteggio: number; esito: AiCheck["esito"] }) {
-  const tone =
-    esito === "ammissibile" ? "bg-brand-500" : esito === "da_verificare" ? "bg-amber-400" : "bg-slate-400";
+function ScoreBar({ punteggio }: { punteggio: number }) {
+  const colori = scoreColorClasses(punteggio);
   return (
     <div className="flex w-28 items-center gap-2">
       <div className="h-1.5 flex-1 rounded-full bg-slate-100">
-        <div className={`h-1.5 rounded-full ${tone}`} style={{ width: `${punteggio}%` }} />
+        <div className={`h-1.5 rounded-full ${colori.bar}`} style={{ width: `${punteggio}%` }} />
       </div>
-      <span className="tabular shrink-0 font-display text-sm font-bold text-slate-900">
+      <span className={`tabular shrink-0 font-display text-sm font-bold ${colori.text}`}>
         {punteggio}
         <span className="text-[10px] font-medium text-slate-400">/100</span>
       </span>
@@ -96,9 +96,7 @@ function GroupRow({ group }: { group: CheckGroup }) {
         ) : (
           <>
             {latest.esito && <AiEsitoBadge esito={latest.esito} />}
-            {latest.punteggio !== null && (
-              <ScoreBar punteggio={latest.punteggio} esito={latest.esito} />
-            )}
+            {latest.punteggio !== null && <ScoreBar punteggio={latest.punteggio} />}
           </>
         )}
         <Link

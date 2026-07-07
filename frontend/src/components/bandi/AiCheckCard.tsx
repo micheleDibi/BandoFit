@@ -2,6 +2,7 @@ import { Loader2, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { useAiChecksForBando, useRequestAiCheck } from "../../hooks/useAiCheck";
 import { apiErrorMessage } from "../../lib/api";
+import { scoreColorClasses } from "../../lib/scoreColor";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";
@@ -78,7 +79,9 @@ export function AiCheckCard({ slug }: { slug: string }) {
           <div className="flex flex-wrap items-center gap-2">
             <AiEsitoBadge esito={latest.esito} />
             {latest.punteggio !== null && (
-              <span className="tabular font-display text-lg font-bold text-slate-900">
+              <span
+                className={`tabular font-display text-lg font-bold ${scoreColorClasses(latest.punteggio).text}`}
+              >
                 {latest.punteggio}
                 <span className="text-xs font-medium text-slate-400">/100</span>
               </span>

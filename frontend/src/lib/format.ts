@@ -23,6 +23,14 @@ const numericDateFormatter = new Intl.DateTimeFormat("it-IT", {
   year: "numeric",
 });
 
+const dateTimeFormatter = new Intl.DateTimeFormat("it-IT", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 export function formatEur(value: number | string | null | undefined): string {
   if (value === null || value === undefined || value === "") return "—";
   const num = typeof value === "string" ? Number(value) : value;
@@ -42,6 +50,14 @@ export function formatDate(iso: string | null | undefined): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "—";
   return dateFormatter.format(date);
+}
+
+/** Data e ora ("7 lug 2026, 14:32") — per distinguere versioni nello stesso giorno. */
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return dateTimeFormatter.format(date);
 }
 
 /** Data in formato numerico gg/mm/aaaa. */

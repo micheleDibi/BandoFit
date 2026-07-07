@@ -9,6 +9,8 @@ import {
   Landmark,
 } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
+import { AiCheckCard } from "../components/bandi/AiCheckCard";
+import { AiCheckReport } from "../components/bandi/AiCheckReport";
 import { ScadenzaBadge, StatoBadge } from "../components/bandi/badges";
 import { ContenutoRenderer } from "../components/bandi/ContenutoRenderer";
 import { Badge } from "../components/ui/Badge";
@@ -149,6 +151,8 @@ export default function BandoDetail() {
         {/* Sidebar */}
         <aside>
           <div className="sticky top-20 space-y-4">
+            <AiCheckCard slug={bando.slug} />
+
             <Card className="p-5">
               <h2 className="font-display text-sm font-semibold text-slate-900">Candidatura</h2>
               <div className="mt-3 space-y-2">
@@ -286,6 +290,8 @@ export default function BandoDetail() {
           </div>
         </aside>
       </div>
+
+      <AiCheckReport slug={bando.slug} />
     </div>
   );
 }

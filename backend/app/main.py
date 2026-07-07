@@ -15,6 +15,7 @@ from postgrest.exceptions import APIError
 from app.api.routers import (
     admin_plans,
     admin_users,
+    ai_check,
     auth,
     bandi,
     company,
@@ -25,6 +26,7 @@ from app.api.routers import (
     plans,
     preferences,
 )
+from app.clients.anthropic_ai import AiCheckClient
 from app.clients.openapi import OpenapiClient
 from app.clients.supabase import create_primary_client, create_secondary_client
 from app.core.config import get_settings
@@ -43,8 +45,12 @@ async def lifespan(app: FastAPI):
     app.state.openapi = OpenapiClient(settings)
     if not app.state.openapi.enabled:
         logger.warning("openapi.it non configurato: import dati e verifica CF disattivati")
+    app.state.ai = AiCheckClient(settings)
+    if not app.state.ai.enabled:
+        logger.warning("API Anthropic non configurata: AI-check disattivato")
     yield
     await app.state.openapi.aclose()
+    await app.state.ai.aclose()
 
 
 app = FastAPI(
@@ -112,6 +118,7 @@ for router in (
     family.router,
     company.router,
     preferences.router,
+    ai_check.router,
     lookups.router,
     bandi.router,
     admin_users.router,

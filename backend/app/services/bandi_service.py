@@ -287,6 +287,25 @@ async def fetch_bandi(
     return Page.build(items, total, page, page_size)
 
 
+async def fetch_bando_for_ai(secondary, slug: str) -> dict:
+    """Riga grezza del bando per la pipeline AI-check: tutti i campi del
+    dettaglio più hash_bando/updated_at (chiave della cache estrazioni).
+    `contenuto` è già normalizzato (gestione del doppio-encoding)."""
+    resp = (
+        await secondary.table("bando")
+        .select(DETAIL_SELECT + ",hash_bando,updated_at")
+        .eq("slug", slug)
+        .eq("stato_processing", "completed")
+        .limit(1)
+        .execute()
+    )
+    if not resp.data:
+        raise NotFoundError("Bando non trovato")
+    row = dict(resp.data[0])
+    row["contenuto"] = normalize_contenuto(row.get("contenuto"))
+    return row
+
+
 async def fetch_bando_by_slug(secondary, slug: str) -> BandoDetail:
     resp = (
         await secondary.table("bando")

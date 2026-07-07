@@ -381,3 +381,115 @@ export interface Preferences {
   modalita: number[];
   programmi: number[];
 }
+
+// ---- AI-check ----------------------------------------------------------------
+
+export type AiEsito = "ammissibile" | "non_ammissibile" | "da_verificare";
+export type AiTipoPunteggio = "stima" | "euristico";
+export type AiVerdetto =
+  | "soddisfatto"
+  | "parzialmente_soddisfatto"
+  | "non_soddisfatto"
+  | "dato_mancante";
+
+export interface AiRiferimentoBando {
+  sezione: string;
+  testo: string;
+  verificata: boolean;
+}
+
+export interface AiDatoAzienda {
+  campo: string;
+  valore: string;
+}
+
+export interface AiRequisitoReport {
+  id: string;
+  testo: string;
+  categoria: string;
+  verdetto: AiVerdetto;
+  riferimento_bando: AiRiferimentoBando;
+  dato_azienda: AiDatoAzienda | null;
+  motivazione: string;
+}
+
+// NON estende AiRequisitoReport: i criteri non hanno `testo` (hanno `nome`).
+export interface AiCriterioReport {
+  id: string;
+  nome: string;
+  categoria: string;
+  verdetto: AiVerdetto;
+  punti_max: number | null;
+  punteggio_parziale: number | null;
+  peso?: number | null;
+  riferimento_bando: AiRiferimentoBando;
+  dato_azienda: AiDatoAzienda | null;
+  motivazione: string;
+}
+
+export interface AiPuntoNotevole {
+  testo: string;
+  ref: string | null;
+}
+
+export interface AiDatoMancante {
+  campo: string | null;
+  descrizione: string;
+  ref: string | null;
+}
+
+export interface AiReport {
+  schema_version: number;
+  esito_ammissibilita: AiEsito;
+  requisiti: AiRequisitoReport[];
+  criteri: AiCriterioReport[];
+  punteggio_totale: number | null;
+  tipo_punteggio: AiTipoPunteggio;
+  griglia: {
+    presente: boolean;
+    fonte: "contenuto" | "allegato" | "assente";
+    punteggio_max_totale: number | null;
+    punti_ottenuti_stimati: number | null;
+    soglia_minima: number | null;
+    note: string | null;
+  };
+  pesi_euristici: Record<string, number> | null;
+  verifiche_strutturate: Record<string, { esito: string; [key: string]: unknown }>;
+  punti_di_forza: AiPuntoNotevole[];
+  punti_di_debolezza: AiPuntoNotevole[];
+  dati_mancanti: AiDatoMancante[];
+  disclaimer: string;
+  meta: Record<string, unknown>;
+}
+
+export interface AiCheck {
+  id: string;
+  bando_id: number;
+  bando_slug: string;
+  bando_titolo: string;
+  status: "pending" | "ready" | "error";
+  error_detail: string | null;
+  esito: AiEsito | null;
+  punteggio: number | null;
+  tipo_punteggio: AiTipoPunteggio | null;
+  model: string | null;
+  extraction_cached: boolean;
+  created_at: string;
+  ready_at: string | null;
+  report: AiReport | null;
+}
+
+export interface AiQuota {
+  totale: number;
+  usati: number;
+  rimanenti: number;
+  periodo_inizio: string | null;
+  periodo_fine: string | null;
+}
+
+export interface AiChecksResponse {
+  editable: boolean;
+  quota: AiQuota;
+  items: AiCheck[];
+  total: number;
+}

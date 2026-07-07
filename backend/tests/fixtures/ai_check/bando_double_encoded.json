@@ -1,0 +1,86 @@
+{
+ "id": 26315,
+ "slug": "piani-formativi-par-gol-4-lazio",
+ "titolo": "Piani formativi GOL 4 nel Lazio: contributi per organismi di formazione",
+ "titolo_breve": "PNRR – Regione Lazio",
+ "descrizione_raw": null,
+ "descrizione_breve": "La Regione Lazio finanzia con risorse PNRR la progettazione di Piani formativi per integrazione e potenziamento degli interventi del PAR GOL (GOL 4). Avviso aperto rivolto agli organismi di formazione accreditati operanti sul territorio regionale.",
+ "stato_bando": "aperto",
+ "livello": "flash_bando",
+ "data_pubblicazione": null,
+ "data_apertura": null,
+ "data_scadenza": null,
+ "importo_totale_eur": null,
+ "importo_max_per_progetto_eur": null,
+ "ente_erogatore": "Regione Lazio",
+ "area_geografica": "Lazio",
+ "tematica": [
+  "Formazione e lavoro",
+  "Inclusione sociale",
+  "PNRR"
+ ],
+ "link_bando": "https://www.lazioeuropa.it/bandi/progettazione-di-piani-formativi-per-integrazione-e-potenziamento-degli-interventi-del-par-gol-gol-4/",
+ "link_candidatura": null,
+ "contenuto": "{\"sections\": [{\"type\": \"paragraph\", \"segments\": [{\"kind\": \"text\", \"text\": \"La Regione Lazio promuove un avviso, finanziato con risorse \"}, {\"kind\": \"bold\", \"text\": \"PNRR\"}, {\"kind\": \"text\", \"text\": \", per la progettazione di Piani formativi destinati a integrare e potenziare gli interventi del \"}, {\"kind\": \"bold\", \"text\": \"PAR GOL (Garanzia di Occupabilità dei Lavoratori) – percorso GOL 4\"}, {\"kind\": \"text\", \"text\": \". L'intervento mira a rafforzare l'offerta formativa rivolta ai destinatari più fragili del programma GOL, sostenendo gli organismi di formazione accreditati nel disegno di percorsi di upskilling e reskilling coerenti con i fabbisogni del mercato del lavoro regionale.\"}]}, {\"type\": \"h2\", \"text\": \"Chi può candidarsi\"}, {\"type\": \"paragraph\", \"segments\": [{\"kind\": \"text\", \"text\": \"L'avviso si rivolge agli \"}, {\"kind\": \"bold\", \"text\": \"organismi di formazione\"}, {\"kind\": \"text\", \"text\": \" accreditati presso la Regione Lazio per l'erogazione di attività formative, in coerenza con la normativa regionale in materia di accreditamento e con le indicazioni operative del PAR GOL.\"}]}, {\"type\": \"paragraph\", \"segments\": [{\"kind\": \"text\", \"text\": \"I soggetti ammessi devono in particolare:\"}]}, {\"type\": \"bullet_list\", \"items\": [{\"segments\": [{\"kind\": \"text\", \"text\": \"essere accreditati per la macrotipologia formazione superiore e/o continua nel sistema regionale del Lazio;\"}]}, {\"segments\": [{\"kind\": \"text\", \"text\": \"operare in coerenza con le linee di intervento del Programma GOL e in particolare con il \"}, {\"kind\": \"bold\", \"text\": \"percorso 4\"}, {\"kind\": \"text\", \"textett: \", dedicato alla riqualificazione approfondita dei lavoratori più distanti dal mercato del lavoro;\"}]}, {\"segments\": [{\"kind\": \"text\", \"text\": \"garantire capacità progettuale e organizzativa per la realizzazione di Piani formativi multi-azione, indirizzati ai beneficiari individuati dai Centri per l'impiego.\"}]}], \"type\": \"bullet_list\"}, {\"type\": \"h2\", \"text\": \"Come e quando\"}, {\"type\": \"paragraph\", \"segments\": [{\"kind\": \"text\", \"text\": \"L'avviso è classificato come \"}, {\"kind\": \"bold\", \"text\": \"aperto\"}, {\"kind\": \"text\", \"text\": \" e prevede l'erogazione di un contributo a \"}, {\"kind\": \"bold\", \"text\": \"fondo perduto\"}, {\"kind\": \"text\", \"text\": \" per la progettazione e attuazione dei Piani formativi GOL 4. Le risorse rientrano nell'ambito del Piano Nazionale di Ripresa e Resilienza, Missione 5 – Inclusione e coesione, all'interno della riforma e del rafforzamento delle politiche attive del lavoro.\"}]}, {\"type\": \"paragraph\", \"segments\": [{\"kind\": \"text\", \"text\": \"Per consultare il testo integrale dell'avviso, la modulistica e gli aggiornamenti su scadenze e dotazione finanziaria si rimanda alla scheda ufficiale pubblicata su \"}, {\"kind\": \"link\", \"text\": \"Lazio Europa\", \"url\": \"https://www.lazioeuropa.it/bandi/progettazione-di-piani-formativi-per-integrazione-e-potenziamento-degli-interventi-del-par-gol-gol-4/\"}, {\"kind\": \"text\", \"text\": \", che funge da punto di accesso unico alle opportunità di finanziamento gestite dalla Regione Lazio nell'ambito dei fondi europei e PNRR.\"}]}, {\"type\": \"paragraph\", \"segments\": [{\"kind\": \"text\", \"text\": \"Gli organismi interessati sono invitati a verificare i requisiti di accreditamento, le tempistiche di presentazione delle proposte e le modalità di rendicontazione indicate nel provvedimento di approvazione dell'avviso e nei relativi allegati tecnici.\"}]}]}",
+ "allegati": [],
+ "hash_bando": "da9cbff109dff14a90c5a9af2e28ed7dc28dd96d859ed5dff7e3222803278263",
+ "updated_at": "2026-07-03 04:02:39.948895+00",
+ "tipologie_bando": {
+  "id": 2,
+  "nome": "Bandi nazionali / PNRR"
+ },
+ "modalita_erogazione": {
+  "id": 1,
+  "nome": "Fondo perduto"
+ },
+ "programmi": {
+  "id": 48,
+  "nome": "PNRR"
+ },
+ "bando_regioni": [
+  {
+   "regioni": {
+    "id": 7,
+    "nome": "Lazio"
+   }
+  }
+ ],
+ "bando_settori": [
+  {
+   "settori": {
+    "id": 39,
+    "nome": "Formazione e lavoro"
+   }
+  },
+  {
+   "settori": {
+    "id": 46,
+    "nome": "Inclusione Sociale e Solidarietà"
+   }
+  }
+ ],
+ "bando_beneficiari": [
+  {
+   "beneficiari": {
+    "id": 23,
+    "nome": "Organismi di formazione"
+   }
+  }
+ ],
+ "bando_codici_ateco": [
+  {
+   "codici_ateco": {
+    "id": 70,
+    "codice": "78",
+    "descrizione": "Attività di ricerca, selezione, fornitura di personale"
+   }
+  },
+  {
+   "codici_ateco": {
+    "id": 76,
+    "codice": "85",
+    "descrizione": "Istruzione"
+   }
+  }
+ ]
+}

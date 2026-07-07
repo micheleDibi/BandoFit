@@ -21,6 +21,8 @@ dependencies = [
     # database IANA dei fusi orari per zoneinfo (le immagini slim non hanno
     # /usr/share/zoneinfo): serve per calcolare "oggi" su Europe/Rome
     "tzdata>=2024.1",
+    # AI-check: chiamate all'API Anthropic con output strutturato (messages.parse)
+    "anthropic>=0.116",
 ]
 
 [project.optional-dependencies]

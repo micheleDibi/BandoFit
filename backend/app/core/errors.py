@@ -68,6 +68,35 @@ class OpenapiTimeoutError(AppError):
         super().__init__(504, "openapi_timeout", message)
 
 
+class AiNotConfiguredError(AppError):
+    """Chiave API Anthropic assente: AI-check disattivato su questo ambiente."""
+
+    def __init__(self, message: str = "AI-check non configurato su questo ambiente"):
+        super().__init__(503, "ai_not_configured", message)
+
+
+class AiUpstreamError(AppError):
+    """Errore dell'API Anthropic (indisponibilità, risposta malformata)."""
+
+    def __init__(self, message: str = "Il servizio di analisi non è al momento disponibile, riprova più tardi"):
+        super().__init__(502, "ai_upstream_error", message)
+
+
+class AiTimeoutError(AppError):
+    """Timeout verso l'API Anthropic: l'esito (e l'eventuale addebito) è
+    ignoto, quindi NESSUN retry automatico — decide l'utente se riprovare."""
+
+    def __init__(self, message: str = "L'analisi ha impiegato troppo tempo: riprova tra qualche minuto"):
+        super().__init__(504, "ai_timeout", message)
+
+
+class AiQuotaExceededError(AppError):
+    """Quota AI-check del piano esaurita per il periodo di abbonamento."""
+
+    def __init__(self, message: str = "Hai esaurito gli AI-check del tuo piano per quest'anno"):
+        super().__init__(429, "ai_quota_exceeded", message)
+
+
 def _error_body(code: str, message: str) -> dict:
     return {"error": {"code": code, "message": message}}
 

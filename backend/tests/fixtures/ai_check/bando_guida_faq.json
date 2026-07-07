@@ -1,0 +1,493 @@
+{
+ "id": 42235,
+ "slug": "valore-artigiano-2026-lazio-fondo-perduto-imprese",
+ "titolo": "Valore Artigiano 2026: fondo perduto fino a 12.000 euro per imprese del Lazio",
+ "titolo_breve": "Bando regionale Lazio – Artigianato",
+ "descrizione_raw": null,
+ "descrizione_breve": "La Regione Lazio finanzia con 2,4 milioni di euro a fondo perduto gli investimenti delle imprese artigiane per innovazione, digitalizzazione e sostenibilità. Domande su GeCoWEB Plus dalle ore 12:00 del 21 luglio 2026 fino alle 17:00 del 28 ottobre 2026.",
+ "stato_bando": "aperto",
+ "livello": "guida_bando",
+ "data_pubblicazione": "2026-06-26",
+ "data_apertura": null,
+ "data_scadenza": null,
+ "importo_totale_eur": 2400000,
+ "importo_max_per_progetto_eur": 12000,
+ "ente_erogatore": "Regione Lazio",
+ "area_geografica": "Lazio",
+ "tematica": [
+  "Artigianato",
+  "Transizione digitale",
+  "Competitività imprese"
+ ],
+ "link_bando": "https://www.lazioeuropa.it/bandi/valore-artigiano-2026/",
+ "link_candidatura": "https://www.lazioinnova.it/gecoweb-plus/",
+ "contenuto": {
+  "sections": [
+   {
+    "text": "In breve",
+    "type": "h2"
+   },
+   {
+    "type": "paragraph",
+    "segments": [
+     {
+      "kind": "text",
+      "text": "La Regione Lazio ha approvato con Determinazione n. G08851 del "
+     },
+     {
+      "kind": "bold",
+      "text": "26 giugno 2026"
+     },
+     {
+      "kind": "text",
+      "text": " l'avviso pubblico Valore Artigiano 2026, che mette a disposizione "
+     },
+     {
+      "kind": "bold",
+      "text": "2,4 milioni di euro"
+     },
+     {
+      "kind": "text",
+      "text": " a fondo perduto per sostenere gli investimenti delle imprese artigiane con sede operativa nel Lazio. Di questa dotazione, 400.000 euro sono riservati al comparto moda. Il contributo copre fino al 60% delle spese ammissibili, con un massimo di 12.000 euro per progetto, in regime de minimis."
+     }
+    ]
+   },
+   {
+    "text": "A chi si rivolge",
+    "type": "h2"
+   },
+   {
+    "type": "paragraph",
+    "segments": [
+     {
+      "kind": "text",
+      "text": "Possono presentare domanda le imprese artigiane iscritte all'albo, attive alla data di presentazione della richiesta e con sede operativa in Regione Lazio. I settori coperti includono industrie tessili, abbigliamento, pelletteria, lavorazione del legno, prodotti in metallo, elettronica, riparazione di macchinari e altre attività manifatturiere artigiane."
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "segments": [
+     {
+      "kind": "text",
+      "text": "Non sono ammissibili le imprese artigiane che hanno già ricevuto un contributo sull'avviso Valore Artigiano approvato con Determinazione n. G00331 del 14 gennaio 2025."
+     }
+    ]
+   },
+   {
+    "text": "Cosa finanzia",
+    "type": "h2"
+   },
+   {
+    "type": "paragraph",
+    "segments": [
+     {
+      "kind": "text",
+      "text": "Ogni progetto deve avere un investimento minimo di 5.000 euro, essere realizzato nel Lazio e concludersi (comprese spese, pagamenti e rendicontazione) entro 12 mesi dalla concessione. Sono ammissibili investimenti strettamente collegati al progetto, tra cui:"
+     }
+    ]
+   },
+   {
+    "type": "bullet_list",
+    "items": [
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "macchinari, attrezzature e impianti produttivi;"
+       }
+      ]
+     },
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "tecnologie digitali (hardware, software, ICT);"
+       }
+      ]
+     },
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "servizi digitali, incluse soluzioni cloud e SaaS;"
+       }
+      ]
+     },
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "impianti fotovoltaici entro i limiti specifici previsti;"
+       }
+      ]
+     },
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "opere murarie e impiantistica, nei limiti stabiliti dall'avviso."
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "text": "Entità del contributo",
+    "type": "h2"
+   },
+   {
+    "type": "paragraph",
+    "segments": [
+     {
+      "kind": "text",
+      "text": "Il sostegno consiste in un contributo a fondo perduto pari al "
+     },
+     {
+      "kind": "bold",
+      "text": "60% delle spese ammissibili"
+     },
+     {
+      "kind": "text",
+      "text": ", con un massimale di 12.000 euro per progetto. È possibile richiedere una percentuale inferiore al fine di ottenere un punteggio più elevato in fase di selezione. Il contributo viene erogato a saldo, dopo la rendicontazione delle spese effettivamente sostenute."
+     }
+    ]
+   },
+   {
+    "text": "Come presentare la domanda",
+    "type": "h2"
+   },
+   {
+    "type": "paragraph",
+    "segments": [
+     {
+      "kind": "text",
+      "text": "La domanda va presentata esclusivamente online tramite la piattaforma "
+     },
+     {
+      "url": "https://www.lazioinnova.it/gecoweb-plus/",
+      "kind": "link",
+      "text": "GeCoWEB Plus"
+     },
+     {
+      "kind": "text",
+      "text": ". La procedura si articola in tre fasi:"
+     }
+    ]
+   },
+   {
+    "type": "numbered_list",
+    "items": [
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "autovalutazione del punteggio;"
+       }
+      ]
+     },
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "compilazione del formulario online;"
+       }
+      ]
+     },
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "invio della domanda firmata digitalmente."
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "text": "Scadenze",
+    "type": "h2"
+   },
+   {
+    "type": "paragraph",
+    "segments": [
+     {
+      "kind": "text",
+      "text": "Il formulario online è disponibile dalle ore 12:00 del "
+     },
+     {
+      "kind": "bold",
+      "text": "7 luglio 2026"
+     },
+     {
+      "kind": "text",
+      "text": ". Le domande possono essere presentate dalle ore 12:00 del "
+     },
+     {
+      "kind": "bold",
+      "text": "21 luglio 2026"
+     },
+     {
+      "kind": "text",
+      "text": " ed entro le ore 17:00 del "
+     },
+     {
+      "kind": "bold",
+      "text": "28 ottobre 2026"
+     },
+     {
+      "kind": "text",
+      "text": "."
+     }
+    ]
+   },
+   {
+    "text": "Valutazione e criteri di selezione",
+    "type": "h2"
+   },
+   {
+    "type": "paragraph",
+    "segments": [
+     {
+      "kind": "text",
+      "text": "L'accesso all'istruttoria avviene sulla base di un punteggio fino a 100, costruito su criteri automatici quali cofinanziamento (con peso maggiore), anzianità dell'impresa, numero di addetti, localizzazione in zona assistita e caratterizzazione giovanile o femminile dell'impresa. I progetti ammessi sono poi valutati qualitativamente su innovatività, impatto, sostenibilità e miglioramento competitivo, con una soglia minima di 60/100."
+     }
+    ]
+   },
+   {
+    "text": "Errori comuni da evitare",
+    "type": "h2"
+   },
+   {
+    "type": "bullet_list",
+    "items": [
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "Presentare progetti con investimento inferiore alla soglia minima di 5.000 euro."
+       }
+      ]
+     },
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "Includere spese non strettamente collegate al progetto o sostenute fuori dal territorio del Lazio."
+       }
+      ]
+     },
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "Sottovalutare i tempi di realizzazione: tutte le attività, i pagamenti e la rendicontazione devono chiudersi entro 12 mesi dalla concessione."
+       }
+      ]
+     },
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "Inviare la domanda senza firma digitale valida o oltre le ore 17:00 del 28 ottobre 2026."
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "text": "FAQ",
+    "type": "h2"
+   },
+   {
+    "type": "faq",
+    "items": [
+     {
+      "a": {
+       "segments": [
+        {
+         "kind": "text",
+         "text": "Il contributo a fondo perduto copre fino al 60% delle spese ammissibili, con un massimo di 12.000 euro per progetto, in regime de minimis."
+        }
+       ]
+      },
+      "q": "Qual è l'importo massimo del contributo?"
+     },
+     {
+      "a": {
+       "segments": [
+        {
+         "kind": "text",
+         "text": "Le imprese artigiane iscritte all'albo, attive alla data di presentazione della domanda e con sede operativa nel Lazio. Sono escluse le imprese già beneficiarie dell'avviso Valore Artigiano approvato con DD n. G00331 del 14 gennaio 2025."
+        }
+       ]
+      },
+      "q": "Chi può partecipare a Valore Artigiano 2026?"
+     },
+     {
+      "a": {
+       "segments": [
+        {
+         "kind": "text",
+         "text": "Le domande possono essere trasmesse dalle ore 12:00 del 21 luglio 2026 fino alle ore 17:00 del 28 ottobre 2026 tramite la piattaforma GeCoWEB Plus."
+        }
+       ]
+      },
+      "q": "Entro quando va presentata la domanda?"
+     },
+     {
+      "a": {
+       "segments": [
+        {
+         "kind": "text",
+         "text": "Il contributo è erogato a saldo, dopo la rendicontazione delle spese effettivamente sostenute e la verifica della corretta realizzazione del progetto."
+        }
+       ]
+      },
+      "q": "Come viene erogato il contributo?"
+     }
+    ]
+   }
+  ]
+ },
+ "allegati": [
+  {
+   "url": "https://www.lazioeuropa.it/app/uploads/2026/07/DD_G08851_26_06_2026.pdf",
+   "tipo": "pdf",
+   "label": "Determinazione n. G08851 del 26 giugno 2026 - Approvazione Avviso pubblico"
+  },
+  {
+   "url": "https://www.lazioeuropa.it/app/uploads/2026/07/DD_G08851_26_06_2026_Bando.pdf",
+   "tipo": "pdf",
+   "label": "Avviso pubblico"
+  },
+  {
+   "url": "https://www.lazioeuropa.it/app/uploads/2026/07/DD_G08851_26_06_2026_Modulistica_istruzioni.pdf",
+   "tipo": "pdf",
+   "label": "Modulistica e istruzioni"
+  }
+ ],
+ "hash_bando": "e713f5173a6f8f0bb67d1508b1ce87d891249bb06d7437b29ceeaec5a7cb8f56",
+ "updated_at": "2026-07-03 04:02:39.948895+00",
+ "tipologie_bando": {
+  "id": 3,
+  "nome": "Bandi regionali / locali"
+ },
+ "modalita_erogazione": {
+  "id": 1,
+  "nome": "Fondo perduto"
+ },
+ "programmi": null,
+ "bando_regioni": [
+  {
+   "regioni": {
+    "id": 7,
+    "nome": "Lazio"
+   }
+  }
+ ],
+ "bando_settori": [
+  {
+   "settori": {
+    "id": 12,
+    "nome": "Artigianato"
+   }
+  },
+  {
+   "settori": {
+    "id": 10,
+    "nome": "Ammodernamento impianti"
+   }
+  },
+  {
+   "settori": {
+    "id": 47,
+    "nome": "Innovazione tecnologica, digitalizzazione, ICT"
+   }
+  },
+  {
+   "settori": {
+    "id": 83,
+    "nome": "Transizione digitale"
+   }
+  },
+  {
+   "settori": {
+    "id": 84,
+    "nome": "Transizione ecologica"
+   }
+  },
+  {
+   "settori": {
+    "id": 22,
+    "nome": "Competitività imprese"
+   }
+  }
+ ],
+ "bando_beneficiari": [
+  {
+   "beneficiari": {
+    "id": 16,
+    "nome": "Imprese"
+   }
+  }
+ ],
+ "bando_codici_ateco": [
+  {
+   "codici_ateco": {
+    "id": 12,
+    "codice": "13",
+    "descrizione": "Industrie tessili"
+   }
+  },
+  {
+   "codici_ateco": {
+    "id": 13,
+    "codice": "14",
+    "descrizione": "Confezione di articoli di abbigliamento; confezione di articoli in pelle e pelliccia"
+   }
+  },
+  {
+   "codici_ateco": {
+    "id": 14,
+    "codice": "15",
+    "descrizione": "Fabbricazione di articoli in pelle e simili"
+   }
+  },
+  {
+   "codici_ateco": {
+    "id": 15,
+    "codice": "16",
+    "descrizione": "Industria del legno e dei prodotti in legno e sughero (esclusi i mobili); fabbricazione di articoli in paglia e materiali da intreccio"
+   }
+  },
+  {
+   "codici_ateco": {
+    "id": 24,
+    "codice": "25",
+    "descrizione": "Fabbricazione di prodotti in metallo (esclusi macchinari e attrezzature)"
+   }
+  },
+  {
+   "codici_ateco": {
+    "id": 25,
+    "codice": "26",
+    "descrizione": "Fabbricazione di computer e prodotti di elettronica e ottica; apparecchi elettromedicali, apparecchi di misurazione e di orologi"
+   }
+  },
+  {
+   "codici_ateco": {
+    "id": 31,
+    "codice": "32",
+    "descrizione": "Altre industrie manifatturiere"
+   }
+  },
+  {
+   "codici_ateco": {
+    "id": 32,
+    "codice": "33",
+    "descrizione": "Riparazione, manutenzione ed installazione di macchine ed apparecchiature"
+   }
+  }
+ ]
+}

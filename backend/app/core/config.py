@@ -49,6 +49,16 @@ class Settings(BaseSettings):
     # Minuti minimi tra due import della stessa azienda (ogni import costa credito).
     company_import_cooldown_minutes: int = 10
 
+    # AI-check (API Anthropic). Chiave vuota = feature disattivata (le rotte
+    # rispondono 503 ai_not_configured). Ogni report costa ~0,10 $ di API.
+    anthropic_api_key: str = ""
+    ai_check_model: str = "claude-sonnet-5"
+    ai_check_timeout_seconds: float = 120.0
+    # Minuti minimi tra due generazioni per la stessa coppia azienda × bando.
+    ai_check_cooldown_minutes: int = 5
+    # Limite del testo visura incluso nel profilo azienda passato al modello.
+    ai_check_visura_max_chars: int = 20000
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

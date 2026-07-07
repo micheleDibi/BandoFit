@@ -69,6 +69,7 @@ async def record_usage(
     outcome: str,
     cost_cents: int,
     meta: dict | None = None,
+    provider: str = "openapi",
 ) -> None:
     """Annota una chiamata a pagamento. Non solleva MAI: un registro non
     scrivibile non deve mandare in errore un import riuscito."""
@@ -77,7 +78,7 @@ async def record_usage(
             {
                 "user_id": str(user_id),
                 "family_parent_id": str(family_parent_id),
-                "provider": "openapi",
+                "provider": provider,
                 "service": service,
                 "outcome": outcome,
                 "cost_cents": cost_cents,

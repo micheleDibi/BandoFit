@@ -1,7 +1,33 @@
-import { CalendarClock, CheckCircle2, Clock3, XCircle } from "lucide-react";
+import { CalendarClock, CheckCircle2, Clock3, HelpCircle, XCircle } from "lucide-react";
 import { daysUntil, formatDate } from "../../lib/format";
-import type { StatoBando } from "../../types";
+import type { AiEsito, StatoBando } from "../../types";
 import { Badge } from "../ui/Badge";
+
+/** Esito di ammissibilità dell'AI-check. */
+export function AiEsitoBadge({ esito }: { esito: AiEsito }) {
+  if (esito === "ammissibile") {
+    return (
+      <Badge tone="emerald">
+        <CheckCircle2 className="size-3" aria-hidden />
+        Ammissibile
+      </Badge>
+    );
+  }
+  if (esito === "non_ammissibile") {
+    return (
+      <Badge tone="red">
+        <XCircle className="size-3" aria-hidden />
+        Non ammissibile
+      </Badge>
+    );
+  }
+  return (
+    <Badge tone="amber">
+      <HelpCircle className="size-3" aria-hidden />
+      Da verificare
+    </Badge>
+  );
+}
 
 export function StatoBadge({ stato }: { stato: StatoBando | null }) {
   if (!stato) return null;

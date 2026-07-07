@@ -4,6 +4,7 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from supabase import AsyncClient
 
+from app.clients.anthropic_ai import AiCheckClient as _AiCheckClient
 from app.clients.openapi import OpenapiClient as _OpenapiClient
 from app.core.errors import ForbiddenError, UnauthorizedError
 from app.core.security import decode_supabase_jwt
@@ -24,9 +25,14 @@ def get_openapi(request: Request) -> _OpenapiClient:
     return request.app.state.openapi
 
 
+def get_ai(request: Request) -> _AiCheckClient:
+    return request.app.state.ai
+
+
 PrimaryClient = Annotated[AsyncClient, Depends(get_primary)]
 SecondaryClient = Annotated[AsyncClient, Depends(get_secondary)]
 OpenapiDep = Annotated[_OpenapiClient, Depends(get_openapi)]
+AiDep = Annotated[_AiCheckClient, Depends(get_ai)]
 
 
 async def get_current_user(

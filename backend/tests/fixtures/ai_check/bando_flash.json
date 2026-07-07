@@ -1,0 +1,272 @@
+{
+ "id": 17774,
+ "slug": "lombardia-iniziativa-milo-nodi-interscambio",
+ "titolo": "Contributi Regione Lombardia per totem informativi nei nodi di interscambio",
+ "titolo_breve": "Bando regionale Lombardia – Iniziativa Milo",
+ "descrizione_raw": null,
+ "descrizione_breve": "Regione Lombardia mette a disposizione 1.000.000 di euro a fondo perduto per attrezzare i nodi di interscambio con totem informativi digitali sul trasporto pubblico. Domande entro il 29 giugno 2026.",
+ "stato_bando": "aperto",
+ "livello": "flash_bando",
+ "data_pubblicazione": null,
+ "data_apertura": null,
+ "data_scadenza": "2026-06-29",
+ "importo_totale_eur": 1000000,
+ "importo_max_per_progetto_eur": null,
+ "ente_erogatore": "Regione Lombardia",
+ "area_geografica": "Lombardia",
+ "tematica": [
+  "Mobilità sostenibile",
+  "Smart cities",
+  "Transizione digitale"
+ ],
+ "link_bando": "https://www.obiettivoeuropa.com/bandi/lombardia-iniziativa-milo",
+ "link_candidatura": null,
+ "contenuto": {
+  "sections": [
+   {
+    "type": "paragraph",
+    "segments": [
+     {
+      "kind": "text",
+      "text": "Regione Lombardia stanzia "
+     },
+     {
+      "kind": "bold",
+      "text": "1.000.000 di euro a fondo perduto"
+     },
+     {
+      "kind": "text",
+      "text": " attraverso l'Iniziativa Milo per attrezzare alcuni nodi di interscambio del territorio con totem informativi digitali. Gli apparati metteranno a disposizione degli utenti dati e informazioni in tempo reale sul trasporto pubblico locale, tramite un'interfaccia web sviluppata dalla stessa Regione. Le domande possono essere presentate entro il "
+     },
+     {
+      "kind": "bold",
+      "text": "29 giugno 2026"
+     },
+     {
+      "kind": "text",
+      "text": "."
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "segments": [
+     {
+      "kind": "text",
+      "text": "L'iniziativa punta a migliorare la qualità dei servizi di trasporto pubblico, favorire l'intermodalità e l'accessibilità, ridurre il traffico veicolare nelle principali polarità urbane e promuovere la decarbonizzazione, incentivando l'uso del trasporto collettivo, della mobilità in sharing e della mobilità attiva."
+     }
+    ]
+   },
+   {
+    "text": "Chi può candidarsi",
+    "type": "h2"
+   },
+   {
+    "type": "paragraph",
+    "segments": [
+     {
+      "kind": "text",
+      "text": "Il bando si rivolge alle "
+     },
+     {
+      "kind": "bold",
+      "text": "imprese"
+     },
+     {
+      "kind": "text",
+      "text": " attive nella filiera del trasporto pubblico locale e dei servizi di mobilità sui nodi di interscambio lombardi. In particolare, sono destinatarie le realtà che gestiscono infrastrutture di scambio modale o che operano nei settori del trasporto terrestre (ATECO 49) e del magazzinaggio e attività di supporto ai trasporti (ATECO 52)."
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "segments": [
+     {
+      "kind": "text",
+      "text": "Gli interventi finanziabili sono focalizzati sull'installazione dei totem informativi e sull'integrazione con la piattaforma digitale regionale. Tra gli obiettivi qualificanti indicati dalla Regione figurano:"
+     }
+    ]
+   },
+   {
+    "type": "bullet_list",
+    "items": [
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "incrementare la qualità dei servizi di trasporto pubblico e l'interoperabilità tra sistemi, tramite informazioni accessibili, integrate e innovative;"
+       }
+      ]
+     },
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "ottimizzare i tempi percepiti dagli utenti con dati aggiornati in tempo reale, evitando attese inutili e favorendo la scelta di percorsi o mezzi alternativi;"
+       }
+      ]
+     },
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "ridurre il traffico veicolare interno e di scambio nelle polarità urbane, promuovendo trasporto collettivo, sharing e mobilità attiva;"
+       }
+      ]
+     },
+     {
+      "segments": [
+       {
+        "kind": "text",
+        "text": "favorire l'accessibilità del trasporto pubblico per gli utenti con disabilità, con informazioni in formati audio, visivi e digitali."
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "text": "Come e quando",
+    "type": "h2"
+   },
+   {
+    "type": "paragraph",
+    "segments": [
+     {
+      "kind": "text",
+      "text": "La dotazione complessiva è pari a "
+     },
+     {
+      "kind": "bold",
+      "text": "1.000.000 di euro"
+     },
+     {
+      "kind": "text",
+      "text": ", erogati sotto forma di "
+     },
+     {
+      "kind": "bold",
+      "text": "contributo a fondo perduto"
+     },
+     {
+      "kind": "text",
+      "text": ". L'iniziativa si inserisce nel quadro delle politiche regionali per la mobilità sostenibile e le smart cities, con richiamo agli obiettivi del programma europeo CEF – Connecting Europe Facility per lo sviluppo di reti di trasporto integrate e digitalizzate."
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "segments": [
+     {
+      "kind": "text",
+      "text": "Il termine per la presentazione delle candidature è fissato al "
+     },
+     {
+      "kind": "bold",
+      "text": "29 giugno 2026"
+     },
+     {
+      "kind": "text",
+      "text": ". La procedura di candidatura e la documentazione ufficiale sono pubblicate sui canali istituzionali di Regione Lombardia; è consigliabile monitorare il portale "
+     },
+     {
+      "url": "https://www.bandi.regione.lombardia.it/",
+      "kind": "link",
+      "text": "bandi.regione.lombardia.it"
+     },
+     {
+      "kind": "text",
+      "text": " per accedere alla modulistica, alle FAQ e agli aggiornamenti sulle modalità operative."
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "segments": [
+     {
+      "kind": "text",
+      "text": "Prima di presentare la domanda, è utile verificare la compatibilità del progetto con le specifiche tecniche dell'interfaccia web regionale, che dovrà dialogare con i totem informativi installati nei nodi di interscambio selezionati."
+     }
+    ]
+   }
+  ]
+ },
+ "allegati": [],
+ "hash_bando": "3d9cf9e1df4766c2d3cb48873005ed53d6e5b0b616f5b5184ff7de50e7438623",
+ "updated_at": "2026-07-01 04:08:11.832555+00",
+ "tipologie_bando": {
+  "id": 3,
+  "nome": "Bandi regionali / locali"
+ },
+ "modalita_erogazione": {
+  "id": 1,
+  "nome": "Fondo perduto"
+ },
+ "programmi": {
+  "id": 4,
+  "nome": "CEF - Connecting Europe Facility"
+ },
+ "bando_regioni": [
+  {
+   "regioni": {
+    "id": 9,
+    "nome": "Lombardia"
+   }
+  }
+ ],
+ "bando_settori": [
+  {
+   "settori": {
+    "id": 47,
+    "nome": "Innovazione tecnologica, digitalizzazione, ICT"
+   }
+  },
+  {
+   "settori": {
+    "id": 59,
+    "nome": "Mobilità sostenibile"
+   }
+  },
+  {
+   "settori": {
+    "id": 72,
+    "nome": "Smart cities"
+   }
+  },
+  {
+   "settori": {
+    "id": 83,
+    "nome": "Transizione digitale"
+   }
+  },
+  {
+   "settori": {
+    "id": 86,
+    "nome": "Trasporti"
+   }
+  }
+ ],
+ "bando_beneficiari": [
+  {
+   "beneficiari": {
+    "id": 16,
+    "nome": "Imprese"
+   }
+  }
+ ],
+ "bando_codici_ateco": [
+  {
+   "codici_ateco": {
+    "id": 44,
+    "codice": "49",
+    "descrizione": "Trasporto terrestre e mediante condotte"
+   }
+  },
+  {
+   "codici_ateco": {
+    "id": 47,
+    "codice": "52",
+    "descrizione": "Magazzinaggio e attività di supporto ai trasporti"
+   }
+  }
+ ]
+}

@@ -27,6 +27,8 @@ services:
       OPENAPI_EMAIL: ${OPENAPI_EMAIL:-}
       OPENAPI_API_KEY: ${OPENAPI_API_KEY:-}
       OPENAPI_ENV: ${OPENAPI_ENV:-production}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_CHECK_MODEL: ${AI_CHECK_MODEL:-claude-sonnet-5}
       ENV: production
 
   frontend:

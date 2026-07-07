@@ -130,6 +130,25 @@ Errori: `400 bad_request` (P.IVA mancante / tipo d'impresa non coperto), `403 fo
 ### `GET /me/company/documents/{id}/file`
 Scarica il PDF del documento (`application/pdf`, anche per i figli attivi). `409 document_not_ready` se non ancora evaso.
 
+## AI-check
+
+Analisi di compatibilità **azienda ↔ bando** con LLM (API Anthropic) e punteggio deterministico. Consuma **1 AI-check della quota annua del piano** (`subscription_plans.ai_check`, condivisa da tutta l'azienda) a ogni generazione, rigenerazioni comprese; costo API ~0,10–0,20 $ a report (l'estrazione dei requisiti è cachata per bando). L'esito distingue sempre **ammissibilità** (gate binario sui requisiti obbligatori: uno solo mancato ⇒ `non_ammissibile`; dato mancante ⇒ `da_verificare`, mai promosso) e **punteggio** (`stima` se il bando pubblica la griglia, `euristico` con pesi interni altrimenti).
+
+### `POST /me/ai-checks` (201)
+Body `{ "bando_slug": "..." }`. Avvia l'analisi (solo titolare) e risponde subito con la riga `pending`: la generazione gira in background (1–2 minuti) e si segue con la GET (polling). I guasti del provider AI (timeout compreso: esito ignoto, nessun retry automatico) non arrivano mai come errore HTTP di questa POST — emergono come `status: "error"` con `error_detail` sulla riga letta via GET. Un'analisi `pending` da oltre 10 minuti viene chiusa come `error` alla lettura/POST successiva (failsafe per i riavvii).
+Errori: `503 ai_not_configured`, `403 forbidden` (figlio attivo), `400 bad_request` (dati aziendali insufficienti), `404 not_found` (bando), `409 ai_check_in_progress` (analisi già in corso o altra operazione sull'azienda), `429 ai_quota_exceeded`, `429 ai_check_cooldown` (5 min per coppia azienda×bando).
+
+### `GET /me/ai-checks?bando_slug=&page=&page_size=`
+Storico (tutta l'azienda, più recenti prima): `{ editable, quota: {totale, usati, rimanenti, periodo_inizio, periodo_fine}, items, total }`. Con `bando_slug` gli item includono il **`report` completo** (storico versionato del bando, il primo è l'ultima analisi); senza, la lista è sintetica (esito/punteggio come colonne). Item: `{id, bando_id, bando_slug, bando_titolo, status: pending|ready|error, error_detail, esito: ammissibile|non_ammissibile|da_verificare, punteggio (0-100), tipo_punteggio: stima|euristico, model, extraction_cached, created_at, ready_at, report?}`.
+
+Il `report` (jsonb, `schema_version: 1`) è verificabile punto-punto: `requisiti[]` e `criteri[]` con verdetto (`soddisfatto|parzialmente_soddisfatto|non_soddisfatto|dato_mancante`), **`riferimento_bando`** (sezione + testo citato alla lettera, con flag `verificata`), **`dato_azienda`** (campo esatto + valore usato) e motivazione; `verifiche_strutturate` (pre-check esatti su regione/ATECO/settore/beneficiari/stato); `griglia` (presente/fonte/soglia, punti stimati); `punti_di_forza`/`punti_di_debolezza`/`dati_mancanti`; `disclaimer`.
+
+### `GET /me/ai-checks/quota`
+`{ totale, usati, rimanenti, periodo_inizio, periodo_fine }` — quota del periodo di abbonamento attivo, contata dalle righe di `ai_checks` (`pending` + `ready`) nella finestra `data_inizio..data_scadenza`: le analisi fallite non consumano. Nota: la finestra segue l'abbonamento attivo — un cambio piano la fa ripartire (accettato in fase 1, senza pagamenti).
+
+### `GET /me/ai-checks/{id}`
+Singolo report completo (anche per i figli attivi). `404` se non appartiene all'azienda.
+
 ## Preferenze
 
 ### `GET /me/preferences` · `PUT /me/preferences`

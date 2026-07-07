@@ -43,13 +43,19 @@ Contiene i dati della piattaforma. Schema in `supabase/migrations/` (eseguire in
 
 **`user_preferences`** — preferenze di filtro/notifica **per utente** (anche i figli hanno le proprie): una riga per (utente, faccetta, id lookup del secondario) con `facet` vincolata alle 7 faccette dei bandi, `label` denormalizzata (nessuna FK cross-DB), unique su (user_id, facet, ref_id). Cascade da profiles.
 
-**`api_usage_events`** — registro dei consumi API a pagamento, **senza FK** (come audit_log: sopravvive alle cancellazioni): provider/service/outcome (`success`/`error`/`timeout_unknown`), `cost_cents`, `response_status`, `request_meta` (mai dati personali in chiaro). Servirà anche al conteggio delle quote AI-check (`service='ai_check'`).
+**`api_usage_events`** — registro dei consumi API a pagamento, **senza FK** (come audit_log: sopravvive alle cancellazioni): provider/service/outcome (`success`/`error`/`timeout_unknown`), `cost_cents`, `response_status`, `request_meta` (mai dati personali in chiaro). Per l'AI-check annota ogni esito con `provider='anthropic'`, `service='ai_check'` e i token consumati nel `request_meta` — ma è un registro di SPESA best-effort: il **conteggio quota** usa le righe di `ai_checks` (`pending`+`ready` nella finestra dell'abbonamento), che cambiano stato atomicamente e sono transazionali col risultato.
 
 **`company_import_locks`** + `fn_acquire_import_lock(parent_id, ttl)` / `fn_release_import_lock(parent_id)` — lock anti doppia-spesa per l'import: la chiamata HTTP esterna avviene tra statement PostgREST, quindi il claim è un INSERT atomico con "furto" solo se il lock esistente è scaduto (TTL clampato a 600s). Riusato anche dalla verifica CF e dalle richieste di documenti.
 
 ### Documenti ufficiali (migration 0006)
 
 **`company_documents`** — visure camerali richieste a openapi.it (documenti asincroni): `kind` (`visura`), `endpoint` (la variante che ha accettato: capitale/persone/impresa-individuale — il tipo giusto si scopre per tentativi, i rifiuti sono gratuiti), `request_id` del provider, `status` (`pending`→`ready`/`error`), riferimento al PDF nel bucket Storage **`company-documents`** (`file_path`), **`extracted_text`** (testo del PDF via pypdf: oggetto sociale e poteri inclusi — input per l'AI-check), `cost_cents`, `sandbox`. Indice unico parziale: al massimo UNA richiesta `pending` per azienda e tipo. Cascade da company_profiles; il file nel bucket viene rimosso dal backend alla cancellazione.
+
+### AI-check (migration 0007)
+
+**`bando_requirements`** — cache delle estrazioni LLM per bando (indipendente dall'azienda, una riga per `bando_id` — id intero del DB secondario, **senza FK cross-database**): `content_hash` (hash_bando del catalogo, fallback sha256 dell'input serializzato), `prompt_version`, `model`, **`extraction` jsonb** (requisiti obbligatori + criteri di valutazione + griglia, con citazioni), token consumati. Aggiornata in place quando cambia hash o versione dei prompt: l'estrazione si paga una volta sola per bando, tutte le aziende la riusano.
+
+**`ai_checks`** — report di compatibilità azienda↔bando (**storico versionato**: ogni generazione è una nuova riga, la più recente è in evidenza): `company_profile_id` (cascade), `user_id` (richiedente, senza FK), `family_parent_id` (chiave di visibilità e quota), `bando_id`/`bando_slug`/`bando_titolo` denormalizzati (lo storico sopravvive al bando), `status` (`pending`→`ready`/`error`), **`esito`** (`ammissibile`/`non_ammissibile`/`da_verificare`), **`punteggio`** (0-100) e **`tipo_punteggio`** (`stima`/`euristico`) come colonne per le liste, **`report` jsonb** completo (requisiti con verdetti e citazioni, criteri, verifiche strutturate, punti di forza/debolezza, dati mancanti), `model`, `prompt_version`, `extraction_cached`, token e `cost_cents` reali. Indice unico parziale: al massimo UNA analisi `pending` per coppia azienda×bando.
 
 ### Funzioni e trigger
 

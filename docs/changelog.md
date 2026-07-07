@@ -2,6 +2,11 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-07 — Tutti i dati aziendali nella pagina Azienda
+
+- La pagina **Azienda** (`/app/azienda`) è ora l'unica casa dei dati aziendali, in tre sezioni: **«Dati aziendali»** (riepilogo leggibile dei campi compilati; il form completo si apre solo col bottone «Modifica», con Salva/Annulla — e non viene mai risincronizzato mentre si scrive), **«Dossier certificato»** dal Registro Imprese (con badge, data di aggiornamento e «Aggiorna») e **«Documenti ufficiali»**. Il titolo della pagina è la denominazione dell'azienda.
+- Nel **Profilo** il form aziendale è sostituito da un rimando compatto alla pagina Azienda (`AziendaTeaser`): niente più dati aziendali in due posti.
+
 ## 2026-07-07 — AI-check: pagina dedicata, tono costruttivo, punteggi più discriminanti
 
 - **Pagina «AI-check»** (`/app/ai-check`, in navigazione): cruscotto con la quota del piano (barra di consumo) e storico raggruppato per bando — ultima analisi in evidenza, numero versioni, «Apri report». Sostituisce la card compatta nella pagina Azienda.

@@ -15,9 +15,9 @@ Stack: **Vite + React 18 + TypeScript**, **Tailwind CSS v4** (token di tema in `
 | `/conferma-email` | Atterraggio del link di conferma registrazione (con reinvio se scaduto) | pubblico |
 | `/app/bandi` | Elenco bandi con filtri | autenticato |
 | `/app/bandi/:slug` | Dettaglio bando | autenticato |
-| `/app/azienda` | Dossier aziendale certificato (import openapi.it) | autenticato |
+| `/app/azienda` | Tutto sull'azienda: dati aziendali, dossier certificato, documenti | autenticato |
 | `/app/ai-check` | Cruscotto AI-check (quota del piano e storico per bando) | autenticato |
-| `/app/profilo` | Profilo, dati aziendali, gestione account collegati, abbonamento | autenticato |
+| `/app/profilo` | Profilo personale, gestione account collegati, abbonamento | autenticato |
 | `/app/admin/utenti` | Gestione utenti | solo admin |
 | `/app/admin/piani` | Gestione piani di abbonamento | solo admin |
 
@@ -31,15 +31,15 @@ Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo 
 
 ## Famiglia di account
 
-- **Profilo del titolare** (`Profilo.tsx`): card «Dati aziendali» (`CompanyCard`, form con `Combobox` con ricerca per ATECO/settori/regioni dalle lookup) e «Gestione account» (`FamilyCard`: contatore X di N, badge stato In attesa/Attivo/Retrocesso, azioni Reinvia/Riattiva/Rimuovi con conferma, dialog di invito). Il dialog di cambio piano avvisa se il downgrade retrocederà account.
-- **Profilo del figlio attivo**: dati aziendali in sola lettura, card «Piano ereditato da …» al posto della griglia piani (nessuno switch).
+- **Profilo del titolare** (`Profilo.tsx`): dati personali (con verifica CF), rimando compatto alla pagina Azienda (`AziendaTeaser` — i dati aziendali vivono TUTTI in `/app/azienda`) e «Gestione account» (`FamilyCard`: contatore X di N, badge stato In attesa/Attivo/Retrocesso, azioni Reinvia/Riattiva/Rimuovi con conferma, dialog di invito). Il dialog di cambio piano avvisa se il downgrade retrocederà account.
+- **Profilo del figlio attivo**: card «Piano ereditato da …» al posto della griglia piani (nessuno switch).
 - **Inviti**: `InviteBanner` (in `AppShell`) mostra agli utenti esistenti l'invito con Accetta (avvisando che l'abbonamento attuale verrà annullato) / Rifiuta; `/accetta-invito` gestisce il link Supabase degli utenti nuovi — cattura l'hash **prima** che supabase-js lo consumi per riconoscere i link scaduti (`otp_expired`), poi form password e accettazione automatica.
 - **Admin**: colonna Famiglia (badge Titolare/In famiglia/Invitato/Retrocesso + email del titolare), piano «(ereditato)» e select disabilitata per i figli.
 
-## Dossier aziendale (openapi.it)
+## Pagina «Azienda» (tutto in un posto)
 
-- **Pagina «Azienda»** (`pages/Azienda.tsx`): dossier certificato a sezioni collassabili (`DossierSection`/`DossierRow` nascondono i campi vuoti) — Anagrafica, Attività e ATECO, Sede e unità locali, Persone e cariche (`PeopleTable`), Partecipazioni, Dipendenti, Dati economici, Contatti, Attributi. Header con badge stato impresa, «Startup innovativa» e «Dati di test» (sandbox), data di aggiornamento gg/mm/aaaa e bottone «Aggiorna» (solo per chi può modificare). Empty state con CTA «Importa da P.IVA» (o messaggio passivo per i figli attivi).
-- **Import** (`ImportCompanyDialog`, aperto anche da `CompanyCard`): dialog con P.IVA precompilata e nota costo (~0,30 € + IVA), poi esito con campi compilati automaticamente, differenze rispetto ai valori utente (mai sovrascritti) e chip «ATECO secondari» da aggiungere alle preferenze con un click.
+- **`pages/Azienda.tsx`** è l'unica casa dei dati aziendali, in tre sezioni: **1) «Dati aziendali»** (`CompanyCard`): riepilogo in sola lettura dei campi compilati con bottoni «Importa da P.IVA» e «Modifica» — il form completo (Combobox con ricerca per ATECO/settori/regioni, sede, dimensione, contatti) si apre solo in modifica, con Salva/Annulla; i figli attivi vedono il solo riepilogo. Il form non viene mai risincronizzato durante la modifica (un refetch non cancella ciò che si sta scrivendo); senza alcun dato la card parte direttamente dal form. **2) «Dossier certificato»**: sezioni collassabili (`DossierSection`/`DossierRow` nascondono i campi vuoti) — Anagrafica, Attività e ATECO, Sede e unità locali, Persone e cariche (`PeopleTable`), Partecipazioni, Dipendenti, Dati economici, Contatti, Attributi — con badge stato impresa/«Startup innovativa»/«Dati di test», data di aggiornamento e bottone «Aggiorna»; empty state con CTA «Importa da P.IVA». **3) «Documenti ufficiali»** (`DocumentiCard`). Nel Profilo resta solo il rimando `AziendaTeaser`.
+- **Import** (`ImportCompanyDialog`, aperto da `CompanyCard` e dalla sezione dossier): dialog con P.IVA precompilata e nota costo (~0,30 € + IVA), poi esito con campi compilati automaticamente, differenze rispetto ai valori utente (mai sovrascritti) e chip «ATECO secondari» da aggiungere alle preferenze con un click.
 - **Hook**: `useCompanyDossier` (query key `["company-dossier"]`) e `useImportCompany` (aggiorna anche `["company"]`); `usePreferences`/`useSavePreferences` (key `["preferences"]`).
 - **Documenti ufficiali** (`DocumentiCard`, nella pagina Azienda): richiesta della visura camerale con dialog e nota costo (2,90–4,90 € + IVA), stato In lavorazione/Pronta/Errore con refetch automatico ogni 10s finché pending (`useCompanyDocuments`, key `["company-documents"]`), download del PDF via blob (`downloadDocumentFile`). Visibile anche senza import IT-full (basta la P.IVA salvata); richiesta riservata a chi può modificare i dati aziendali.
 

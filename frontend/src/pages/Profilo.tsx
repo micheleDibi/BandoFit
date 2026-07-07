@@ -1,6 +1,6 @@
 import { BadgeCheck, CalendarDays, Check, ShieldCheck, Users } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
-import { CompanyCard } from "../components/company/CompanyCard";
+import { AziendaTeaser } from "../components/company/AziendaTeaser";
 import { FamilyCard } from "../components/family/FamilyCard";
 import { PreferenzeTeaser } from "../components/preferences/PreferenzeTeaser";
 import { PlanCard, planFeatures } from "../components/shared/PlanCard";
@@ -224,9 +224,9 @@ export default function Profilo() {
         </form>
       </Card>
 
-      {/* Dati aziendali (form per il titolare, sola lettura per i figli) */}
+      {/* Dati aziendali: si gestiscono nella pagina Azienda */}
       <div className="mt-6">
-        <CompanyCard />
+        <AziendaTeaser />
       </div>
 
       {/* Preferenze bandi: l'editor completo vive in /app/preferenze */}

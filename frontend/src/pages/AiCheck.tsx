@@ -1,4 +1,4 @@
-import { ArrowUpRight, CheckCircle2, Gauge, History, Loader2, Sparkles } from "lucide-react";
+import { ArrowUpRight, Gauge, Loader2, Sparkles } from "lucide-react";
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { AiEsitoBadge } from "../components/bandi/badges";
@@ -117,7 +117,6 @@ export default function AiCheck() {
   const { data, isPending, isError, error, refetch } = useAiChecks();
 
   const groups = useMemo(() => groupBySlug(data?.items ?? []), [data]);
-  const inLinea = groups.filter((g) => g.latest.esito === "ammissibile").length;
   const quota = data?.quota;
   const quotaPct =
     quota && quota.totale > 0 ? Math.min(100, Math.round((quota.usati / quota.totale) * 100)) : 0;
@@ -139,11 +138,7 @@ export default function AiCheck() {
 
       {isPending ? (
         <div className="mt-6 space-y-4">
-          <div className="grid gap-4 sm:grid-cols-3">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <Skeleton key={i} className="h-24 w-full" />
-            ))}
-          </div>
+          <Skeleton className="h-24 w-full sm:max-w-sm" />
           <Skeleton className="h-48 w-full" />
         </div>
       ) : isError ? (
@@ -152,8 +147,8 @@ export default function AiCheck() {
         </div>
       ) : (
         <>
-          {/* Statistiche */}
-          <div className="mt-6 grid gap-4 sm:grid-cols-3">
+          {/* Quota del piano */}
+          <div className="mt-6 sm:max-w-sm">
             <StatTile icon={Gauge} label="Disponibili quest'anno">
               {quota && quota.totale > 0 ? (
                 <>
@@ -176,21 +171,6 @@ export default function AiCheck() {
                   </Link>
                 </p>
               )}
-            </StatTile>
-            <StatTile icon={History} label="Analisi effettuate">
-              <p className="tabular font-display text-2xl font-bold text-slate-900">
-                {data?.total ?? 0}
-                <span className="text-sm font-medium text-slate-400">
-                  {" "}
-                  su {groups.length} band{groups.length === 1 ? "o" : "i"}
-                </span>
-              </p>
-            </StatTile>
-            <StatTile icon={CheckCircle2} label="Bandi in linea">
-              <p className="tabular font-display text-2xl font-bold text-emerald-600">
-                {inLinea}
-                <span className="text-sm font-medium text-slate-400"> di {groups.length}</span>
-              </p>
             </StatTile>
           </div>
 

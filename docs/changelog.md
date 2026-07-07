@@ -4,7 +4,7 @@ Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descr
 
 ## 2026-07-07 — AI-check: pagina dedicata, tono costruttivo, punteggi più discriminanti
 
-- **Pagina «AI-check»** (`/app/ai-check`, in navigazione): cruscotto con statistiche (AI-check disponibili con barra di consumo, analisi effettuate, bandi in linea) e storico raggruppato per bando — ultima analisi in evidenza, numero versioni, «Apri report». Sostituisce la card compatta nella pagina Azienda.
+- **Pagina «AI-check»** (`/app/ai-check`, in navigazione): cruscotto con la quota del piano (barra di consumo) e storico raggruppato per bando — ultima analisi in evidenza, numero versioni, «Apri report». Sostituisce la card compatta nella pagina Azienda.
 - **Tono costruttivo**: mai «Non ammissibile» né «punteggio non rilevante» — il report è generato dall'AI e può sbagliare. Gli esiti diventano «In linea col bando» / «Dati da completare» / «Da approfondire» (mai rosso), col rimando ai dettagli e al testo ufficiale; il punteggio resta sempre leggibile.
 - **Mai nomi tecnici in interfaccia**: i campi citati dall'AI (`derived.beneficiari[1].nome`…) sono tradotti in etichette italiane con fonte («Categorie di beneficiari (Registro Imprese)»); il prompt di matching impone linguaggio naturale nelle motivazioni; i dati mancanti guidano con link a Profilo (completa) e Azienda (importa).
 - **Pesi euristici ribilanciati**: il punteggio ora premia soprattutto requisiti soddisfatti (30) e criteri del bando (40) — che cambiano da bando a bando — e meno i confronti di catalogo (settore 12, regione 9, beneficiari 9), quasi identici per bandi simili: prima quattro bandi diversi finivano tutti sullo stesso punteggio. 327 test backend.

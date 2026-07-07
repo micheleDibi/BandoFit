@@ -42,13 +42,23 @@ export interface ContenutoSegment {
   kind: string;
   text?: string;
   href?: string;
+  // Nei dati reali i segmenti `link` portano l'URL in `url`, non in `href`.
+  url?: string;
+}
+
+export interface ContenutoItem {
+  segments?: ContenutoSegment[];
+  text?: string;
+  // Voci delle sezioni `faq`: domanda + risposta.
+  q?: string;
+  a?: { segments?: ContenutoSegment[]; text?: string } | string;
 }
 
 export interface ContenutoSection {
   type: string;
   text?: string;
   segments?: ContenutoSegment[];
-  items?: Array<string | { segments?: ContenutoSegment[]; text?: string }>;
+  items?: Array<string | ContenutoItem>;
 }
 
 export interface BandoDetail extends BandoListItem {

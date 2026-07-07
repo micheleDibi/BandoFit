@@ -2,6 +2,11 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-07 — Pagina Abbonamento dedicata e catalogo Add-on
+
+- La sezione **abbonamenti** lascia il Profilo e vive nella nuova pagina **«Abbonamento»** (`/app/abbonamento`, voce in navigazione): stessa griglia piani, stesso cambio piano (avviso di retrocessione famiglia compreso), piano ereditato per gli account collegati. Nel Profilo resta un rimando compatto col piano attuale; i link «Vedi i piani»/«passa a un piano superiore» puntano alla nuova pagina. Registrazione invariata.
+- **Add-on** (migration 0009, tabella `addons` gemella di `subscription_plans`): catalogo gestito dagli admin dalla nuova pagina **Admin → Add-on** con lo stesso CRUD dei piani (crea con slug stabile e unico, modifica, disattiva — mai eliminare; prezzo in € come i piani, mostrato una tantum). Lato cliente le card appaiono nella pagina Abbonamento con bottone **«Acquista»**: nessun acquisto per ora — si apre l'avviso «In arrivo» e il click passa dal punto di estensione `purchaseAddon(slug)` (`lib/addons.ts`), pronto per il flusso futuro. Con 7 voci cliente (+3 admin) la navigazione per esteso parte da `xl` (sotto: menu hamburger) e la voce admin dei piani si accorcia in «Piani»; errori di caricamento del catalogo mostrati con retry (mai confusi con un catalogo vuoto). 388 test backend (13 nuovi).
+
 ## 2026-07-07 — Bandi salvati e Calendario
 
 - **Bandi salvati**: segnalibro su ogni card (lista e dettaglio) con stato ottimista; nuova scheda **«Salvati»** con i preferiti dell'utente. I preferiti sono **riferimenti** al catalogo (migration 0008, `saved_bandi`, snapshot denormalizzato senza FK cross-DB): un bando sparito dal catalogo resta visibile dallo snapshot con «Non più disponibile» e si può rimuovere; uno scaduto si mostra normalmente. Cap 200 per utente; salvataggio/rimozione idempotenti.

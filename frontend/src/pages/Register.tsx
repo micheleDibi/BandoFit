@@ -228,7 +228,7 @@ export default function Register() {
             <div>
               <h1 className="font-display text-xl font-bold text-slate-900">Scegli il tuo piano</h1>
               <p className="mt-1 text-sm text-slate-500">
-                Abbonamento annuale, puoi cambiarlo in qualsiasi momento dal profilo.
+                Abbonamento annuale, puoi cambiarlo in qualsiasi momento dalla pagina Abbonamento.
               </p>
             </div>
             <StepIndicator step={2} />

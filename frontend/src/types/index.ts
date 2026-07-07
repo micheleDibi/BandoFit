@@ -527,3 +527,17 @@ export interface CalendarEvent {
   created_at: string;
   updated_at: string;
 }
+
+// ---- Add-on ----------------------------------------------------------------
+
+export interface Addon {
+  id: number;
+  nome: string;
+  /** Identificativo stabile: aggancerà le funzionalità future. */
+  slug: string;
+  descrizione: string | null;
+  prezzo: string | number;
+  ordering: number;
+  is_active: boolean;
+  updated_at: string | null;
+}

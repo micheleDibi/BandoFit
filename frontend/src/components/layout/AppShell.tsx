@@ -10,7 +10,7 @@ import { Logo } from "./Logo";
 
 const navLinkClasses = ({ isActive }: { isActive: boolean }) =>
   cn(
-    "rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-150",
+    "rounded-lg px-2.5 py-2 text-sm font-medium transition-colors duration-150",
     isActive
       ? "bg-brand-50 text-brand-700"
       : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
@@ -48,6 +48,13 @@ export function AppShell() {
       <NavLink to="/app/preferenze" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
         Preferenze
       </NavLink>
+      <NavLink
+        to="/app/abbonamento"
+        className={navLinkClasses}
+        onClick={() => setMobileOpen(false)}
+      >
+        Abbonamento
+      </NavLink>
       {isAdmin && (
         <>
           <NavLink
@@ -62,7 +69,14 @@ export function AppShell() {
             className={navLinkClasses}
             onClick={() => setMobileOpen(false)}
           >
-            Abbonamenti
+            Piani
+          </NavLink>
+          <NavLink
+            to="/app/admin/addon"
+            className={navLinkClasses}
+            onClick={() => setMobileOpen(false)}
+          >
+            Add-on
           </NavLink>
         </>
       )}
@@ -81,9 +95,9 @@ export function AppShell() {
             <Logo />
           </Link>
 
-          {/* Con 6 voci (+2 admin) la nav non entra a 768px: desktop da lg,
+          {/* Con 7 voci (+3 admin) la nav per esteso entra solo da xl:
               sotto resta il menu hamburger. */}
-          <nav className="ml-4 hidden items-center gap-1 lg:flex" aria-label="Navigazione principale">
+          <nav className="ml-3 hidden items-center gap-0.5 xl:flex" aria-label="Navigazione principale">
             {navLinks}
           </nav>
 
@@ -115,7 +129,7 @@ export function AppShell() {
             </button>
             <button
               type="button"
-              className="inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500 lg:hidden"
+              className="inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500 xl:hidden"
               onClick={() => setMobileOpen((v) => !v)}
               aria-expanded={mobileOpen}
               aria-label={mobileOpen ? "Chiudi menu" : "Apri menu"}
@@ -126,7 +140,7 @@ export function AppShell() {
         </div>
         {mobileOpen && (
           <nav
-            className="flex flex-col gap-1 border-t border-slate-200 px-4 py-3 lg:hidden"
+            className="flex flex-col gap-1 border-t border-slate-200 px-4 py-3 xl:hidden"
             aria-label="Navigazione mobile"
           >
             {navLinks}

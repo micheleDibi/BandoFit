@@ -1,5 +1,6 @@
 import { Loader2, Sparkles } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useAiChecksForBando, useRequestAiCheck } from "../../hooks/useAiCheck";
 import { apiErrorMessage } from "../../lib/api";
 import { scoreColorClasses } from "../../lib/scoreColor";
@@ -151,9 +152,20 @@ export function AiCheckCard({ slug }: { slug: string }) {
 
       {quota && (
         <p className="mt-3 border-t border-brand-100 pt-2.5 text-xs text-slate-500">
-          {quota.totale === 0
-            ? "Il tuo piano non include AI-check: passa a un piano superiore per usarli."
-            : `Ti restano ${quota.rimanenti} AI-check su ${quota.totale} per quest'anno.`}
+          {quota.totale === 0 ? (
+            <>
+              Il tuo piano non include AI-check:{" "}
+              <Link
+                to="/app/abbonamento"
+                className="font-medium text-brand-600 underline-offset-2 hover:underline"
+              >
+                passa a un piano superiore
+              </Link>{" "}
+              per usarli.
+            </>
+          ) : (
+            `Ti restano ${quota.rimanenti} AI-check su ${quota.totale} per quest'anno.`
+          )}
         </p>
       )}
 

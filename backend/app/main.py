@@ -13,6 +13,8 @@ from fastapi.responses import JSONResponse
 from postgrest.exceptions import APIError
 
 from app.api.routers import (
+    addons,
+    admin_addons,
     admin_plans,
     admin_users,
     ai_check,
@@ -116,6 +118,7 @@ for router in (
     health.router,
     auth.router,
     plans.router,
+    addons.router,
     me.router,
     family.router,
     company.router,
@@ -127,5 +130,6 @@ for router in (
     bandi.router,
     admin_users.router,
     admin_plans.router,
+    admin_addons.router,
 ):
     app.include_router(router, prefix=API_PREFIX)

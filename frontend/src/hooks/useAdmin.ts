@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import type { AdminUser, Page, Plan } from "../types";
+import type { Addon, AdminUser, Page, Plan } from "../types";
 
 export interface AdminUsersParams {
   q: string;
@@ -81,6 +81,47 @@ export function useAdminCreatePlan() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-plans"] });
       queryClient.invalidateQueries({ queryKey: ["plans"] });
+    },
+  });
+}
+
+// ---- Add-on (stesso pattern dei piani: mai delete, doppia invalidazione) ----
+
+export function useAdminAddons() {
+  return useQuery({
+    queryKey: ["admin-addons"],
+    queryFn: async () => (await api.get<Addon[]>("/admin/addons")).data,
+  });
+}
+
+export interface AddonPayload {
+  nome?: string;
+  descrizione?: string | null;
+  prezzo?: number;
+  ordering?: number;
+  is_active?: boolean;
+}
+
+export function useAdminUpdateAddon() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ addonId, data }: { addonId: number; data: AddonPayload }) =>
+      (await api.patch<Addon>(`/admin/addons/${addonId}`, data)).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-addons"] });
+      queryClient.invalidateQueries({ queryKey: ["addons"] });
+    },
+  });
+}
+
+export function useAdminCreateAddon() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: AddonPayload & { slug: string; nome: string }) =>
+      (await api.post<Addon>("/admin/addons", data)).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-addons"] });
+      queryClient.invalidateQueries({ queryKey: ["addons"] });
     },
   });
 }

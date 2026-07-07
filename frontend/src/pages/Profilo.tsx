@@ -1,26 +1,20 @@
-import { BadgeCheck, CalendarDays, Check, ShieldCheck, Users } from "lucide-react";
+import { BadgeCheck, ShieldCheck } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { AziendaTeaser } from "../components/company/AziendaTeaser";
 import { FamilyCard } from "../components/family/FamilyCard";
 import { PreferenzeTeaser } from "../components/preferences/PreferenzeTeaser";
-import { PlanCard, planFeatures } from "../components/shared/PlanCard";
+import { AbbonamentoTeaser } from "../components/shared/AbbonamentoTeaser";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Dialog } from "../components/ui/Dialog";
 import { TextField } from "../components/ui/Field";
 import { ErrorState, Skeleton } from "../components/ui/states";
-import { useMe, useSwitchPlan, useUpdateProfile, useVerifyCf } from "../hooks/useMe";
-import { usePlans } from "../hooks/usePlans";
+import { useMe, useUpdateProfile, useVerifyCf } from "../hooks/useMe";
 import { apiErrorMessage } from "../lib/api";
-import { formatDate } from "../lib/format";
-import type { Plan } from "../types";
 
 export default function Profilo() {
   const { data: me, isPending, isError, error, refetch } = useMe();
-  const { data: plans, isPending: plansLoading, isError: plansError, refetch: refetchPlans } =
-    usePlans();
   const updateProfile = useUpdateProfile();
-  const switchPlan = useSwitchPlan();
   const verifyCf = useVerifyCf();
 
   const [form, setForm] = useState({
@@ -31,8 +25,6 @@ export default function Profilo() {
     codice_fiscale: "",
   });
   const [saved, setSaved] = useState(false);
-  const [planToConfirm, setPlanToConfirm] = useState<Plan | null>(null);
-  const [switchNotice, setSwitchNotice] = useState<string | null>(null);
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [cfError, setCfError] = useState<string | null>(null);
 
@@ -60,9 +52,6 @@ export default function Profilo() {
   if (isError || !me) {
     return <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />;
   }
-
-  const currentPlanId = me.subscription?.plan.id;
-  const isActiveChild = me.family?.role === "child" && me.family.status === "active";
 
   const cfInput = form.codice_fiscale.trim().toUpperCase();
   const cfVerified =
@@ -95,32 +84,6 @@ export default function Profilo() {
       setVerifyOpen(false);
     } catch {
       // errore mostrato nel dialog
-    }
-  };
-
-  const handleSwitch = async () => {
-    if (!planToConfirm) return;
-    setSwitchNotice(null);
-    try {
-      const result = await switchPlan.mutateAsync(planToConfirm.id);
-      setPlanToConfirm(null);
-      const adjustment = result.plan_switch_adjustment;
-      if (adjustment && (adjustment.demoted.length || adjustment.revoked_pending.length)) {
-        const parts: string[] = [];
-        if (adjustment.demoted.length) {
-          parts.push(
-            `${adjustment.demoted.length} account ${adjustment.demoted.length === 1 ? "retrocesso" : "retrocessi"} al piano Gratuito (${adjustment.demoted.map((d) => d.denominazione).join(", ")})`,
-          );
-        }
-        if (adjustment.revoked_pending.length) {
-          parts.push(
-            `${adjustment.revoked_pending.length} ${adjustment.revoked_pending.length === 1 ? "invito revocato" : "inviti revocati"}`,
-          );
-        }
-        setSwitchNotice(`Piano aggiornato. ${parts.join(" e ")}.`);
-      }
-    } catch {
-      // l'errore è mostrato nel dialog
     }
   };
 
@@ -234,131 +197,16 @@ export default function Profilo() {
         <PreferenzeTeaser />
       </div>
 
+      {/* Abbonamento e add-on: si gestiscono in /app/abbonamento */}
+      <div className="mt-6">
+        <AbbonamentoTeaser />
+      </div>
+
       {/* Gestione account collegati: solo per il titolare con piano multi-account */}
       {me.family?.role === "parent" && (
         <div className="mt-6">
           <FamilyCard />
         </div>
-      )}
-
-      {/* Abbonamento: un figlio ATTIVO eredita il piano della famiglia */}
-      {isActiveChild ? (
-        <section className="mt-10">
-          <h2 className="font-display text-xl font-bold tracking-tight text-slate-900">
-            Il tuo abbonamento
-          </h2>
-          <Card className="mt-4 max-w-lg border-brand-200 p-6">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200">
-                <Users className="size-3.5" aria-hidden />
-                Piano ereditato da {me.family?.parent_display_name ?? "il titolare"}
-              </span>
-            </div>
-            {me.subscription && (
-              <>
-                <p className="mt-3 font-display text-2xl font-bold text-slate-900">
-                  {me.subscription.plan.nome}
-                </p>
-                <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-slate-500">
-                  <CalendarDays className="size-4" aria-hidden />
-                  Attivo fino al {formatDate(me.subscription.data_scadenza)}
-                </p>
-                <ul className="mt-4 space-y-2">
-                  {planFeatures(me.subscription.plan).map((feature) => (
-                    <li key={feature} className="flex items-start gap-2 text-sm text-slate-600">
-                      <Check className="mt-0.5 size-4 shrink-0 text-brand-500" aria-hidden />
-                      {feature}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-            <p className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-400">
-              Le quote del piano sono condivise con tutta l'azienda. Solo il titolare può
-              cambiare l'abbonamento.
-            </p>
-          </Card>
-        </section>
-      ) : (
-      <section className="mt-10">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <h2 className="font-display text-xl font-bold tracking-tight text-slate-900">
-              Il tuo abbonamento
-            </h2>
-            {me.subscription && (
-              <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-slate-500">
-                <CalendarDays className="size-4" aria-hidden />
-                Piano <strong className="text-slate-700">{me.subscription.plan.nome}</strong> attivo
-                fino al {formatDate(me.subscription.data_scadenza)}
-              </p>
-            )}
-            {me.family?.role === "child" && me.family.status === "demoted" && (
-              <p className="mt-1 text-sm text-amber-600">
-                Il tuo account è stato retrocesso dall'azienda: hai un piano indipendente
-                finché il titolare non ti riattiva.
-              </p>
-            )}
-          </div>
-        </div>
-
-        {switchNotice && (
-          <p className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800" role="status">
-            {switchNotice}
-          </p>
-        )}
-
-        {plansLoading ? (
-          <div className="mt-6 grid gap-5 pt-3 sm:grid-cols-2 lg:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-72 w-full" />
-            ))}
-          </div>
-        ) : plansError ? (
-          <div className="mt-6">
-            <ErrorState
-              message="Impossibile caricare i piani disponibili."
-              onRetry={() => refetchPlans()}
-            />
-          </div>
-        ) : (
-          <div className="mt-6 grid gap-5 pt-3 sm:grid-cols-2 lg:grid-cols-4">
-            {(plans ?? []).map((plan) => {
-              const isCurrent = plan.id === currentPlanId;
-              return (
-                <PlanCard
-                  key={plan.id}
-                  plan={plan}
-                  selected={isCurrent}
-                  highlighted={plan.slug === "pro"}
-                  badge={
-                    isCurrent ? "Piano attuale" : plan.slug === "pro" ? "Consigliato" : undefined
-                  }
-                  footer={
-                    isCurrent ? (
-                      <Button variant="secondary" className="w-full" disabled>
-                        Attivo
-                      </Button>
-                    ) : (
-                      <Button
-                        variant={plan.slug === "pro" ? "primary" : "secondary"}
-                        className="w-full"
-                        onClick={() => setPlanToConfirm(plan)}
-                      >
-                        Passa a {plan.nome}
-                      </Button>
-                    )
-                  }
-                />
-              );
-            })}
-          </div>
-        )}
-        <p className="mt-4 text-xs text-slate-400">
-          Il cambio piano è immediato e la durata riparte da oggi per un anno. In questa fase non è
-          previsto alcun pagamento.
-        </p>
-      </section>
       )}
 
       {/* Verifica codice fiscale */}
@@ -391,46 +239,6 @@ export default function Profilo() {
         )}
       </Dialog>
 
-      {/* Conferma cambio piano */}
-      <Dialog
-        open={!!planToConfirm}
-        onClose={() => setPlanToConfirm(null)}
-        title="Confermi il cambio di piano?"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setPlanToConfirm(null)}>
-              Annulla
-            </Button>
-            <Button onClick={handleSwitch} loading={switchPlan.isPending}>
-              Conferma
-            </Button>
-          </>
-        }
-      >
-        {planToConfirm && (
-          <>
-            <p>
-              Stai per passare da{" "}
-              <strong className="text-slate-900">{me.subscription?.plan.nome ?? "—"}</strong> a{" "}
-              <strong className="text-slate-900">{planToConfirm.nome}</strong>. Il nuovo
-              abbonamento annuale parte da oggi.
-            </p>
-            {me.family?.role === "parent" &&
-              (me.family.used ?? 1) > (planToConfirm.num_account_aziendali ?? 1) && (
-                <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-amber-800">
-                  Attenzione: il piano {planToConfirm.nome} prevede al massimo{" "}
-                  {planToConfirm.num_account_aziendali} account (incluso il tuo). Gli account più
-                  recenti oltre il limite verranno retrocessi al piano Gratuito.
-                </p>
-              )}
-            {switchPlan.isError && (
-              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-red-700" role="alert">
-                {apiErrorMessage(switchPlan.error)}
-              </p>
-            )}
-          </>
-        )}
-      </Dialog>
     </div>
   );
 }

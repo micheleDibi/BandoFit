@@ -19,9 +19,11 @@ Stack: **Vite + React 18 + TypeScript**, **Tailwind CSS v4** (token di tema in `
 | `/app/calendario` | Calendario mensile con eventi personali e scadenze bandi | autenticato |
 | `/app/azienda` | Tutto sull'azienda: dati aziendali, dossier certificato, documenti | autenticato |
 | `/app/ai-check` | Cruscotto AI-check (quota del piano e storico per bando) | autenticato |
-| `/app/profilo` | Profilo personale, gestione account collegati, abbonamento | autenticato |
+| `/app/abbonamento` | Piano attuale, cambio piano e catalogo add-on | autenticato |
+| `/app/profilo` | Profilo personale e gestione account collegati | autenticato |
 | `/app/admin/utenti` | Gestione utenti | solo admin |
 | `/app/admin/piani` | Gestione piani di abbonamento | solo admin |
+| `/app/admin/addon` | Gestione catalogo add-on | solo admin |
 
 Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo via `/me`) in `src/components/layout/guards.tsx`.
 
@@ -33,8 +35,8 @@ Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo 
 
 ## Famiglia di account
 
-- **Profilo del titolare** (`Profilo.tsx`): dati personali (con verifica CF), rimando compatto alla pagina Azienda (`AziendaTeaser` — i dati aziendali vivono TUTTI in `/app/azienda`) e «Gestione account» (`FamilyCard`: contatore X di N, badge stato In attesa/Attivo/Retrocesso, azioni Reinvia/Riattiva/Rimuovi con conferma, dialog di invito). Il dialog di cambio piano avvisa se il downgrade retrocederà account.
-- **Profilo del figlio attivo**: card «Piano ereditato da …» al posto della griglia piani (nessuno switch).
+- **Profilo** (`Profilo.tsx`): dati personali (con verifica CF), rimandi compatti ad Azienda (`AziendaTeaser`), Preferenze (`PreferenzeTeaser`) e Abbonamento (`AbbonamentoTeaser` — piano attuale + link) e «Gestione account» (`FamilyCard`: contatore X di N, badge stato, azioni Reinvia/Riattiva/Rimuovi, dialog di invito).
+- **Pagina «Abbonamento»** (`/app/abbonamento`, voce in navigazione): la sezione abbonamenti spostata INVARIATA dal Profilo — griglia `PlanCard` con cambio piano (il dialog di conferma avvisa se il downgrade retrocederà account; figlio attivo → card «Piano ereditato da …» senza switch) — più la sezione **Add-on**: catalogo gestito dagli admin (`useAddons`, key `["addons"]`, sezione nascosta se vuoto), card `AddonCard` (nome, descrizione, prezzo una tantum via `formatPrezzo` senza «/anno») con bottone «Acquista» che passa dal **punto di estensione `purchaseAddon(slug)` in `lib/addons.ts`** — oggi stub: apre il dialog «Acquisto in arrivo» (nessun addebito); collegare il flusso reale = riempire quella funzione. Admin: `/app/admin/addon` (`AdminAddon.tsx`, clone di `AdminPiani`: card-editor, slug immutabile, «non si eliminano: si disattivano», hook `useAdminAddons`/`Create`/`Update` con doppia invalidazione).
 - **Inviti**: `InviteBanner` (in `AppShell`) mostra agli utenti esistenti l'invito con Accetta (avvisando che l'abbonamento attuale verrà annullato) / Rifiuta; `/accetta-invito` gestisce il link Supabase degli utenti nuovi — cattura l'hash **prima** che supabase-js lo consumi per riconoscere i link scaduti (`otp_expired`), poi form password e accettazione automatica.
 - **Admin**: colonna Famiglia (badge Titolare/In famiglia/Invitato/Retrocesso + email del titolare), piano «(ereditato)» e select disabilitata per i figli.
 

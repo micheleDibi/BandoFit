@@ -63,6 +63,10 @@ Contiene i dati della piattaforma. Schema in `supabase/migrations/` (eseguire in
 
 **`calendar_events`** — eventi del calendario personale: `titolo` (1-200), **`data` `date` + `ora_inizio`/`ora_fine` `time` senza fuso** (calendario italiano wall-clock, come `data_scadenza` del catalogo), `tutto_il_giorno`, `note` (≤2000), `tipo` (`personale`/`bando`). CHECK di coerenza: `tipo='bando'` ⇔ `bando_id`+`bando_slug` presenti; tutto il giorno ⇒ niente orari, con orari ⇒ inizio obbligatorio e fine successiva. Indice unico parziale `(user_id, bando_id) where tipo='bando'`: **una sola scadenza in calendario per bando per utente** (idempotenza). Nessuna FK verso saved_bandi: preferiti ed eventi sono indipendenti.
 
+### Add-on (migration 0009)
+
+**`addons`** — catalogo add-on acquistabili gestito dagli admin, gemello di `subscription_plans`: `nome`, **`slug` unico** (identificativo STABILE per agganciare le funzionalità future), `descrizione`, `prezzo numeric(10,2) ≥ 0` (euro, stessa convenzione dei piani), `ordering`, `is_active`. Come i piani, **non si eliminano: si disattivano**. Nessun seed: il catalogo parte vuoto. Il flusso di acquisto non è ancora implementato.
+
 ### Funzioni e trigger
 
 - `handle_new_user()` — trigger `AFTER INSERT ON auth.users`: crea profilo + abbonamento iniziale (fallback `gratuito`); per gli utenti invitati in famiglia (metadata `family_invite='true'`) crea **solo il profilo**, senza abbonamento. **Difensiva: non solleva mai eccezioni.**

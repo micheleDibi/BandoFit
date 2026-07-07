@@ -1,7 +1,9 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AdminRoute, ProtectedRoute } from "./components/layout/guards";
 import { AppShell } from "./components/layout/AppShell";
+import Abbonamento from "./pages/Abbonamento";
 import AccettaInvito from "./pages/AccettaInvito";
+import AdminAddon from "./pages/AdminAddon";
 import AdminPiani from "./pages/AdminPiani";
 import AdminUtenti from "./pages/AdminUtenti";
 import AiCheck from "./pages/AiCheck";
@@ -46,6 +48,7 @@ export default function App() {
         <Route path="azienda" element={<Azienda />} />
         <Route path="ai-check" element={<AiCheck />} />
         <Route path="preferenze" element={<Preferenze />} />
+        <Route path="abbonamento" element={<Abbonamento />} />
         <Route path="profilo" element={<Profilo />} />
         <Route
           path="admin/utenti"
@@ -60,6 +63,14 @@ export default function App() {
           element={
             <AdminRoute>
               <AdminPiani />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="admin/addon"
+          element={
+            <AdminRoute>
+              <AdminAddon />
             </AdminRoute>
           }
         />

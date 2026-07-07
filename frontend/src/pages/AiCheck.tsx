@@ -164,7 +164,7 @@ export default function AiCheck() {
               ) : (
                 <p className="text-sm text-slate-500">
                   Non inclusi nel tuo piano.{" "}
-                  <Link to="/app/profilo" className="font-medium text-brand-600 hover:underline">
+                  <Link to="/app/abbonamento" className="font-medium text-brand-600 hover:underline">
                     Vedi i piani
                   </Link>
                 </p>

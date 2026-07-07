@@ -56,6 +56,9 @@ Piani di abbonamento attivi, ordinati per `ordering`. Usato dallo step 2 della r
 
 ## Endpoint autenticati
 
+### `GET /addons`
+Catalogo **add-on attivi**, ordinati per `ordering`: `[{id, nome, slug, descrizione, prezzo, ordering, is_active, updated_at}]`. Lo `slug` è l'identificativo STABILE a cui verranno agganciate le funzionalità future. A differenza di `GET /plans` (pubblico perché serve alla registrazione) la rotta è **autenticata**: il catalogo si vede solo dentro l'app. Il flusso di acquisto non esiste ancora (il bottone «Acquista» lato client mostra l'avviso «In arrivo» tramite lo stub `purchaseAddon`).
+
 ### `GET /me`
 Profilo dell'utente corrente + abbonamento attivo con il piano.
 ```json
@@ -249,3 +252,6 @@ Crea un piano. Body: `nome`, `slug` (`[a-z0-9-]+`, unico → `409` se duplicato)
 
 ### `PATCH /admin/plans/{plan_id}`
 Aggiornamento parziale (stessi campi, tranne `slug`). I piani **non si eliminano** (lo storico abbonamenti li referenzia): si disattivano con `is_active=false`, che li nasconde dalla registrazione e dal cambio piano.
+
+### `GET /admin/addons` · `POST /admin/addons` (201) · `PATCH /admin/addons/{addon_id}`
+Gestione del catalogo add-on, gemella di `/admin/plans` (stessi permessi admin): GET tutti (anche disattivati), POST crea (`nome`, `slug` — unico, immutabile, `[a-z0-9-]+` → `409` se duplicato —, `descrizione?`, `prezzo ≥ 0` in €, `ordering`, `is_active`), PATCH aggiorna i campi passati (slug escluso) o disattiva. Gli add-on **non si eliminano**: si disattivano.

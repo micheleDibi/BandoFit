@@ -16,7 +16,7 @@ Stack: **Vite + React 18 + TypeScript**, **Tailwind CSS v4** (token di tema in `
 | `/app/bandi` | Elenco bandi con filtri | autenticato |
 | `/app/bandi/:slug` | Dettaglio bando | autenticato |
 | `/app/azienda` | Dossier aziendale certificato (import openapi.it) | autenticato |
-| `/app/ai-check` | Cruscotto AI-check (quota, statistiche, storico per bando) | autenticato |
+| `/app/ai-check` | Cruscotto AI-check (quota del piano e storico per bando) | autenticato |
 | `/app/profilo` | Profilo, dati aziendali, gestione account collegati, abbonamento | autenticato |
 | `/app/admin/utenti` | Gestione utenti | solo admin |
 | `/app/admin/piani` | Gestione piani di abbonamento | solo admin |

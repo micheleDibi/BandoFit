@@ -8,31 +8,30 @@ interface MonthGridProps {
   mese: number; // 1-12
   eventsByDay: Map<string, CalendarEvent[]>;
   todayIso: string;
-  selectedDay: string;
-  /** Click sul giorno (area vuota della cella): seleziona E apre il form. */
-  onCreateDay: (iso: string) => void;
+  /** Click sul giorno (area vuota della cella). */
+  onDayClick: (iso: string) => void;
   /** Click su un chip evento: apre la modifica di quell'evento. */
   onOpenEvent: (event: CalendarEvent) => void;
+  /** Click su «+N altri»: elenco completo degli eventi del giorno. */
+  onShowDay: (iso: string) => void;
 }
 
 const WEEKDAYS = weekdayShortLabels();
 const MAX_CHIPS = 3;
 
-/** Griglia mensile (lunedì per primo, 6 settimane fisse), pensata per vivere
- *  DENTRO la card del calendario: bordi interni sottili, numero del giorno in
- *  alto a sinistra, hint «+» al passaggio del mouse. Ogni cella è un div con
- *  bottoni FRATELLI (mai annidati): uno di sfondo che copre la cella
- *  (click = crea evento) e i chip degli eventi sopra (click = apri evento).
- *  Su mobile i chip sono pallini presentazionali: gli eventi si aprono
- *  dall'agenda. */
+/** Griglia mensile a tutta larghezza (lunedì per primo, 6 settimane fisse),
+ *  compatta in verticale. Ogni cella è un div con bottoni FRATELLI (mai
+ *  annidati): uno di sfondo che copre la cella (click sul giorno), i chip
+ *  degli eventi e l'eventuale «+N altri» sopra. Su mobile i chip sono
+ *  pallini presentazionali: il tap sul giorno apre l'elenco. */
 export function MonthGrid({
   anno,
   mese,
   eventsByDay,
   todayIso,
-  selectedDay,
-  onCreateDay,
+  onDayClick,
   onOpenEvent,
+  onShowDay,
 }: MonthGridProps) {
   const first = new Date(anno, mese - 1, 1);
   const lead = (first.getDay() + 6) % 7; // lunedì = 0
@@ -60,7 +59,6 @@ export function MonthGrid({
           const inMonth = day.getMonth() === mese - 1;
           const events = eventsByDay.get(iso) ?? [];
           const isToday = iso === todayIso;
-          const isSelected = iso === selectedDay;
           const col = index % 7;
           const lastRow = index >= 35;
 
@@ -68,22 +66,21 @@ export function MonthGrid({
             <div
               key={iso}
               className={cn(
-                "group relative flex min-h-24 flex-col gap-1 p-1.5 lg:min-h-28",
+                "group relative flex min-h-20 flex-col gap-1 p-1.5 sm:min-h-24 sm:p-2",
                 "border-slate-100",
                 !lastRow && "border-b",
                 col < 6 && "border-r",
                 inMonth ? "bg-white" : "bg-slate-50/60",
-                isSelected && "bg-brand-50/70",
               )}
             >
-              {/* Bottone di sfondo: seleziona il giorno e apre il form */}
+              {/* Bottone di sfondo: click sul giorno */}
               <button
                 type="button"
-                onClick={() => onCreateDay(iso)}
-                aria-label={`Aggiungi un evento — ${formatWeekdayLong(iso)}${
+                onClick={() => onDayClick(iso)}
+                aria-label={`${formatWeekdayLong(iso)}${
                   events.length
-                    ? `, ${events.length} ${events.length === 1 ? "evento presente" : "eventi presenti"}`
-                    : ""
+                    ? ` — ${events.length} ${events.length === 1 ? "evento" : "eventi"}`
+                    : " — aggiungi un evento"
                 }`}
                 className={cn(
                   "absolute inset-0 cursor-pointer transition-colors hover:bg-slate-900/[0.03]",
@@ -97,7 +94,6 @@ export function MonthGrid({
                     "inline-flex size-6 items-center justify-center rounded-full text-[13px]",
                     inMonth ? "font-medium text-slate-700" : "text-slate-300",
                     isToday && "bg-brand-500 font-semibold text-white",
-                    !isToday && isSelected && "font-semibold text-brand-700",
                   )}
                 >
                   {day.getDate()}
@@ -131,12 +127,16 @@ export function MonthGrid({
                       </button>
                     ))}
                     {events.length > MAX_CHIPS && (
-                      <span className="pointer-events-none px-1.5 text-[11px] font-medium text-slate-400">
+                      <button
+                        type="button"
+                        onClick={() => onShowDay(iso)}
+                        className="cursor-pointer rounded px-1.5 py-0.5 text-left text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand-500"
+                      >
                         +{events.length - MAX_CHIPS} altri
-                      </span>
+                      </button>
                     )}
                   </div>
-                  {/* mobile: pallini presentazionali (eventi nell'agenda) */}
+                  {/* mobile: pallini presentazionali (il tap sul giorno apre l'elenco) */}
                   <span className="pointer-events-none relative z-10 flex gap-1 sm:hidden">
                     {events.slice(0, 4).map((event) => (
                       <span

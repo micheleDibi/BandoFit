@@ -1,12 +1,14 @@
-import { CalendarClock, CalendarPlus, Plus } from "lucide-react";
+import { CalendarClock, Plus } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { formatTime, formatWeekdayLong } from "../../lib/format";
 import type { CalendarEvent } from "../../types";
 import { Button } from "../ui/Button";
+import { Dialog } from "../ui/Dialog";
 
-interface DayAgendaProps {
-  dayIso: string;
+interface DayEventsDialogProps {
+  date: string | null; // YYYY-MM-DD, null = chiuso
   events: CalendarEvent[];
+  onClose: () => void;
   onCreate: () => void;
   onOpenEvent: (event: CalendarEvent) => void;
 }
@@ -17,34 +19,36 @@ function timeLabel(event: CalendarEvent): string {
   return event.ora_fine ? `${start}–${formatTime(event.ora_fine)}` : start;
 }
 
-/** Agenda del giorno selezionato, resa come PANNELLO dentro la card del
- *  calendario (niente card flottante): riempie l'altezza della colonna. */
-export function DayAgenda({ dayIso, events, onCreate, onOpenEvent }: DayAgendaProps) {
+/** Elenco degli eventi di un giorno: si apre dal «+N altri» delle celle
+ *  affollate e, su mobile, dal tap su un giorno con eventi. */
+export function DayEventsDialog({
+  date,
+  events,
+  onClose,
+  onCreate,
+  onOpenEvent,
+}: DayEventsDialogProps) {
   return (
-    <div className="flex h-full flex-col p-5">
-      <h2 className="font-display text-base font-bold capitalize text-slate-900">
-        {formatWeekdayLong(dayIso)}
-      </h2>
-      <p className="mt-0.5 text-xs text-slate-400">
-        {events.length === 0
-          ? "Nessun evento"
-          : `${events.length} ${events.length === 1 ? "evento" : "eventi"}`}
-      </p>
-
-      <Button variant="secondary" size="sm" className="mt-3 w-full" onClick={onCreate}>
-        <Plus className="size-4" aria-hidden />
-        Aggiungi evento
-      </Button>
-
+    <Dialog
+      open={date !== null}
+      onClose={onClose}
+      title={date ? formatWeekdayLong(date) : ""}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Chiudi
+          </Button>
+          <Button onClick={onCreate}>
+            <Plus className="size-4" aria-hidden />
+            Aggiungi evento
+          </Button>
+        </>
+      }
+    >
       {events.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 py-10 text-center">
-          <CalendarPlus className="size-8 text-slate-200" aria-hidden />
-          <p className="max-w-44 text-xs leading-relaxed text-slate-400">
-            Giornata libera: clicca su un giorno della griglia per pianificare qualcosa.
-          </p>
-        </div>
+        <p className="text-sm text-slate-400">Nessun evento in questo giorno.</p>
       ) : (
-        <ul className="mt-4 space-y-2">
+        <ul className="space-y-2">
           {events.map((event) => (
             <li key={event.id}>
               <button
@@ -70,16 +74,11 @@ export function DayAgenda({ dayIso, events, onCreate, onOpenEvent }: DayAgendaPr
                     Scadenza bando
                   </span>
                 )}
-                {event.note && (
-                  <span className="mt-0.5 block truncate text-xs text-slate-400">
-                    {event.note}
-                  </span>
-                )}
               </button>
             </li>
           ))}
         </ul>
       )}
-    </div>
+    </Dialog>
   );
 }

@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { DayAgenda } from "../components/calendar/DayAgenda";
+import { DayEventsDialog } from "../components/calendar/DayEventsDialog";
 import { EventDialog, type DialogState } from "../components/calendar/EventDialog";
 import { MonthGrid } from "../components/calendar/MonthGrid";
 import { Button } from "../components/ui/Button";
@@ -31,23 +31,14 @@ function monthParam(anno: number, mese: number): string {
 export default function Calendario() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { anno, mese } = parseMonthParam(searchParams.get("m"));
+  const monthKey = monthParam(anno, mese);
   const todayIso = todayItalyIso();
 
   const { data: events, isPending, isError, error, refetch } = useCalendarEvents(anno, mese);
 
-  // Giorno selezionato: oggi se siamo nel mese corrente, altrimenti il 1°.
-  const monthKey = monthParam(anno, mese);
-  const defaultDay = todayIso.startsWith(monthKey) ? todayIso : `${monthKey}-01`;
-  const [selectedDay, setSelectedDay] = useState(defaultDay);
   const [dialog, setDialog] = useState<DialogState>(null);
-
-  // Il mese può cambiare anche FUORI da goToMonth (back/forward del browser,
-  // link con ?m=): la selezione non deve restare su un giorno di un altro mese.
-  useEffect(() => {
-    if (!selectedDay.startsWith(monthKey)) {
-      setSelectedDay(todayIso.startsWith(monthKey) ? todayIso : `${monthKey}-01`);
-    }
-  }, [monthKey, selectedDay, todayIso]);
+  // Giorno di cui mostrare l'ELENCO eventi (celle affollate / tap su mobile).
+  const [dayListFor, setDayListFor] = useState<string | null>(null);
 
   const eventsByDay = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
@@ -59,7 +50,7 @@ export default function Calendario() {
     return map;
   }, [events]);
 
-  const goToMonth = (nextAnno: number, nextMese: number, day?: string) => {
+  const goToMonth = (nextAnno: number, nextMese: number) => {
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -68,8 +59,6 @@ export default function Calendario() {
       },
       { replace: true },
     );
-    const key = monthParam(nextAnno, nextMese);
-    setSelectedDay(day ?? (todayIso.startsWith(key) ? todayIso : `${key}-01`));
   };
 
   const shiftMonth = (delta: number) => {
@@ -77,109 +66,111 @@ export default function Calendario() {
     goToMonth(base.getFullYear(), base.getMonth() + 1);
   };
 
-  // Click sul giorno: seleziona (l'agenda si aggiorna) E apre subito il form
-  // di creazione con la data precompilata. Su un giorno di un altro mese
-  // prima si naviga lì.
-  const handleCreateDay = (iso: string) => {
+  // Click su un giorno: apre subito il form di creazione (data precompilata).
+  // Su mobile i chip non ci sono: se il giorno ha eventi si apre l'elenco
+  // (da cui si può comunque aggiungere). Un giorno di un altro mese naviga lì.
+  const handleDayClick = (iso: string) => {
     if (!iso.startsWith(monthKey)) {
-      goToMonth(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)), iso);
-    } else {
-      setSelectedDay(iso);
+      goToMonth(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)));
     }
-    setDialog({ mode: "create", date: iso });
+    const hasEvents = (eventsByDay.get(iso) ?? []).length > 0;
+    const isDesktop = window.matchMedia("(min-width: 640px)").matches;
+    if (hasEvents && !isDesktop) {
+      setDayListFor(iso);
+    } else {
+      setDialog({ mode: "create", date: iso });
+    }
   };
 
   const handleOpenEvent = (event: CalendarEvent) => {
-    setSelectedDay(event.data);
+    setDayListFor(null);
     setDialog({ mode: "edit", event });
   };
 
   return (
     <div>
-      <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
-        Calendario
-      </h1>
-      <p className="mt-1 text-sm text-slate-500">
-        Le tue scadenze e i tuoi impegni: clicca su un giorno per aggiungere un evento, su un
-        evento per modificarlo.
-      </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
+            Calendario
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Clicca su un giorno per aggiungere un evento, su un evento per modificarlo.
+          </p>
+        </div>
+        <div className="flex items-center gap-4 text-xs text-slate-500">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-brand-500" aria-hidden />
+            Personali
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-amber-500" aria-hidden />
+            Scadenze bandi
+          </span>
+        </div>
+      </div>
 
       {isPending ? (
-        <Skeleton className="mt-5 h-[36rem] w-full" />
+        <Skeleton className="mt-5 h-[34rem] w-full" />
       ) : isError ? (
         <div className="mt-5">
           <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
         </div>
       ) : (
         <Card className="mt-5 overflow-hidden p-0">
-          {/* Toolbar: mese + navigazione + legenda */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3.5 sm:px-5">
-            <div className="flex items-center gap-2">
-              <h2 className="min-w-40 font-display text-lg font-bold capitalize text-slate-900">
-                {formatMonthYear(anno, mese)}
-              </h2>
-              <button
-                type="button"
-                onClick={() => shiftMonth(-1)}
-                aria-label="Mese precedente"
-                className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500"
-              >
-                <ChevronLeft className="size-4" aria-hidden />
-              </button>
-              <button
-                type="button"
-                onClick={() => shiftMonth(1)}
-                aria-label="Mese successivo"
-                className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500"
-              >
-                <ChevronRight className="size-4" aria-hidden />
-              </button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  goToMonth(Number(todayIso.slice(0, 4)), Number(todayIso.slice(5, 7)), todayIso)
-                }
-              >
-                Oggi
-              </Button>
-            </div>
-            <div className="hidden items-center gap-4 text-xs text-slate-500 sm:flex">
-              <span className="inline-flex items-center gap-1.5">
-                <span className="size-2 rounded-full bg-brand-500" aria-hidden />
-                Personali
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="size-2 rounded-full bg-amber-500" aria-hidden />
-                Scadenze bandi
-              </span>
-            </div>
+          {/* Toolbar: mese + navigazione */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-4 py-3 sm:px-5">
+            <h2 className="min-w-44 font-display text-lg font-bold capitalize text-slate-900">
+              {formatMonthYear(anno, mese)}
+            </h2>
+            <button
+              type="button"
+              onClick={() => shiftMonth(-1)}
+              aria-label="Mese precedente"
+              className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500"
+            >
+              <ChevronLeft className="size-4" aria-hidden />
+            </button>
+            <button
+              type="button"
+              onClick={() => shiftMonth(1)}
+              aria-label="Mese successivo"
+              className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500"
+            >
+              <ChevronRight className="size-4" aria-hidden />
+            </button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => goToMonth(Number(todayIso.slice(0, 4)), Number(todayIso.slice(5, 7)))}
+            >
+              Oggi
+            </Button>
           </div>
 
-          {/* Griglia + agenda incorporata (colonna a destra su desktop) */}
-          <div className="flex flex-col xl:flex-row">
-            <div className="min-w-0 flex-1">
-              <MonthGrid
-                anno={anno}
-                mese={mese}
-                eventsByDay={eventsByDay}
-                todayIso={todayIso}
-                selectedDay={selectedDay}
-                onCreateDay={handleCreateDay}
-                onOpenEvent={handleOpenEvent}
-              />
-            </div>
-            <aside className="border-t border-slate-200 bg-slate-50/60 xl:w-80 xl:border-l xl:border-t-0">
-              <DayAgenda
-                dayIso={selectedDay}
-                events={eventsByDay.get(selectedDay) ?? []}
-                onCreate={() => setDialog({ mode: "create", date: selectedDay })}
-                onOpenEvent={handleOpenEvent}
-              />
-            </aside>
-          </div>
+          <MonthGrid
+            anno={anno}
+            mese={mese}
+            eventsByDay={eventsByDay}
+            todayIso={todayIso}
+            onDayClick={handleDayClick}
+            onOpenEvent={handleOpenEvent}
+            onShowDay={setDayListFor}
+          />
         </Card>
       )}
+
+      <DayEventsDialog
+        date={dayListFor}
+        events={dayListFor ? (eventsByDay.get(dayListFor) ?? []) : []}
+        onClose={() => setDayListFor(null)}
+        onCreate={() => {
+          const date = dayListFor;
+          setDayListFor(null);
+          if (date) setDialog({ mode: "create", date });
+        }}
+        onOpenEvent={handleOpenEvent}
+      />
 
       <EventDialog state={dialog} onClose={() => setDialog(null)} />
     </div>

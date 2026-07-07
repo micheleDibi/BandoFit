@@ -150,10 +150,10 @@ export function AiCheckReport({ slug }: { slug: string }) {
           )}
         </div>
 
-        {/* Esito + punteggio */}
-        <div className="mt-5 grid gap-4 sm:grid-cols-[auto_1fr] sm:items-center">
+        {/* Esito + punteggio (il badge può mancare: layout flessibile) */}
+        <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-3">
           <AiEsitoBadge esito={report.esito_ammissibilita} />
-          <div>
+          <div className="min-w-0 flex-1 basis-72">
             {punteggio !== null ? (
               <>
                 <div className="flex items-baseline justify-between gap-3">

@@ -1,10 +1,12 @@
-import { CalendarClock, CheckCircle2, Clock3, HelpCircle, SearchCheck, XCircle } from "lucide-react";
+import { CalendarClock, CheckCircle2, Clock3, HelpCircle, XCircle } from "lucide-react";
 import { daysUntil, formatDate } from "../../lib/format";
 import type { AiEsito, StatoBando } from "../../types";
 import { Badge } from "../ui/Badge";
 
 /** Esito dell'AI-check. Il report è generato da un modello e può sbagliare:
- *  il linguaggio resta costruttivo — mai un «bocciato» secco. */
+ *  il linguaggio resta costruttivo — mai un «bocciato» secco. Per l'esito
+ *  negativo NESSUN badge: il colore del punteggio e i verdetti dei singoli
+ *  requisiti dicono già tutto, un'etichetta vaga non aggiunge significato. */
 export function AiEsitoBadge({ esito }: { esito: AiEsito }) {
   if (esito === "ammissibile") {
     return (
@@ -14,20 +16,15 @@ export function AiEsitoBadge({ esito }: { esito: AiEsito }) {
       </Badge>
     );
   }
-  if (esito === "non_ammissibile") {
+  if (esito === "da_verificare") {
     return (
-      <Badge tone="slate">
-        <SearchCheck className="size-3" aria-hidden />
-        Da approfondire
+      <Badge tone="amber">
+        <HelpCircle className="size-3" aria-hidden />
+        Dati da completare
       </Badge>
     );
   }
-  return (
-    <Badge tone="amber">
-      <HelpCircle className="size-3" aria-hidden />
-      Dati da completare
-    </Badge>
-  );
+  return null;
 }
 
 export function StatoBadge({ stato }: { stato: StatoBando | null }) {

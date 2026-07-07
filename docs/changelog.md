@@ -6,7 +6,7 @@ Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descr
 
 - **Elenchi e FAQ finalmente visibili nella scheda bando**: il renderer del contenuto gestiva solo il tipo `list`, ma il catalogo usa `bullet_list`/`numbered_list` (1.454 sezioni saltate in tutto il catalogo!) e `faq` — ora resi come elenchi puntati/numerati e riquadri domanda/risposta; i link dei segmenti leggono anche la chiave reale `url`.
 
-- **Punteggio a colori** ovunque (report, card, cruscotto): rosso 0–39, arancione 40–59, giallo 60–79, verde 80–100 — numero e barra (`lib/scoreColor.ts`).
+- **Punteggio a colori** ovunque (report, card, cruscotto): rosso 0–39, arancione 40–59, giallo 60–79, verde 80–100 — numero e barra (`lib/scoreColor.ts`). Per l'esito negativo nessun badge («Da approfondire» eliminato): il colore e i verdetti dei singoli requisiti dicono già tutto; restano «In linea col bando» e «Dati da completare».
 - Report più asciutto: via la nota sulla griglia negli allegati e via il «Dato aziendale usato» dai requisiti di ammissibilità (resta nei criteri).
 - **Dettaglio bando senza box vuote**: i riquadri Dotazione/Max per progetto/Apertura/Scadenza compaiono solo se valorizzati, e la card «Candidatura» solo se esiste un link.
 

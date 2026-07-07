@@ -1,10 +1,11 @@
-import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DayAgenda } from "../components/calendar/DayAgenda";
 import { EventDialog, type DialogState } from "../components/calendar/EventDialog";
 import { MonthGrid } from "../components/calendar/MonthGrid";
 import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { ErrorState, Skeleton } from "../components/ui/states";
 import { useCalendarEvents } from "../hooks/useCalendar";
 import { apiErrorMessage } from "../lib/api";
@@ -95,90 +96,89 @@ export default function Calendario() {
 
   return (
     <div>
-      {/* Intestazione: navigazione mese + legenda */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="inline-flex items-center gap-2 font-display text-2xl font-bold tracking-tight text-slate-900">
-          <CalendarDays className="size-6 text-brand-500" aria-hidden />
-          Calendario
-        </h1>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => shiftMonth(-1)}
-            aria-label="Mese precedente"
-            className="inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500"
-          >
-            <ChevronLeft className="size-5" aria-hidden />
-          </button>
-          <span className="min-w-36 text-center font-display text-base font-semibold capitalize text-slate-900">
-            {formatMonthYear(anno, mese)}
-          </span>
-          <button
-            type="button"
-            onClick={() => shiftMonth(1)}
-            aria-label="Mese successivo"
-            className="inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500"
-          >
-            <ChevronRight className="size-5" aria-hidden />
-          </button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="ml-1"
-            onClick={() =>
-              goToMonth(Number(todayIso.slice(0, 4)), Number(todayIso.slice(5, 7)), todayIso)
-            }
-          >
-            Oggi
-          </Button>
-        </div>
-      </div>
-
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-        <span className="inline-flex items-center gap-1.5">
-          <span className="size-2 rounded-full bg-brand-500" aria-hidden />
-          Eventi personali
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="size-2 rounded-full bg-amber-500" aria-hidden />
-          Scadenze bandi
-        </span>
-        <span className="text-slate-400">
-          Clicca su un giorno per aggiungere un evento, su un evento per modificarlo.
-        </span>
-      </div>
+      <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
+        Calendario
+      </h1>
+      <p className="mt-1 text-sm text-slate-500">
+        Le tue scadenze e i tuoi impegni: clicca su un giorno per aggiungere un evento, su un
+        evento per modificarlo.
+      </p>
 
       {isPending ? (
-        <div className="mt-5 space-y-4">
-          <Skeleton className="h-96 w-full" />
-          <Skeleton className="h-32 w-full" />
-        </div>
+        <Skeleton className="mt-5 h-[36rem] w-full" />
       ) : isError ? (
         <div className="mt-5">
           <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
         </div>
       ) : (
-        // La griglia occupa tutta la larghezza; su desktop l'agenda del
-        // giorno selezionato affianca come colonna fissa.
-        <div className="mt-5 grid items-start gap-6 xl:grid-cols-[1fr_340px]">
-          <MonthGrid
-            anno={anno}
-            mese={mese}
-            eventsByDay={eventsByDay}
-            todayIso={todayIso}
-            selectedDay={selectedDay}
-            onCreateDay={handleCreateDay}
-            onOpenEvent={handleOpenEvent}
-          />
-          <div className="xl:sticky xl:top-20">
-            <DayAgenda
-              dayIso={selectedDay}
-              events={eventsByDay.get(selectedDay) ?? []}
-              onCreate={() => setDialog({ mode: "create", date: selectedDay })}
-              onOpenEvent={handleOpenEvent}
-            />
+        <Card className="mt-5 overflow-hidden p-0">
+          {/* Toolbar: mese + navigazione + legenda */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3.5 sm:px-5">
+            <div className="flex items-center gap-2">
+              <h2 className="min-w-40 font-display text-lg font-bold capitalize text-slate-900">
+                {formatMonthYear(anno, mese)}
+              </h2>
+              <button
+                type="button"
+                onClick={() => shiftMonth(-1)}
+                aria-label="Mese precedente"
+                className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500"
+              >
+                <ChevronLeft className="size-4" aria-hidden />
+              </button>
+              <button
+                type="button"
+                onClick={() => shiftMonth(1)}
+                aria-label="Mese successivo"
+                className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500"
+              >
+                <ChevronRight className="size-4" aria-hidden />
+              </button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  goToMonth(Number(todayIso.slice(0, 4)), Number(todayIso.slice(5, 7)), todayIso)
+                }
+              >
+                Oggi
+              </Button>
+            </div>
+            <div className="hidden items-center gap-4 text-xs text-slate-500 sm:flex">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="size-2 rounded-full bg-brand-500" aria-hidden />
+                Personali
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="size-2 rounded-full bg-amber-500" aria-hidden />
+                Scadenze bandi
+              </span>
+            </div>
           </div>
-        </div>
+
+          {/* Griglia + agenda incorporata (colonna a destra su desktop) */}
+          <div className="flex flex-col xl:flex-row">
+            <div className="min-w-0 flex-1">
+              <MonthGrid
+                anno={anno}
+                mese={mese}
+                eventsByDay={eventsByDay}
+                todayIso={todayIso}
+                selectedDay={selectedDay}
+                onCreateDay={handleCreateDay}
+                onOpenEvent={handleOpenEvent}
+              />
+            </div>
+            <aside className="border-t border-slate-200 bg-slate-50/60 xl:w-80 xl:border-l xl:border-t-0">
+              <DayAgenda
+                dayIso={selectedDay}
+                events={eventsByDay.get(selectedDay) ?? []}
+                onCreate={() => setDialog({ mode: "create", date: selectedDay })}
+                onOpenEvent={handleOpenEvent}
+              />
+            </aside>
+          </div>
+        </Card>
       )}
 
       <EventDialog state={dialog} onClose={() => setDialog(null)} />

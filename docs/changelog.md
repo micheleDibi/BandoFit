@@ -2,6 +2,13 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-07 — AI-check: pagina dedicata, tono costruttivo, punteggi più discriminanti
+
+- **Pagina «AI-check»** (`/app/ai-check`, in navigazione): cruscotto con statistiche (AI-check disponibili con barra di consumo, analisi effettuate, bandi in linea) e storico raggruppato per bando — ultima analisi in evidenza, numero versioni, «Apri report». Sostituisce la card compatta nella pagina Azienda.
+- **Tono costruttivo**: mai «Non ammissibile» né «punteggio non rilevante» — il report è generato dall'AI e può sbagliare. Gli esiti diventano «In linea col bando» / «Dati da completare» / «Da approfondire» (mai rosso), col rimando ai dettagli e al testo ufficiale; il punteggio resta sempre leggibile.
+- **Mai nomi tecnici in interfaccia**: i campi citati dall'AI (`derived.beneficiari[1].nome`…) sono tradotti in etichette italiane con fonte («Categorie di beneficiari (Registro Imprese)»); il prompt di matching impone linguaggio naturale nelle motivazioni; i dati mancanti guidano con link a Profilo (completa) e Azienda (importa).
+- **Pesi euristici ribilanciati**: il punteggio ora premia soprattutto requisiti soddisfatti (30) e criteri del bando (40) — che cambiano da bando a bando — e meno i confronti di catalogo (settore 12, regione 9, beneficiari 9), quasi identici per bandi simili: prima quattro bandi diversi finivano tutti sullo stesso punteggio. 327 test backend.
+
 ## 2026-07-07 — AI-check di compatibilità azienda ↔ bando
 
 - **AI-check** dal dettaglio bando: l'AI (API Anthropic, `claude-sonnet-5`, output vincolato da schema) estrae dal testo del bando i **requisiti obbligatori** e i **criteri di valutazione** — con citazione letterale di ogni passaggio — e li confronta punto-punto col profilo dell'azienda (dati form, dossier certificato, persone, testo della visura). **Ammissibilità e punteggio sono calcolati in Python, mai dal modello**: gate binario sui requisiti (uno mancato ⇒ non ammissibile, dato mancante ⇒ «da verificare», mai promosso d'ufficio), punteggio «stima» se il bando pubblica la griglia, «euristico interno» altrimenti; pre-check esatti sui facet del catalogo prevalgono sui verdetti del modello, e le citazioni non ritrovate nel testo vengono marcate.

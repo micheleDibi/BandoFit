@@ -36,6 +36,9 @@ export function AppShell() {
       <NavLink to="/app/azienda" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
         Azienda
       </NavLink>
+      <NavLink to="/app/ai-check" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
+        AI-check
+      </NavLink>
       <NavLink to="/app/preferenze" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
         Preferenze
       </NavLink>

@@ -4,6 +4,7 @@ import { AppShell } from "./components/layout/AppShell";
 import AccettaInvito from "./pages/AccettaInvito";
 import AdminPiani from "./pages/AdminPiani";
 import AdminUtenti from "./pages/AdminUtenti";
+import AiCheck from "./pages/AiCheck";
 import Azienda from "./pages/Azienda";
 import BandiList from "./pages/BandiList";
 import BandoDetail from "./pages/BandoDetail";
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="bandi" element={<BandiList />} />
         <Route path="bandi/:slug" element={<BandoDetail />} />
         <Route path="azienda" element={<Azienda />} />
+        <Route path="ai-check" element={<AiCheck />} />
         <Route path="preferenze" element={<Preferenze />} />
         <Route path="profilo" element={<Profilo />} />
         <Route

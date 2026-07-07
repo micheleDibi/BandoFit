@@ -66,6 +66,12 @@ campo preciso, l'esito è `dato_mancante` con `dato_azienda` null.
 - Le equivalenze semantiche sono ammesse ma vanno motivate (es. la divisione \
 ATECO 62 rientra nei "servizi ICT"; la categoria "PMI" copre micro, piccole \
 e medie imprese). Motivazione: massimo 2 frasi, in italiano.
+- Le `motivazione` e le `descrizione` sono lette dall'utente finale: linguaggio \
+naturale, MAI nomi tecnici di campi o percorsi (niente "settore_nome", \
+"derived.beneficiari[1].nome") — descrivi il dato in italiano (es. «il settore \
+indicato nei dati aziendali», «le categorie di beneficiari del Registro \
+Imprese»). I nomi tecnici vanno SOLO in `dato_azienda.campo` e in \
+`dati_mancanti.campo`.
 - Le VERIFICHE STRUTTURATE fornite sono fatti già accertati con confronto \
 esatto sui dati del catalogo: non contraddirle mai.
 - `criteri`: usa `parzialmente_soddisfatto` quando l'azienda copre solo in \

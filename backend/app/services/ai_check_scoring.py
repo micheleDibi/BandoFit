@@ -28,12 +28,16 @@ FRAC = {
     "dato_mancante": 0.0,
 }
 
-# Pesi del punteggio euristico (griglia non pubblicata).
+# Pesi del punteggio euristico (griglia non pubblicata). Il peso è spostato
+# su requisiti e criteri — che cambiano da bando a bando — e non sui confronti
+# di catalogo (settore/regione/beneficiari), quasi identici per bandi simili:
+# altrimenti aziende e bandi diversi finiscono tutti sullo stesso punteggio.
 HEURISTIC_WEIGHTS = {
-    "settoriale": 30,   # pre-check ateco + settore
-    "territoriale": 20,  # pre-check regione
-    "beneficiari": 20,   # pre-check beneficiari (tipologia/dimensione)
-    "criteri": 30,       # media dei criteri valutati dall'LLM
+    "requisiti": 30,     # quota di requisiti obbligatori soddisfatti (post-merge)
+    "criteri": 40,       # media dei criteri valutati dall'LLM
+    "settoriale": 12,    # pre-check ateco/settore (best-of)
+    "territoriale": 9,   # pre-check regione
+    "beneficiari": 9,    # pre-check beneficiari (tipologia/dimensione)
 }
 
 # Categoria del requisito → pre-check "effettivo" corrispondente. ATECO e
@@ -412,6 +416,14 @@ def score_report(
         tipo_punteggio = "euristico"
         components: list[tuple[int, float]] = []
 
+        # Quota dei requisiti obbligatori soddisfatti (verdetti post-merge,
+        # voci sintetiche comprese): i dato_mancante valgono 0 ma restano nel
+        # denominatore — l'assenza di dati non gonfia mai il punteggio.
+        if gate_esiti:
+            requisiti_frac = sum(FRAC.get(e, 0.0) for e in gate_esiti) / len(gate_esiti)
+            components.append((HEURISTIC_WEIGHTS["requisiti"], requisiti_frac))
+        if criteri_fracs:
+            components.append((HEURISTIC_WEIGHTS["criteri"], sum(criteri_fracs) / len(criteri_fracs)))
         # Solo i pre-check con un esito accertato (sì/no) pesano: un
         # dato_mancante qui significa "confronto esatto non possibile"
         # (es. manca l'import certificato) e non deve costare punti — è già
@@ -424,8 +436,6 @@ def score_report(
             esito = effective.get(facet_key)
             if esito in ("soddisfatto", "non_soddisfatto"):
                 components.append((HEURISTIC_WEIGHTS[weight_key], FRAC[esito]))
-        if criteri_fracs:
-            components.append((HEURISTIC_WEIGHTS["criteri"], sum(criteri_fracs) / len(criteri_fracs)))
 
         total_weight = sum(w for w, _ in components)
         punteggio_totale = (

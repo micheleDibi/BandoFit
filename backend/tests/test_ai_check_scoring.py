@@ -309,7 +309,8 @@ class TestPunteggioStima:
 
 class TestPunteggioEuristico:
     def test_componenti_non_applicabili_escluse_dal_denominatore(self):
-        # Solo i criteri LLM applicabili: punteggio = frazione media dei criteri
+        # Facet non applicabili fuori dal denominatore: pesano requisiti (30×1)
+        # e criteri (40×0.5) → 50/70 ≈ 71.
         ext = extraction(criteri=[criterio("C1"), criterio("C2")])
         m = matching(
             requisiti=[verdict("R1")],
@@ -317,7 +318,7 @@ class TestPunteggioEuristico:
         )
         report = score_report(ext, m, NO_PRECHECKS, SECTIONS, META)
         assert report["tipo_punteggio"] == "euristico"
-        assert report["punteggio_totale"] == 50
+        assert report["punteggio_totale"] == 71
 
     def test_dato_mancante_resta_nel_denominatore(self):
         ext = extraction(criteri=[criterio("C1"), criterio("C2")])
@@ -326,7 +327,30 @@ class TestPunteggioEuristico:
             criteri=[verdict("C1", "soddisfatto"), verdict("C2", "dato_mancante", campo=None)],
         )
         report = score_report(ext, m, NO_PRECHECKS, SECTIONS, META)
-        assert report["punteggio_totale"] == 50  # non 100: l'assenza non gonfia
+        # criteri 0.5 (l'assenza non gonfia), requisiti 1 → (30+20)/70 ≈ 71
+        assert report["punteggio_totale"] == 71
+
+    def test_i_requisiti_pesano_nel_punteggio(self):
+        # A parità di facet e criteri, chi soddisfa meno requisiti scende:
+        # è ciò che differenzia bandi simili tra loro.
+        ext = extraction(
+            requisiti=[requisito("R1"), requisito("R2", "formale")],
+            criteri=[criterio("C1")],
+        )
+        pieno = matching(
+            requisiti=[verdict("R1"), verdict("R2")],
+            criteri=[verdict("C1", "soddisfatto")],
+        )
+        parziale = matching(
+            requisiti=[verdict("R1"), verdict("R2", "non_soddisfatto")],
+            criteri=[verdict("C1", "soddisfatto")],
+        )
+        alto = score_report(ext, pieno, NO_PRECHECKS, SECTIONS, META)
+        basso = score_report(ext, parziale, NO_PRECHECKS, SECTIONS, META)
+        assert alto["punteggio_totale"] == 100
+        # requisiti 30×0.5 + criteri 40×1 → 55/70 ≈ 79
+        assert basso["punteggio_totale"] == 79
+        assert alto["punteggio_totale"] > basso["punteggio_totale"]
 
     def test_pesi_composti_con_prechecks(self):
         prechecks = {
@@ -339,8 +363,11 @@ class TestPunteggioEuristico:
         ext = extraction(criteri=[criterio("C1")])
         m = matching(requisiti=[verdict("R1")], criteri=[verdict("C1", "soddisfatto")])
         report = score_report(ext, m, prechecks, SECTIONS, META)
-        # settoriale 30*0 (nessuna evidenza combacia), regione 20, beneficiari 20, criteri 30 → 70/100
-        assert report["punteggio_totale"] == 70
+        # Il settoriale bocciato genera anche la voce sintetica nel gate →
+        # requisiti 30×0.5 (R1 sì, V1 no) + criteri 40 + settoriale 12×0 +
+        # regione 9 + beneficiari 9 → 73/100
+        assert report["punteggio_totale"] == 73
+        assert report["esito_ammissibilita"] == "non_ammissibile"
         assert report["pesi_euristici"] is not None
 
     def test_settoriale_best_of_nel_punteggio(self):
@@ -372,7 +399,7 @@ class TestPunteggioEuristico:
 
     def test_nessuna_componente_applicabile_punteggio_null(self):
         report = score_report(
-            extraction(), matching(requisiti=[verdict("R1")]),
+            extraction(requisiti=[], criteri=[]), matching(),
             NO_PRECHECKS, SECTIONS, META,
         )
         assert report["punteggio_totale"] is None

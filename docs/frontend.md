@@ -16,6 +16,7 @@ Stack: **Vite + React 18 + TypeScript**, **Tailwind CSS v4** (token di tema in `
 | `/app/bandi` | Elenco bandi con filtri | autenticato |
 | `/app/bandi/:slug` | Dettaglio bando | autenticato |
 | `/app/azienda` | Dossier aziendale certificato (import openapi.it) | autenticato |
+| `/app/ai-check` | Cruscotto AI-check (quota, statistiche, storico per bando) | autenticato |
 | `/app/profilo` | Profilo, dati aziendali, gestione account collegati, abbonamento | autenticato |
 | `/app/admin/utenti` | Gestione utenti | solo admin |
 | `/app/admin/piani` | Gestione piani di abbonamento | solo admin |
@@ -44,9 +45,11 @@ Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo 
 
 ## AI-check
 
-- **`AiCheckCard`** (prima card della sidebar in `BandoDetail.tsx`): quota residua del piano, CTA «Verifica compatibilità» con dialog di conferma (consumo quota + durata 1-2 minuti), stato «Analisi in corso…» con polling ogni 4s (`useAiChecksForBando`, key `["ai-check", slug]` — stesso pattern dei documenti: il polling si spegne per le pending oltre 12 minuti, il backend le chiude a 10), esito sintetico (badge `AiEsitoBadge` emerald/red/amber + punteggio) con ancora al report. I figli attivi vedono i risultati ma non avviano.
-- **`AiCheckReport`** (sezione full-width `#ai-check-report` sotto la scheda del bando): esito + barra punteggio 0-100 + badge «Stima del punteggio ufficiale»/«Punteggio euristico interno», selettore delle versioni (storico), righe espandibili (`<details>`) per ogni requisito/criterio con **citazione del bando** (sezione + testo, flag «citazione non verificata») e **dato aziendale usato** (`campo = valore`), punti di forza/debolezza, callout ambra dei dati mancanti con link a /app/azienda, disclaimer. Il punteggio è marcato «non rilevante» se non ammissibile, «provvisorio» se da verificare.
-- **`AiChecksCard`** (pagina Azienda): storico compatto — bando (link), esito, punteggio, data, quota residua (`useAiChecks`, key `["ai-checks"]`).
+- **Tono costruttivo, mai bocciature secche**: il report è generato da un modello e può sbagliare — gli esiti in UI sono «In linea col bando» (emerald), «Dati da completare» (amber) e «Da approfondire» (slate, mai rosso), con invito a controllare i dettagli e il testo ufficiale. Il punteggio non viene mai "svalutato" o nascosto.
+- **Mai nomi tecnici davanti all'utente**: i campi citati dall'AI (`derived.beneficiari[1].nome`, `settore_nome`…) passano da `lib/aiCheckFields.ts` → etichette italiane con fonte («Categorie di beneficiari (Registro Imprese)»); il prompt di matching impone linguaggio naturale nelle motivazioni. I dati mancanti guidano con due link: completa i dati (Profilo) o importa dal Registro Imprese (Azienda).
+- **`AiCheckCard`** (prima card della sidebar in `BandoDetail.tsx`): quota residua del piano, CTA «Verifica compatibilità» con dialog di conferma (consumo quota + durata 1-2 minuti), stato «Analisi in corso…» con polling ogni 4s (`useAiChecksForBando`, key `["ai-check", slug]` — stesso pattern dei documenti: il polling si spegne per le pending oltre 12 minuti, il backend le chiude a 10), esito sintetico + punteggio con ancora al report. I figli attivi vedono i risultati ma non avviano.
+- **`AiCheckReport`** (sezione full-width `#ai-check-report` sotto la scheda del bando): esito + barra punteggio 0-100 + badge «Stima del punteggio ufficiale»/«Punteggio euristico interno», selettore delle versioni (storico, con data e ora), righe espandibili (`<details>`) per ogni requisito/criterio con **citazione del bando** (sezione + testo, flag «citazione non verificata») e **dato aziendale usato** in linguaggio naturale, punti di forza/debolezza, callout ambra dei dati mancanti, disclaimer.
+- **Pagina «AI-check»** (`/app/ai-check`, voce in navigazione): cruscotto con tre tile statistiche (disponibili quest'anno con barra, analisi effettuate, bandi in linea) e storico **raggruppato per bando** — l'analisi più recente in evidenza con badge, mini-barra punteggio, numero versioni e bottone «Apri report» che porta al report sul dettaglio bando (`useAiChecks`, key `["ai-checks"]`, polling 10s se c'è un'analisi in corso).
 - Hook in `hooks/useAiCheck.ts`; `useRequestAiCheck` invalida `["ai-check", slug]` e `["ai-checks"]`.
 
 ## Preferenze e «Bandi per te»

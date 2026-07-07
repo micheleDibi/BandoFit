@@ -52,12 +52,14 @@ class FakeQuery:
         if self._op == "select":
             return SimpleNamespace(data=self._primary.selects.get(self._table, []))
         if self._op == "insert" and isinstance(self._payload, dict):
-            # come PostgREST: l'insert ritorna la riga (id/created_at generati)
+            # come PostgREST: l'insert ritorna la riga (id/created_at generati).
+            # created_at DINAMICO: una data fissa farebbe scattare i failsafe
+            # "stale" dei servizi col passare del tempo reale.
             return SimpleNamespace(
                 data=[
                     {
                         "id": f"gen-{self._table}-{len(self._primary.ops)}",
-                        "created_at": "2026-07-06T12:00:00+00:00",
+                        "created_at": datetime.now(timezone.utc).isoformat(),
                         **self._payload,
                     }
                 ]

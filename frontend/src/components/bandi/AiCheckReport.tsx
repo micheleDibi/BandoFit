@@ -12,6 +12,7 @@ import {
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAiChecksForBando } from "../../hooks/useAiCheck";
+import { fieldLabel } from "../../lib/aiCheckFields";
 import { formatDateTime } from "../../lib/format";
 import type { AiCheck, AiCriterioReport, AiRequisitoReport, AiVerdetto } from "../../types";
 import { Badge } from "../ui/Badge";
@@ -70,9 +71,8 @@ function VoceRow({ voce, punti }: { voce: AiRequisitoReport | AiCriterioReport; 
         </div>
         {voce.dato_azienda ? (
           <p className="text-xs text-slate-500">
-            Dato aziendale usato:{" "}
-            <code className="rounded bg-slate-100 px-1 py-0.5">{voce.dato_azienda.campo}</code>{" "}
-            = <span className="font-medium text-slate-700">{voce.dato_azienda.valore}</span>
+            Dato aziendale usato: {fieldLabel(voce.dato_azienda.campo)} —{" "}
+            <span className="font-medium text-slate-700">{voce.dato_azienda.valore}</span>
           </p>
         ) : (
           <p className="text-xs text-amber-600">
@@ -99,13 +99,13 @@ export function AiCheckReport({ slug }: { slug: string }) {
   const current = ready.find((c) => c.id === selectedId) ?? ready[0];
   const report = current.report;
   const punteggio = report.punteggio_totale;
-  const nonAmmissibile = report.esito_ammissibilita === "non_ammissibile";
+  const daApprofondire = report.esito_ammissibilita === "non_ammissibile";
   const barTone =
     report.esito_ammissibilita === "ammissibile"
       ? "bg-brand-500"
       : report.esito_ammissibilita === "da_verificare"
         ? "bg-amber-400"
-        : "bg-slate-300";
+        : "bg-slate-400";
 
   return (
     <section id="ai-check-report" aria-label="Report AI-check" className="mt-10 scroll-mt-24">
@@ -155,12 +155,7 @@ export function AiCheckReport({ slug }: { slug: string }) {
                   <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
                     Punteggio di compatibilità
                   </span>
-                  <span
-                    className={
-                      "tabular font-display text-xl font-bold " +
-                      (nonAmmissibile ? "text-slate-400" : "text-slate-900")
-                    }
-                  >
+                  <span className="tabular font-display text-xl font-bold text-slate-900">
                     {punteggio}
                     <span className="text-xs font-medium text-slate-400">/100</span>
                   </span>
@@ -196,14 +191,15 @@ export function AiCheckReport({ slug }: { slug: string }) {
                 il punteggio è una stima interna.
               </p>
             )}
-            {nonAmmissibile && punteggio !== null && (
-              <p className="mt-1.5 text-xs font-medium text-red-600">
-                Punteggio non rilevante: uno o più requisiti obbligatori non sono soddisfatti.
+            {daApprofondire && (
+              <p className="mt-1.5 text-xs text-slate-500">
+                L'analisi segnala alcuni requisiti da approfondire: guarda i dettagli qui
+                sotto e verifica sempre il testo ufficiale del bando.
               </p>
             )}
             {report.esito_ammissibilita === "da_verificare" && (
               <p className="mt-1.5 text-xs font-medium text-amber-600">
-                Esito provvisorio: mancano alcuni dati per completare la verifica.
+                Esito provvisorio: completa i dati indicati sotto per una verifica piena.
               </p>
             )}
           </div>
@@ -216,8 +212,8 @@ export function AiCheckReport({ slug }: { slug: string }) {
               Requisiti di ammissibilità ({report.requisiti.length})
             </h3>
             <p className="mt-0.5 text-xs text-slate-500">
-              Tutti i requisiti obbligatori devono essere soddisfatti: uno solo mancato rende
-              l'azienda non ammissibile, a prescindere dal punteggio.
+              La verifica punto per punto dei requisiti obbligatori del bando: apri ogni
+              voce per vedere il passaggio citato e il dato aziendale usato.
             </p>
             <div className="mt-3 space-y-2">
               {report.requisiti.map((r) => (
@@ -291,17 +287,25 @@ export function AiCheckReport({ slug }: { slug: string }) {
             <ul className="mt-2 space-y-1.5 text-sm text-amber-900">
               {report.dati_mancanti.map((d, i) => (
                 <li key={i}>
-                  • {d.campo ? <code className="rounded bg-amber-100 px-1">{d.campo}</code> : null}{" "}
+                  • {d.campo ? <span className="font-semibold">{fieldLabel(d.campo)}:</span> : null}{" "}
                   {d.descrizione}
                 </li>
               ))}
             </ul>
-            <Link
-              to="/app/azienda"
-              className="mt-2.5 inline-block text-sm font-medium text-amber-800 underline underline-offset-2"
-            >
-              Completa i dati aziendali →
-            </Link>
+            <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1">
+              <Link
+                to="/app/profilo"
+                className="text-sm font-medium text-amber-800 underline underline-offset-2"
+              >
+                Completa i dati aziendali →
+              </Link>
+              <Link
+                to="/app/azienda"
+                className="text-sm font-medium text-amber-800 underline underline-offset-2"
+              >
+                Importa dal Registro Imprese →
+              </Link>
+            </div>
           </div>
         )}
 

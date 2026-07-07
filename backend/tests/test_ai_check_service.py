@@ -127,7 +127,8 @@ class FakeQuery:
             return SimpleNamespace(
                 data=[{
                     "id": f"gen-{self._table}-{len(self._primary.ops)}",
-                    "created_at": "2026-07-07T12:00:00+00:00",
+                    # dinamico: una data fissa farebbe scattare i failsafe stale
+                    "created_at": datetime.now(timezone.utc).isoformat(),
                     **(self._payload or {}),
                 }],
                 count=None,

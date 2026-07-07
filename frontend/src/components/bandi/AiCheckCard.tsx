@@ -78,12 +78,7 @@ export function AiCheckCard({ slug }: { slug: string }) {
           <div className="flex flex-wrap items-center gap-2">
             <AiEsitoBadge esito={latest.esito} />
             {latest.punteggio !== null && (
-              <span
-                className={
-                  "tabular font-display text-lg font-bold " +
-                  (latest.esito === "non_ammissibile" ? "text-slate-400" : "text-slate-900")
-                }
-              >
+              <span className="tabular font-display text-lg font-bold text-slate-900">
                 {latest.punteggio}
                 <span className="text-xs font-medium text-slate-400">/100</span>
               </span>

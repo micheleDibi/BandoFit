@@ -9,7 +9,10 @@ from postgrest.exceptions import APIError
 from app.core.errors import BadRequestError, ConflictError, NotFoundError
 from app.schemas.addon import AddonCreate, AddonOut, AddonUpdate
 
-ADDON_SELECT = "id,nome,slug,descrizione,prezzo,ordering,is_active,updated_at"
+ADDON_SELECT = (
+    "id,nome,slug,descrizione,prezzo,tipo_prezzo,etichetta_prezzo,"
+    "ordering,is_active,updated_at"
+)
 
 _UNIQUE_VIOLATION = "23505"
 

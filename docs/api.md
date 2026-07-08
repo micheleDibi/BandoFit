@@ -25,7 +25,7 @@ Stato del servizio. → `{"status": "ok"}`
 > **Link di dominio**: tutti i link nelle email (conferma, recovery, inviti) sono token **propri** di BandoFit (256 bit, salvati solo come SHA-256 in `auth_tokens`, monouso, con scadenza) e puntano al dominio dell'app. GoTrue non genera MAI link né invia email: Supabase è solo il deposito di utenti e dati (Admin API `create_user`/`update_user_by_id`).
 
 ### `POST /auth/register` (201)
-Registrazione. Body: `email`, `password` (≥8), `nome`, `cognome`, `azienda?`, `plan_slug`. Crea l'utente via Admin API (non confermato) e invia l'email di conferma col link `/conferma-email?token=...`. → `{"confirmation_required": true}`. Errori: `409` email già registrata o cooldown 60s, `400` password non valida.
+Registrazione. Body: `email`, `password` (≥8), `nome`, `cognome`, `azienda?`, `plan_slug`. Crea l'utente via Admin API (non confermato) e invia l'email di conferma col link `/conferma-email?token=...`. → `{"confirmation_required": true}`. Errori: `409` email già registrata o cooldown 60s, `400` password non valida, `400` se `plan_slug` punta a un piano `su_richiesta` (non selezionabile alla registrazione; il rifiuto avviene PRIMA del cooldown e non lo consuma).
 
 ### `POST /auth/confirm`
 Body: `{"token": "..."}` (dal link email, monouso, TTL 48h). Conferma l'indirizzo e sblocca il login. → `{"email": "..."}` (per il prefill di `/login?email=`). `404` se non valido/scaduto/già usato.
@@ -50,14 +50,17 @@ Piani di abbonamento attivi, ordinati per `ordering`. Usato dallo step 2 della r
 
 ```json
 [{ "id": 1, "nome": "Gratuito", "slug": "gratuito", "descrizione": "...", "prezzo_annuale": "0.00",
+   "tipo_prezzo": "gratis", "etichetta_prezzo": null,
    "ai_check": 0, "alert_attivo": false, "alert_giorni_preavviso": null,
    "num_account_aziendali": 1, "ordering": 1, "is_active": true, "updated_at": "..." }]
 ```
 
+`tipo_prezzo` (`importo`/`gratis`/`su_richiesta`) decide come la UI mostra il prezzo; con `su_richiesta` il piano **non è selezionabile alla registrazione** (`POST /auth/register` risponde `400` se lo slug punta a un piano su richiesta) né attivabile con il cambio piano self-serve — l'`etichetta_prezzo` sostituisce l'importo (fallback UI «Su richiesta»).
+
 ## Endpoint autenticati
 
 ### `GET /addons`
-Catalogo **add-on attivi**, ordinati per `ordering`: `[{id, nome, slug, descrizione, prezzo, ordering, is_active, updated_at}]`. Lo `slug` è l'identificativo STABILE a cui verranno agganciate le funzionalità future. A differenza di `GET /plans` (pubblico perché serve alla registrazione) la rotta è **autenticata**: il catalogo si vede solo dentro l'app. Il flusso di acquisto non esiste ancora (il bottone «Acquista» lato client mostra l'avviso «In arrivo» tramite lo stub `purchaseAddon`).
+Catalogo **add-on attivi**, ordinati per `ordering`: `[{id, nome, slug, descrizione, prezzo, tipo_prezzo, etichetta_prezzo, ordering, is_active, updated_at}]`. Lo `slug` è l'identificativo STABILE a cui verranno agganciate le funzionalità future. A differenza di `GET /plans` (pubblico perché serve alla registrazione) la rotta è **autenticata**: il catalogo si vede solo dentro l'app. Il flusso di acquisto non esiste ancora (il bottone «Acquista» — «Attiva» per gli add-on `gratis` — mostra l'avviso «In arrivo» tramite lo stub `purchaseAddon`); per gli add-on `su_richiesta` la CTA è «Richiedi una consulenza» e passa dallo stub `requestConsultation` (il futuro endpoint di acquisto dovrà rifiutarli lato server).
 
 ### `GET /me`
 Profilo dell'utente corrente + abbonamento attivo con il piano.
@@ -76,7 +79,7 @@ Verifica il **codice fiscale personale** all'Anagrafe Tributaria via openapi.it 
 Esiti: `200 {codice_fiscale, cf_verified_at}`; `400 cf_invalid` (malformato) / `400 cf_not_valid` (formalmente corretto ma non registrato — salvato non verificato SOLO se non c'è già un CF verificato: una verifica fallita non cancella mai un dato buono); `409 verify_in_progress`; `429 verify_cooldown`; `502 openapi_error`; `503 openapi_not_configured`; `504 openapi_timeout` (esito ignoto, nessun retry automatico). Il profilo (`GET /me`, `PATCH /me`) espone/accetta anche `codice_fiscale` (il cambio del CF azzera la verifica).
 
 ### `POST /me/subscription`
-Cambio piano (senza pagamento in questa fase). Body: `{"plan_id": 3}`. L'abbonamento attivo passa a `cancelled` e ne viene creato uno nuovo annuale. → come `GET /me`; se il downgrade ha retrocesso membri della famiglia, la risposta include `plan_switch_adjustment: {demoted, revoked_pending}`. Errori: `400` piano inesistente/non attivo; `403 child_plan_locked` se l'utente è un figlio attivo (il piano si gestisce sul titolare).
+Cambio piano (senza pagamento in questa fase). Body: `{"plan_id": 3}`. L'abbonamento attivo passa a `cancelled` e ne viene creato uno nuovo annuale. → come `GET /me`; se il downgrade ha retrocesso membri della famiglia, la risposta include `plan_switch_adjustment: {demoted, revoked_pending}`. Errori: `400` piano inesistente/non attivo; `400` piano `su_richiesta` («disponibile solo su richiesta», il guard scatta PRIMA della RPC — l'assegnazione resta possibile via `POST /admin/users/{id}/subscription`); `403 child_plan_locked` se l'utente è un figlio attivo (il piano si gestisce sul titolare).
 
 ## Azienda (gruppo di account)
 
@@ -242,16 +245,16 @@ Elenco utenti con abbonamento attivo. Parametri: `q` (cerca in email/nome/cognom
 Body (opzionali): `role` (`admin`|`cliente`), `is_active` (bool). Protezioni: un admin non può togliersi il ruolo né disattivarsi da solo (`400`).
 
 ### `POST /admin/users/{user_id}/subscription`
-Cambio piano forzato per un utente. Body: `{"plan_id": 2}`. `403` sui figli di famiglia (pending/attivi): il piano si gestisce sull'account titolare; forzare il piano di un titolare applica le stesse retrocessioni automatiche del cambio normale.
+Cambio piano forzato per un utente. Body: `{"plan_id": 2}`. `403` sui figli di famiglia (pending/attivi): il piano si gestisce sull'account titolare; forzare il piano di un titolare applica le stesse retrocessioni automatiche del cambio normale. **Scavalca il guard `su_richiesta`** (`self_serve=False`): assegnare da qui un piano su richiesta è il completamento manuale di quel flusso.
 
 ### `GET /admin/plans`
 Tutti i piani, inclusi i disattivati.
 
 ### `POST /admin/plans` (201)
-Crea un piano. Body: `nome`, `slug` (`[a-z0-9-]+`, unico → `409` se duplicato), `descrizione?`, `prezzo_annuale`, `ai_check`, `alert_attivo`, `alert_giorni_preavviso` (obbligatorio se `alert_attivo=true`), `num_account_aziendali`, `ordering`, `is_active`.
+Crea un piano. Body: `nome`, `slug` (`[a-z0-9-]+`, unico → `409` se duplicato), `descrizione?`, `prezzo_annuale`, `tipo_prezzo?` (`importo`/`gratis`/`su_richiesta`, default `importo`), `etichetta_prezzo?` (≤100, usata solo con `su_richiesta`), `ai_check`, `alert_attivo`, `alert_giorni_preavviso` (obbligatorio se `alert_attivo=true`), `num_account_aziendali`, `ordering`, `is_active`.
 
 ### `PATCH /admin/plans/{plan_id}`
 Aggiornamento parziale (stessi campi, tranne `slug`). I piani **non si eliminano** (lo storico abbonamenti li referenzia): si disattivano con `is_active=false`, che li nasconde dalla registrazione e dal cambio piano.
 
 ### `GET /admin/addons` · `POST /admin/addons` (201) · `PATCH /admin/addons/{addon_id}`
-Gestione del catalogo add-on, gemella di `/admin/plans` (stessi permessi admin): GET tutti (anche disattivati), POST crea (`nome`, `slug` — unico, immutabile, `[a-z0-9-]+` → `409` se duplicato —, `descrizione?`, `prezzo ≥ 0` in €, `ordering`, `is_active`), PATCH aggiorna i campi passati (slug escluso) o disattiva. Gli add-on **non si eliminano**: si disattivano.
+Gestione del catalogo add-on, gemella di `/admin/plans` (stessi permessi admin): GET tutti (anche disattivati), POST crea (`nome`, `slug` — unico, immutabile, `[a-z0-9-]+` → `409` se duplicato —, `descrizione?`, `prezzo ≥ 0` in €, `tipo_prezzo?`/`etichetta_prezzo?` come per i piani, `ordering`, `is_active`), PATCH aggiorna i campi passati (slug escluso) o disattiva. Gli add-on **non si eliminano**: si disattivano.

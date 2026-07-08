@@ -4,7 +4,7 @@ import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Dialog } from "../components/ui/Dialog";
-import { TextField } from "../components/ui/Field";
+import { SelectField, TextField } from "../components/ui/Field";
 import { ErrorState, Skeleton } from "../components/ui/states";
 import {
   useAdminAddons,
@@ -13,13 +13,15 @@ import {
   type AddonPayload,
 } from "../hooks/useAdmin";
 import { apiErrorMessage } from "../lib/api";
-import type { Addon } from "../types";
+import type { Addon, TipoPrezzo } from "../types";
 
 interface AddonFormState {
   nome: string;
   slug: string;
   descrizione: string;
   prezzo: string;
+  tipo_prezzo: TipoPrezzo;
+  etichetta_prezzo: string;
   ordering: string;
   is_active: boolean;
 }
@@ -30,6 +32,8 @@ function toFormState(addon: Addon): AddonFormState {
     slug: addon.slug,
     descrizione: addon.descrizione ?? "",
     prezzo: String(addon.prezzo ?? "0"),
+    tipo_prezzo: addon.tipo_prezzo ?? "importo",
+    etichetta_prezzo: addon.etichetta_prezzo ?? "",
     ordering: String(addon.ordering),
     is_active: addon.is_active,
   };
@@ -40,13 +44,18 @@ const EMPTY_FORM: AddonFormState = {
   slug: "",
   descrizione: "",
   prezzo: "0",
+  tipo_prezzo: "importo",
+  etichetta_prezzo: "",
   ordering: "10",
   is_active: true,
 };
 
 function validate(form: AddonFormState): string | null {
   if (!form.nome.trim()) return "Il nome dell'add-on è obbligatorio.";
-  if (Number(form.prezzo) < 0 || form.prezzo === "") return "Il prezzo non è valido.";
+  // Il prezzo conta solo in modalità «importo»: con gratis/su_richiesta il
+  // campo è disabilitato, un valore residuo vuoto non deve bloccare il salvataggio.
+  if (form.tipo_prezzo === "importo" && (Number(form.prezzo) < 0 || form.prezzo === ""))
+    return "Il prezzo non è valido.";
   return null;
 }
 
@@ -55,6 +64,8 @@ function toPayload(form: AddonFormState): AddonPayload {
     nome: form.nome.trim(),
     descrizione: form.descrizione.trim() || null,
     prezzo: Number(form.prezzo),
+    tipo_prezzo: form.tipo_prezzo,
+    etichetta_prezzo: form.etichetta_prezzo.trim() || null,
     ordering: Number(form.ordering) || 0,
     is_active: form.is_active,
   };
@@ -98,14 +109,38 @@ function AddonFormFields({
           onChange={(e) => setForm((f) => ({ ...f, descrizione: e.target.value }))}
         />
       </div>
+      <SelectField
+        label="Prezzo mostrato come"
+        value={form.tipo_prezzo}
+        onChange={(e) => setForm((f) => ({ ...f, tipo_prezzo: e.target.value as TipoPrezzo }))}
+      >
+        <option value="importo">Importo in €</option>
+        <option value="gratis">Gratis</option>
+        <option value="su_richiesta">Su richiesta (etichetta)</option>
+      </SelectField>
       <TextField
         label="Prezzo (€)"
         type="number"
         min={0}
         step="0.01"
         required
+        disabled={form.tipo_prezzo !== "importo"}
+        helper={
+          form.tipo_prezzo !== "importo" ? "Non mostrato ai clienti con questa modalità" : undefined
+        }
         value={form.prezzo}
         onChange={(e) => setForm((f) => ({ ...f, prezzo: e.target.value }))}
+      />
+      <TextField
+        label="Etichetta al posto del prezzo"
+        disabled={form.tipo_prezzo !== "su_richiesta"}
+        helper={
+          form.tipo_prezzo === "su_richiesta"
+            ? "Se vuota viene mostrato «Su richiesta»"
+            : "Usata solo con «Su richiesta»"
+        }
+        value={form.etichetta_prezzo}
+        onChange={(e) => setForm((f) => ({ ...f, etichetta_prezzo: e.target.value }))}
       />
       <TextField
         label="Ordine di visualizzazione"

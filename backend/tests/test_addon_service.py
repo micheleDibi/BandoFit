@@ -17,6 +17,8 @@ ADDON_ROW = {
     "slug": "pacchetto-ai",
     "descrizione": "10 AI-check extra",
     "prezzo": "49.00",
+    "tipo_prezzo": "importo",
+    "etichetta_prezzo": None,
     "ordering": 1,
     "is_active": True,
     "updated_at": "2026-07-07T10:00:00+00:00",
@@ -125,6 +127,24 @@ class TestCreate:
         with pytest.raises(ValueError):
             AddonCreate(nome="X", slug="maiuscole-No", prezzo=Decimal("1"))
 
+    async def test_su_richiesta_con_etichetta(self):
+        primary = FakePrimary()
+        data = AddonCreate(
+            nome="Consulenza dedicata",
+            slug="consulenza",
+            prezzo=Decimal("0"),
+            tipo_prezzo="su_richiesta",
+            etichetta_prezzo="Parliamone insieme",
+        )
+        await addon_service.create_addon(primary, data)
+        [(inserted, _)] = primary.ops_for("addons", "insert")
+        assert inserted["tipo_prezzo"] == "su_richiesta"
+        assert inserted["etichetta_prezzo"] == "Parliamone insieme"
+
+    def test_tipo_prezzo_non_valido_respinto(self):
+        with pytest.raises(ValueError):
+            AddonCreate(nome="X", slug="x", prezzo=Decimal("1"), tipo_prezzo="sconto")
+
 
 class TestUpdate:
     async def test_exclude_unset(self):
@@ -134,6 +154,12 @@ class TestUpdate:
         assert changes == {"prezzo": "59.00"}  # SOLO il campo passato
         assert filters["id"] == 1
         assert out.id == 1
+
+    async def test_exclude_unset_solo_tipo_prezzo(self):
+        primary = FakePrimary()
+        await addon_service.update_addon(primary, 1, AddonUpdate(tipo_prezzo="gratis"))
+        [(changes, _)] = primary.ops_for("addons", "update")
+        assert changes == {"tipo_prezzo": "gratis"}
 
     async def test_vuoto_400(self):
         with pytest.raises(BadRequestError):

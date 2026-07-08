@@ -11,7 +11,9 @@ import { useMe, useSwitchPlan } from "../hooks/useMe";
 import { usePlans } from "../hooks/usePlans";
 import { apiErrorMessage } from "../lib/api";
 import { purchaseAddon } from "../lib/addons";
-import { formatDate, formatPrezzo } from "../lib/format";
+import { requestConsultation } from "../lib/consulenza";
+import { formatDate } from "../lib/format";
+import { prezzoDisplay } from "../lib/prezzo";
 import type { Addon, Plan } from "../types";
 
 export default function Abbonamento() {
@@ -30,6 +32,9 @@ export default function Abbonamento() {
   const [switchNotice, setSwitchNotice] = useState<string | null>(null);
   // Add-on per cui è stato chiesto l'acquisto (flusso non ancora disponibile).
   const [addonInArrivo, setAddonInArrivo] = useState<Addon | null>(null);
+  // Piano o add-on «su richiesta» per cui è stata chiesta una consulenza
+  // (flusso di contatto non ancora disponibile).
+  const [consulenzaInArrivo, setConsulenzaInArrivo] = useState<{ nome: string } | null>(null);
   // Slug con acquisto "in volo": un Set, così quando purchaseAddon diventerà
   // una vera chiamata di rete i click concorrenti su card diverse non si
   // pesteranno i piedi (né riabiliteranno un bottone a metà acquisto).
@@ -93,6 +98,14 @@ export default function Abbonamento() {
         return next;
       });
     }
+  };
+
+  // Punto di estensione della richiesta di consulenza (piani e add-on «su
+  // richiesta»): la UI passa SEMPRE da requestConsultation (lib/consulenza.ts);
+  // finché lo stub risponde available=false si apre il dialog «In arrivo».
+  const handleRichiedi = async (kind: "plan" | "addon", item: { slug: string; nome: string }) => {
+    const esito = await requestConsultation({ kind, slug: item.slug });
+    if (!esito.available) setConsulenzaInArrivo({ nome: item.nome });
   };
 
   return (
@@ -202,6 +215,16 @@ export default function Abbonamento() {
                       <Button variant="secondary" className="w-full" disabled>
                         Attivo
                       </Button>
+                    ) : plan.tipo_prezzo === "su_richiesta" ? (
+                      // Non attivabile self-serve (il backend rifiuta comunque
+                      // lo switch): la CTA diventa una richiesta di contatto.
+                      <Button
+                        variant="secondary"
+                        className="w-full"
+                        onClick={() => handleRichiedi("plan", plan)}
+                      >
+                        Richiedi una consulenza
+                      </Button>
                     ) : (
                       <Button
                         variant={plan.slug === "pro" ? "primary" : "secondary"}
@@ -256,6 +279,7 @@ export default function Abbonamento() {
                   key={addon.id}
                   addon={addon}
                   onAcquista={handleAcquista}
+                  onRichiedi={(a) => handleRichiedi("addon", a)}
                   loading={addonLoading.has(addon.slug)}
                 />
               ))}
@@ -321,12 +345,39 @@ export default function Abbonamento() {
             <p>
               L'acquisto degli add-on sarà disponibile a breve. Hai scelto{" "}
               <strong className="text-slate-900">{addonInArrivo.nome}</strong> (
-              {formatPrezzo(addonInArrivo.prezzo)}).
+              {
+                prezzoDisplay(
+                  addonInArrivo.tipo_prezzo,
+                  addonInArrivo.etichetta_prezzo,
+                  addonInArrivo.prezzo,
+                ).testo
+              }
+              ).
             </p>
             <p className="mt-2 text-xs text-slate-400">
               Nessun addebito è stato effettuato.
             </p>
           </>
+        )}
+      </Dialog>
+
+      {/* Richiesta di consulenza: flusso di contatto non ancora disponibile */}
+      <Dialog
+        open={!!consulenzaInArrivo}
+        onClose={() => setConsulenzaInArrivo(null)}
+        title="Richiesta in arrivo"
+        footer={
+          <Button variant="secondary" onClick={() => setConsulenzaInArrivo(null)}>
+            Ho capito
+          </Button>
+        }
+      >
+        {consulenzaInArrivo && (
+          <p>
+            <strong className="text-slate-900">{consulenzaInArrivo.nome}</strong> si attiva su
+            richiesta: la richiesta di consulenza dall'app sarà disponibile a breve. Nel frattempo
+            contattaci per maggiori informazioni.
+          </p>
         )}
       </Dialog>
     </div>

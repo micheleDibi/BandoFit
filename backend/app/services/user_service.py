@@ -29,7 +29,8 @@ PROFILE_SELECT = (
 # applicato dal chiamante con .eq("user_subscriptions.status", "active").
 SUBSCRIPTION_EMBED = (
     "user_subscriptions(id,status,data_inizio,data_scadenza,"
-    "subscription_plans(id,nome,slug,descrizione,prezzo_annuale,ai_check,"
+    "subscription_plans(id,nome,slug,descrizione,prezzo_annuale,tipo_prezzo,"
+    "etichetta_prezzo,ai_check,"
     "alert_attivo,alert_giorni_preavviso,num_account_aziendali,ordering,is_active,updated_at))"
 )
 
@@ -104,7 +105,8 @@ async def _fetch_active_subscription(primary, user_id: str) -> SubscriptionOut |
         await primary.table("user_subscriptions")
         .select(
             "id,status,data_inizio,data_scadenza,"
-            "subscription_plans(id,nome,slug,descrizione,prezzo_annuale,ai_check,"
+            "subscription_plans(id,nome,slug,descrizione,prezzo_annuale,tipo_prezzo,"
+            "etichetta_prezzo,ai_check,"
             "alert_attivo,alert_giorni_preavviso,num_account_aziendali,ordering,"
             "is_active,updated_at)"
         )
@@ -159,9 +161,26 @@ async def update_profile(primary, user_id: str, data: ProfileUpdate) -> MeOut:
     return await get_me(primary, user_id)
 
 
-async def switch_plan(primary, user_id: str, plan_id: int) -> MeOut:
+async def switch_plan(primary, user_id: str, plan_id: int, *, self_serve: bool = True) -> MeOut:
     """Cambio piano. Se l'utente è titolare di una famiglia e il nuovo piano ha
-    meno account, la RPC retrocede/revoca automaticamente gli eccedenti."""
+    meno account, la RPC retrocede/revoca automaticamente gli eccedenti.
+
+    I piani «su richiesta» non sono attivabili self-serve: solo l'admin può
+    assegnarli (self_serve=False) — è il completamento manuale del flusso.
+    """
+    if self_serve:
+        plan_resp = (
+            await primary.table("subscription_plans")
+            .select("tipo_prezzo")
+            .eq("id", plan_id)
+            .limit(1)
+            .execute()
+        )
+        if plan_resp.data and plan_resp.data[0]["tipo_prezzo"] == "su_richiesta":
+            raise BadRequestError(
+                "Questo piano è disponibile solo su richiesta: contattaci per attivarlo"
+            )
+        # Piano inesistente: si prosegue, la RPC mantiene la sua mappatura errori.
     try:
         resp = await primary.rpc(
             "fn_switch_plan", {"p_user_id": str(user_id), "p_plan_id": plan_id}
@@ -234,7 +253,8 @@ async def admin_list_users(
             await primary.table("user_subscriptions")
             .select(
                 "user_id,id,status,data_inizio,data_scadenza,"
-                "subscription_plans(id,nome,slug,descrizione,prezzo_annuale,ai_check,"
+                "subscription_plans(id,nome,slug,descrizione,prezzo_annuale,tipo_prezzo,"
+                "etichetta_prezzo,ai_check,"
                 "alert_attivo,alert_giorni_preavviso,num_account_aziendali,ordering,"
                 "is_active,updated_at)"
             )
@@ -354,7 +374,8 @@ async def admin_switch_user_plan(primary, target_user_id: UUID, plan_id: int) ->
             "Il piano si gestisce sull'account titolare dell'azienda"
         )
 
-    me = await switch_plan(primary, str(target_user_id), plan_id)
+    # self_serve=False: l'admin può assegnare anche i piani «su richiesta».
+    me = await switch_plan(primary, str(target_user_id), plan_id, self_serve=False)
     return AdminUserOut(profile=me.profile, subscription=me.subscription, family=me_family_to_admin(me))
 
 

@@ -62,6 +62,25 @@ async def register(
     """Crea l'utente (Admin API, nessun link GoTrue) e invia l'email di
     conferma col nostro token dal nostro provider."""
     email = email.strip().lower()
+
+    # I piani «su richiesta» non sono selezionabili alla registrazione (la UI
+    # non li propone; questo è il backstop). PRIMA del cooldown: un tentativo
+    # respinto non deve bruciare i 60 secondi della registrazione corretta.
+    plan_resp = (
+        await primary.table("subscription_plans")
+        .select("tipo_prezzo")
+        .eq("slug", plan_slug)
+        .limit(1)
+        .execute()
+    )
+    if plan_resp.data and plan_resp.data[0]["tipo_prezzo"] == "su_richiesta":
+        raise BadRequestError(
+            "Questo piano è disponibile solo su richiesta: registrati con un "
+            "altro piano e contattaci dalla pagina Abbonamento"
+        )
+    # Slug inesistente o disattivato: comportamento invariato, il trigger
+    # handle_new_user ripiega sul piano Gratuito.
+
     _check_cooldown("register", email)
     try:
         created = await primary.auth.admin.create_user(

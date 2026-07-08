@@ -13,6 +13,8 @@ Contiene i dati della piattaforma. Schema in `supabase/migrations/` (eseguire in
 | `nome`, `slug` | text | `slug` unico (`[a-z0-9-]`), immutabile dall'interfaccia |
 | `descrizione` | text | opzionale |
 | `prezzo_annuale` | numeric(10,2) | ≥ 0 |
+| `tipo_prezzo` | text | `importo`/`gratis`/`su_richiesta` (default `importo`, migration 0010): come mostrare il prezzo; con `su_richiesta` il piano **non è attivabile self-serve** (guard del backend su cambio piano e registrazione, resta assegnabile dall'admin) |
+| `etichetta_prezzo` | text | mostrata al posto del prezzo SOLO con `su_richiesta`; NULL/vuota ⇒ la UI mostra «Su richiesta» (nessun check cross-campo) |
 | `ai_check` | integer | numero di AI-check inclusi/anno |
 | `alert_attivo` | boolean | se true, `alert_giorni_preavviso` è obbligatorio (check `plans_alert_coherence`) |
 | `alert_giorni_preavviso` | integer | > 0 o NULL |
@@ -65,7 +67,11 @@ Contiene i dati della piattaforma. Schema in `supabase/migrations/` (eseguire in
 
 ### Add-on (migration 0009)
 
-**`addons`** — catalogo add-on acquistabili gestito dagli admin, gemello di `subscription_plans`: `nome`, **`slug` unico** (identificativo STABILE per agganciare le funzionalità future), `descrizione`, `prezzo numeric(10,2) ≥ 0` (euro, stessa convenzione dei piani), `ordering`, `is_active`. Come i piani, **non si eliminano: si disattivano**. Nessun seed: il catalogo parte vuoto. Il flusso di acquisto non è ancora implementato.
+**`addons`** — catalogo add-on acquistabili gestito dagli admin, gemello di `subscription_plans`: `nome`, **`slug` unico** (identificativo STABILE per agganciare le funzionalità future), `descrizione`, `prezzo numeric(10,2) ≥ 0` (euro, stessa convenzione dei piani), `tipo_prezzo`/`etichetta_prezzo` (migration 0010, stessa semantica dei piani), `ordering`, `is_active`. Come i piani, **non si eliminano: si disattivano**. Nessun seed: il catalogo parte vuoto. Il flusso di acquisto non è ancora implementato.
+
+### Modalità di visualizzazione prezzo (migration 0010)
+
+Su `subscription_plans` e `addons`: `tipo_prezzo text not null default 'importo'` con check sui tre valori (`importo`, `gratis`, `su_richiesta` — valori di dominio in italiano come `tipo_punteggio`/`esito`) ed `etichetta_prezzo text` libera. La migration fa un **backfill una tantum**: tutto ciò che aveva prezzo 0 diventa `gratis` (nel seed è il piano Gratuito); i record creati a 0 € in seguito restano `importo` finché l'admin non li cambia. Il valore numerico del prezzo resta sempre salvato, anche quando non è mostrato.
 
 ### Funzioni e trigger
 

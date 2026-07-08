@@ -1,7 +1,7 @@
 import { Check, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
-import { formatPrezzo } from "../../lib/format";
+import { prezzoDisplay } from "../../lib/prezzo";
 import type { Plan } from "../../types";
 
 export function planFeatures(plan: Plan): string[] {
@@ -34,6 +34,7 @@ export function PlanCard({
 }) {
   const interactive = !!onClick;
   const Wrapper = interactive ? "button" : "div";
+  const display = prezzoDisplay(plan.tipo_prezzo, plan.etichetta_prezzo, plan.prezzo_annuale);
 
   return (
     <Wrapper
@@ -61,10 +62,16 @@ export function PlanCard({
       {plan.descrizione && <p className="mt-1 text-xs text-slate-500">{plan.descrizione}</p>}
 
       <p className="mt-3">
-        <span className="tabular font-display text-3xl font-bold text-slate-900">
-          {formatPrezzo(plan.prezzo_annuale)}
+        {/* L'etichetta «su richiesta» è testo libero: corpo ridotto per non sforare. */}
+        <span
+          className={cn(
+            "tabular font-display font-bold text-slate-900",
+            display.suRichiesta ? "text-2xl" : "text-3xl",
+          )}
+        >
+          {display.testo}
         </span>
-        <span className="text-sm text-slate-500"> /anno</span>
+        {display.conSuffissoPeriodo && <span className="text-sm text-slate-500"> /anno</span>}
       </p>
 
       <ul className="mt-4 flex-1 space-y-2">

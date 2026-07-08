@@ -65,10 +65,16 @@ export default function Register() {
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Se lo slug ?piano non corrisponde ad alcun piano attivo, ripiega su gratuito.
+  // Se lo slug ?piano non corrisponde ad alcun piano attivo selezionabile
+  // (i piani «su richiesta» non si scelgono alla registrazione), ripiega su
+  // gratuito o sul primo piano self-serve.
   useEffect(() => {
-    if (plans && plans.length > 0 && !plans.some((p) => p.slug === selectedPlan)) {
-      setSelectedPlan(plans.some((p) => p.slug === "gratuito") ? "gratuito" : plans[0].slug);
+    if (!plans || plans.length === 0) return;
+    const selfServe = plans.filter((p) => p.tipo_prezzo !== "su_richiesta");
+    if (!selfServe.some((p) => p.slug === selectedPlan)) {
+      setSelectedPlan(
+        selfServe.some((p) => p.slug === "gratuito") ? "gratuito" : selfServe[0]?.slug ?? "",
+      );
     }
   }, [plans, selectedPlan]);
 
@@ -249,16 +255,32 @@ export default function Register() {
             </div>
           ) : (
             <div className="mt-8 grid gap-5 pt-3 sm:grid-cols-2 lg:grid-cols-4">
-              {(plans ?? []).map((plan) => (
-                <PlanCard
-                  key={plan.id}
-                  plan={plan}
-                  selected={selectedPlan === plan.slug}
-                  highlighted={plan.slug === "pro"}
-                  badge={plan.slug === "pro" ? "Consigliato" : undefined}
-                  onClick={() => setSelectedPlan(plan.slug)}
-                />
-              ))}
+              {(plans ?? []).map((plan) =>
+                plan.tipo_prezzo === "su_richiesta" ? (
+                  // Visibile ma non selezionabile: senza onClick la card è un
+                  // div non interattivo (il backend rifiuta comunque il piano
+                  // alla registrazione).
+                  <PlanCard
+                    key={plan.id}
+                    plan={plan}
+                    footer={
+                      <p className="text-xs text-slate-500">
+                        Disponibile su richiesta: contattaci dalla pagina Abbonamento dopo la
+                        registrazione.
+                      </p>
+                    }
+                  />
+                ) : (
+                  <PlanCard
+                    key={plan.id}
+                    plan={plan}
+                    selected={selectedPlan === plan.slug}
+                    highlighted={plan.slug === "pro"}
+                    badge={plan.slug === "pro" ? "Consigliato" : undefined}
+                    onClick={() => setSelectedPlan(plan.slug)}
+                  />
+                ),
+              )}
             </div>
           )}
 

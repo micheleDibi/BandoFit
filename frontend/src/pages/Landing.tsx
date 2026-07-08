@@ -149,13 +149,22 @@ export default function Landing() {
                   highlighted={plan.slug === "pro"}
                   badge={plan.slug === "pro" ? "Consigliato" : undefined}
                   footer={
-                    <LinkButton
-                      to={`/registrati?piano=${plan.slug}`}
-                      variant={plan.slug === "pro" ? "primary" : "secondary"}
-                      className="w-full"
-                    >
-                      Scegli {plan.nome}
-                    </LinkButton>
+                    plan.tipo_prezzo === "su_richiesta" ? (
+                      // Non selezionabile self-serve: niente deep-link ?piano=
+                      // (in Register verrebbe scartato), si entra e si richiede
+                      // dall'app.
+                      <LinkButton to="/registrati" variant="secondary" className="w-full">
+                        Richiedi una consulenza
+                      </LinkButton>
+                    ) : (
+                      <LinkButton
+                        to={`/registrati?piano=${plan.slug}`}
+                        variant={plan.slug === "pro" ? "primary" : "secondary"}
+                        className="w-full"
+                      >
+                        Scegli {plan.nome}
+                      </LinkButton>
+                    )
                   }
                 />
               ))}

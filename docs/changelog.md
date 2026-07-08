@@ -2,6 +2,12 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-08 — Modalità prezzo «Gratis» e «Su richiesta» per piani e add-on
+
+- **`tipo_prezzo`** su `subscription_plans` e `addons` (migration 0010): `importo` (comportamento attuale), `gratis` (la card mostra «Gratis» invece di «0 €»; stesso flusso di attivazione — il piano Gratuito viene **backfillato automaticamente**, insieme a qualunque record a prezzo 0 esistente) e `su_richiesta` (**`etichetta_prezzo`** personalizzabile al posto del prezzo, fallback «Su richiesta»).
+- I piani/add-on **su richiesta non sono attivabili self-serve**: la CTA diventa «Richiedi una consulenza» (per gli add-on gratis: «Attiva»), il backend rifiuta con `400` sia il cambio piano sia la registrazione (guard prima del cooldown; in `/registrati` la card è visibile ma non selezionabile) e solo l'admin può assegnarli (`POST /admin/users/{id}/subscription`, `self_serve=False`).
+- **Flusso di contatto rimandato a una fase successiva**: il click su «Richiedi una consulenza» passa dal punto di estensione `requestConsultation({kind, slug})` (`lib/consulenza.ts`, gemello di `purchaseAddon`) e per ora apre il dialog «Richiesta in arrivo». Il testo del prezzo è centralizzato in `prezzoDisplay` (`lib/prezzo.ts`); nei form admin il select «Prezzo mostrato come» disabilita prezzo/etichetta secondo la modalità. Il futuro endpoint reale di acquisto add-on dovrà rifiutare lato server gli add-on su richiesta.
+
 ## 2026-07-07 — Pagina Abbonamento dedicata e catalogo Add-on
 
 - La sezione **abbonamenti** lascia il Profilo e vive nella nuova pagina **«Abbonamento»** (`/app/abbonamento`, voce in navigazione): stessa griglia piani, stesso cambio piano (avviso di retrocessione famiglia compreso), piano ereditato per gli account collegati. Nel Profilo resta un rimando compatto col piano attuale; i link «Vedi i piani»/«passa a un piano superiore» puntano alla nuova pagina. Registrazione invariata.

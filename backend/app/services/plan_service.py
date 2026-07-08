@@ -6,7 +6,8 @@ from app.core.errors import BadRequestError, ConflictError, NotFoundError
 from app.schemas.plan import PlanCreate, PlanOut, PlanUpdate
 
 PLAN_SELECT = (
-    "id,nome,slug,descrizione,prezzo_annuale,ai_check,alert_attivo,"
+    "id,nome,slug,descrizione,prezzo_annuale,tipo_prezzo,etichetta_prezzo,"
+    "ai_check,alert_attivo,"
     "alert_giorni_preavviso,num_account_aziendali,ordering,is_active,updated_at"
 )
 

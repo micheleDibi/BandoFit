@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import type { Addon, AdminUser, Page, Plan } from "../types";
+import type { Addon, AdminUser, Page, Plan, TipoPrezzo } from "../types";
 
 export interface AdminUsersParams {
   q: string;
@@ -53,6 +53,8 @@ export interface PlanPayload {
   nome?: string;
   descrizione?: string | null;
   prezzo_annuale?: number;
+  tipo_prezzo?: TipoPrezzo;
+  etichetta_prezzo?: string | null;
   ai_check?: number;
   alert_attivo?: boolean;
   alert_giorni_preavviso?: number | null;
@@ -98,6 +100,8 @@ export interface AddonPayload {
   nome?: string;
   descrizione?: string | null;
   prezzo?: number;
+  tipo_prezzo?: TipoPrezzo;
+  etichetta_prezzo?: string | null;
   ordering?: number;
   is_active?: boolean;
 }

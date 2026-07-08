@@ -84,12 +84,21 @@ export interface Lookups {
   programmi: LookupItem[];
 }
 
+/**
+ * Come mostrare il prezzo di un piano o add-on: importo in €, «Gratis»
+ * (stesso flusso di attivazione) o etichetta «su richiesta» (non attivabile
+ * self-serve: la CTA diventa una richiesta di consulenza).
+ */
+export type TipoPrezzo = "importo" | "gratis" | "su_richiesta";
+
 export interface Plan {
   id: number;
   nome: string;
   slug: string;
   descrizione: string | null;
   prezzo_annuale: string | number;
+  tipo_prezzo: TipoPrezzo;
+  etichetta_prezzo: string | null;
   ai_check: number;
   alert_attivo: boolean;
   alert_giorni_preavviso: number | null;
@@ -537,6 +546,8 @@ export interface Addon {
   slug: string;
   descrizione: string | null;
   prezzo: string | number;
+  tipo_prezzo: TipoPrezzo;
+  etichetta_prezzo: string | null;
   ordering: number;
   is_active: boolean;
   updated_at: string | null;

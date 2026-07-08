@@ -13,13 +13,15 @@ import {
   type PlanPayload,
 } from "../hooks/useAdmin";
 import { apiErrorMessage } from "../lib/api";
-import type { Plan } from "../types";
+import type { Plan, TipoPrezzo } from "../types";
 
 interface PlanFormState {
   nome: string;
   slug: string;
   descrizione: string;
   prezzo_annuale: string;
+  tipo_prezzo: TipoPrezzo;
+  etichetta_prezzo: string;
   ai_check: string;
   alert_attivo: boolean;
   alert_giorni_preavviso: string;
@@ -34,6 +36,8 @@ function toFormState(plan: Plan): PlanFormState {
     slug: plan.slug,
     descrizione: plan.descrizione ?? "",
     prezzo_annuale: String(plan.prezzo_annuale ?? "0"),
+    tipo_prezzo: plan.tipo_prezzo ?? "importo",
+    etichetta_prezzo: plan.etichetta_prezzo ?? "",
     ai_check: String(plan.ai_check),
     alert_attivo: plan.alert_attivo,
     alert_giorni_preavviso: plan.alert_giorni_preavviso ? String(plan.alert_giorni_preavviso) : "",
@@ -48,6 +52,8 @@ const EMPTY_FORM: PlanFormState = {
   slug: "",
   descrizione: "",
   prezzo_annuale: "0",
+  tipo_prezzo: "importo",
+  etichetta_prezzo: "",
   ai_check: "0",
   alert_attivo: false,
   alert_giorni_preavviso: "",
@@ -58,7 +64,9 @@ const EMPTY_FORM: PlanFormState = {
 
 function validate(form: PlanFormState): string | null {
   if (!form.nome.trim()) return "Il nome del piano è obbligatorio.";
-  if (Number(form.prezzo_annuale) < 0 || form.prezzo_annuale === "")
+  // Il prezzo conta solo in modalità «importo»: con gratis/su_richiesta il
+  // campo è disabilitato, un valore residuo vuoto non deve bloccare il salvataggio.
+  if (form.tipo_prezzo === "importo" && (Number(form.prezzo_annuale) < 0 || form.prezzo_annuale === ""))
     return "Il prezzo annuale non è valido.";
   if (!Number.isInteger(Number(form.ai_check)) || Number(form.ai_check) < 0)
     return "Il numero di AI-check non è valido.";
@@ -74,6 +82,8 @@ function toPayload(form: PlanFormState): PlanPayload {
     nome: form.nome.trim(),
     descrizione: form.descrizione.trim() || null,
     prezzo_annuale: Number(form.prezzo_annuale),
+    tipo_prezzo: form.tipo_prezzo,
+    etichetta_prezzo: form.etichetta_prezzo.trim() || null,
     ai_check: Number(form.ai_check),
     alert_attivo: form.alert_attivo,
     alert_giorni_preavviso: form.alert_attivo ? Number(form.alert_giorni_preavviso) : null,
@@ -117,15 +127,41 @@ function PlanFormFields({
           onChange={(e) => setForm((f) => ({ ...f, descrizione: e.target.value }))}
         />
       </div>
+      <SelectField
+        label="Prezzo mostrato come"
+        value={form.tipo_prezzo}
+        onChange={(e) => setForm((f) => ({ ...f, tipo_prezzo: e.target.value as TipoPrezzo }))}
+      >
+        <option value="importo">Importo in €</option>
+        <option value="gratis">Gratis</option>
+        <option value="su_richiesta">Su richiesta (etichetta)</option>
+      </SelectField>
       <TextField
         label="Prezzo annuale (€)"
         type="number"
         min={0}
         step="0.01"
         required
+        disabled={form.tipo_prezzo !== "importo"}
+        helper={
+          form.tipo_prezzo !== "importo" ? "Non mostrato ai clienti con questa modalità" : undefined
+        }
         value={form.prezzo_annuale}
         onChange={(e) => setForm((f) => ({ ...f, prezzo_annuale: e.target.value }))}
       />
+      <div className="sm:col-span-2">
+        <TextField
+          label="Etichetta al posto del prezzo"
+          disabled={form.tipo_prezzo !== "su_richiesta"}
+          helper={
+            form.tipo_prezzo === "su_richiesta"
+              ? "Se vuota viene mostrato «Su richiesta». Con questa modalità il piano non è attivabile dai clienti: la CTA diventa «Richiedi una consulenza»."
+              : "Usata solo con «Su richiesta»"
+          }
+          value={form.etichetta_prezzo}
+          onChange={(e) => setForm((f) => ({ ...f, etichetta_prezzo: e.target.value }))}
+        />
+      </div>
       <TextField
         label="AI-check inclusi"
         type="number"

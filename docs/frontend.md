@@ -6,7 +6,7 @@ Stack: **Vite + React 18 + TypeScript**, **Tailwind CSS v4** (token di tema in `
 
 | Percorso | Pagina | Accesso |
 |---|---|---|
-| `/` | Landing (hero, feature, piani) | pubblico (redirect a `/app/bandi` se loggato) |
+| `/` | Landing pubblica (hero, funzionalità, come funziona, piani, FAQ) | pubblico (redirect a `/app/bandi` se loggato) |
 | `/login` | Accesso | pubblico |
 | `/registrati` | Registrazione in 2 step (dati → scelta piano) | pubblico |
 | `/accetta-invito` | Atterraggio del link d'invito famiglia (set password + accettazione) | pubblico |
@@ -28,6 +28,8 @@ Stack: **Vite + React 18 + TypeScript**, **Tailwind CSS v4** (token di tema in `
 Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo via `/me`) in `src/components/layout/guards.tsx`.
 
 **Navigazione** (`AppShell.tsx`): per non affollare la barra le voci sono raggruppate — link diretti **Bandi · Salvati · Calendario · AI-check** + menu a tendina **«Impostazioni»** (Azienda, Preferenze, Abbonamento) e, per gli admin, **«Admin»** (Utenti, Piani, Add-on, con icona scudo che sostituisce il vecchio badge). Il dropdown è `components/layout/NavMenu.tsx` (chiusura su selezione, click fuori ed Esc; trigger attivo quando la rotta corrente è nel gruppo). La nav per esteso entra da `lg`; sotto, il menu hamburger elenca gli stessi gruppi come sezioni con intestazione.
+
+**Landing pubblica** (`pages/Landing.tsx`): pagina marketing per l'utente sloggato (redirect a `/app/bandi` se c'è sessione). Sezioni: header sticky con ancore (Funzionalità · Come funziona · Piani · FAQ, smooth-scroll) + Accedi/Registrati; hero a due colonne (gradiente firma `from-brand-950 via-brand-900 to-brand-700`) con `HeroShowcase` (mock di prodotto *illustrativo* costruito dai token — scheda bando + widget AI-check con anello punteggio via `lib/scoreColor.ts`, `aria-hidden`); problema→soluzione; griglia funzionalità con l'**AI-check in evidenza** (`FeatureCard` variante `featured`); «come funziona» in 4 passi; «perché BandoFit» + fascia di numeri **reali** (nessuna statistica di utenti inventata); piani (riuso di `usePlans`+`PlanCard`, gestione `su_richiesta` invariata); FAQ (`Faq`, accordion `<details>` nativo); CTA finale; footer ricco (ancore, Accedi/Registrati, `PoweredBy`). Copy onesto: gli **alert email non sono implementati** → il tema scadenze punta sul Calendario reale e gli alert sono citati come «in arrivo» sotto i piani. Componenti presentazionali co-locati in `components/landing/` (`HeroShowcase`, `SectionHeading`, `FeatureCard`, `Faq`), solo token, nessuna logica di rete.
 
 ## Flusso di autenticazione
 

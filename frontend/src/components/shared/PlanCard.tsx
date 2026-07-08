@@ -8,7 +8,9 @@ export function planFeatures(plan: Plan): string[] {
   const features = [
     plan.ai_check > 0 ? `${plan.ai_check} AI-check all'anno` : "AI-check non inclusi",
     plan.alert_attivo
-      ? `Alert personalizzati con ${plan.alert_giorni_preavviso ?? "-"} giorni di preavviso`
+      ? // Gli alert via email non sono ancora attivi: è una quota del piano
+        // ma il recapito arriverà in seguito → marcato «(in arrivo)».
+        `Alert personalizzati con ${plan.alert_giorni_preavviso ?? "-"} giorni di preavviso (in arrivo)`
       : "Alert personalizzati non inclusi",
     plan.num_account_aziendali === 1
       ? "1 account aziendale"

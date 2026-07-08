@@ -2,6 +2,12 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-08 — Redesign della landing page pubblica
+
+- Nuova `pages/Landing.tsx`: hero a due colonne con un **mock di prodotto** (`HeroShowcase`, scheda bando + widget AI-check con anello punteggio) costruito dai token, sezione problema→soluzione, griglia funzionalità con l'**AI-check in evidenza**, «come funziona» in 4 passi, «perché BandoFit» con una fascia di **numeri reali**, piani (riuso `usePlans`+`PlanCard`), **FAQ** (accordion `<details>` nativo), CTA finale e footer ricco con ancore. Header sticky con navigazione ad ancore (smooth-scroll).
+- **Copy più onesto**: gli alert email di scadenza non sono ancora implementati, quindi il tema scadenze punta sul **Calendario** reale e gli alert sono citati come «in arrivo» sotto i piani; nessuna statistica di utenti inventata (social proof assente nel prodotto), solo fatti reali (~1.200 bandi, copertura UE→locale, dati dal Registro Imprese, punteggio 0–100 con citazioni).
+- Nuovi componenti presentazionali in `components/landing/` (`HeroShowcase`, `SectionHeading`, `FeatureCard`, `Faq`), coerenti al 100% col design system esistente: nessuna nuova dipendenza, nessun asset, palette/font/componenti invariati. Solo frontend.
+
 ## 2026-07-08 — Modalità prezzo «Gratis» e «Su richiesta» per piani e add-on
 
 - **`tipo_prezzo`** su `subscription_plans` e `addons` (migration 0010): `importo` (comportamento attuale), `gratis` (la card mostra «Gratis» invece di «0 €»; stesso flusso di attivazione — il piano Gratuito viene **backfillato automaticamente**, insieme a qualunque record a prezzo 0 esistente) e `su_richiesta` (**`etichetta_prezzo`** personalizzabile al posto del prezzo, fallback «Su richiesta»).

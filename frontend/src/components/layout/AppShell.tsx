@@ -7,6 +7,29 @@ import { cn } from "../../lib/cn";
 import { InviteBanner } from "../shared/InviteBanner";
 import { PoweredBy } from "../shared/PoweredBy";
 import { Logo } from "./Logo";
+import { NavMenu, type NavItem } from "./NavMenu";
+
+// Voci sempre dirette (le azioni più frequenti sui bandi).
+const directLinks: NavItem[] = [
+  { to: "/app/bandi", label: "Bandi" },
+  { to: "/app/salvati", label: "Salvati" },
+  { to: "/app/calendario", label: "Calendario" },
+  { to: "/app/ai-check", label: "AI-check" },
+];
+
+// Raggruppate sotto «Impostazioni»: profilo aziendale e account.
+const impostazioniLinks: NavItem[] = [
+  { to: "/app/azienda", label: "Azienda" },
+  { to: "/app/preferenze", label: "Preferenze" },
+  { to: "/app/abbonamento", label: "Abbonamento" },
+];
+
+// Raggruppate sotto «Admin» (solo per gli amministratori).
+const adminLinks: NavItem[] = [
+  { to: "/app/admin/utenti", label: "Utenti" },
+  { to: "/app/admin/piani", label: "Piani" },
+  { to: "/app/admin/addon", label: "Add-on" },
+];
 
 const navLinkClasses = ({ isActive }: { isActive: boolean }) =>
   cn(
@@ -28,60 +51,19 @@ export function AppShell() {
     navigate("/");
   };
 
-  const navLinks = (
-    <>
-      <NavLink to="/app/bandi" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
-        Bandi
-      </NavLink>
-      <NavLink to="/app/salvati" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
-        Salvati
-      </NavLink>
-      <NavLink to="/app/calendario" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
-        Calendario
-      </NavLink>
-      <NavLink to="/app/azienda" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
-        Azienda
-      </NavLink>
-      <NavLink to="/app/ai-check" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
-        AI-check
-      </NavLink>
-      <NavLink to="/app/preferenze" className={navLinkClasses} onClick={() => setMobileOpen(false)}>
-        Preferenze
-      </NavLink>
-      <NavLink
-        to="/app/abbonamento"
-        className={navLinkClasses}
-        onClick={() => setMobileOpen(false)}
-      >
-        Abbonamento
-      </NavLink>
-      {isAdmin && (
-        <>
-          <NavLink
-            to="/app/admin/utenti"
-            className={navLinkClasses}
-            onClick={() => setMobileOpen(false)}
-          >
-            Utenti
-          </NavLink>
-          <NavLink
-            to="/app/admin/piani"
-            className={navLinkClasses}
-            onClick={() => setMobileOpen(false)}
-          >
-            Piani
-          </NavLink>
-          <NavLink
-            to="/app/admin/addon"
-            className={navLinkClasses}
-            onClick={() => setMobileOpen(false)}
-          >
-            Add-on
-          </NavLink>
-        </>
-      )}
-    </>
+  // Lista mobile (hamburger): gruppi come sezioni con intestazione.
+  const mobileLink = (item: NavItem) => (
+    <NavLink
+      key={item.to}
+      to={item.to}
+      className={navLinkClasses}
+      onClick={() => setMobileOpen(false)}
+    >
+      {item.label}
+    </NavLink>
   );
+  const mobileSectionLabel =
+    "px-2.5 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400";
 
   return (
     <div className="flex min-h-dvh flex-col bg-surface">
@@ -95,19 +77,28 @@ export function AppShell() {
             <Logo />
           </Link>
 
-          {/* Con 7 voci (+3 admin) la nav per esteso entra solo da xl:
-              sotto resta il menu hamburger. */}
-          <nav className="ml-3 hidden items-center gap-0.5 xl:flex" aria-label="Navigazione principale">
-            {navLinks}
+          {/* 4 link diretti + 2 menu raggruppati: la nav per esteso entra da
+              lg, sotto resta il menu hamburger. */}
+          <nav
+            className="ml-3 hidden items-center gap-0.5 lg:flex"
+            aria-label="Navigazione principale"
+          >
+            {directLinks.map((item) => (
+              <NavLink key={item.to} to={item.to} className={navLinkClasses}>
+                {item.label}
+              </NavLink>
+            ))}
+            <NavMenu label="Impostazioni" items={impostazioniLinks} />
+            {isAdmin && (
+              <NavMenu
+                label="Admin"
+                items={adminLinks}
+                icon={<ShieldCheck className="size-3.5" aria-hidden />}
+              />
+            )}
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
-            {isAdmin && (
-              <span className="hidden items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 sm:inline-flex">
-                <ShieldCheck className="size-3.5" aria-hidden />
-                Admin
-              </span>
-            )}
             <Link
               to="/app/profilo"
               aria-label="Vai al tuo profilo"
@@ -129,7 +120,7 @@ export function AppShell() {
             </button>
             <button
               type="button"
-              className="inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500 xl:hidden"
+              className="inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500 lg:hidden"
               onClick={() => setMobileOpen((v) => !v)}
               aria-expanded={mobileOpen}
               aria-label={mobileOpen ? "Chiudi menu" : "Apri menu"}
@@ -140,10 +131,18 @@ export function AppShell() {
         </div>
         {mobileOpen && (
           <nav
-            className="flex flex-col gap-1 border-t border-slate-200 px-4 py-3 xl:hidden"
+            className="flex flex-col gap-1 border-t border-slate-200 px-4 py-3 lg:hidden"
             aria-label="Navigazione mobile"
           >
-            {navLinks}
+            {directLinks.map(mobileLink)}
+            <p className={mobileSectionLabel}>Impostazioni</p>
+            {impostazioniLinks.map(mobileLink)}
+            {isAdmin && (
+              <>
+                <p className={mobileSectionLabel}>Amministrazione</p>
+                {adminLinks.map(mobileLink)}
+              </>
+            )}
           </nav>
         )}
       </header>

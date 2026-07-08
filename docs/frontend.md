@@ -27,6 +27,8 @@ Stack: **Vite + React 18 + TypeScript**, **Tailwind CSS v4** (token di tema in `
 
 Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo via `/me`) in `src/components/layout/guards.tsx`.
 
+**Navigazione** (`AppShell.tsx`): per non affollare la barra le voci sono raggruppate — link diretti **Bandi · Salvati · Calendario · AI-check** + menu a tendina **«Impostazioni»** (Azienda, Preferenze, Abbonamento) e, per gli admin, **«Admin»** (Utenti, Piani, Add-on, con icona scudo che sostituisce il vecchio badge). Il dropdown è `components/layout/NavMenu.tsx` (chiusura su selezione, click fuori ed Esc; trigger attivo quando la rotta corrente è nel gruppo). La nav per esteso entra da `lg`; sotto, il menu hamburger elenca gli stessi gruppi come sezioni con intestazione.
+
 ## Flusso di autenticazione
 
 - `src/lib/supabase.ts`: client del progetto **primario**, usato solo per `signUp` / `signInWithPassword` / sessione.

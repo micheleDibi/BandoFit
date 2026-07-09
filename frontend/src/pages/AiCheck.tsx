@@ -1,12 +1,15 @@
 import { ArrowUpRight, Gauge, Loader2, Sparkles } from "lucide-react";
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
+import { QuotaUpgradeBanner } from "../components/aicheck/QuotaUpgradeBanner";
 import { AiEsitoBadge } from "../components/bandi/badges";
 import { Badge } from "../components/ui/Badge";
 import { buttonClasses } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
 import { useAiChecks } from "../hooks/useAiCheck";
+import { useMe } from "../hooks/useMe";
+import { usePlans } from "../hooks/usePlans";
 import { apiErrorMessage } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import { scoreColorClasses } from "../lib/scoreColor";
@@ -113,6 +116,10 @@ function GroupRow({ group }: { group: CheckGroup }) {
 
 export default function AiCheck() {
   const { data, isPending, isError, error, refetch } = useAiChecks();
+  // Servono al banner per capire se un upgrade è davvero possibile: entrambe
+  // sono già in cache TanStack (navbar e pagina Abbonamento).
+  const { data: me } = useMe();
+  const { data: plans } = usePlans();
 
   const groups = useMemo(() => groupBySlug(data?.items ?? []), [data]);
   const quota = data?.quota;
@@ -171,6 +178,8 @@ export default function AiCheck() {
               )}
             </StatTile>
           </div>
+
+          <QuotaUpgradeBanner quota={quota} me={me} plans={plans} />
 
           {/* Elenco */}
           {groups.length === 0 ? (

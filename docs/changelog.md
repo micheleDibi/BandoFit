@@ -11,6 +11,13 @@ Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descr
 - Copy: la landing non promette più «visura camerale in PDF» (due punti), e la card dell'AI-check non la cita più.
 - **DB**: migration **0012** (distruttiva, da eseguire a mano) fa il `drop table company_documents cascade`. **I PDF nel bucket `company-documents` non vengono cancellati da nessun codice** — la vecchia documentazione sosteneva il contrario: vanno svuotati a mano dalla console. `api_usage_events` resta (condivisa con IT-full e verifica CF), smette solo di ricevere righe `service='visura'`.
 
+## 2026-07-09 — Avviso di quota AI-check in esaurimento
+
+- Nella pagina AI-check compare un **callout** quando la quota del piano è consumata per **almeno due terzi**. La soglia si deriva dal totale del piano (`usati * 3 >= totale * 2`, aritmetica intera per non finire ostaggio dell'arrotondamento di 66,6…%), non è un numero fisso. Nessuna chiamata di rete in più: `usati` e `totale` arrivavano già con `GET /me/ai-checks`.
+- **Ai bordi**: piano senza AI-check → nessun avviso (lo dice già il riquadro della quota); **quota a zero** → messaggio diverso e più marcato, ma **CTA mantenuta**, perché è l'unica via d'uscita e a bloccare è già il backend; **figlio attivo** → nessuna CTA (non può cambiare piano, le quote sono del titolare); **piano più alto** (per `ordering`) → nessuna CTA di upgrade, si dice quando la quota si rinnova.
+- Non è modale, non è un toast, non blocca gli AI-check residui. È chiudibile e la scelta persiste in `localStorage` (`useDismissible`), con chiave che include **periodo e livello**: chiudere «sta per esaurirsi» non zittisce il successivo «esaurito», e un nuovo periodo di abbonamento lo ripropone.
+- Le stringhe nuove vivono in **`lib/copy.ts`**, insieme al claim della landing.
+
 ## 2026-07-09 — Claim bandi della landing: «Più di 4.000 bandi monitorati»
 
 - Il claim passa da «Oltre 1.200 bandi **attivi** monitorati» a **«Più di 4.000 bandi monitorati»**, su richiesta esplicita. Era ripetuto e hardcodato in **tre** punti di `pages/Landing.tsx` (fascia statistiche, badge dell'hero, risposta FAQ): ora vive in **una sola costante** in `lib/copy.ts`, così non possono più divergere.

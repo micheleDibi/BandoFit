@@ -10,9 +10,9 @@ const DIM_LABELS: Record<string, string> = {
   beneficiari: "Beneficiari",
 };
 
-/** Riepilogo del pre-check: «Compatibilità 18/23» — frazione delle relazioni
- *  del bando in comune con l'azienda, colorata per banda con la stessa scala
- *  dell'AI-check. L'etichetta è esplicita: da sola la frazione non si capisce.
+/** Riepilogo del pre-check: «Compatibilità 3/4» — requisiti del bando che
+ *  l'azienda soddisfa, colorati per banda con la stessa scala dell'AI-check.
+ *  L'etichetta è esplicita: da sola la frazione non si capisce.
  *  Da renderizzare solo quando `compatibilita` è presente (profilo sufficiente). */
 export function CompatibilitaBadge({
   compatibilita,
@@ -26,10 +26,10 @@ export function CompatibilitaBadge({
 
   const dettaglio = dimensioni
     ? Object.entries(dimensioni)
-        .map(([dim, d]) => `${DIM_LABELS[dim] ?? dim} ${d.matched}/${d.totale}`)
+        .map(([dim, d]) => `${DIM_LABELS[dim] ?? dim}: ${d.soddisfatta ? "sì" : "no"}`)
         .join(" · ")
     : "";
-  const label = `Compatibilità ${punteggio}%: ${matched}/${totale} elementi del bando in comune con la tua azienda${
+  const label = `Compatibilità ${punteggio}%: ${matched} requisiti del bando su ${totale} soddisfatti dalla tua azienda${
     dettaglio ? ` (${dettaglio})` : ""
   }`;
 

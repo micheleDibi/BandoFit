@@ -1,16 +1,21 @@
 """Punteggio di compatibilità a-priori azienda↔bando.
 
 Metrica DINAMICA (mai persistita) mostrata in elenco e dettaglio bando prima
-e senza l'AI-check: quante delle relazioni di catalogo del bando (regioni,
-divisioni ATECO, settori, beneficiari) l'azienda ha in comune, sul totale —
-es. «18/23». Tutte le relazioni pesano uguale.
+e senza l'AI-check: quanti dei requisiti di catalogo del bando (regioni,
+divisioni ATECO, settori, beneficiari) l'azienda soddisfa — es. «3/4».
 
 Regole (confermate col prodotto):
+- **Dentro una dimensione le voci sono alternative (OR)**: un bando che elenca
+  quattro settori li accetta tutti, quindi UNO in comune basta perché il
+  requisito «settore» sia soddisfatto. Contare 1/4 sarebbe sbagliato: non è
+  un bando che chiede di operare in tutti e quattro i settori insieme.
+- **Tra dimensioni si somma**: il punteggio è la frazione di requisiti
+  soddisfatti su quelli valutabili, tutti dello stesso peso.
 - **Tutte le sedi** concorrono alla dimensione territoriale (sede legale +
-  unità locali): un bando è "in comune" su una regione se l'azienda ha almeno
-  una sede lì.
-- **Bandi nazionali** (che collegano tutte le regioni del catalogo): il
-  territorio conta come pienamente in comune, così non vengono penalizzati.
+  unità locali): il requisito è soddisfatto se ANCHE UNA SOLA sede è in una
+  regione ammessa. Ne segue che un bando nazionale (tutte le regioni del
+  catalogo) soddisfa il territorio da sé: `nazionale` è solo un flag per
+  spiegarlo in UI, non incide sul punteggio.
 - **Gate di visibilità**: si calcola solo per un'azienda con P.IVA importata
   (ha `ateco_id` e `regione_id`); altrimenti nessun punteggio.
 - Una dimensione entra nel conto solo se l'azienda ha quel dato: settore solo
@@ -85,9 +90,9 @@ def build_company_facets(
 def compute_compatibilita(
     facets: CompanyFacets | None, bando_facets: dict, *, totale_regioni: int
 ) -> dict | None:
-    """Frazione «in comune / totale» sulle relazioni del bando. Ritorna None
-    (nessun badge) se l'azienda non è sufficiente o il bando non ha relazioni
-    valutabili. Puro (nessun I/O).
+    """Frazione «requisiti soddisfatti / requisiti valutabili» del bando.
+    Ritorna None (nessun badge) se l'azienda non è sufficiente o il bando non
+    ha requisiti valutabili. Puro (nessun I/O).
 
     `bando_facets`: {"regioni": [id...], "ateco": [id...], "settori": [id...],
     "beneficiari": [id...]} (id del namespace lookup del catalogo)."""
@@ -102,35 +107,34 @@ def compute_compatibilita(
     }
 
     dimensioni: dict[str, dict] = {}
-    matched_tot = 0
-    totale_tot = 0
+    soddisfatte = 0
     for dim, company_set in company_sets.items():
         bando_set = {i for i in (bando_facets.get(dim) or []) if i is not None}
         # La dimensione entra solo se il bando la vincola E l'azienda ha il dato.
         if not bando_set or not company_set:
             continue
-        totale = len(bando_set)
         intersezione = bando_set & company_set
-        # Bando nazionale (copre tutte le regioni del catalogo) → il territorio
-        # non vincola nessuno: conta come pienamente in comune. `matched_ids`
-        # resta però l'intersezione vera (le regioni dove l'azienda ha una sede).
-        nazionale = dim == "regioni" and totale >= totale_regioni > 0
-        matched = totale if nazionale else len(intersezione)
+        # Le voci di una dimensione sono alternative: una in comune basta.
+        soddisfatta = bool(intersezione)
         dimensioni[dim] = {
-            "matched": matched,
-            "totale": totale,
+            "soddisfatta": soddisfatta,
+            "matched": len(intersezione),
+            "totale": len(bando_set),
             "matched_ids": sorted(intersezione),
-            "nazionale": nazionale,
+            # Bando aperto a tutte le regioni del catalogo: il territorio è
+            # soddisfatto da sé (l'intersezione non può essere vuota). Solo
+            # una nota per la UI, che altrimenti elencherebbe 20 chip.
+            "nazionale": dim == "regioni" and len(bando_set) >= totale_regioni > 0,
         }
-        matched_tot += matched
-        totale_tot += totale
+        soddisfatte += soddisfatta
 
-    if totale_tot == 0:
+    if not dimensioni:
         return None
+    totale = len(dimensioni)
     return {
-        "punteggio": round(matched_tot / totale_tot * 100),
-        "matched": matched_tot,
-        "totale": totale_tot,
+        "punteggio": round(soddisfatte / totale * 100),
+        "matched": soddisfatte,
+        "totale": totale,
         "dimensioni": dimensioni,
     }
 
@@ -178,9 +182,7 @@ async def _load_company_facets(primary, user: dict, lookups: LookupsOut) -> Comp
     return facets
 
 
-async def get_company_facets(
-    primary, user: dict, lookups: LookupsOut
-) -> CompanyFacets | None:
+async def get_company_facets(primary, user: dict, lookups: LookupsOut) -> CompanyFacets | None:
     """Facet dell'azienda della famiglia (i figli ereditano dal titolare).
     Ritorna None se manca l'azienda o non è sufficiente (P.IVA non importata).
     Cache in-memory a TTL breve per owner (invalidata dalle scritture).

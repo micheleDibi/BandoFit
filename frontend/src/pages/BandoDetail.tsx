@@ -15,7 +15,7 @@ import { AiCheckCard } from "../components/bandi/AiCheckCard";
 import { AiCheckReport } from "../components/bandi/AiCheckReport";
 import { ScadenzaBadge, StatoBadge } from "../components/bandi/badges";
 import { CompatibilitaBadge } from "../components/bandi/CompatibilitaBadge";
-import { CompatibilitaSection } from "../components/bandi/CompatibilitaSection";
+import { CompatibilitaCard } from "../components/bandi/CompatibilitaCard";
 import { ContenutoRenderer } from "../components/bandi/ContenutoRenderer";
 import { SaveBandoButton } from "../components/bandi/SaveBandoButton";
 import { Badge } from "../components/ui/Badge";
@@ -184,11 +184,6 @@ export default function BandoDetail() {
         </div>
       )}
 
-      {/* Pre-check: i requisiti di catalogo del bando confrontati con l'azienda.
-          Assorbe la vecchia card «A chi si rivolge» (stesse liste, ma con il
-          confronto): tenerle entrambe sarebbe un doppione. */}
-      <CompatibilitaSection bando={bando} />
-
       <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_320px]">
         {/* Contenuto */}
         <article className="min-w-0">
@@ -212,6 +207,10 @@ export default function BandoDetail() {
         {/* Sidebar */}
         <aside>
           <div className="sticky top-20 space-y-4">
+            {/* Pre-check prima dell'AI-check: è il confronto immediato e gratuito,
+                e assorbe la vecchia card «A chi si rivolge» (stesse liste, ma con
+                l'esito) — tenerle entrambe sarebbe un doppione. */}
+            <CompatibilitaCard bando={bando} />
             <AiCheckCard slug={bando.slug} />
 
             {linkPrincipale && (

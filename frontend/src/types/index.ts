@@ -19,20 +19,20 @@ export interface Page<T> {
 
 export type StatoBando = "aperto" | "chiuso" | "in apertura prossimamente";
 
-/** Dettaglio di una dimensione del pre-check. `matched_ids` sono gli id delle
- *  voci del bando REALMENTE in comune con l'azienda (per evidenziarle). Per un
- *  bando `nazionale` il territorio conta come pieno (`matched === totale`) anche
- *  se le sedi coprono solo alcune regioni: lì `matched_ids` resta l'intersezione
- *  vera (le regioni dove l'azienda ha una sede). */
+/** Dettaglio di un requisito del pre-check. Le voci del bando sono alternative:
+ *  `soddisfatta` è vera con ANCHE UNA SOLA voce in comune (`matched_ids`).
+ *  `matched`/`totale` sono solo il dettaglio (voci in comune / voci elencate dal
+ *  bando), non pesano sul punteggio. `nazionale`: aperto a tutte le regioni. */
 export interface CompatibilitaDimensione {
+  soddisfatta: boolean;
   matched: number;
   totale: number;
   matched_ids: number[];
   nazionale: boolean;
 }
 
-/** Punteggio di compatibilità a-priori azienda↔bando: relazioni in comune /
- *  totali (es. 18/23). `punteggio` è la percentuale per la banda di colore.
+/** Punteggio di compatibilità a-priori azienda↔bando: requisiti soddisfatti /
+ *  valutabili (es. 3/4). `punteggio` è la percentuale per la banda di colore.
  *  Calcolato dinamicamente dal backend; assente se il profilo è insufficiente. */
 export interface Compatibilita {
   punteggio: number;

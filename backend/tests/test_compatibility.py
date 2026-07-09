@@ -68,28 +68,38 @@ def _facets(**over):
 
 
 class TestComputeCompatibilita:
-    def test_frazione_su_tutte_le_dimensioni(self):
+    def test_una_voce_in_comune_soddisfa_il_requisito(self):
+        # Le voci di un requisito sono ALTERNATIVE: il bando su 3 settori non
+        # chiede di operare in tutti e 3. Un solo settore in comune → soddisfatto.
         bando = {"regioni": [12, 3], "ateco": [620, 630], "settori": [7, 8, 9], "beneficiari": [2, 5]}
         out = compute_compatibilita(_facets(), bando, totale_regioni=3)
-        # reg 1/2, ateco 1/2, settori 1/3, benef 1/2 → 4/9
-        assert out["matched"] == 4
-        assert out["totale"] == 9
-        assert out["punteggio"] == round(4 / 9 * 100)
+        assert out["matched"] == 4  # 4 requisiti su 4, non 4 voci su 9
+        assert out["totale"] == 4
+        assert out["punteggio"] == 100
         assert out["dimensioni"]["settori"] == {
-            "matched": 1, "totale": 3, "matched_ids": [7], "nazionale": False,
+            "soddisfatta": True, "matched": 1, "totale": 3, "matched_ids": [7], "nazionale": False,
         }
         assert out["dimensioni"]["ateco"]["matched_ids"] == [620]
 
-    def test_bando_nazionale_territorio_pieno(self):
-        # Bando che copre tutte le regioni del catalogo: territorio non penalizza.
+    def test_requisito_non_soddisfatto_pesa_come_gli_altri(self):
+        # 3 requisiti su 4: beneficiari senza nessuna voce in comune.
+        bando = {"regioni": [12], "ateco": [620], "settori": [7, 8], "beneficiari": [5, 9]}
+        out = compute_compatibilita(_facets(), bando, totale_regioni=3)
+        assert out["matched"] == 3 and out["totale"] == 4
+        assert out["punteggio"] == 75
+        assert out["dimensioni"]["beneficiari"]["soddisfatta"] is False
+        assert out["dimensioni"]["beneficiari"]["matched_ids"] == []
+
+    def test_bando_nazionale(self):
+        # Bando che copre tutte le regioni del catalogo: il territorio è
+        # soddisfatto da sé. `matched_ids` resta l'intersezione vera — le
+        # regioni dove l'azienda ha davvero una sede.
         bando = {"regioni": [12, 3, 15], "ateco": [620]}
         out = compute_compatibilita(_facets(regioni_ids={12}), bando, totale_regioni=3)
-        # matched=totale (non penalizza) ma matched_ids resta l'intersezione vera:
-        # le regioni dove l'azienda ha davvero una sede.
         assert out["dimensioni"]["regioni"] == {
-            "matched": 3, "totale": 3, "matched_ids": [12], "nazionale": True,
+            "soddisfatta": True, "matched": 1, "totale": 3, "matched_ids": [12], "nazionale": True,
         }
-        assert out["matched"] == 4 and out["totale"] == 4
+        assert out["matched"] == 2 and out["totale"] == 2
         assert out["punteggio"] == 100
 
     def test_gate_azienda_non_sufficiente(self):
@@ -98,7 +108,7 @@ class TestComputeCompatibilita:
         assert compute_compatibilita(None, bando, totale_regioni=3) is None
 
     def test_settore_escluso_se_azienda_senza(self):
-        # Azienda senza settore: la dimensione non entra nel denominatore.
+        # Azienda senza settore: il requisito non entra nel denominatore.
         bando = {"regioni": [12], "settori": [8, 9]}
         out = compute_compatibilita(_facets(settore_id=None), bando, totale_regioni=3)
         assert "settori" not in out["dimensioni"]
@@ -119,16 +129,19 @@ class TestComputeCompatibilita:
         bando = {"regioni": [3], "ateco": [850]}
         out = compute_compatibilita(_facets(regioni_ids={12}, ateco_ids={620}), bando, totale_regioni=3)
         assert out["matched"] == 0 and out["totale"] == 2 and out["punteggio"] == 0
+        assert out["dimensioni"]["regioni"]["soddisfatta"] is False
         assert out["dimensioni"]["regioni"]["matched_ids"] == []
 
-    def test_regioni_non_nazionale_matched_ids_coerenti(self):
-        # Bando su 2 regioni su 3 del catalogo: NON nazionale.
+    def test_regione_soddisfatta_da_una_sede_secondaria(self):
+        # Bando su 2 regioni su 3 del catalogo: NON nazionale. La sede legale è
+        # fuori, ma un'unità locale è in una regione ammessa → soddisfatto.
         bando = {"regioni": [12, 3]}
-        out = compute_compatibilita(_facets(regioni_ids={12, 15}), bando, totale_regioni=3)
+        out = compute_compatibilita(_facets(regioni_ids={15, 3}), bando, totale_regioni=3)
         dim = out["dimensioni"]["regioni"]
         assert dim["nazionale"] is False
+        assert dim["soddisfatta"] is True
         assert dim["matched"] == len(dim["matched_ids"]) == 1
-        assert dim["matched_ids"] == [12]
+        assert dim["matched_ids"] == [3]
 
 
 class TestCompanyRegioniIds:

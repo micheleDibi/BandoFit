@@ -424,9 +424,11 @@ class TestFacetPrechecks:
     }
 
     def test_match_esatti(self):
+        # I beneficiari sono dichiarati sul profilo, non dedotti dalla visura.
         company = {"regione_id": 12, "regione_nome": "Lazio", "settore_id": 5,
-                   "settore_nome": "Artigianato", "ateco_codice": "62.01"}
-        derived = {"beneficiari": [{"id": 2, "nome": "PMI"}], "ateco_secondari": []}
+                   "settore_nome": "Artigianato", "ateco_codice": "62.01",
+                   "beneficiari": [{"id": 2, "nome": "PMI"}]}
+        derived = {"ateco_secondari": []}
         checks = facet_prechecks(self.BANDO, company, derived)
         assert checks["regione"]["esito"] == "soddisfatto"
         assert checks["settore"]["esito"] == "soddisfatto"
@@ -436,9 +438,21 @@ class TestFacetPrechecks:
 
     def test_ateco_secondari_contano(self):
         company = {"ateco_codice": "85.59"}
-        derived = {"ateco_secondari": ["62.02"], "beneficiari": []}
+        derived = {"ateco_secondari": ["62.02"]}
         checks = facet_prechecks(self.BANDO, company, derived)
         assert checks["ateco"]["esito"] == "soddisfatto"
+
+    def test_beneficiari_non_dichiarati_sono_dato_mancante(self):
+        # Campo vuoto ≠ «nessuna categoria»: non deve mai dire non_soddisfatto,
+        # o il requisito peserebbe su un dato che l'utente non ha compilato.
+        checks = facet_prechecks(self.BANDO, {"beneficiari": []}, {})
+        assert checks["beneficiari"]["esito"] == "dato_mancante"
+
+    def test_beneficiari_dichiarati_fuori_dal_bando(self):
+        company = {"beneficiari": [{"id": 99, "nome": "Enti pubblici"}]}
+        checks = facet_prechecks(self.BANDO, company, {})
+        assert checks["beneficiari"]["esito"] == "non_soddisfatto"
+        assert checks["beneficiari"]["azienda"] == ["Enti pubblici"]
 
     def test_dati_mancanti_e_non_applicabile(self):
         checks = facet_prechecks(self.BANDO, {}, {})

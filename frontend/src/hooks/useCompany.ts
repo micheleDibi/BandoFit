@@ -21,6 +21,7 @@ export interface CompanyPayload {
   ateco_id: number | null;
   settore_id: number | null;
   regione_id: number | null;
+  beneficiari_ids: number[];
   anno_fondazione: number | null;
   indirizzo: string | null;
   comune: string | null;

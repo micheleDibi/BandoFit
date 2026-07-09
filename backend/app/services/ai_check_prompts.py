@@ -68,10 +68,9 @@ ATECO 62 rientra nei "servizi ICT"; la categoria "PMI" copre micro, piccole \
 e medie imprese). Motivazione: massimo 2 frasi, in italiano.
 - Le `motivazione` e le `descrizione` sono lette dall'utente finale: linguaggio \
 naturale, MAI nomi tecnici di campi o percorsi (niente "settore_nome", \
-"derived.beneficiari[1].nome") — descrivi il dato in italiano (es. «il settore \
-indicato nei dati aziendali», «le categorie di beneficiari del Registro \
-Imprese»). I nomi tecnici vanno SOLO in `dato_azienda.campo` e in \
-`dati_mancanti.campo`.
+"derived.ateco_secondari[1]") — descrivi il dato in italiano (es. «il settore \
+indicato nei dati aziendali», «le categorie di beneficiario dichiarate»). \
+I nomi tecnici vanno SOLO in `dato_azienda.campo` e in `dati_mancanti.campo`.
 - Le VERIFICHE STRUTTURATE fornite sono fatti già accertati con confronto \
 esatto sui dati del catalogo: non contraddirle mai.
 - Per i requisiti TERRITORIALI considera TUTTE le sedi dell'azienda (sede \
@@ -297,6 +296,11 @@ def build_company_pack(
         f"{field}: {company.get(field) if (company or {}).get(field) not in (None, '') else NON_DISPONIBILE}"
         for field in _COMPANY_FIELDS
     ] if company else [NON_DISPONIBILE]
+    if company:
+        # Multi-valore: serializzato a parte, coi soli nomi (il campo citabile
+        # resta `beneficiari`). Vuoto = non dichiarato, non "nessuna categoria".
+        nomi = [b.get("nome") for b in (company.get("beneficiari") or []) if b.get("nome")]
+        company_lines.append(f"beneficiari: {', '.join(nomi) if nomi else NON_DISPONIBILE}")
     blocks.append("## Dati aziendali (form)\n" + "\n".join(company_lines))
 
     if derived:

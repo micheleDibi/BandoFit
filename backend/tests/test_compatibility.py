@@ -33,12 +33,15 @@ def lookups(**overrides) -> SimpleNamespace:
 
 class TestBuildCompanyFacets:
     def test_ateco_primario_e_secondari_e_multisede(self):
-        company = {"ateco_id": 620, "regione_id": 12, "settore_id": 7}
+        # I beneficiari sono DICHIARATI sul profilo, non dedotti dalla visura.
+        company = {
+            "ateco_id": 620, "regione_id": 12, "settore_id": 7,
+            "beneficiari": [{"id": 2, "nome": "PMI"}],
+        }
         derived = {
             "ateco_divisione": "62",
             "ateco_secondari": ["63.01", "85.2"],
             "regioni_ids": [12, 15],
-            "beneficiari": [{"id": 2, "nome": "PMI"}],
         }
         facets = build_company_facets(company, derived, lookups())
         assert facets.ateco_ids == {620, 630, 850}
@@ -59,6 +62,11 @@ class TestBuildCompanyFacets:
         # Azienda importata prima della modifica: nessun regioni_ids → sede legale.
         facets = build_company_facets({"ateco_id": 620, "regione_id": 12}, {}, lookups())
         assert facets.regioni_ids == {12}
+
+    def test_beneficiari_non_dichiarati(self):
+        # Campo vuoto: nessun id → il requisito non entrerà nel punteggio.
+        facets = build_company_facets({"ateco_id": 620, "regione_id": 12}, {}, lookups())
+        assert facets.beneficiari_ids == set()
 
 
 def _facets(**over):

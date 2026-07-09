@@ -195,8 +195,9 @@ async def _company_context(primary, owner_id: str) -> tuple[dict, dict | None, l
         await primary.table("company_profiles")
         .select("id,ragione_sociale,forma_giuridica,partita_iva,codice_fiscale,"
                 "ateco_id,ateco_codice,ateco_descrizione,settore_id,settore_nome,"
-                "regione_id,regione_nome,anno_fondazione,indirizzo,comune,provincia,cap,"
-                "classe_dimensionale,numero_dipendenti,fascia_fatturato,pec,telefono,sito_web")
+                "regione_id,regione_nome,beneficiari,anno_fondazione,indirizzo,comune,"
+                "provincia,cap,classe_dimensionale,numero_dipendenti,fascia_fatturato,"
+                "pec,telefono,sito_web")
         .eq("parent_id", str(owner_id))
         .limit(1)
         .execute()

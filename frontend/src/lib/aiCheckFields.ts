@@ -1,5 +1,5 @@
 /** Traduzione dei nomi tecnici dei campi citati dall'AI-check
- *  ("derived.beneficiari[1].nome", "settore_nome", "dossier.bilanci.fatturato")
+ *  ("beneficiari[1].nome", "settore_nome", "dossier.bilanci.fatturato")
  *  in etichette italiane leggibili: l'utente non deve mai vedere codice. */
 
 const FIELD_LABELS: Record<string, string> = {
@@ -51,7 +51,7 @@ const FIELD_LABELS: Record<string, string> = {
   email: "Email",
   sito_web: "Sito web",
   contatti: "Contatti",
-  beneficiari: "Categorie di beneficiari",
+  beneficiari: "Categorie di beneficiario",
   stato_impresa: "Stato impresa",
   stato: "Stato impresa",
   anagrafica: "Anagrafica",
@@ -83,7 +83,7 @@ const SOURCE_LABELS: Record<string, string> = {
   derived: "Registro Imprese",
 };
 
-/** "derived.beneficiari[1].nome" → "Categorie di beneficiari (Registro Imprese)". */
+/** "dossier.bilanci.fatturato" → "Fatturato (Registro Imprese)". */
 export function fieldLabel(campo: string | null | undefined): string {
   if (!campo) return "dato aziendale";
   // Più campi separati da virgola: traduci ciascuno e togli i duplicati.

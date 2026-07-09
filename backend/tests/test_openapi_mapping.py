@@ -11,7 +11,6 @@ from app.services.openapi_mapping import (
     build_derived,
     build_dossier,
     classe_dimensionale,
-    derive_beneficiari,
     extract_people,
     fascia_fatturato,
     normalize_region,
@@ -128,16 +127,11 @@ class TestFasciaEClasse:
 
 
 class TestBeneficiari:
-    def test_derivazione_dalla_fixture(self):
-        found = derive_beneficiari(payload(), lookups().beneficiari)
-        nomi = {f["nome"] for f in found}
-        assert nomi == {"Micro-imprese", "PMI"}  # 9 dipendenti, non startup
-
-    def test_startup(self):
-        data = payload()
-        data["innovativeSmeAndSu"]["isInnovativeStartUp"] = True
-        nomi = {f["nome"] for f in derive_beneficiari(data, lookups().beneficiari)}
-        assert "Startup" in nomi
+    def test_non_derivati_dalla_visura(self):
+        # Le categorie del catalogo (Istituti Scolastici, Enti pubblici…) non
+        # si deducono da attributi camerali: le dichiara l'utente su
+        # company_profiles.beneficiari. `derived` non deve più contenerle.
+        assert "beneficiari" not in build_derived(payload(), lookups())
 
 
 class TestBuildDerived:

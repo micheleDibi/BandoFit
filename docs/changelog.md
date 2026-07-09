@@ -2,6 +2,13 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-09 — Le categorie di beneficiario si dichiarano, non si deducono
+
+- **Nuovo campo multi-valore «Categorie di beneficiario»** sui dati aziendali (`TagSelect` in `CompanyCard`, scelto dalla lookup `beneficiari` del catalogo): un'azienda può essere insieme PMI e Organismo di formazione. Salvato su `company_profiles.beneficiari` jsonb `[{id, nome}]` (migration **0011**), denormalizzato come `settore_nome`; `PUT /me/company` accetta `beneficiari_ids` e risponde con `beneficiari`. La colonna sta lì, e non su una tabella ponte, perché il pre-check la rilegge a ogni `GET /bandi`, dove `company_profiles` è già nella query: zero letture aggiuntive.
+- **Rimossa la deduzione dalla visura** (`derive_beneficiari`). Il catalogo distingue Istituti Scolastici, Organismi di formazione, Enti pubblici… che nessun attributo camerale può esprimere: un bando riservato a quelle categorie risultava non soddisfatto per chiunque. In più il match era per sottostringa, e `"cooperative"` è contenuto in `"Cooperative sociali"`: **ogni società cooperativa risultava cooperativa sociale**, nel pre-check e nel dossier passato all'LLM dell'AI-check. Nessun backfill: il dato dedotto era inaffidabile e va confermato dall'utente.
+- Finché il campo è vuoto il requisito «beneficiari» resta **non valutato** — fuori dal denominatore, come il settore non compilato: nessuno viene penalizzato per un dato che non ha ancora inserito. Idem nell'AI-check (`dato_mancante`, non `non_soddisfatto`).
+- Le categorie dichiarate sono ora **ereditate da «Bandi per te»** come regione/settore/ATECO: la pagina Preferenze diceva già «sempre inclusi», ma il preset le ignorava.
+
 ## 2026-07-09 — Pre-check: requisiti in OR, riquadro in colonna laterale
 
 - **Correzione della formula.** Dentro un requisito le voci del bando sono **alternative**: un bando che elenca quattro settori li accetta tutti, non ne chiede quattro insieme. Contare le voci (`1/4` sui settori) penalizzava a torto: ora un requisito è **soddisfatto con anche una sola voce in comune** e il punteggio è **requisiti soddisfatti / requisiti valutabili** (es. `3/4`). Il caso «bando nazionale» smette di essere speciale — se il bando è aperto a tutte le regioni, una sede qualsiasi lo soddisfa da sé; il flag `nazionale` resta solo come nota per la UI. Nuovo campo `soddisfatta` per dimensione nella risposta API.

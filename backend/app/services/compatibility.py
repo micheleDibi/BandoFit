@@ -18,9 +18,9 @@ Regole (confermate col prodotto):
   spiegarlo in UI, non incide sul punteggio.
 - **Gate di visibilità**: si calcola solo per un'azienda con P.IVA importata
   (ha `ateco_id` e `regione_id`); altrimenti nessun punteggio.
-- Una dimensione entra nel conto solo se l'azienda ha quel dato: settore solo
-  se compilato, beneficiari solo con import certificato (non si penalizza una
-  dimensione che l'azienda non può ancora avere).
+- Una dimensione entra nel conto solo se l'azienda ha quel dato: settore e
+  categorie di beneficiario solo se dichiarati (non si penalizza una
+  dimensione che l'azienda non ha ancora compilato).
 
 I due DB (azienda sul primario, facet bando sul secondario) non si possono
 unire in SQL: i facet azienda si costruiscono una volta per richiesta (con
@@ -71,8 +71,11 @@ def build_company_facets(
         if division and division in codice_to_id:
             ateco_ids.add(codice_to_id[division])
 
+    # Beneficiari: dichiarati dall'utente, non deducibili dalla visura (il
+    # catalogo distingue Istituti Scolastici, Enti pubblici… che nessun
+    # attributo camerale esprime). Vuoto → requisito non valutato.
     beneficiari_ids = {
-        int(b["id"]) for b in (derived.get("beneficiari") or []) if b.get("id") is not None
+        int(b["id"]) for b in (company.get("beneficiari") or []) if b.get("id") is not None
     }
 
     settore_id = company.get("settore_id")
@@ -156,7 +159,7 @@ async def _load_company_facets(primary, user: dict, lookups: LookupsOut) -> Comp
 
     company_resp = (
         await primary.table("company_profiles")
-        .select("id,ateco_id,settore_id,regione_id")
+        .select("id,ateco_id,settore_id,regione_id,beneficiari")
         .eq("parent_id", owner_id)
         .limit(1)
         .execute()

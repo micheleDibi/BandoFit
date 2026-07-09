@@ -7,6 +7,14 @@ ClasseDimensionale = Literal["micro", "piccola", "media", "grande"]
 FasciaFatturato = Literal["fino_100k", "100k_500k", "500k_2m", "2m_10m", "10m_50m", "oltre_50m"]
 
 
+class BeneficiarioRef(BaseModel):
+    """Copia denormalizzata di una riga della lookup `beneficiari` del DB
+    secondario (nessuna FK cross-database), come settore_id/settore_nome."""
+
+    id: int
+    nome: str
+
+
 class CompanyIn(BaseModel):
     ragione_sociale: str = Field(min_length=1, max_length=300)
     forma_giuridica: str | None = Field(default=None, max_length=100)
@@ -15,6 +23,9 @@ class CompanyIn(BaseModel):
     ateco_id: int | None = None
     settore_id: int | None = None
     regione_id: int | None = None
+    # Categorie di beneficiario dichiarate (lookup del catalogo). Multi-valore:
+    # un'azienda può essere insieme PMI e Organismo di formazione.
+    beneficiari_ids: list[int] = Field(default_factory=list, max_length=50)
     anno_fondazione: int | None = Field(default=None, ge=1800, le=2100)
     indirizzo: str | None = Field(default=None, max_length=300)
     comune: str | None = Field(default=None, max_length=100)
@@ -26,6 +37,11 @@ class CompanyIn(BaseModel):
     pec: str | None = Field(default=None, max_length=200)
     telefono: str | None = Field(default=None, max_length=50)
     sito_web: str | None = Field(default=None, max_length=300)
+
+    @field_validator("beneficiari_ids")
+    @classmethod
+    def dedup_beneficiari(cls, value: list[int]) -> list[int]:
+        return list(dict.fromkeys(value))
 
     @field_validator("partita_iva")
     @classmethod
@@ -71,6 +87,8 @@ class CompanyOut(CompanyIn):
     ateco_descrizione: str | None = None
     settore_nome: str | None = None
     regione_nome: str | None = None
+    # Come `settore_nome`: la copia col nome, che il client non deve inviare.
+    beneficiari: list[BeneficiarioRef] = Field(default_factory=list)
 
 
 class CompanyResponse(BaseModel):

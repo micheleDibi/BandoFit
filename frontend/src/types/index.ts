@@ -246,6 +246,10 @@ export interface CompanyProfile {
   settore_nome: string | null;
   regione_id: number | null;
   regione_nome: string | null;
+  /** Categorie di beneficiario DICHIARATE (non deducibili dalla visura), dalla
+   *  lookup del catalogo. `beneficiari` è la copia col nome, come settore_nome. */
+  beneficiari_ids: number[];
+  beneficiari: { id: number; nome: string }[];
   anno_fondazione: number | null;
   indirizzo: string | null;
   comune: string | null;

@@ -1,4 +1,4 @@
-import { BadgeCheck, Building2, Download, PencilLine } from "lucide-react";
+import { BadgeCheck, Building2, Download, PencilLine, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useCompany, useSaveCompany, type CompanyPayload } from "../../hooks/useCompany";
 import { useLookups } from "../../hooks/useLookups";
@@ -9,6 +9,7 @@ import { Card } from "../ui/Card";
 import { Combobox } from "../ui/Combobox";
 import { SelectField, TextField } from "../ui/Field";
 import { Skeleton } from "../ui/states";
+import { TagSelect } from "../ui/TagSelect";
 import { ImportCompanyDialog } from "./ImportCompanyDialog";
 
 const CLASSI = [
@@ -35,6 +36,7 @@ interface FormState {
   ateco_id: number | null;
   settore_id: number | null;
   regione_id: number | null;
+  beneficiari_ids: number[];
   anno_fondazione: string;
   indirizzo: string;
   comune: string;
@@ -56,6 +58,7 @@ const EMPTY: FormState = {
   ateco_id: null,
   settore_id: null,
   regione_id: null,
+  beneficiari_ids: [],
   anno_fondazione: "",
   indirizzo: "",
   comune: "",
@@ -79,6 +82,7 @@ function toFormState(company: CompanyProfile | null): FormState {
     ateco_id: company.ateco_id,
     settore_id: company.settore_id,
     regione_id: company.regione_id,
+    beneficiari_ids: company.beneficiari_ids ?? [],
     anno_fondazione: company.anno_fondazione ? String(company.anno_fondazione) : "",
     indirizzo: company.indirizzo ?? "",
     comune: company.comune ?? "",
@@ -114,6 +118,7 @@ function toPayload(form: FormState): CompanyPayload {
     ateco_id: form.ateco_id,
     settore_id: form.settore_id,
     regione_id: form.regione_id,
+    beneficiari_ids: form.beneficiari_ids,
     anno_fondazione: form.anno_fondazione ? Number(form.anno_fondazione) : null,
     indirizzo: opt(form.indirizzo),
     comune: opt(form.comune),
@@ -157,6 +162,10 @@ function CompanySummary({ company }: { company: CompanyProfile }) {
       />
       <ReadOnlyRow label="Settore" value={company.settore_nome} />
       <ReadOnlyRow label="Regione" value={company.regione_nome} />
+      <ReadOnlyRow
+        label="Categorie di beneficiario"
+        value={company.beneficiari?.map((b) => b.nome).join(", ") || null}
+      />
       <ReadOnlyRow
         label="Anno di fondazione"
         value={company.anno_fondazione ? String(company.anno_fondazione) : null}
@@ -244,6 +253,18 @@ export function CompanyCard() {
 
   const set = (key: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const beneficiariOptions = (lookups?.beneficiari ?? []).map((b) => ({ id: b.id, label: b.nome }));
+  // Fallback all'id: se il catalogo non è ancora arrivato la chip resta leggibile.
+  const beneficiarioNome = (id: number) =>
+    beneficiariOptions.find((b) => b.id === id)?.label ?? String(id);
+  const toggleBeneficiario = (id: number) =>
+    setForm((f) => ({
+      ...f,
+      beneficiari_ids: f.beneficiari_ids.includes(id)
+        ? f.beneficiari_ids.filter((x) => x !== id)
+        : [...f.beneficiari_ids, id],
+    }));
 
   const handleCancel = () => {
     setForm(toFormState(company));
@@ -371,6 +392,46 @@ export function CompanyCard() {
               value={form.anno_fondazione}
               onChange={set("anno_fondazione")}
             />
+            {/* Dichiarato, non deducibile dalla visura: il catalogo distingue
+                Istituti Scolastici, Enti pubblici, Organismi di formazione… che
+                nessun attributo camerale esprime. Multi-valore.
+                TagSelect è solo il selettore (la sua `label` è sr-only e non
+                mostra i valori scelti): etichetta e chip stanno qui. */}
+            <div className="sm:col-span-2">
+              <span className="block text-sm font-medium text-slate-700">
+                Categorie di beneficiario
+              </span>
+              {form.beneficiari_ids.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {form.beneficiari_ids.map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => toggleBeneficiario(id)}
+                      title="Rimuovi"
+                      className="inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200 transition-colors hover:bg-brand-100"
+                    >
+                      <span className="truncate">{beneficiarioNome(id)}</span>
+                      <X className="size-3 shrink-0" aria-hidden />
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="mt-1.5">
+                <TagSelect
+                  label="Aggiungi una categoria di beneficiario"
+                  options={beneficiariOptions}
+                  values={form.beneficiari_ids}
+                  onToggle={toggleBeneficiario}
+                  placeholder="Cerca e aggiungi una categoria…"
+                />
+              </div>
+              <p className="mt-1.5 text-xs text-slate-500">
+                Come ti presenti ai bandi: PMI, Startup, Organismo di formazione, Ente
+                pubblico… Puoi sceglierne più di una. Finché è vuota, i bandi che limitano i
+                beneficiari non la conteggiano nella compatibilità.
+              </p>
+            </div>
           </div>
 
           <fieldset className="grid gap-4 border-t border-slate-100 pt-4 sm:grid-cols-2">

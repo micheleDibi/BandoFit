@@ -19,7 +19,6 @@ import { Card } from "../components/ui/Card";
 import { TagSelect, type TagSelectOption } from "../components/ui/TagSelect";
 import { Skeleton } from "../components/ui/states";
 import { useCompany } from "../hooks/useCompany";
-import { useCompanyDossier } from "../hooks/useCompanyDossier";
 import { useLookups } from "../hooks/useLookups";
 import { EMPTY_PREFERENCES, usePreferences, useSavePreferences } from "../hooks/usePreferences";
 import { apiErrorMessage } from "../lib/api";
@@ -104,7 +103,6 @@ export default function Preferenze() {
   const { data: saved, isPending } = usePreferences();
   const { data: lookups } = useLookups();
   const { data: companyData } = useCompany();
-  const { data: dossier } = useCompanyDossier();
   const savePreferences = useSavePreferences();
 
   const [form, setForm] = useState<Preferences>(EMPTY_PREFERENCES);
@@ -119,9 +117,6 @@ export default function Preferenze() {
   // Valori EREDITATI dai dati aziendali: sempre inclusi in «Bandi per te»,
   // si modificano dai dati aziendali (non da qui).
   const inherited = useMemo<Record<PrefKey, InheritedValue[]>>(() => {
-    const derivedBeneficiari = Array.isArray(dossier?.derived?.beneficiari)
-      ? (dossier!.derived.beneficiari as Array<{ id: number; nome: string }>)
-      : [];
     return {
       codici_ateco:
         company?.ateco_id != null
@@ -138,12 +133,13 @@ export default function Preferenze() {
         company?.settore_id != null
           ? [{ id: company.settore_id, label: company.settore_nome ?? String(company.settore_id) }]
           : [],
-      beneficiari: derivedBeneficiari.map((b) => ({ id: b.id, label: b.nome })),
+      // Dichiarate sui dati aziendali (prima erano dedotte dalla visura).
+      beneficiari: (company?.beneficiari ?? []).map((b) => ({ id: b.id, label: b.nome })),
       tipologie: [],
       modalita: [],
       programmi: [],
     };
-  }, [company, dossier]);
+  }, [company]);
 
   const hasInherited = Object.values(inherited).some((v) => v.length > 0);
 

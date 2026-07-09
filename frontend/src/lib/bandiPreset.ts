@@ -20,7 +20,8 @@ export function buildBandiPerTePreset(
     regioni: union(company?.regione_id, preferences?.regioni),
     settori: union(company?.settore_id, preferences?.settori),
     ateco: union(company?.ateco_id, preferences?.codici_ateco),
-    beneficiari: union(preferences?.beneficiari),
+    // Dichiarate sui dati aziendali: ereditate come regione/settore/ATECO.
+    beneficiari: union(company?.beneficiari_ids, preferences?.beneficiari),
     tipologie: union(preferences?.tipologie),
     modalita: union(preferences?.modalita),
     programmi: union(preferences?.programmi),

@@ -1,7 +1,7 @@
 """Dati aziendali della famiglia: modificabili dal padre, letti dai figli attivi.
 
-I riferimenti ad ATECO, settore e regione puntano alle lookup del DB
-SECONDARIO: alla scrittura si risolvono gli id e si denormalizzano le copie
+I riferimenti ad ATECO, settore, regione e beneficiari puntano alle lookup del
+DB SECONDARIO: alla scrittura si risolvono gli id e si denormalizzano le copie
 testuali (nessuna FK cross-database)."""
 
 from app.core.errors import BadRequestError, ForbiddenError
@@ -11,8 +11,9 @@ from app.services import family_service, lookup_service
 COMPANY_SELECT = (
     "ragione_sociale,forma_giuridica,partita_iva,codice_fiscale,"
     "ateco_id,ateco_codice,ateco_descrizione,settore_id,settore_nome,"
-    "regione_id,regione_nome,anno_fondazione,indirizzo,comune,provincia,cap,"
-    "classe_dimensionale,numero_dipendenti,fascia_fatturato,pec,telefono,sito_web"
+    "regione_id,regione_nome,beneficiari,anno_fondazione,indirizzo,comune,"
+    "provincia,cap,classe_dimensionale,numero_dipendenti,fascia_fatturato,"
+    "pec,telefono,sito_web"
 )
 
 
@@ -24,7 +25,12 @@ async def _fetch_company(primary, parent_id: str) -> CompanyOut | None:
         .limit(1)
         .execute()
     )
-    return CompanyOut(**resp.data[0]) if resp.data else None
+    if not resp.data:
+        return None
+    row = dict(resp.data[0])
+    # In colonna c'è solo [{id, nome}]: gli id per il form si ricavano da lì.
+    row["beneficiari_ids"] = [b["id"] for b in (row.get("beneficiari") or [])]
+    return CompanyOut(**row)
 
 
 async def get_company(primary, requester: dict) -> CompanyResponse:
@@ -47,9 +53,12 @@ async def get_company(primary, requester: dict) -> CompanyResponse:
 
 
 def resolve_lookups(data: CompanyIn, lookups) -> dict:
-    """Risolve ateco/settore/regione contro le lookup del DB secondario e
-    ritorna il payload con le copie denormalizzate. 400 se un id non esiste."""
+    """Risolve ateco/settore/regione/beneficiari contro le lookup del DB
+    secondario e ritorna il payload con le copie denormalizzate. 400 se un id
+    non esiste."""
     payload = data.model_dump(mode="json")
+    # `beneficiari_ids` è solo l'input: in colonna va [{id, nome}].
+    beneficiari_ids = payload.pop("beneficiari_ids", [])
     payload.update(
         {
             "ateco_codice": None,
@@ -74,6 +83,14 @@ def resolve_lookups(data: CompanyIn, lookups) -> dict:
         if match is None:
             raise BadRequestError("Regione non valida")
         payload["regione_nome"] = match.nome
+
+    beneficiari = []
+    for beneficiario_id in beneficiari_ids:
+        match = next((b for b in lookups.beneficiari if b.id == beneficiario_id), None)
+        if match is None:
+            raise BadRequestError("Categoria di beneficiario non valida")
+        beneficiari.append({"id": match.id, "nome": match.nome})
+    payload["beneficiari"] = beneficiari
     return payload
 
 

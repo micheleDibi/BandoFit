@@ -146,9 +146,9 @@ def facet_prechecks(bando: dict, company: dict | None, derived: dict | None) -> 
         )
         checks["settore"] = {"esito": esito, "bando": [s.get("nome") for s in bando_settori], "azienda": company.get("settore_nome")}
 
-    # Beneficiari (derivati dall'import certificato)
+    # Beneficiari (dichiarati dall'azienda: la visura non li esprime)
     bando_beneficiari = _junction_items(bando, "bando_beneficiari", "beneficiari")
-    company_beneficiari = derived.get("beneficiari") or []
+    company_beneficiari = company.get("beneficiari") or []
     if not bando_beneficiari:
         checks["beneficiari"] = {"esito": "non_applicabile", "bando": [], "azienda": [b.get("nome") for b in company_beneficiari]}
     elif not company_beneficiari:

@@ -176,43 +176,6 @@ def fascia_fatturato(payload: dict) -> str | None:
     return None
 
 
-# ------------------------------------------------------------------ beneficiari
-
-def derive_beneficiari(payload: dict, beneficiari_lookup: list) -> list[dict]:
-    """Deriva le categorie di beneficiari del catalogo bandi dagli attributi
-    dell'azienda (il catalogo non ha controparte openapi). Tabella dichiarativa:
-    solo DATI per il futuro AI-check, nessun effetto sui filtri."""
-    matches: list[str] = []
-    classe = classe_dimensionale(payload)
-    if classe == "micro":
-        matches.append("micro")
-    if classe in ("micro", "piccola", "media"):
-        matches.append("pmi")
-    if classe == "grande":
-        matches.append("grandi imprese")
-    if _get(payload, "innovativeSmeAndSu", "isInnovativeStartUp"):
-        matches.append("startup")
-    forma = (
-        (_clean(_get(payload, "legalForm", "detailedLegalForm", "description")) or "")
-        + " "
-        + (_clean(_get(payload, "legalForm", "legalForm", "description")) or "")
-    ).lower()
-    if "cooperativa sociale" in forma or "social cooperative" in forma:
-        matches.append("cooperative sociali")
-    if "cooperativ" in forma:
-        matches.append("cooperative")
-    if "benefit" in forma or "impresa sociale" in forma:
-        matches.append("imprese sociali")
-
-    found: list[dict] = []
-    for item in beneficiari_lookup:
-        nome_lower = item.nome.lower()
-        if any(needle in nome_lower for needle in matches):
-            if not any(f["id"] == item.id for f in found):
-                found.append({"id": item.id, "nome": item.nome})
-    return found
-
-
 # ----------------------------------------------------------------- persone
 
 def _map_roles(person: dict) -> list[dict]:
@@ -505,7 +468,9 @@ def build_derived(payload: dict, lookups) -> dict:
         "regioni_ids": all_regioni_ids(payload, lookups),
         "classe_dimensionale": classe_dimensionale(payload),
         "fascia_fatturato": fascia_fatturato(payload),
-        "beneficiari": derive_beneficiari(payload, lookups.beneficiari),
+        # Nessun `beneficiari`: le categorie del catalogo (Istituti Scolastici,
+        # Enti pubblici…) non si deducono dalla visura. Le dichiara l'utente su
+        # `company_profiles.beneficiari`.
         "stato_impresa": stato_impresa(payload),
     }
 

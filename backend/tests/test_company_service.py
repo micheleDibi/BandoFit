@@ -16,7 +16,7 @@ VALID = {
 LOOKUPS = LookupsOut(
     regioni=[{"id": 10, "nome": "Lombardia"}],
     settori=[{"id": 5, "nome": "Automotive"}],
-    beneficiari=[],
+    beneficiari=[{"id": 7, "nome": "PMI"}, {"id": 9, "nome": "Organismi di formazione"}],
     codici_ateco=[{"id": 3, "codice": "49", "descrizione": "Trasporto terrestre"}],
     tipologie_bando=[],
     modalita_erogazione=[],
@@ -94,3 +94,23 @@ class TestResolveLookups:
         assert payload["ateco_codice"] is None
         assert payload["settore_nome"] is None
         assert payload["regione_nome"] is None
+        assert payload["beneficiari"] == []
+
+    def test_beneficiari_denormalizzati(self):
+        # Multi-valore: in colonna finisce [{id, nome}], non la lista di id.
+        data = CompanyIn(**{**VALID, "beneficiari_ids": [9, 7]})
+        payload = resolve_lookups(data, LOOKUPS)
+        assert payload["beneficiari"] == [
+            {"id": 9, "nome": "Organismi di formazione"},
+            {"id": 7, "nome": "PMI"},
+        ]
+        assert "beneficiari_ids" not in payload  # non è una colonna
+
+    def test_beneficiari_duplicati_deduplicati(self):
+        data = CompanyIn(**{**VALID, "beneficiari_ids": [7, 7, 9]})
+        assert data.beneficiari_ids == [7, 9]
+
+    def test_beneficiario_sconosciuto_400(self):
+        data = CompanyIn(**{**VALID, "beneficiari_ids": [999]})
+        with pytest.raises(BadRequestError):
+            resolve_lookups(data, LOOKUPS)

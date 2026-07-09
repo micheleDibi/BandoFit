@@ -393,6 +393,33 @@ export interface ImportResult {
   sandbox: boolean;
 }
 
+/** Il minimo per rispondere a «è la mia azienda?». `stato_impresa` intercetta
+ *  le cessate e le sospese prima della conferma. */
+export interface ImportPreviewAzienda {
+  partita_iva: string;
+  ragione_sociale: string | null;
+  codice_fiscale: string | null;
+  forma_giuridica: string | null;
+  stato_impresa: string | null;
+  sede: string | null;
+  regione: string | null;
+  ateco: string | null;
+  legale_rappresentante: string | null;
+  numero_persone: number;
+}
+
+/** Anteprima di sola lettura: nulla è ancora stato scritto sui dati aziendali.
+ *  `reused: true` = il payload era già stato pagato, nessun nuovo addebito. */
+export interface ImportPreview {
+  azienda: ImportPreviewAzienda;
+  autofill: { applied: string[]; conflicts: ImportConflict[] };
+  suggestions: { codici_ateco: AtecoSuggestion[] };
+  fetched_at: string;
+  draft_expires_at: string;
+  reused: boolean;
+  sandbox: boolean;
+}
+
 // ---- Preferenze per utente -------------------------------------------------
 
 export interface Preferences {

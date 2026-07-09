@@ -59,6 +59,48 @@ class ImportResult(BaseModel):
     sandbox: bool
 
 
+class ImportConfirmIn(ImportIn):
+    """Conferma dell'anteprima. La P.IVA è una guardia: deve combaciare con
+    quella del draft, o si scriverebbero i dati di un'altra azienda. Stessa
+    normalizzazione dell'anteprima (prefisso IT e spazi tollerati)."""
+
+
+class ImportPreviewAzienda(BaseModel):
+    """Il minimo per rispondere a «è la mia azienda?». `stato_impresa` c'è per
+    intercettare le cessate e le sospese PRIMA di importarle."""
+
+    partita_iva: str
+    ragione_sociale: str | None = None
+    codice_fiscale: str | None = None
+    forma_giuridica: str | None = None
+    stato_impresa: str | None = None
+    sede: str | None = None
+    regione: str | None = None
+    ateco: str | None = None
+    legale_rappresentante: str | None = None
+    numero_persone: int = 0
+
+
+class ImportPreview(BaseModel):
+    """Anteprima di SOLA LETTURA: nulla è stato scritto sui dati aziendali.
+
+    `autofill` risponde all'altra domanda, «cosa verrà scritto?»: `applied`
+    sono i campi vuoti che la conferma compilerà, `conflicts` quelli già
+    valorizzati che differiscono e che NON verranno toccati. Sono calcolati
+    con la stessa funzione che userà la conferma, quindi non possono mentire.
+
+    `reused: true` = l'anteprima viene da un payload già pagato (nessun nuovo
+    addebito). `draft_expires_at` è il momento oltre il quale va rifatta."""
+
+    azienda: ImportPreviewAzienda
+    autofill: AutofillOut
+    suggestions: SuggestionsOut
+    fetched_at: str
+    draft_expires_at: str
+    reused: bool = False
+    sandbox: bool = False
+
+
 class DossierResponse(BaseModel):
     editable: bool
     imported: bool

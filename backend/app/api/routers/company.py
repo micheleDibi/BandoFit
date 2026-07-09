@@ -4,7 +4,9 @@ from app.api.deps import CurrentUser, OpenapiDep, PrimaryClient, SecondaryClient
 from app.schemas.company import CompanyIn, CompanyResponse
 from app.schemas.openapi_data import (
     DossierResponse,
+    ImportConfirmIn,
     ImportIn,
+    ImportPreview,
     ImportResult,
 )
 from app.services import company_service, openapi_service
@@ -32,19 +34,32 @@ async def save_company(
     return await company_service.upsert_company(primary, secondary, user, data)
 
 
-@router.post("/import", response_model=ImportResult, status_code=201)
-async def import_company(
+@router.post("/import/preview", response_model=ImportPreview)
+async def preview_import(
     data: ImportIn,
     user: CurrentUser,
     primary: PrimaryClient,
     secondary: SecondaryClient,
     openapi: OpenapiDep,
-) -> ImportResult:
-    """Importa la visura completa da openapi.it (IT-full, A PAGAMENTO) e
-    compila i campi aziendali vuoti. Protetto da cooldown e lock."""
-    return await openapi_service.import_company(
+) -> ImportPreview:
+    """Recupera IT-full da openapi.it (A PAGAMENTO) e mostra cosa si sta per
+    importare. NON scrive nulla: il payload resta in staging fino alla conferma.
+    Protetto da cooldown e lock; riusa gratis un'anteprima già pagata."""
+    return await openapi_service.preview_import(
         primary, secondary, openapi, user, data.partita_iva
     )
+
+
+@router.post("/import/confirm", response_model=ImportResult, status_code=201)
+async def confirm_import(
+    data: ImportConfirmIn,
+    user: CurrentUser,
+    primary: PrimaryClient,
+    secondary: SecondaryClient,
+) -> ImportResult:
+    """Scrive i dati dell'anteprima e compila i campi aziendali vuoti. Nessuna
+    chiamata al provider: gratis, e fuori dal cooldown."""
+    return await openapi_service.confirm_import(primary, secondary, user, data.partita_iva)
 
 
 @router.get("/dossier", response_model=DossierResponse)

@@ -49,6 +49,8 @@ Contiene i dati della piattaforma. Schema in `supabase/migrations/` (eseguire in
 
 **`company_import_locks`** + `fn_acquire_import_lock(parent_id, ttl)` / `fn_release_import_lock(parent_id)` — lock anti doppia-spesa per l'import: la chiamata HTTP esterna avviene tra statement PostgREST, quindi il claim è un INSERT atomico con "furto" solo se il lock esistente è scaduto (TTL clampato a 600s). Riusato anche dalla verifica CF.
 
+**`company_import_drafts`** (migration 0013) — payload IT-full **già pagato**, in attesa che l'utente confermi l'anteprima: una riga per titolare (`parent_id` PK → profiles, cascade), `partita_iva` (check 11 cifre), `raw` jsonb, `sandbox`, `fetched_at`, `expires_at` (indicizzato). Esiste perché la chiamata costa: rifarla alla conferma raddoppierebbe la spesa, e una cache in memoria non sopravvive al multi-worker. **Non è un dato aziendale** — nessuna pagina lo legge, non entra nell'AI-check né nel punteggio di compatibilità — quindi il vincolo «nulla è salvato finché non confermi» resta rispettato. Le letture filtrano sempre su `expires_at > now()`: la scadenza è un filtro, non una cancellazione (non c'è job di pulizia; un nuovo recupero sostituisce la riga con un upsert). Chi annulla non lo perde: entro il TTL l'anteprima si ricostruisce gratis. RLS deny-all + revoke, come i lock.
+
 ### Documenti ufficiali (migration 0006, rimossa dalla 0012)
 
 _(La tabella `company_documents` e il bucket `company-documents` sono stati **rimossi** con la migration 0012: la visura camerale PDF non è più una funzionalità. Il dossier, l'anagrafica, le sedi e le persone vengono dal payload IT-full in `company_data.raw`, mai dal PDF.)_

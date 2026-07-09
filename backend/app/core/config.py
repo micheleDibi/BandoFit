@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     openapi_timeout_seconds: float = 30.0
     # Minuti minimi tra due import della stessa azienda (ogni import costa credito).
     company_import_cooldown_minutes: int = 10
+    # Vita dell'anteprima già pagata, in attesa di conferma. Più lungo del
+    # cooldown: chi annulla e ci ripensa non deve ripagare il fetch.
+    company_import_draft_ttl_minutes: int = 30
 
     # AI-check (API Anthropic). Chiave vuota = feature disattivata (le rotte
     # rispondono 503 ai_not_configured). Ogni report costa ~0,10 $ di API.

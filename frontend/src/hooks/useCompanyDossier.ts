@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import type { DossierResponse, ImportResult } from "../types";
+import type { DossierResponse, ImportPreview, ImportResult } from "../types";
 import { useAuth } from "./useAuth";
+
+/** Deadline del polling lato server (240s, vedi backend/app/clients/openapi.py)
+ *  più un margine. Senza timeout esplicito axios attende all'infinito e una rete
+ *  caduta a metà chiamata lascerebbe la modale a girare per sempre. */
+const PREVIEW_TIMEOUT_MS = 255_000;
 
 export function useCompanyDossier() {
   const { session } = useAuth();
@@ -13,13 +18,29 @@ export function useCompanyDossier() {
   });
 }
 
-/** Import della visura da openapi.it (operazione A PAGAMENTO lato server:
- * il bottone che la lancia mostra sempre la nota costo). */
-export function useImportCompany() {
+/** Fase 1: recupera i dati dal Registro Imprese (A PAGAMENTO lato server) e li
+ *  mostra in anteprima. NON scrive nulla: il bottone che la lancia mostra
+ *  sempre la nota costo. */
+export function usePreviewImport() {
+  return useMutation({
+    mutationFn: async (partitaIva: string) =>
+      (
+        await api.post<ImportPreview>(
+          "/me/company/import/preview",
+          { partita_iva: partitaIva },
+          { timeout: PREVIEW_TIMEOUT_MS },
+        )
+      ).data,
+  });
+}
+
+/** Fase 2: scrive i dati già recuperati. Gratuita e rapida — nessuna chiamata
+ *  al provider, quindi nessun timeout dedicato. */
+export function useConfirmImport() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (partitaIva: string) =>
-      (await api.post<ImportResult>("/me/company/import", { partita_iva: partitaIva })).data,
+      (await api.post<ImportResult>("/me/company/import/confirm", { partita_iva: partitaIva })).data,
     onSuccess: (result) => {
       queryClient.setQueryData(["company"], result.company);
       queryClient.setQueryData<DossierResponse>(["company-dossier"], {

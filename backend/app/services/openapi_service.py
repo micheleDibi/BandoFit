@@ -24,6 +24,8 @@ from app.core.errors import (
 from app.schemas.openapi_data import (
     AutofillOut,
     DossierResponse,
+    ImportPreview,
+    ImportPreviewAzienda,
     ImportResult,
     PersonOut,
     SuggestionsOut,
@@ -47,6 +49,8 @@ COST_VERIFICA_CF_CENTS = 5
 # il lock NON deve scadere mentre l'import è ancora in corso, o un secondo
 # import concorrente pagherebbe una seconda chiamata.
 LOCK_TTL_SECONDS = 300
+# La conferma non aspetta nessuna rete esterna: qualche scrittura PostgREST.
+CONFIRM_LOCK_TTL_SECONDS = 30
 VERIFY_LOCK_TTL_SECONDS = 30
 # Cooldown (in-memory) tra verifiche CF A PAGAMENTO dello stesso utente:
 # il lock copre la concorrenza, questo evita il drenaggio di credito con
@@ -123,6 +127,69 @@ async def _fetch_company_data(primary, company_profile_id: str) -> dict | None:
     return resp.data[0] if resp.data else None
 
 
+async def _fetch_draft(primary, parent_id: str) -> dict | None:
+    """Anteprima già pagata e non ancora scaduta. Un draft scaduto è come non
+    esistesse: il payload va richiesto (e ripagato)."""
+    resp = (
+        await primary.table("company_import_drafts")
+        .select("partita_iva,raw,sandbox,fetched_at,expires_at")
+        .eq("parent_id", str(parent_id))
+        .gt("expires_at", datetime.now(timezone.utc).isoformat())
+        .limit(1)
+        .execute()
+    )
+    return resp.data[0] if resp.data else None
+
+
+async def _store_draft(
+    primary, parent_id: str, piva: str, payload: dict, *, sandbox: bool
+) -> tuple[str, str]:
+    """Mette in staging il payload appena pagato. Una riga per titolare:
+    una nuova anteprima sostituisce la precedente. Ritorna (fetched_at, expires_at)."""
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(minutes=settings.company_import_draft_ttl_minutes)
+    await primary.table("company_import_drafts").upsert(
+        {
+            "parent_id": str(parent_id),
+            "partita_iva": piva,
+            "raw": payload,
+            "sandbox": sandbox,
+            "fetched_at": now.isoformat(),
+            "expires_at": expires_at.isoformat(),
+        },
+        on_conflict="parent_id",
+    ).execute()
+    return now.isoformat(), expires_at.isoformat()
+
+
+async def _delete_draft(primary, parent_id: str) -> None:
+    await primary.table("company_import_drafts").delete().eq(
+        "parent_id", str(parent_id)
+    ).execute()
+
+
+async def _lock_remaining_minutes(primary, parent_id: str) -> int:
+    """Minuti che restano al lock. Dopo un timeout del provider il lock viene
+    lasciato scadere di proposito (fino a 5 minuti): dire «attendi qualche
+    istante» sarebbe una presa in giro."""
+    try:
+        resp = (
+            await primary.table("company_import_locks")
+            .select("expires_at")
+            .eq("parent_id", str(parent_id))
+            .limit(1)
+            .execute()
+        )
+        expires = _parse_ts(resp.data[0]["expires_at"]) if resp.data else None
+    except Exception:  # pragma: no cover — il messaggio è accessorio
+        expires = None
+    if not expires:
+        return 1
+    remaining = expires - datetime.now(timezone.utc)
+    return max(1, int(remaining.total_seconds() // 60) + 1)
+
+
 async def _acquire_lock(primary, parent_id: str, ttl_seconds: int = LOCK_TTL_SECONDS) -> bool:
     resp = await primary.rpc(
         "fn_acquire_import_lock",
@@ -140,52 +207,148 @@ async def _release_lock(primary, parent_id: str) -> None:
         logger.exception("release del lock di import fallita (scadrà da solo)")
 
 
-async def import_company(
-    primary, secondary, openapi: OpenapiClient, user: dict, partita_iva: str | None
-) -> ImportResult:
-    """Recupera IT-full, persiste raw+derivati+persone e compila i campi
-    aziendali VUOTI (mai sovrascrivere i valori dell'utente)."""
-    if not openapi.enabled:
-        raise OpenapiNotConfiguredError()
-
-    # Stessa regola di scrittura dei dati aziendali: un figlio ATTIVO eredita.
+async def _guard_editable(primary, user: dict) -> str:
+    """Stessa regola di scrittura dei dati aziendali: un figlio ATTIVO eredita."""
     membership = await family_service.get_membership(primary, user["id"])
     if membership and membership["status"] == "active":
         raise ForbiddenError("I dati aziendali li gestisce il titolare dell'azienda")
+    return str(user["id"])
 
-    parent_id = str(user["id"])
-    company_row = await _fetch_company_row(primary, parent_id)
 
+def _resolve_piva(partita_iva: str | None, company_row: dict | None) -> str:
     piva = partita_iva or (company_row or {}).get("partita_iva")
     if not piva:
         raise BadRequestError("Inserisci la partita IVA da importare")
     if not validate_partita_iva(piva):
         raise BadRequestError("La partita IVA non è valida: controlla le 11 cifre")
+    return piva
+
+
+def _build_preview(
+    payload: dict,
+    company_row: dict | None,
+    lookups,
+    *,
+    piva: str,
+    fetched_at: str,
+    expires_at: str,
+    sandbox: bool,
+    reused: bool,
+) -> ImportPreview:
+    """Anteprima di sola lettura. `build_autofill` è puro: lo chiamiamo qui e
+    SCARTIAMO `updates` — così l'anteprima mostra esattamente ciò che la
+    conferma scriverà, senza una seconda implementazione che possa divergere."""
+    dossier = build_dossier(payload)
+    anagrafica = dossier.get("anagrafica") or {}
+    attivita = dossier.get("attivita") or {}
+    sede = dossier.get("sede") or {}
+    ateco = attivita.get("ateco") or {}
+
+    _updates, applied, conflicts, suggestions = build_autofill(payload, company_row, lookups)
+
+    people = extract_people(payload)
+    rappresentante = next(
+        (
+            " ".join(filter(None, [p.get("nome"), p.get("cognome")])) or p.get("denominazione")
+            for p in people
+            if p.get("is_legale_rappresentante")
+        ),
+        None,
+    )
+
+    indirizzo = ", ".join(
+        filter(None, [sede.get("indirizzo"), sede.get("cap"), sede.get("comune")])
+    )
+    if sede.get("provincia"):
+        indirizzo = f"{indirizzo} ({sede['provincia']})" if indirizzo else sede["provincia"]
+
+    codice = ateco.get("codice")
+    descrizione = ateco.get("descrizione")
+
+    return ImportPreview(
+        azienda=ImportPreviewAzienda(
+            partita_iva=piva,
+            ragione_sociale=anagrafica.get("denominazione"),
+            codice_fiscale=anagrafica.get("codice_fiscale"),
+            forma_giuridica=anagrafica.get("forma_giuridica_dettaglio")
+            or anagrafica.get("forma_giuridica"),
+            stato_impresa=stato_impresa(payload),
+            sede=indirizzo or None,
+            regione=sede.get("regione"),
+            ateco=f"{codice} — {descrizione}" if codice and descrizione else codice,
+            legale_rappresentante=rappresentante,
+            numero_persone=len(people),
+        ),
+        autofill=AutofillOut(applied=applied, conflicts=conflicts),
+        suggestions=SuggestionsOut(**suggestions),
+        fetched_at=fetched_at,
+        draft_expires_at=expires_at,
+        reused=reused,
+        sandbox=sandbox,
+    )
+
+
+async def preview_import(
+    primary, secondary, openapi: OpenapiClient, user: dict, partita_iva: str | None
+) -> ImportPreview:
+    """Fase 1: recupera IT-full (A PAGAMENTO) e mostra cosa si sta per importare.
+
+    NON scrive nulla sui dati aziendali. Il payload pagato finisce in staging
+    (`company_import_drafts`) e la conferma lo consuma senza ripagarlo."""
+    if not openapi.enabled:
+        raise OpenapiNotConfiguredError()
+
+    parent_id = await _guard_editable(primary, user)
+    company_row = await _fetch_company_row(primary, parent_id)
+    piva = _resolve_piva(partita_iva, company_row)
 
     settings = get_settings()
-    cost = 0 if openapi.sandbox else COST_IT_FULL_CENTS
+    lookups = await lookup_service.get_lookups(secondary)
+
+    # Anteprima già pagata per la STESSA azienda: si riusa, gratis e senza
+    # cooldown. È ciò che rende indolore un «annulla» seguito da un ripensamento.
+    draft = await _fetch_draft(primary, parent_id)
+    if draft and draft["partita_iva"] == piva:
+        return _build_preview(
+            draft["raw"], company_row, lookups,
+            piva=piva,
+            fetched_at=draft["fetched_at"],
+            expires_at=draft["expires_at"],
+            sandbox=draft["sandbox"],
+            reused=True,
+        )
 
     # Cooldown: l'import costa, un doppio click non deve pagare due volte.
+    # Vale sull'ultimo fetch PAGATO, che può essere un import confermato
+    # (company_data) o un'anteprima di un'altra P.IVA rimasta in staging —
+    # altrimenti si drenerebbe credito cambiando P.IVA a ogni tentativo.
     existing_data = (
         await _fetch_company_data(primary, company_row["id"]) if company_row else None
     )
-    if existing_data:
-        last = _parse_ts(existing_data.get("fetched_at"))
-        cooldown = timedelta(minutes=settings.company_import_cooldown_minutes)
-        if last and datetime.now(timezone.utc) - last < cooldown:
-            remaining = cooldown - (datetime.now(timezone.utc) - last)
-            minutes = max(1, int(remaining.total_seconds() // 60) + 1)
-            raise AppError(
-                409,
-                "import_cooldown",
-                f"Dati aziendali già aggiornati di recente: riprova tra circa {minutes} minuti",
-            )
+    timestamps = [
+        _parse_ts((existing_data or {}).get("fetched_at")),
+        _parse_ts((draft or {}).get("fetched_at")),
+    ]
+    last = max((t for t in timestamps if t), default=None)
+    cooldown = timedelta(minutes=settings.company_import_cooldown_minutes)
+    if last and datetime.now(timezone.utc) - last < cooldown:
+        remaining = cooldown - (datetime.now(timezone.utc) - last)
+        minutes = max(1, int(remaining.total_seconds() // 60) + 1)
+        raise AppError(
+            409,
+            "import_cooldown",
+            f"Dati aziendali già aggiornati di recente: riprova tra circa {minutes} minuti",
+        )
+
+    cost = 0 if openapi.sandbox else COST_IT_FULL_CENTS
 
     if not await _acquire_lock(primary, parent_id):
+        minutes = await _lock_remaining_minutes(primary, parent_id)
         raise AppError(
             409,
             "import_in_progress",
-            "Un'importazione è già in corso per questa azienda: attendi qualche istante",
+            "Un recupero dati è ancora in corso, o si è appena interrotto. Per evitare "
+            f"un doppio addebito riprova tra circa {minutes} minuti",
         )
 
     try:
@@ -216,7 +379,8 @@ async def import_company(
 
     try:
         # Guardia: la risposta deve riguardare l'azienda richiesta (IT-full
-        # accetta P.IVA o CF: confrontiamo con entrambi).
+        # accetta P.IVA o CF: confrontiamo con entrambi). Un payload che non
+        # combacia non entra MAI in staging.
         returned_ids = {
             str((payload.get("companyDetails") or {}).get("vatCode") or ""),
             str((payload.get("companyDetails") or {}).get("taxCode") or ""),
@@ -236,79 +400,138 @@ async def import_company(
             primary, user_id=parent_id, family_parent_id=parent_id,
             service="IT-full", outcome="success", cost_cents=cost, meta={"piva": piva},
         )
-
-        lookups = await lookup_service.get_lookups(secondary)
-
-        # Il profilo aziendale deve esistere per agganciare i dati certificati.
-        if company_row is None:
-            ragione = (payload.get("companyDetails") or {}).get("companyName") or "—"
-            insert = (
-                await primary.table("company_profiles")
-                .insert({"parent_id": parent_id, "ragione_sociale": ragione, "partita_iva": piva})
-                .execute()
-            )
-            company_row = await _fetch_company_row(primary, parent_id)
-            if company_row is None:  # pragma: no cover — solo per robustezza
-                raise OpenapiUpstreamError()
-
-        updates, applied, conflicts, suggestions = build_autofill(
-            payload, company_row, lookups
+        fetched_at, expires_at = await _store_draft(
+            primary, parent_id, piva, payload, sandbox=openapi.sandbox
         )
-        if updates:
-            await primary.table("company_profiles").update(updates).eq(
-                "parent_id", parent_id
-            ).execute()
-
-        derived = build_derived(payload, lookups)
-        fetched_at = datetime.now(timezone.utc).isoformat()
-        await primary.table("company_data").upsert(
-            {
-                "company_profile_id": company_row["id"],
-                "provider": "openapi.it",
-                "endpoint": "IT-full",
-                "piva_fetched": piva,
-                "sandbox": openapi.sandbox,
-                "raw": payload,
-                "derived": derived,
-                "denominazione": (payload.get("companyDetails") or {}).get("companyName"),
-                "stato_impresa": stato_impresa(payload),
-                "fetch_count": (existing_data or {}).get("fetch_count", 0) + 1,
-                "fetched_at": fetched_at,
-            },
-            on_conflict="company_profile_id",
-        ).execute()
-
-        # L'import è l'azione che ABILITA il punteggio di compatibilità (ateco +
-        # regione + regioni_ids): la cache va scaduta subito, o il badge non
-        # comparirebbe fino al TTL.
-        from app.services.compatibility import invalidate_company_facets  # import locale: evita cicli
-
-        invalidate_company_facets(parent_id)
-
-        people = extract_people(payload)
-        await primary.table("company_people").delete().eq(
-            "company_profile_id", company_row["id"]
-        ).execute()
-        if people:
-            await primary.table("company_people").insert(
-                [{"company_profile_id": company_row["id"], **person} for person in people]
-            ).execute()
-
-        await primary.table("audit_log").insert(
-            {
-                "actor_id": parent_id,
-                "action": "company.imported",
-                "target_user_id": parent_id,
-                "family_parent_id": parent_id,
-                "payload": {
-                    "piva": piva,
-                    "campi_compilati": applied,
-                    "sandbox": openapi.sandbox,
-                },
-            }
-        ).execute()
     finally:
         await _release_lock(primary, parent_id)
+
+    return _build_preview(
+        payload, company_row, lookups,
+        piva=piva,
+        fetched_at=fetched_at,
+        expires_at=expires_at,
+        sandbox=openapi.sandbox,
+        reused=False,
+    )
+
+
+async def confirm_import(
+    primary, secondary, user: dict, partita_iva: str | None
+) -> ImportResult:
+    """Fase 2: scrive i dati dell'anteprima. NON chiama il provider, quindi
+    non costa nulla e non passa dal cooldown (che protegge il fetch, non la
+    scrittura). Il draft viene consumato: una seconda conferma non trova nulla."""
+    parent_id = await _guard_editable(primary, user)
+
+    draft = await _fetch_draft(primary, parent_id)
+    if draft is None:
+        raise AppError(
+            409,
+            "draft_not_found",
+            "L'anteprima è scaduta: riavvia l'importazione dei dati",
+        )
+    if partita_iva and partita_iva != draft["partita_iva"]:
+        raise AppError(
+            409,
+            "draft_mismatch",
+            "L'anteprima si riferisce a un'altra partita IVA: riavvia l'importazione",
+        )
+
+    # Serializza due conferme concorrenti. TTL breve: qui non si aspetta nessuna
+    # rete esterna, solo qualche scrittura PostgREST.
+    if not await _acquire_lock(primary, parent_id, CONFIRM_LOCK_TTL_SECONDS):
+        raise AppError(
+            409,
+            "import_in_progress",
+            "Un'importazione è già in corso per questa azienda: attendi qualche istante",
+        )
+
+    try:
+        result = await _persist_import(
+            primary, secondary, user, parent_id,
+            piva=draft["partita_iva"],
+            payload=draft["raw"],
+            sandbox=draft["sandbox"],
+        )
+        await _delete_draft(primary, parent_id)
+    finally:
+        await _release_lock(primary, parent_id)
+
+    return result
+
+
+async def _persist_import(
+    primary, secondary, user: dict, parent_id: str, *, piva: str, payload: dict, sandbox: bool
+) -> ImportResult:
+    """Persiste raw + derivati + persone e compila i campi aziendali VUOTI
+    (mai sovrascrivere i valori dell'utente). Nessuna chiamata esterna."""
+    company_row = await _fetch_company_row(primary, parent_id)
+    existing_data = (
+        await _fetch_company_data(primary, company_row["id"]) if company_row else None
+    )
+    lookups = await lookup_service.get_lookups(secondary)
+
+    # Il profilo aziendale deve esistere per agganciare i dati certificati.
+    if company_row is None:
+        ragione = (payload.get("companyDetails") or {}).get("companyName") or "—"
+        await primary.table("company_profiles").insert(
+            {"parent_id": parent_id, "ragione_sociale": ragione, "partita_iva": piva}
+        ).execute()
+        company_row = await _fetch_company_row(primary, parent_id)
+        if company_row is None:  # pragma: no cover — solo per robustezza
+            raise OpenapiUpstreamError()
+
+    updates, applied, conflicts, suggestions = build_autofill(payload, company_row, lookups)
+    if updates:
+        await primary.table("company_profiles").update(updates).eq(
+            "parent_id", parent_id
+        ).execute()
+
+    derived = build_derived(payload, lookups)
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    await primary.table("company_data").upsert(
+        {
+            "company_profile_id": company_row["id"],
+            "provider": "openapi.it",
+            "endpoint": "IT-full",
+            "piva_fetched": piva,
+            "sandbox": sandbox,
+            "raw": payload,
+            "derived": derived,
+            "denominazione": (payload.get("companyDetails") or {}).get("companyName"),
+            "stato_impresa": stato_impresa(payload),
+            "fetch_count": (existing_data or {}).get("fetch_count", 0) + 1,
+            "fetched_at": fetched_at,
+        },
+        on_conflict="company_profile_id",
+    ).execute()
+
+    # L'import è l'azione che ABILITA il punteggio di compatibilità (ateco +
+    # regione + regioni_ids): la cache va scaduta subito, o il badge non
+    # comparirebbe fino al TTL.
+    from app.services.compatibility import invalidate_company_facets  # import locale: evita cicli
+
+    invalidate_company_facets(parent_id)
+
+    people = extract_people(payload)
+    await primary.table("company_people").delete().eq(
+        "company_profile_id", company_row["id"]
+    ).execute()
+    if people:
+        await primary.table("company_people").insert(
+            [{"company_profile_id": company_row["id"], **person} for person in people]
+        ).execute()
+
+    await primary.table("audit_log").insert(
+        {
+            "actor_id": parent_id,
+            "action": "company.imported",
+            "target_user_id": parent_id,
+            "family_parent_id": parent_id,
+            "payload": {"piva": piva, "campi_compilati": applied, "sandbox": sandbox},
+        }
+    ).execute()
 
     company = await company_service.get_company(primary, user)
     return ImportResult(
@@ -318,7 +541,7 @@ async def import_company(
         autofill=AutofillOut(applied=applied, conflicts=conflicts),
         suggestions=SuggestionsOut(**suggestions),
         fetched_at=fetched_at,
-        sandbox=openapi.sandbox,
+        sandbox=sandbox,
     )
 
 

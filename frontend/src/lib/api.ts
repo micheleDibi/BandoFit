@@ -38,6 +38,16 @@ export function apiErrorMessage(err: unknown, fallback = "Si è verificato un er
     const body = err.response?.data as ApiErrorBody | undefined;
     if (body?.error?.message) return body.error.message;
     if (err.code === "ERR_NETWORK") return "Impossibile raggiungere il server. Controlla la connessione.";
+    // Timeout della richiesta: il server può aver completato l'operazione.
+    if (err.code === "ECONNABORTED")
+      return "L'operazione sta impiegando più del previsto. Riprova tra qualche minuto: se è già andata a buon fine, i dati saranno aggiornati.";
   }
   return fallback;
+}
+
+/** Codice d'errore del backend (`draft_not_found`, `import_cooldown`, …), per
+ *  chi deve reagire all'errore e non solo mostrarlo. */
+export function apiErrorCode(err: unknown): string | undefined {
+  if (!axios.isAxiosError(err)) return undefined;
+  return (err.response?.data as ApiErrorBody | undefined)?.error?.code;
 }

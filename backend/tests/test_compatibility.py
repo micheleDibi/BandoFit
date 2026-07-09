@@ -69,6 +69,73 @@ class TestBuildCompanyFacets:
         assert facets.beneficiari_ids == set()
 
 
+class FakePrimary:
+    """PostgREST finto: `selects` risponde alle SELECT per tabella."""
+
+    def __init__(self, selects: dict):
+        self.selects = selects
+
+    def table(self, name):
+        primary = self
+
+        class _Q:
+            def __getattr__(self, _name):
+                return lambda *a, **k: self
+
+            async def execute(self):
+                return SimpleNamespace(data=primary.selects.get(name, []))
+
+        return _Q()
+
+
+USER = {"id": "a0000000-0000-0000-0000-000000000001"}
+
+
+def _primary(company: dict | None, derived: dict | None = None) -> FakePrimary:
+    return FakePrimary(
+        {
+            "company_profiles": [dict(company, id="c1")] if company else [],
+            "company_data": [{"derived": derived}] if derived is not None else [],
+        }
+    )
+
+
+class TestLoadCompanyFacets:
+    """`load_company_facets` NON filtra su `sufficiente`; `get_company_facets` sì.
+
+    È la distinzione che fa funzionare «Bandi per te» su un'azienda senza P.IVA
+    importata (solo settore o beneficiari dichiarati a mano) senza mostrare un
+    badge di compatibilità che mentirebbe."""
+
+    async def test_multisede_e_ateco_secondari(self):
+        invalidate_company_facets(USER["id"])
+        primary = _primary(
+            {"ateco_id": 620, "regione_id": 12, "settore_id": 7, "beneficiari": []},
+            {"ateco_secondari": ["63.01"], "regioni_ids": [12, 15]},
+        )
+        facets = await compatibility.load_company_facets(primary, USER, lookups())
+        assert facets.regioni_ids == {12, 15}  # sede legale + unità locale
+        assert facets.ateco_ids == {620, 630}  # principale + secondario
+
+    async def test_azienda_non_sufficiente_resta_utile_al_preset(self):
+        invalidate_company_facets(USER["id"])
+        # Nessun ATECO, nessuna regione: solo beneficiari dichiarati a mano.
+        primary = _primary({"beneficiari": [{"id": 2, "nome": "PMI"}]})
+
+        facets = await compatibility.load_company_facets(primary, USER, lookups())
+        assert facets.sufficiente is False
+        assert facets.beneficiari_ids == {2}  # il preset può filtrare lo stesso
+
+        invalidate_company_facets(USER["id"])
+        # Il badge invece non deve comparire.
+        assert await compatibility.get_company_facets(primary, USER, lookups()) is None
+
+    async def test_senza_azienda_nessun_facet(self):
+        invalidate_company_facets(USER["id"])
+        primary = _primary(None)
+        assert await compatibility.load_company_facets(primary, USER, lookups()) is None
+
+
 def _facets(**over):
     base = dict(regioni_ids={12}, ateco_ids={620}, settore_id=7, beneficiari_ids={2}, sufficiente=True)
     base.update(over)
@@ -240,5 +307,5 @@ async def test_get_company_facets_degrada_a_none_su_errore(monkeypatch):
     async def boom(*_args, **_kwargs):
         raise RuntimeError("primary irraggiungibile")
 
-    monkeypatch.setattr(compatibility, "_load_company_facets", boom)
+    monkeypatch.setattr(compatibility, "load_company_facets", boom)
     assert await compatibility.get_company_facets(object(), {"id": "u1"}, lookups()) is None

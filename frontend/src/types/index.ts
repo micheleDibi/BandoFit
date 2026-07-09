@@ -268,6 +268,18 @@ export interface CompanyResponse {
   company: CompanyProfile | null;
 }
 
+/** Facet reali dell'azienda (id delle lookup del catalogo). Non è `CompanyProfile`:
+ *  là ci sono i campi del form (una regione, un ATECO), qui tutto ciò che
+ *  l'azienda è secondo i dati certificati — `regioni` copre TUTTE le sedi e
+ *  `ateco` include le divisioni secondarie. `sufficiente` = P.IVA importata. */
+export interface CompanyFacets {
+  regioni: number[];
+  ateco: number[];
+  settori: number[];
+  beneficiari: number[];
+  sufficiente: boolean;
+}
+
 // ---- Dossier certificato (import openapi.it) -------------------------------
 
 export interface DossierRuolo {

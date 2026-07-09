@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import type { CompanyResponse } from "../types";
+import type { CompanyFacets, CompanyResponse } from "../types";
 import { useAuth } from "./useAuth";
 
 export function useCompany() {
@@ -8,6 +8,20 @@ export function useCompany() {
   return useQuery({
     queryKey: ["company"],
     queryFn: async () => (await api.get<CompanyResponse>("/me/company")).data,
+    enabled: !!session,
+    staleTime: 60_000,
+  });
+}
+
+/** Cosa l'azienda è DAVVERO: tutte le sedi (non la sola sede legale) e le
+ *  divisioni ATECO secondarie. `useCompany` restituisce i campi del form, che
+ *  per costruzione ne tengono una sola. Il server li calcola con la stessa
+ *  funzione del badge di compatibilità. */
+export function useCompanyFacets() {
+  const { session } = useAuth();
+  return useQuery({
+    queryKey: ["company-facets"],
+    queryFn: async () => (await api.get<CompanyFacets>("/me/company/facets")).data,
     enabled: !!session,
     staleTime: 60_000,
   });
@@ -40,6 +54,11 @@ export function useSaveCompany() {
   return useMutation({
     mutationFn: async (data: CompanyPayload) =>
       (await api.put<CompanyResponse>("/me/company", data)).data,
-    onSuccess: (response) => queryClient.setQueryData(["company"], response),
+    onSuccess: (response) => {
+      queryClient.setQueryData(["company"], response);
+      // I facet li ricalcola il server (ATECO secondari, sedi): non si
+      // ricostruiscono dalla risposta.
+      queryClient.invalidateQueries({ queryKey: ["company-facets"] });
+    },
   });
 }

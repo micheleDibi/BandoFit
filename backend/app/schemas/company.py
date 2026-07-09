@@ -94,3 +94,22 @@ class CompanyOut(CompanyIn):
 class CompanyResponse(BaseModel):
     editable: bool
     company: CompanyOut | None = None
+
+
+class CompanyFacetsOut(BaseModel):
+    """Facet REALI dell'azienda, negli id delle lookup del catalogo.
+
+    Non è un doppione di `CompanyOut`: là ci sono i campi del FORM (una sola
+    regione, un solo ATECO), qui c'è tutto ciò che l'azienda è davvero secondo
+    i dati certificati — `regioni` sono TUTTE le sedi (legale + unità locali) e
+    `ateco` include le divisioni secondarie. Stessa fonte del badge di
+    compatibilità e dell'AI-check, così i tre non possono divergere.
+
+    `sufficiente` = P.IVA importata (ATECO e regione valorizzati): è la
+    condizione del badge, non del preset «Bandi per te»."""
+
+    regioni: list[int] = Field(default_factory=list)
+    ateco: list[int] = Field(default_factory=list)
+    settori: list[int] = Field(default_factory=list)
+    beneficiari: list[int] = Field(default_factory=list)
+    sufficiente: bool = False

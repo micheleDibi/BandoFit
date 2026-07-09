@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.deps import CurrentUser, OpenapiDep, PrimaryClient, SecondaryClient
-from app.schemas.company import CompanyIn, CompanyResponse
+from app.schemas.company import CompanyFacetsOut, CompanyIn, CompanyResponse
 from app.schemas.openapi_data import (
     DossierResponse,
     ImportConfirmIn,
@@ -9,7 +9,7 @@ from app.schemas.openapi_data import (
     ImportPreview,
     ImportResult,
 )
-from app.services import company_service, openapi_service
+from app.services import company_service, compatibility, lookup_service, openapi_service
 
 router = APIRouter(prefix="/me/company", tags=["company"])
 
@@ -32,6 +32,30 @@ async def save_company(
     famiglia); pending e retrocessi sono account indipendenti con dati propri —
     la coerenza con `editable` di GET è verificata nel service."""
     return await company_service.upsert_company(primary, secondary, user, data)
+
+
+@router.get("/facets", response_model=CompanyFacetsOut)
+async def company_facets(
+    user: CurrentUser,
+    primary: PrimaryClient,
+    secondary: SecondaryClient,
+) -> CompanyFacetsOut:
+    """Cosa l'azienda è DAVVERO, per i filtri: tutte le sedi, non la sola sede
+    legale, e le divisioni ATECO secondarie oltre alla principale. Stessa
+    funzione che alimenta il badge di compatibilità e l'AI-check.
+
+    Un figlio attivo vede i facet della famiglia, come per i dati aziendali."""
+    lookups = await lookup_service.get_lookups(secondary)
+    facets = await compatibility.load_company_facets(primary, user, lookups)
+    if facets is None:
+        return CompanyFacetsOut()
+    return CompanyFacetsOut(
+        regioni=sorted(facets.regioni_ids),
+        ateco=sorted(facets.ateco_ids),
+        settori=[facets.settore_id] if facets.settore_id is not None else [],
+        beneficiari=sorted(facets.beneficiari_ids),
+        sufficiente=facets.sufficiente,
+    )
 
 
 @router.post("/import/preview", response_model=ImportPreview)

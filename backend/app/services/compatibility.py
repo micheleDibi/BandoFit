@@ -150,7 +150,16 @@ def invalidate_company_facets(owner_id: str) -> None:
     _cache.pop(str(owner_id), None)
 
 
-async def _load_company_facets(primary, user: dict, lookups: LookupsOut) -> CompanyFacets | None:
+async def load_company_facets(primary, user: dict, lookups: LookupsOut) -> CompanyFacets | None:
+    """Facet dell'azienda della famiglia (i figli ereditano dal titolare), SENZA
+    il gate `sufficiente`: None solo se l'azienda non esiste.
+
+    È la fonte unica dei «dati reali dell'azienda»: il badge di compatibilità e
+    l'AI-check li vogliono filtrati (vedi `get_company_facets`), il preset
+    «Bandi per te» no — lì anche il solo settore, o i soli beneficiari
+    dichiarati a mano, sono un filtro utile.
+
+    Cache in-memory a TTL breve per owner (invalidata dalle scritture)."""
     owner_id, _editable = await owner_and_editable(primary, user)
 
     cached = _cache.get(owner_id)
@@ -176,8 +185,7 @@ async def _load_company_facets(primary, user: dict, lookups: LookupsOut) -> Comp
             .execute()
         )
         derived = data_resp.data[0].get("derived") if data_resp.data else None
-        built = build_company_facets(company, derived, lookups)
-        facets = built if built.sufficiente else None
+        facets = build_company_facets(company, derived, lookups)
 
     if len(_cache) > 512:  # backstop: evita crescita illimitata
         _cache.clear()
@@ -186,15 +194,15 @@ async def _load_company_facets(primary, user: dict, lookups: LookupsOut) -> Comp
 
 
 async def get_company_facets(primary, user: dict, lookups: LookupsOut) -> CompanyFacets | None:
-    """Facet dell'azienda della famiglia (i figli ereditano dal titolare).
-    Ritorna None se manca l'azienda o non è sufficiente (P.IVA non importata).
-    Cache in-memory a TTL breve per owner (invalidata dalle scritture).
+    """Facet per il PUNTEGGIO: None anche quando l'azienda non è sufficiente
+    (P.IVA non importata), perché senza ATECO e regione il badge mentirebbe.
 
     Il punteggio è ACCESSORIO: qualunque errore nella lettura dei dati
     aziendali degrada a None (nessun badge) e non deve mai far fallire
     l'elenco o il dettaglio di un bando, che vivono sul DB secondario."""
     try:
-        return await _load_company_facets(primary, user, lookups)
+        facets = await load_company_facets(primary, user, lookups)
     except Exception:
         logger.warning("compatibilità non calcolabile: dati aziendali illeggibili", exc_info=True)
         return None
+    return facets if facets is not None and facets.sufficiente else None

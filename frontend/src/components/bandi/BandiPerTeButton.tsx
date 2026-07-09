@@ -1,6 +1,6 @@
 import { Sparkles } from "lucide-react";
 import { useMemo } from "react";
-import { useCompany } from "../../hooks/useCompany";
+import { useCompanyFacets } from "../../hooks/useCompany";
 import { usePreferences } from "../../hooks/usePreferences";
 import { useBandiFilters, type FacetKey } from "../../hooks/useBandiFilters";
 import { buildBandiPerTePreset, presetHasValues } from "../../lib/bandiPreset";
@@ -13,12 +13,12 @@ const sameSet = (a: number[], b: number[]) =>
  * dell'azienda e delle PREFERENZE personali dell'utente. */
 export function BandiPerTeButton() {
   const { filters, update } = useBandiFilters();
-  const { data: companyData } = useCompany();
+  const { data: facets } = useCompanyFacets();
   const { data: preferences } = usePreferences();
 
   const preset = useMemo(
-    () => buildBandiPerTePreset(companyData?.company, preferences),
-    [companyData, preferences],
+    () => buildBandiPerTePreset(facets, preferences),
+    [facets, preferences],
   );
 
   const hasPreset = presetHasValues(preset);

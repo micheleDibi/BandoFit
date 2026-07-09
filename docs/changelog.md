@@ -2,6 +2,13 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-09 — «Bandi per te» considera tutte le sedi, non solo quella legale
+
+- Il preset filtrava sui campi del **form** (`company_profiles.regione_id`, `ateco_id`), che per costruzione tengono **una** regione e **un** ATECO: un'azienda con unità locali in altre regioni non vedeva i bandi per cui è candidabile. Il badge di compatibilità e l'AI-check erano già corretti — usano `derived.regioni_ids` (tutte le sedi) e le divisioni ATECO secondarie — quindi i tre **dicevano cose diverse sulla stessa azienda**.
+- Nuovo **`GET /me/company/facets`**: i facet reali dell'azienda (tutte le sedi, ATECO principale + secondari, settore, beneficiari dichiarati), calcolati dalla **stessa** `build_company_facets` che alimenta badge e AI-check. Una sola definizione di «cosa l'azienda è», impossibile da far divergere.
+- `compatibility.load_company_facets` (nuova, pubblica) non filtra su `sufficiente`; `get_company_facets` continua a filtrarlo. Il **badge** senza ATECO e regione mentirebbe, il **preset** no: con i soli beneficiari dichiarati a mano filtra comunque in modo utile.
+- Frontend: `useCompanyFacets` alimenta `BandiPerTeButton` e il riquadro «La tua azienda» in Preferenze (che ora elenca **tutte** le regioni delle sedi e tutti i codici ATECO, con descrizione). `useCompany` resta la fonte del form. La cache `["company-facets"]` si invalida al salvataggio dei dati aziendali e alla conferma dell'import.
+
 ## 2026-07-09 — Import da P.IVA: anteprima con conferma, e il bug che lo faceva «sparire»
 
 - **Il bug non era l'API.** `Dialog` è un `<dialog>` nativo: si chiudeva con **Esc** e con un **click sul backdrop**, senza guardie. L'import può durare fino a **240 secondi** (polling del provider) e axios non aveva timeout: in quella finestra chi cliccava fuori vedeva la modale svanire mentre la richiesta proseguiva. I dati venivano importati **e pagati**, ma `result` ed `error` vivevano nello stato locale del dialog e morivano con lui. Non c'era nessun errore da mostrare: era il feedback a sparire. Scartate dopo verifica: errori inghiottiti (erano già mostrati, con messaggi distinti per 400/404/409/502/503/504), problemi CORS o **chiave API esposta** (la chiamata va al nostro backend; nel bundle c'è solo `VITE_API_BASE_URL`, le credenziali openapi.it stanno in `core/config.py` — **nessuna esposizione**), doppio addebito da doppio click (il `Button` si disabilita, e il server serializza con lock e cooldown).

@@ -54,6 +54,8 @@ export function useConfirmImport() {
       });
       // derived viene ricalcolato dal server: riallineiamo in background.
       queryClient.invalidateQueries({ queryKey: ["company-dossier"] });
+      // L'import è l'azione che popola sedi e ATECO secondari: i facet cambiano.
+      queryClient.invalidateQueries({ queryKey: ["company-facets"] });
     },
   });
 }

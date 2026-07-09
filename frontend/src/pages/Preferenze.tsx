@@ -18,7 +18,7 @@ import { Button, LinkButton } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { TagSelect, type TagSelectOption } from "../components/ui/TagSelect";
 import { Skeleton } from "../components/ui/states";
-import { useCompany } from "../hooks/useCompany";
+import { useCompanyFacets } from "../hooks/useCompany";
 import { useLookups } from "../hooks/useLookups";
 import { EMPTY_PREFERENCES, usePreferences, useSavePreferences } from "../hooks/usePreferences";
 import { apiErrorMessage } from "../lib/api";
@@ -102,7 +102,7 @@ interface InheritedValue {
 export default function Preferenze() {
   const { data: saved, isPending } = usePreferences();
   const { data: lookups } = useLookups();
-  const { data: companyData } = useCompany();
+  const { data: facets } = useCompanyFacets();
   const savePreferences = useSavePreferences();
 
   const [form, setForm] = useState<Preferences>(EMPTY_PREFERENCES);
@@ -112,34 +112,39 @@ export default function Preferenze() {
     if (saved) setForm(saved);
   }, [saved]);
 
-  const company = companyData?.company ?? null;
+  const optionOf = (facet: FacetDef, id: number): TagSelectOption | undefined =>
+    lookups ? facet.options(lookups).find((o) => o.id === id) : undefined;
+
+  const labelOf = (facet: FacetDef, id: number): string => optionOf(facet, id)?.label ?? String(id);
+
+  /** Nell'elenco l'ATECO è il solo codice; nel riquadro dell'azienda c'è spazio
+   *  per la descrizione, e un «62» nudo non direbbe niente. */
+  const labelEsteso = (facet: FacetDef, id: number): string => {
+    const option = optionOf(facet, id);
+    if (!option) return String(id);
+    return option.sublabel ? `${option.label} — ${option.sublabel}` : option.label;
+  };
 
   // Valori EREDITATI dai dati aziendali: sempre inclusi in «Bandi per te»,
-  // si modificano dai dati aziendali (non da qui).
+  // si modificano dai dati aziendali (non da qui). Vengono dai FACET, non dai
+  // campi del form: tutte le sedi, non la sola sede legale, e le divisioni
+  // ATECO secondarie oltre alla principale.
   const inherited = useMemo<Record<PrefKey, InheritedValue[]>>(() => {
+    const byKey = Object.fromEntries(FACETS.map((f) => [f.key, f])) as Record<PrefKey, FacetDef>;
+    const values = (key: PrefKey, ids: number[] | undefined): InheritedValue[] =>
+      (ids ?? []).map((id) => ({ id, label: labelEsteso(byKey[key], id) }));
     return {
-      codici_ateco:
-        company?.ateco_id != null
-          ? [{
-              id: company.ateco_id,
-              label: `${company.ateco_codice ?? company.ateco_id}${company.ateco_descrizione ? ` — ${company.ateco_descrizione}` : ""}`,
-            }]
-          : [],
-      regioni:
-        company?.regione_id != null
-          ? [{ id: company.regione_id, label: company.regione_nome ?? String(company.regione_id) }]
-          : [],
-      settori:
-        company?.settore_id != null
-          ? [{ id: company.settore_id, label: company.settore_nome ?? String(company.settore_id) }]
-          : [],
+      codici_ateco: values("codici_ateco", facets?.ateco),
+      regioni: values("regioni", facets?.regioni),
+      settori: values("settori", facets?.settori),
       // Dichiarate sui dati aziendali (prima erano dedotte dalla visura).
-      beneficiari: (company?.beneficiari ?? []).map((b) => ({ id: b.id, label: b.nome })),
+      beneficiari: values("beneficiari", facets?.beneficiari),
       tipologie: [],
       modalita: [],
       programmi: [],
     };
-  }, [company]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [facets, lookups]);
 
   const hasInherited = Object.values(inherited).some((v) => v.length > 0);
 
@@ -151,8 +156,8 @@ export default function Preferenze() {
   const followedCount = FACETS.reduce((acc, { key }) => acc + form[key].length, 0);
 
   const preset = useMemo(
-    () => buildBandiPerTePreset(company, saved ?? null),
-    [company, saved],
+    () => buildBandiPerTePreset(facets, saved ?? null),
+    [facets, saved],
   );
 
   if (isPending) {
@@ -182,11 +187,6 @@ export default function Preferenze() {
     } catch {
       // errore mostrato nella barra
     }
-  };
-
-  const labelOf = (facet: FacetDef, id: number): string => {
-    if (!lookups) return String(id);
-    return facet.options(lookups).find((o) => o.id === id)?.label ?? String(id);
   };
 
   return (
@@ -226,16 +226,17 @@ export default function Preferenze() {
               </h2>
               <p className="mt-1 text-xs text-slate-500">
                 Valori reali dai dati aziendali: sono <strong>sempre inclusi</strong> in
-                «Bandi per te» e si aggiornano da lì.
+                «Bandi per te» e si aggiornano da lì. Contano <strong>tutte le sedi</strong>
+                {" "}e tutti i codici ATECO del Registro Imprese, non solo la sede legale.
               </p>
             </div>
             <div className="space-y-3 px-5 py-4">
               {hasInherited ? (
                 (
                   [
-                    ["codici_ateco", "Codice ATECO"],
+                    ["codici_ateco", "Codici ATECO"],
                     ["settori", "Settore"],
-                    ["regioni", "Regione"],
+                    ["regioni", "Regioni delle sedi"],
                     ["beneficiari", "Beneficiari"],
                   ] as Array<[PrefKey, string]>
                 ).map(([key, title]) =>
@@ -265,7 +266,7 @@ export default function Preferenze() {
                 </p>
               )}
               <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-slate-100 pt-3 text-sm">
-                {/* Dati, dossier e documenti vivono tutti nella pagina Azienda */}
+                {/* Dati aziendali e dossier vivono entrambi nella pagina Azienda */}
                 <Link to="/app/azienda" className="font-medium text-brand-600 hover:text-brand-700">
                   Dati aziendali →
                 </Link>

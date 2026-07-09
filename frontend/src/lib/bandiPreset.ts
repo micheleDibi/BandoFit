@@ -1,5 +1,5 @@
 import type { FacetKey } from "../hooks/useBandiFilters";
-import type { CompanyProfile, Preferences } from "../types";
+import type { CompanyFacets, Preferences } from "../types";
 
 const union = (...groups: Array<number | number[] | null | undefined>): number[] => {
   const out = new Set<number>();
@@ -11,17 +11,22 @@ const union = (...groups: Array<number | number[] | null | undefined>): number[]
 };
 
 /** Preset «Bandi per te»: unione dei valori REALI dell'azienda e delle
- *  preferenze personali dell'utente, nelle chiavi dei filtri URL. */
+ *  preferenze personali dell'utente, nelle chiavi dei filtri URL.
+ *
+ *  I valori dell'azienda arrivano dai FACET (`GET /me/company/facets`), non
+ *  dai campi del form: un'azienda con tre unità locali è ammissibile in tre
+ *  regioni, e opera in tutte le divisioni ATECO che il Registro le riconosce.
+ *  Filtrare sulla sola sede legale nascondeva bandi per cui è candidabile. */
 export function buildBandiPerTePreset(
-  company: CompanyProfile | null | undefined,
+  facets: CompanyFacets | null | undefined,
   preferences: Preferences | null | undefined,
 ): Record<FacetKey, number[]> {
   return {
-    regioni: union(company?.regione_id, preferences?.regioni),
-    settori: union(company?.settore_id, preferences?.settori),
-    ateco: union(company?.ateco_id, preferences?.codici_ateco),
-    // Dichiarate sui dati aziendali: ereditate come regione/settore/ATECO.
-    beneficiari: union(company?.beneficiari_ids, preferences?.beneficiari),
+    regioni: union(facets?.regioni, preferences?.regioni),
+    settori: union(facets?.settori, preferences?.settori),
+    ateco: union(facets?.ateco, preferences?.codici_ateco),
+    // Dichiarate sui dati aziendali: ereditate come regioni/settore/ATECO.
+    beneficiari: union(facets?.beneficiari, preferences?.beneficiari),
     tipologie: union(preferences?.tipologie),
     modalita: union(preferences?.modalita),
     programmi: union(preferences?.programmi),

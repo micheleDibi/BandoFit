@@ -126,16 +126,6 @@ Errori: `400 bad_request` (P.IVA assente/checksum errata), `403 forbidden` (figl
 ### `GET /me/company/dossier`
 Dossier certificato importato: `{ editable, imported, fetched_at, sandbox, dossier: {anagrafica, attivita, sede, contatti, dipendenti, bilanci, partecipazioni, flags} | null, people: [...], derived: {...} }`. Stessa visibilità di `GET /me/company` (figlio attivo → sola lettura). `sandbox: true` = dati di test. Il payload grezzo del provider non viene mai esposto integralmente.
 
-### `POST /me/company/documents` (201)
-Richiede la **visura camerale ufficiale** (PDF dal Registro Imprese, **a pagamento**: ~2,90 € impresa individuale/ente REA, ~4,90 € società, +IVA). Il tipo d'impresa giusto viene individuato per tentativi (i rifiuti del Registro sono gratuiti); la variante è ordinata in base alla forma giuridica nota dall'import IT-full. Flusso asincrono: la risposta può essere `pending` (di solito è pronta in pochi secondi). Il PDF viene archiviato nel bucket Storage `company-documents` e il **testo estratto** (oggetto sociale e poteri compresi) resta server-side come input per l'AI-check.
-Errori: `400 bad_request` (P.IVA mancante / tipo d'impresa non coperto), `403 forbidden` (figlio attivo), `404 not_found`, `409 document_in_progress`, `502/503/504` come l'import.
-
-### `GET /me/company/documents`
-`{ editable, documents: [{id, kind, endpoint, status: pending|ready|error, file_name, file_size, pages, has_text, cost_cents, sandbox, created_at, ready_at}] }` — stessa visibilità dei dati aziendali; le richieste `pending` vengono completate a questa lettura se il Registro le ha evase (controllo gratuito).
-
-### `GET /me/company/documents/{id}/file`
-Scarica il PDF del documento (`application/pdf`, anche per i figli attivi). `409 document_not_ready` se non ancora evaso.
-
 ## AI-check
 
 Analisi di compatibilità **azienda ↔ bando** con LLM (API Anthropic) e punteggio deterministico. Consuma **1 AI-check della quota annua del piano** (`subscription_plans.ai_check`, condivisa da tutta l'azienda) a ogni generazione, rigenerazioni comprese; costo API ~0,10–0,20 $ a report (l'estrazione dei requisiti è cachata per bando). L'esito distingue sempre **ammissibilità** (gate binario sui requisiti obbligatori: uno solo mancato ⇒ `non_ammissibile`; dato mancante ⇒ `da_verificare`, mai promosso) e **punteggio** (`stima` se il bando pubblica la griglia, `euristico` con pesi interni altrimenti).

@@ -270,8 +270,6 @@ def build_company_pack(
     dossier: dict | None,
     derived: dict | None,
     people: list[dict] | None,
-    visura_text: str | None,
-    visura_max_chars: int,
 ) -> str:
     """Profilo persona + azienda serializzato con nomi di campo citabili."""
     blocks: list[str] = []
@@ -328,11 +326,6 @@ def build_company_pack(
             legale = " [legale rappresentante]" if person.get("is_legale_rappresentante") else ""
             rows.append(f"- {person.get('kind')}: {name}{legale} ({ruoli_text or 'ruolo non indicato'})")
         blocks.append("## Persone e cariche\n" + "\n".join(rows))
-
-    if visura_text:
-        text = visura_text[:visura_max_chars]
-        truncated = " (troncato)" if len(visura_text) > visura_max_chars else ""
-        blocks.append(f"## Testo della visura camerale{truncated}\n{text}")
 
     return "\n\n".join(blocks)
 

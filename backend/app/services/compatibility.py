@@ -32,7 +32,7 @@ import time
 from dataclasses import dataclass, field
 
 from app.schemas.bando import LookupsOut
-from app.services.document_service import _owner_and_editable
+from app.services.family_service import owner_and_editable
 from app.services.openapi_mapping import ateco_division, company_regioni_ids
 
 logger = logging.getLogger("bandofit.compatibility")
@@ -151,7 +151,7 @@ def invalidate_company_facets(owner_id: str) -> None:
 
 
 async def _load_company_facets(primary, user: dict, lookups: LookupsOut) -> CompanyFacets | None:
-    owner_id, _editable = await _owner_and_editable(primary, user)
+    owner_id, _editable = await owner_and_editable(primary, user)
 
     cached = _cache.get(owner_id)
     if cached is not None and (time.monotonic() - cached[1]) < _CACHE_TTL_SECONDS:

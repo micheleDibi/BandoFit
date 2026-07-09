@@ -47,11 +47,11 @@ Contiene i dati della piattaforma. Schema in `supabase/migrations/` (eseguire in
 
 **`api_usage_events`** — registro dei consumi API a pagamento, **senza FK** (come audit_log: sopravvive alle cancellazioni): provider/service/outcome (`success`/`error`/`timeout_unknown`), `cost_cents`, `response_status`, `request_meta` (mai dati personali in chiaro). Per l'AI-check annota ogni esito con `provider='anthropic'`, `service='ai_check'` e i token consumati nel `request_meta` — ma è un registro di SPESA best-effort: il **conteggio quota** usa le righe di `ai_checks` (`pending`+`ready` nella finestra dell'abbonamento), che cambiano stato atomicamente e sono transazionali col risultato.
 
-**`company_import_locks`** + `fn_acquire_import_lock(parent_id, ttl)` / `fn_release_import_lock(parent_id)` — lock anti doppia-spesa per l'import: la chiamata HTTP esterna avviene tra statement PostgREST, quindi il claim è un INSERT atomico con "furto" solo se il lock esistente è scaduto (TTL clampato a 600s). Riusato anche dalla verifica CF e dalle richieste di documenti.
+**`company_import_locks`** + `fn_acquire_import_lock(parent_id, ttl)` / `fn_release_import_lock(parent_id)` — lock anti doppia-spesa per l'import: la chiamata HTTP esterna avviene tra statement PostgREST, quindi il claim è un INSERT atomico con "furto" solo se il lock esistente è scaduto (TTL clampato a 600s). Riusato anche dalla verifica CF.
 
-### Documenti ufficiali (migration 0006)
+### Documenti ufficiali (migration 0006, rimossa dalla 0012)
 
-**`company_documents`** — visure camerali richieste a openapi.it (documenti asincroni): `kind` (`visura`), `endpoint` (la variante che ha accettato: capitale/persone/impresa-individuale — il tipo giusto si scopre per tentativi, i rifiuti sono gratuiti), `request_id` del provider, `status` (`pending`→`ready`/`error`), riferimento al PDF nel bucket Storage **`company-documents`** (`file_path`), **`extracted_text`** (testo del PDF via pypdf: oggetto sociale e poteri inclusi — input per l'AI-check), `cost_cents`, `sandbox`. Indice unico parziale: al massimo UNA richiesta `pending` per azienda e tipo. Cascade da company_profiles; il file nel bucket viene rimosso dal backend alla cancellazione.
+_(La tabella `company_documents` e il bucket `company-documents` sono stati **rimossi** con la migration 0012: la visura camerale PDF non è più una funzionalità. Il dossier, l'anagrafica, le sedi e le persone vengono dal payload IT-full in `company_data.raw`, mai dal PDF.)_
 
 ### AI-check (migration 0007)
 

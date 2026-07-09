@@ -1,0 +1,25 @@
+-- ============================================================================
+-- BandoFit — DB primario, migration 0012: rimozione della visura camerale.
+--
+-- ⚠️ DISTRUTTIVA. Elimina lo storico delle visure richieste — e PAGATE — a
+-- openapi.it. Non c'è modo di ricostruirlo se non riacquistandole.
+--
+-- ⚠️ I PDF NON VENGONO RIMOSSI DA QUESTA MIGRATION. Vivono nel bucket Storage
+-- `company-documents` e nessun codice li ha mai cancellati (la vecchia
+-- documentazione sosteneva il contrario). Dopo il drop la tabella non li
+-- indicizza più: diventano file orfani. **Svuotare il bucket a mano dalla
+-- console Supabase, PRIMA o subito dopo questa migration**, e poi eliminarlo.
+--
+-- Cosa resta intatto:
+--   * `company_data` (payload IT-full): è la fonte di dossier, anagrafica,
+--     sedi, persone e AI-check. Non dipende dal PDF.
+--   * `api_usage_events`: condivisa con IT-full e verifica_cf. Smette solo di
+--     ricevere righe `service = 'visura'`; lo storico dei costi resta.
+--   * `company_import_locks`: usata anche dall'import P.IVA.
+--
+-- Cosa perde l'AI-check: il blocco «Testo della visura camerale» nel prompt
+-- (oggetto sociale e poteri dallo statuto). Era opzionale e già assente per
+-- chi non aveva mai richiesto una visura: nessun fallback da scrivere.
+-- ============================================================================
+
+drop table if exists public.company_documents cascade;

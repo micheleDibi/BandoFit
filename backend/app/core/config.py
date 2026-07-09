@@ -56,8 +56,6 @@ class Settings(BaseSettings):
     ai_check_timeout_seconds: float = 120.0
     # Minuti minimi tra due generazioni per la stessa coppia azienda × bando.
     ai_check_cooldown_minutes: int = 5
-    # Limite del testo visura incluso nel profilo azienda passato al modello.
-    ai_check_visura_max_chars: int = 20000
 
     @property
     def cors_origins_list(self) -> list[str]:

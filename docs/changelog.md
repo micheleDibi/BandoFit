@@ -2,6 +2,15 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-09 — Rimossa la visura camerale
+
+- Sparisce la funzionalità **«Documenti ufficiali»**: richiesta della visura camerale PDF a openapi.it, archiviazione nel bucket Storage, download. Via i tre endpoint `/me/company/documents*`, `services/document_service.py`, il client visure, la dipendenza `pypdf`, `DocumentiCard`, `useCompanyDocuments` e i relativi test e fixture.
+- **Il dossier non ne dipendeva.** Anagrafica, ATECO, sedi, persone e dati economici vengono dal payload IT-full in `company_data.raw`: continuano a funzionare identici. L'**AI-check** perde però un blocco *opzionale* del prompt — il testo estratto dal PDF, che conteneva oggetto sociale e poteri. Non c'era fallback da scrivere (il blocco esisteva solo se una visura era stata richiesta), ma su bandi che valutano l'oggetto sociale il report può essere meno ricco.
+- **`_owner_and_editable` viveva in `document_service.py` ma non era codice della visura**: è la regola di visibilità di famiglia, e ci pendevano il badge di compatibilità e l'AI-check. È stata spostata in `family_service.owner_and_editable` (pubblica, senza underscore) prima di rimuovere il modulo.
+- Gli **scope OAuth** verso `visurecamerali.openapi.it` non vengono più richiesti; quelli di `IT-full`, `IT-check_id` e `verifica_cf` sono indipendenti e restano. Un test lo presidia.
+- Copy: la landing non promette più «visura camerale in PDF» (due punti), e la card dell'AI-check non la cita più.
+- **DB**: migration **0012** (distruttiva, da eseguire a mano) fa il `drop table company_documents cascade`. **I PDF nel bucket `company-documents` non vengono cancellati da nessun codice** — la vecchia documentazione sosteneva il contrario: vanno svuotati a mano dalla console. `api_usage_events` resta (condivisa con IT-full e verifica CF), smette solo di ricevere righe `service='visura'`.
+
 ## 2026-07-09 — Le categorie di beneficiario si dichiarano, non si deducono
 
 - **Nuovo campo multi-valore «Categorie di beneficiario»** sui dati aziendali (`TagSelect` in `CompanyCard`, scelto dalla lookup `beneficiari` del catalogo): un'azienda può essere insieme PMI e Organismo di formazione. Salvato su `company_profiles.beneficiari` jsonb `[{id, nome}]` (migration **0011**), denormalizzato come `settore_nome`; `PUT /me/company` accetta `beneficiari_ids` e risponde con `beneficiari`. La colonna sta lì, e non su una tabella ponte, perché il pre-check la rilegge a ogni `GET /bandi`, dove `company_profiles` è già nella query: zero letture aggiuntive.

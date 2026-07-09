@@ -106,43 +106,37 @@ COMPANY = {"ragione_sociale": "ACME Srl", "partita_iva": "01234567890",
 
 class TestCompanyPack:
     def test_campi_assenti_resi_non_disponibile(self):
-        pack = build_company_pack(PROFILE, COMPANY, None, None, [], None, 1000)
+        pack = build_company_pack(PROFILE, COMPANY, None, None, [])
         assert "settore_nome: NON DISPONIBILE" in pack
         assert "regione_nome: Lazio" in pack
 
     def test_cf_personale_mai_in_chiaro_nel_pack(self):
         # Il report è visibile a tutta l'azienda: il CF del titolare non deve
         # poter trapelare via dato_azienda — nel pack va solo lo stato.
-        pack = build_company_pack(PROFILE, COMPANY, None, None, [], None, 1000)
+        pack = build_company_pack(PROFILE, COMPANY, None, None, [])
         assert PROFILE["codice_fiscale"] not in pack.split("## Dati aziendali")[0]
         assert "codice_fiscale (stato): presente, verificato all'Anagrafe Tributaria" in pack
-        senza_cf = build_company_pack({**PROFILE, "codice_fiscale": None}, COMPANY, None, None, [], None, 1000)
+        senza_cf = build_company_pack({**PROFILE, "codice_fiscale": None}, COMPANY, None, None, [])
         assert "codice_fiscale (stato): NON DISPONIBILE" in senza_cf
 
     def test_dossier_e_derived_appiattiti_con_percorsi_citabili(self):
         dossier = {"anagrafica": {"denominazione": "ACME Srl", "rea": None},
                    "flags": {"startup_innovativa": True}}
-        derived = {"beneficiari": [{"id": 2, "nome": "PMI"}], "ateco_divisione": "62"}
-        pack = build_company_pack(PROFILE, COMPANY, dossier, derived, [], None, 1000)
+        derived = {"ateco_secondari": ["63.01"], "ateco_divisione": "62"}
+        pack = build_company_pack(PROFILE, COMPANY, dossier, derived, [])
         assert "dossier.anagrafica.denominazione: ACME Srl" in pack
         assert "dossier.flags.startup_innovativa: True" in pack
         assert "derived.ateco_divisione: 62" in pack
         assert "rea" not in pack.split("## Dossier")[1].split("##")[0]  # i None non compaiono
 
-    def test_visura_troncata(self):
-        pack = build_company_pack(PROFILE, COMPANY, None, None, [], "x" * 500, 100)
-        assert "Testo della visura camerale (troncato)" in pack
-        section = pack.split("## Testo della visura camerale (troncato)\n")[1]
-        assert len(section) == 100
-
     def test_persone_e_cariche(self):
         people = [{"kind": "manager", "nome": "Anna", "cognome": "Bianchi",
                    "ruoli": [{"role": "Presidente"}], "is_legale_rappresentante": True}]
-        pack = build_company_pack(PROFILE, COMPANY, None, None, people, None, 1000)
+        pack = build_company_pack(PROFILE, COMPANY, None, None, people)
         assert "- manager: Anna Bianchi [legale rappresentante] (Presidente)" in pack
 
     def test_senza_company_row(self):
-        pack = build_company_pack(PROFILE, None, None, None, [], None, 1000)
+        pack = build_company_pack(PROFILE, None, None, None, [])
         assert NON_DISPONIBILE in pack
 
 

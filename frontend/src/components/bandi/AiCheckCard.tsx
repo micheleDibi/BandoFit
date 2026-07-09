@@ -186,8 +186,8 @@ export function AiCheckCard({ slug }: { slug: string }) {
       >
         <p>
           L'analisi confronta i requisiti e i criteri di questo bando con i dati della tua
-          azienda (compresi il dossier certificato e la visura, se presenti) e produce un
-          report con esito di ammissibilità e punteggio di compatibilità.
+          azienda (compreso il dossier certificato, se importato) e produce un report con
+          esito di ammissibilità e punteggio di compatibilità.
         </p>
         <p className="mt-2 text-xs text-slate-400">
           Consuma 1 dei tuoi {quota?.totale ?? 0} AI-check annuali e richiede uno o due

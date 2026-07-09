@@ -48,7 +48,7 @@ from app.services.ai_check_prompts import (
     compute_content_hash,
 )
 from app.services.ai_check_scoring import facet_prechecks, score_report
-from app.services.document_service import _owner_and_editable
+from app.services.family_service import owner_and_editable
 from app.services.openapi_mapping import build_dossier
 from app.services.openapi_service import _acquire_lock, _release_lock, record_usage
 
@@ -58,7 +58,7 @@ logger = logging.getLogger("bandofit.ai_check")
 # PostgREST): NON è tenuto durante le chiamate LLM. Il TTL è comodo rispetto
 # alla durata attesa (decine di ms): un TTL troppo stretto rischierebbe di
 # scadere durante uno stallo del DB e di far rubare/cancellare il lock a
-# un'operazione concorrente (import/visura condividono la stessa chiave).
+# un'operazione concorrente (import e AI-check condividono la stessa chiave).
 AI_LOCK_TTL_SECONDS = 30
 # Failsafe: un'analisi senza esito entro questo tempo viene chiusa come error
 # (il task in-process può morire con un riavvio del container).
@@ -189,8 +189,8 @@ async def get_quota(primary, owner_id: str) -> AiQuotaOut:
 
 # ----------------------------------------------------------------- richiesta
 
-async def _company_context(primary, owner_id: str) -> tuple[dict, dict | None, list[dict], str | None]:
-    """Profilo aziendale + dati certificati + persone + testo visura."""
+async def _company_context(primary, owner_id: str) -> tuple[dict, dict | None, list[dict]]:
+    """Profilo aziendale + dati certificati + persone."""
     company_resp = (
         await primary.table("company_profiles")
         .select("id,ragione_sociale,forma_giuridica,partita_iva,codice_fiscale,"
@@ -225,18 +225,7 @@ async def _company_context(primary, owner_id: str) -> tuple[dict, dict | None, l
         .execute()
     )
 
-    visura_resp = (
-        await primary.table("company_documents")
-        .select("extracted_text")
-        .eq("company_profile_id", company["id"])
-        .eq("status", "ready")
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
-    )
-    visura_text = (visura_resp.data[0].get("extracted_text") if visura_resp.data else None) or None
-
-    return company, company_data, people_resp.data or [], visura_text
+    return company, company_data, people_resp.data or []
 
 
 async def request_check(
@@ -246,7 +235,7 @@ async def request_check(
     if not ai.enabled:
         raise AiNotConfiguredError()
 
-    owner_id, editable = await _owner_and_editable(primary, user)
+    owner_id, editable = await owner_and_editable(primary, user)
     if not editable:
         raise ForbiddenError("L'AI-check lo avvia il titolare dell'azienda")
 
@@ -254,7 +243,7 @@ async def request_check(
     # bloccare il bando né gonfiare la quota fino alla prossima GET.
     await _close_stale(primary, owner_id)
 
-    company, company_data, people, visura_text = await _company_context(primary, owner_id)
+    company, company_data, people = await _company_context(primary, owner_id)
     if not any(company.get(f) for f in ("ateco_id", "settore_id", "regione_id")) and not company_data:
         raise BadRequestError(
             "Servono più dati aziendali per un'analisi utile: compila ATECO, settore o "
@@ -306,8 +295,6 @@ async def request_check(
         dossier=build_dossier(raw) if raw else None,
         derived=(company_data or {}).get("derived"),
         people=people,
-        visura_text=visura_text,
-        visura_max_chars=settings.ai_check_visura_max_chars,
     )
     prechecks = facet_prechecks(bando, company, (company_data or {}).get("derived"))
 
@@ -597,7 +584,7 @@ async def list_checks(
     # Parametro vuoto = nessun filtro: va normalizzato PRIMA, così filtro e
     # inclusione dei report restano coerenti (la lista globale è sintetica).
     bando_slug = (bando_slug or "").strip() or None
-    owner_id, editable = await _owner_and_editable(primary, user)
+    owner_id, editable = await owner_and_editable(primary, user)
     await _close_stale(primary, owner_id)
 
     query = (
@@ -632,7 +619,7 @@ async def get_check(primary, user: dict, check_id: str) -> AiCheckOut:
     except ValueError:
         # Un id malformato è, per il chiamante, un report inesistente.
         raise NotFoundError("Report non trovato") from None
-    owner_id, _ = await _owner_and_editable(primary, user)
+    owner_id, _ = await owner_and_editable(primary, user)
     await _close_stale(primary, owner_id)
     resp = (
         await primary.table("ai_checks")
@@ -648,7 +635,7 @@ async def get_check(primary, user: dict, check_id: str) -> AiCheckOut:
 
 
 async def quota_for(primary, user: dict) -> AiQuotaOut:
-    owner_id, _ = await _owner_and_editable(primary, user)
+    owner_id, _ = await owner_and_editable(primary, user)
     # Anche qui il failsafe: una pending zombie non deve gonfiare la quota.
     await _close_stale(primary, owner_id)
     return await get_quota(primary, owner_id)

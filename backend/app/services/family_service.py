@@ -113,6 +113,18 @@ async def get_membership(primary, user_id: str) -> dict | None:
     return resp.data[0] if resp.data else None
 
 
+async def owner_and_editable(primary, user: dict) -> tuple[str, bool]:
+    """Titolare dei dati aziendali per questo utente, e se può modificarli.
+
+    Un figlio ATTIVO legge i dati della famiglia in sola lettura; titolari,
+    utenti singoli, pending e retrocessi hanno i propri. È la chiave di
+    visibilità E di conteggio quota (AI-check, compatibilità)."""
+    membership = await get_membership(primary, user["id"])
+    if membership and membership["status"] == "active":
+        return str(membership["parent_id"]), False
+    return str(user["id"]), True
+
+
 async def parent_display_name(primary, parent_id: str) -> str:
     """Nome mostrato della famiglia: ragione sociale → azienda → nome cognome → email."""
     resp = (

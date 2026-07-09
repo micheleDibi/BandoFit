@@ -276,7 +276,6 @@ def base_selects(**overrides) -> dict:
         "company_profiles": [COMPANY_ROW],
         "company_data": [],
         "company_people": [],
-        "company_documents": [],
         "ai_checks": [],
         "user_subscriptions": [SUBSCRIPTION],
         "api_usage_events": [],

@@ -42,7 +42,7 @@ const FEATURES = [
     icon: Building2,
     title: "Dossier aziendale certificato",
     description:
-      "Importa i dati della tua azienda dal Registro Imprese partendo dalla partita IVA: ATECO, cariche, dati economici e visura in PDF. Ufficiali, non autodichiarati.",
+      "Importa i dati della tua azienda dal Registro Imprese partendo dalla partita IVA: anagrafica, ATECO, sedi, cariche e dati economici. Ufficiali, non autodichiarati.",
   },
   {
     icon: Target,
@@ -122,7 +122,7 @@ const FAQS: FaqItem[] = [
   },
   {
     q: "I dati sulla mia azienda sono affidabili?",
-    a: "Sì: puoi importare il dossier direttamente dal Registro Imprese partendo dalla partita IVA — anagrafica, codici ATECO, cariche, dati economici e visura camerale in PDF. Sono dati ufficiali, non autodichiarati.",
+    a: "Sì: puoi importare il dossier direttamente dal Registro Imprese partendo dalla partita IVA — anagrafica, codici ATECO, sedi, cariche e dati economici. Sono dati ufficiali, non autodichiarati.",
   },
   {
     q: "Come funziona l'AI-check?",

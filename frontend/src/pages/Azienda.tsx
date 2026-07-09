@@ -14,7 +14,6 @@ import { useState } from "react";
 import { useCompany } from "../hooks/useCompany";
 import { useCompanyDossier } from "../hooks/useCompanyDossier";
 import { CompanyCard } from "../components/company/CompanyCard";
-import { DocumentiCard } from "../components/company/DocumentiCard";
 import { ImportCompanyDialog } from "../components/company/ImportCompanyDialog";
 import { DossierGrid, DossierRow, DossierSection } from "../components/company/dossier/DossierSection";
 import { PeopleTable } from "../components/company/dossier/PeopleTable";
@@ -346,13 +345,6 @@ export default function Azienda() {
           </div>
         )}
       </section>
-
-      {/* 3. Documenti ufficiali */}
-      {defaultPiva && (
-        <section className="mt-10" aria-label="Documenti ufficiali">
-          <DocumentiCard />
-        </section>
-      )}
 
       <p className="mt-8 pb-2 text-xs text-slate-400">
         Dati provenienti da fonti pubbliche (Registro Imprese) tramite openapi.it, per uso

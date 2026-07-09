@@ -393,29 +393,6 @@ export interface ImportResult {
   sandbox: boolean;
 }
 
-// ---- Documenti ufficiali ---------------------------------------------------
-
-export interface CompanyDocument {
-  id: string;
-  kind: "visura";
-  endpoint: string;
-  status: "pending" | "ready" | "error";
-  error_detail: string | null;
-  file_name: string | null;
-  file_size: number | null;
-  pages: number | null;
-  has_text: boolean;
-  cost_cents: number;
-  sandbox: boolean;
-  created_at: string;
-  ready_at: string | null;
-}
-
-export interface DocumentsResponse {
-  editable: boolean;
-  documents: CompanyDocument[];
-}
-
 // ---- Preferenze per utente -------------------------------------------------
 
 export interface Preferences {

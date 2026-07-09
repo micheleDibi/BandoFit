@@ -67,26 +67,3 @@ class DossierResponse(BaseModel):
     dossier: dict | None = None
     people: list[PersonOut] = []
     derived: dict = {}
-
-
-class DocumentOut(BaseModel):
-    id: str
-    kind: str
-    endpoint: str
-    status: str
-    error_detail: str | None = None
-    file_name: str | None = None
-    file_size: int | None = None
-    pages: int | None = None
-    # Il testo estratto non viene mai spedito al client (serve all'AI-check):
-    # qui solo il flag di disponibilità.
-    has_text: bool = False
-    cost_cents: int = 0
-    sandbox: bool = False
-    created_at: str
-    ready_at: str | None = None
-
-
-class DocumentsResponse(BaseModel):
-    editable: bool
-    documents: list[DocumentOut] = []

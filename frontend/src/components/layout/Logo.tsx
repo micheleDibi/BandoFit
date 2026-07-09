@@ -1,20 +1,21 @@
 import eduNews24 from "../../assets/edunews24.png";
 import logoIcona from "../../assets/logo-icona.png";
 import logoOrizzontale from "../../assets/logo-orizzontale.png";
-import logoVerticale from "../../assets/logo-verticale.png";
 import { cn } from "../../lib/cn";
 
 type Variant = "horizontal" | "vertical" | "icon";
 
+// Il brand è fornito come singolo lockup orizzontale: la variante "vertical"
+// riusa la stessa immagine impilando sotto l'attribuzione EduNews24.
 const sources: Record<Variant, string> = {
   horizontal: logoOrizzontale,
-  vertical: logoVerticale,
+  vertical: logoOrizzontale,
   icon: logoIcona,
 };
 
 const defaultSizes: Record<Variant, string> = {
   horizontal: "h-9 w-auto",
-  vertical: "h-24 w-auto",
+  vertical: "h-12 w-auto",
   icon: "h-9 w-auto",
 };
 

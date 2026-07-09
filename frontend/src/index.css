@@ -1,18 +1,18 @@
 @import "tailwindcss";
 
 @theme {
-  /* Brand — blu BandoFit */
-  --color-brand-50: #eef3ff;
-  --color-brand-100: #dce7ff;
-  --color-brand-200: #b9ceff;
-  --color-brand-300: #8fadff;
-  --color-brand-400: #5c84ff;
-  --color-brand-500: #1e5eff;
-  --color-brand-600: #164bdb;
-  --color-brand-700: #113ab0;
-  --color-brand-800: #0e2f8c;
-  --color-brand-900: #0c2668;
-  --color-brand-950: #071740;
+  /* Brand — navy BandoFit (ancorato al logo: brand-900 ≈ #182448 del wordmark) */
+  --color-brand-50: #f3f5f9;
+  --color-brand-100: #e4e8f4;
+  --color-brand-200: #c2cded;
+  --color-brand-300: #93a9e4;
+  --color-brand-400: #5e7fd9;
+  --color-brand-500: #2c56c9;
+  --color-brand-600: #2246a7;
+  --color-brand-700: #213b83;
+  --color-brand-800: #1c2e61;
+  --color-brand-900: #182549;
+  --color-brand-950: #0f172f;
 
   /* Superfici e testo */
   --color-surface: #f7f9fc;

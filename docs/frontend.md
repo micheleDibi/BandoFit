@@ -83,13 +83,13 @@ Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo 
 
 ## Brand assets
 
-- Loghi in `src/assets/` (PNG trasparenti, importati da Vite): `logo-orizzontale.png` (topbar e footer), `logo-verticale.png` (pagine auth), `logo-icona.png`; favicon e apple-touch-icon in `public/`.
-- Componente `Logo` (`components/layout/Logo.tsx`) con varianti `horizontal` (default) / `vertical` / `icon`. **Regola di brand: il logo BandoFit porta sempre con sé l'attribuzione "powered by EduNews24"** — accanto (con separatore) nella variante orizzontale, sotto nella verticale; solo la variante `icon` (favicon) ne è priva. L'attribuzione nel lockup non è cliccabile (il Logo è spesso dentro un `<Link>`); il link a https://edunews24.it vive nel componente `PoweredBy` (`components/shared/PoweredBy.tsx`), usato nel footer dell'app.
+- Loghi in `src/assets/` (PNG trasparenti, importati da Vite): `logo-orizzontale.png` (unico lockup fornito: topbar, footer **e** pagine auth) e `logo-icona.png` (sola icona documento+check, **ritagliata dall'orizzontale**); favicon e apple-touch-icon in `public/` sono la stessa icona ritagliata (512²/180²). Non esiste più un `logo-verticale.png` dedicato.
+- Componente `Logo` (`components/layout/Logo.tsx`) con varianti `horizontal` (default) / `vertical` / `icon`. Il brand è un **singolo lockup orizzontale**: la variante `vertical` riusa la stessa immagine (più piccola) impilando sotto l'attribuzione. **Regola di brand: il logo BandoFit porta sempre con sé l'attribuzione "powered by EduNews24"** — accanto (con separatore) nella variante orizzontale, sotto nella verticale; solo la variante `icon` (favicon) ne è priva. L'attribuzione nel lockup non è cliccabile (il Logo è spesso dentro un `<Link>`); il link a https://edunews24.it vive nel componente `PoweredBy` (`components/shared/PoweredBy.tsx`), usato nel footer dell'app.
 - Gli screenshot sorgente dei loghi restano solo locali (`Screenshot *.png` in .gitignore).
 
 ## Design system
 
-- **Colore primario**: blu `#1E5EFF` (scala `brand-50`→`brand-950`; hover `brand-600 #164BDB`, tint `brand-50 #EEF3FF`); neutri slate; sfondo app `#F7F9FC` (`bg-surface`).
+- **Colore primario**: navy `#2C56C9` (scala `brand-50`→`brand-950` ancorata al logo — `brand-900 #182549` ≈ navy del wordmark; hover `brand-600 #2246A7`, tint `brand-50 #F3F5F9`); neutri slate; sfondo app `#F7F9FC` (`bg-surface`). Tutta la UI passa dai token `brand-*`: la palette si ritara dagli 11 `--color-brand-*` in `index.css` senza toccare i componenti. Il verde `emerald` (stati di successo) è volutamente vicino al teal del logo.
 - **Semantici**: aperto = smeraldo, chiuso = slate, in apertura = ambra; scadenza ≤ 7 giorni = rosso, ≤ 30 = ambra.
 - **Tipografia**: Sora (titoli, 600/700) + Inter (testo) via Fontsource (self-hosted); cifre tabellari (classe `.tabular`) per importi e date.
 - **Superfici**: card `rounded-xl` con ombre morbide (`shadow-card`, `shadow-card-hover`); topbar sticky bianca con bordo.

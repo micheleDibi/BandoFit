@@ -2,6 +2,11 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-09 — Nuovo logo e palette navy
+
+- **Nuovo logo BandoFit** (brand ridisegnato: icona documento + check circolare, wordmark «Bando» navy / «FIT» teal). Fornito come singolo lockup orizzontale: sostituisce `logo-orizzontale.png` (topbar, footer, pagine auth — la variante `vertical` ora riusa l'orizzontale). Icona, **favicon** e apple-touch-icon sono **ritagliate dall'orizzontale** (solo il glifo documento+check). Rimossi `logo-verticale.png` e il file di deposito in radice. `edunews24.png` e il «powered by EduNews24» invariati.
+- **Palette riallineata al logo**: colore primario da blu royal `#1E5EFF` a **navy `#2C56C9`** (scala `brand-50`→`brand-950` ancorata al navy `#182448` del wordmark, `brand-900 #182549`). Essendo la UI tokenizzata, il cambio agisce solo sugli 11 `--color-brand-*` in `index.css`: pulsanti, link, focus, nav e gradienti si aggiornano da soli, nessun componente toccato. Il verde di successo (`emerald`) resta com'è, già coerente col teal del logo. Solo frontend, nessuna modifica a backend/DB.
+
 ## 2026-07-08 — Redesign della landing page pubblica
 
 - Nuova `pages/Landing.tsx`: hero a due colonne con un **mock di prodotto** (`HeroShowcase`, scheda bando + widget AI-check con anello punteggio) costruito dai token, sezione problema→soluzione, griglia funzionalità con l'**AI-check in evidenza**, «come funziona» in 4 passi, «perché BandoFit» con una fascia di **numeri reali**, piani (riuso `usePlans`+`PlanCard`), **FAQ** (accordion `<details>` nativo), CTA finale e footer ricco con ancore. Header sticky con navigazione ad ancore (smooth-scroll).

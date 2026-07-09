@@ -140,6 +140,20 @@ class TestBeneficiari:
         assert "Startup" in nomi
 
 
+class TestBuildDerived:
+    def test_regioni_ids_di_tutte_le_sedi(self):
+        # Fixture: sede legale LAZIO + unità locali PUGLIA/CALABRIA/LAZIO.
+        lk = lookups(regioni=[
+            SimpleNamespace(id=12, nome="Lazio"),
+            SimpleNamespace(id=15, nome="Puglia"),
+            SimpleNamespace(id=18, nome="Calabria"),
+        ])
+        derived = build_derived(payload(), lk)
+        assert derived["regione_id"] == 12  # sede legale
+        assert derived["regioni_ids"][0] == 12  # sede legale per prima
+        assert set(derived["regioni_ids"]) == {12, 15, 18}
+
+
 class TestPersone:
     def test_manager_dalla_fixture(self):
         people = extract_people(payload())

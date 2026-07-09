@@ -3,12 +3,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import CurrentUser, SecondaryClient
+from app.api.deps import CurrentUser, PrimaryClient, SecondaryClient
 from app.core.errors import BadRequestError
 from app.schemas.bando import BandoDetail, BandoListItem
 from app.schemas.common import Page
 from app.services import bandi_service
 from app.services.bandi_service import DEFAULT_SORT, SORT_OPTIONS, BandiFilters
+from app.services.compatibility import get_company_facets
+from app.services.lookup_service import get_lookups
 
 router = APIRouter(prefix="/bandi", tags=["bandi"])
 
@@ -69,7 +71,8 @@ def parse_filters(
 
 @router.get("", response_model=Page[BandoListItem])
 async def list_bandi(
-    _user: CurrentUser,
+    user: CurrentUser,
+    primary: PrimaryClient,
     secondary: SecondaryClient,
     filters: Annotated[BandiFilters, Depends(parse_filters)],
     page: int = Query(default=1, ge=1),
@@ -78,9 +81,25 @@ async def list_bandi(
 ) -> Page[BandoListItem]:
     if sort not in SORT_OPTIONS:
         raise BadRequestError(f"Ordinamento non valido: {sort}")
-    return await bandi_service.fetch_bandi(secondary, filters, page, page_size, sort)
+    lookups = await get_lookups(secondary)
+    facets = await get_company_facets(primary, user, lookups)
+    return await bandi_service.fetch_bandi(
+        secondary,
+        filters,
+        page,
+        page_size,
+        sort,
+        company_facets=facets,
+        totale_regioni=len(lookups.regioni),
+    )
 
 
 @router.get("/{slug}", response_model=BandoDetail)
-async def get_bando(_user: CurrentUser, secondary: SecondaryClient, slug: str) -> BandoDetail:
-    return await bandi_service.fetch_bando_by_slug(secondary, slug)
+async def get_bando(
+    user: CurrentUser, primary: PrimaryClient, secondary: SecondaryClient, slug: str
+) -> BandoDetail:
+    lookups = await get_lookups(secondary)
+    facets = await get_company_facets(primary, user, lookups)
+    return await bandi_service.fetch_bando_by_slug(
+        secondary, slug, company_facets=facets, totale_regioni=len(lookups.regioni)
+    )

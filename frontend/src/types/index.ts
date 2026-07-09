@@ -19,6 +19,16 @@ export interface Page<T> {
 
 export type StatoBando = "aperto" | "chiuso" | "in apertura prossimamente";
 
+/** Punteggio di compatibilità a-priori azienda↔bando: relazioni in comune /
+ *  totali (es. 18/23). `punteggio` è la percentuale per la banda di colore.
+ *  Calcolato dinamicamente dal backend; assente se il profilo è insufficiente. */
+export interface Compatibilita {
+  punteggio: number;
+  matched: number;
+  totale: number;
+  dimensioni?: Record<string, { matched: number; totale: number }> | null;
+}
+
 export interface BandoListItem {
   id: number;
   slug: string;
@@ -36,6 +46,7 @@ export interface BandoListItem {
   tipologia: LookupItem | null;
   modalita_erogazione: LookupItem | null;
   regioni: LookupItem[];
+  compatibilita?: Compatibilita | null;
 }
 
 export interface ContenutoSegment {

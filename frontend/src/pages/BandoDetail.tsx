@@ -14,6 +14,7 @@ import { Link, useParams } from "react-router-dom";
 import { AiCheckCard } from "../components/bandi/AiCheckCard";
 import { AiCheckReport } from "../components/bandi/AiCheckReport";
 import { ScadenzaBadge, StatoBadge } from "../components/bandi/badges";
+import { CompatibilitaBadge } from "../components/bandi/CompatibilitaBadge";
 import { ContenutoRenderer } from "../components/bandi/ContenutoRenderer";
 import { SaveBandoButton } from "../components/bandi/SaveBandoButton";
 import { Badge } from "../components/ui/Badge";
@@ -125,6 +126,7 @@ export default function BandoDetail() {
           {bando.tipologia && <Badge tone="brand">{bando.tipologia.nome}</Badge>}
           {bando.modalita_erogazione && <Badge tone="slate">{bando.modalita_erogazione.nome}</Badge>}
           {bando.programma && <Badge tone="slate">{bando.programma.nome}</Badge>}
+          {bando.compatibilita && <CompatibilitaBadge compatibilita={bando.compatibilita} />}
         </div>
         <h1 className="mt-3 font-display text-2xl font-bold leading-tight tracking-tight text-slate-900 sm:text-3xl">
           {titolo}

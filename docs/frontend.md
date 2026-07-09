@@ -61,6 +61,11 @@ Guardie: `ProtectedRoute` (sessione Supabase) e `AdminRoute` (ruolo dal profilo 
 - **Pagina «AI-check»** (`/app/ai-check`, voce in navigazione): cruscotto con la quota del piano (disponibili quest'anno, con barra di consumo) e storico **raggruppato per bando** — l'analisi più recente in evidenza con badge, mini-barra punteggio, numero versioni e bottone «Apri report» che porta al report sul dettaglio bando (`useAiChecks`, key `["ai-checks"]`, polling 10s se c'è un'analisi in corso).
 - Hook in `hooks/useAiCheck.ts`; `useRequestAiCheck` invalida `["ai-check", slug]` e `["ai-checks"]`.
 
+## Punteggio di compatibilità
+
+- **`CompatibilitaBadge`** (`components/bandi/`): pill con la **frazione «in comune / totale»** (es. «18/23») colorata per banda con la stessa scala dell'AI-check (`lib/scoreColor.ts`); il dettaglio per dimensione (regioni/ATECO/settori/beneficiari) e la percentuale sono nel tooltip/`aria-label`. Il badge è presente su ogni `BandoCard` (riga badge dell'elenco) e nell'header di `BandoDetail`, **subito e senza azioni** dell'utente.
+- Il valore arriva già calcolato dal backend nel campo `compatibilita` di `BandoListItem`/`BandoDetail` (tipo `Compatibilita` in `types/index.ts`): il frontend non ricalcola nulla e **rende il badge solo se il campo è presente** (profilo aziendale sufficiente, cioè P.IVA importata). Nessun nuovo hook o round-trip: viaggia con la lista e col dettaglio.
+
 ## Bandi salvati e Calendario
 
 - **Salvataggio** (`SaveBandoButton`): toggle segnalibro con stato **ottimista sul Set degli id** (`useSavedIds`, key `["saved-bandi","ids"]`; rollback su errore, poi invalidazione della lista). Sulle card della lista il bottone è un **fratello sovrapposto** al link (`SavableBandoCard`: wrapper `relative` + bottone `absolute` — mai annidato nel `<Link>`, vedi Pattern chiave); sul dettaglio bando è un bottone inline accanto ad «Aggiungi scadenza al calendario» (visibile solo con una scadenza).

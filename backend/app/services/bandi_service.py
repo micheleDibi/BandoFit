@@ -16,7 +16,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.core.errors import NotFoundError
-from app.schemas.bando import BandoDetail, BandoListItem
+from app.schemas.bando import BandoDetail, BandoListItem, Compatibilita
+from app.services.compatibility import CompanyFacets, compute_compatibilita
 from app.schemas.common import Page
 
 # Campi mostrati nelle card dell'elenco + embed di visualizzazione.
@@ -26,6 +27,15 @@ LIST_SELECT = (
     "importo_totale_eur,importo_max_per_progetto_eur,ente_erogatore,"
     "tipologie_bando(id,nome),modalita_erogazione(id,nome),"
     "bando_regioni(regioni(id,nome))"
+)
+
+# Junction settori/beneficiari/ateco come SOLI id: non si mostrano in lista,
+# servono al punteggio di compatibilità e viaggiano nella stessa query. Si
+# aggiungono solo quando un punteggio verrà davvero calcolato (le regioni sono
+# già embeddate per la visualizzazione).
+SCORING_EMBEDS = (
+    ",bando_settori(settore_id),bando_beneficiari(beneficiario_id),"
+    "bando_codici_ateco(codice_ateco_id)"
 )
 
 DETAIL_SELECT = (
@@ -108,9 +118,12 @@ def normalize_contenuto(value: Any) -> dict | None:
     return None
 
 
-def build_list_select(filters: BandiFilters) -> str:
-    """Select dell'elenco + embed ``!inner`` aliasati per le faccette M:N attive."""
+def build_list_select(filters: BandiFilters, *, include_facets: bool = False) -> str:
+    """Select dell'elenco + embed ``!inner`` aliasati per le faccette M:N attive,
+    più (solo se serve un punteggio) gli embed id-only per la compatibilità."""
     select = LIST_SELECT
+    if include_facets:
+        select += SCORING_EMBEDS
     for facet, (alias, junction, id_col) in JUNCTION_FACETS.items():
         if getattr(filters, facet):
             select += f",{alias}:{junction}!inner({id_col})"
@@ -189,6 +202,43 @@ def _flatten_junction(rows: list | None, key: str) -> list[dict]:
     return [row[key] for row in (rows or []) if isinstance(row, dict) and row.get(key)]
 
 
+def _junction_ids(rows: list | None, id_key: str, nested_key: str) -> list[int]:
+    """Id di una junction, robusto ai due embed: id-only (elenco, es.
+    ``{settore_id: X}``) o annidato (dettaglio, es. ``{settori: {id: X}}``)."""
+    ids: list[int] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        value = row.get(id_key)
+        if value is None:
+            nested = row.get(nested_key)
+            value = nested.get("id") if isinstance(nested, dict) else None
+        if value is not None:
+            ids.append(value)
+    return ids
+
+
+def bando_facet_ids(row: dict) -> dict:
+    """Id dei facet del bando per il calcolo di compatibilità."""
+    return {
+        "regioni": _junction_ids(row.get("bando_regioni"), "regione_id", "regioni"),
+        "ateco": _junction_ids(row.get("bando_codici_ateco"), "codice_ateco_id", "codici_ateco"),
+        "settori": _junction_ids(row.get("bando_settori"), "settore_id", "settori"),
+        "beneficiari": _junction_ids(row.get("bando_beneficiari"), "beneficiario_id", "beneficiari"),
+    }
+
+
+def _compat_for_row(
+    row: dict, company_facets: "CompanyFacets | None", totale_regioni: int
+) -> Compatibilita | None:
+    if company_facets is None:
+        return None
+    result = compute_compatibilita(
+        company_facets, bando_facet_ids(row), totale_regioni=totale_regioni
+    )
+    return Compatibilita(**result) if result else None
+
+
 def map_list_item(row: dict) -> BandoListItem:
     return BandoListItem(
         id=row["id"],
@@ -233,6 +283,9 @@ async def fetch_bandi(
     page: int,
     page_size: int,
     sort: str,
+    *,
+    company_facets: "CompanyFacets | None" = None,
+    totale_regioni: int = 0,
 ) -> Page[BandoListItem]:
     """Elenco paginato in due segmenti: prima i bandi non chiusi, poi i chiusi
     — sempre in coda, qualunque ordinamento. PostgREST non sa ordinare per
@@ -241,7 +294,7 @@ async def fetch_bandi(
     column, desc_open, desc_closed = SORT_OPTIONS.get(sort, SORT_OPTIONS[DEFAULT_SORT])
     offset = (page - 1) * page_size
     today = today_italy()
-    select = build_list_select(filters)
+    select = build_list_select(filters, include_facets=company_facets is not None)
 
     open_q = secondary.table("bando").select(select, count="exact")
     open_q = apply_open_tier(apply_filters(open_q, filters, today), today)
@@ -283,7 +336,9 @@ async def fetch_bandi(
         if row["id"] in seen_ids:
             continue
         seen_ids.add(row["id"])
-        items.append(map_list_item(row))
+        item = map_list_item(row)
+        item.compatibilita = _compat_for_row(row, company_facets, totale_regioni)
+        items.append(item)
     return Page.build(items, total, page, page_size)
 
 
@@ -306,7 +361,13 @@ async def fetch_bando_for_ai(secondary, slug: str) -> dict:
     return row
 
 
-async def fetch_bando_by_slug(secondary, slug: str) -> BandoDetail:
+async def fetch_bando_by_slug(
+    secondary,
+    slug: str,
+    *,
+    company_facets: "CompanyFacets | None" = None,
+    totale_regioni: int = 0,
+) -> BandoDetail:
     resp = (
         await secondary.table("bando")
         .select(DETAIL_SELECT)
@@ -317,4 +378,7 @@ async def fetch_bando_by_slug(secondary, slug: str) -> BandoDetail:
     )
     if not resp.data:
         raise NotFoundError("Bando non trovato")
-    return map_detail(resp.data[0])
+    row = resp.data[0]
+    detail = map_detail(row)
+    detail.compatibilita = _compat_for_row(row, company_facets, totale_regioni)
+    return detail

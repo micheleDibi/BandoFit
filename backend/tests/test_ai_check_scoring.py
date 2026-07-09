@@ -453,6 +453,21 @@ class TestFacetPrechecks:
         assert checks["regione"]["esito"] == "non_soddisfatto"
         assert checks["ateco"]["esito"] == "non_soddisfatto"
 
+    def test_regione_soddisfatta_da_sede_secondaria(self):
+        # Sede legale in Lombardia (10, non ammessa) ma un'unità locale nel
+        # Lazio (12, ammesso): il vincolo territoriale è soddisfatto.
+        company = {"regione_id": 10, "regione_nome": "Lombardia"}
+        derived = {"regioni_ids": [10, 12], "beneficiari": []}
+        checks = facet_prechecks(self.BANDO, company, derived)
+        assert checks["regione"]["esito"] == "soddisfatto"
+        assert checks["regione"]["azienda_sedi"] == 2
+
+    def test_regione_non_soddisfatta_con_piu_sedi(self):
+        company = {"regione_id": 10}
+        derived = {"regioni_ids": [10, 3]}  # nessuna sede in una regione ammessa
+        checks = facet_prechecks(self.BANDO, company, derived)
+        assert checks["regione"]["esito"] == "non_soddisfatto"
+
 
 def test_frac_copre_tutti_i_verdetti():
     assert set(FRAC) == {"soddisfatto", "parzialmente_soddisfatto", "non_soddisfatto", "dato_mancante"}

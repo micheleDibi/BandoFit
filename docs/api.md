@@ -192,10 +192,12 @@ Parametri query:
 | `scadenza_da`, `scadenza_a` | date ISO | intervallo su `data_scadenza` |
 | `scade_entro_giorni` | int 1-365 | da oggi a oggi+N |
 
-Item della risposta: `id`, `slug`, `titolo`, `titolo_breve`, `descrizione_breve`, `stato_bando`, `livello`, date, importi, `ente_erogatore`, `tipologia {id,nome}`, `modalita_erogazione {id,nome}`, `regioni [{id,nome}]`.
+Item della risposta: `id`, `slug`, `titolo`, `titolo_breve`, `descrizione_breve`, `stato_bando`, `livello`, date, importi, `ente_erogatore`, `tipologia {id,nome}`, `modalita_erogazione {id,nome}`, `regioni [{id,nome}]`, `compatibilita` (vedi sotto).
+
+**`compatibilita`** — punteggio a-priori azienda↔bando, **dinamico** (mai persistito), calcolato server-side per ogni item ed esposto sia in elenco sia in dettaglio: `{ punteggio (0-100, %), matched, totale, dimensioni: { regioni|ateco|settori|beneficiari: {matched,totale} } }`, es. `18/23`. Conta quante relazioni di catalogo del bando l'azienda ha in comune sul totale, tutte a **peso uguale**. **Tutte le sedi** (sede legale + unità locali) valgono sul territorio; i **bandi nazionali** (tutte le regioni del catalogo) contano il territorio come pieno per non penalizzarli; settori/beneficiari entrano solo se l'azienda ha quel dato. È **`null`** se il profilo non è sufficiente (P.IVA non importata: mancano `ateco_id`/`regione_id`) o il bando non ha relazioni valutabili. I due DB non si uniscono in SQL: i facet azienda si costruiscono una volta per richiesta (cache TTL breve per owner) e il confronto per-bando è Python puro (`services/compatibility.py`).
 
 ### `GET /bandi/{slug}`
-Dettaglio completo: campi dell'elenco + `area_geografica`, `tematica[]`, `link_bando`, `link_candidatura`, `contenuto` (JSON strutturato a sezioni/segmenti, renderizzato dal frontend), `allegati[]`, `programma`, `settori[]`, `beneficiari[]`, `codici_ateco[]`. `404` se lo slug non esiste o il bando non è pubblicabile.
+Dettaglio completo: campi dell'elenco (`compatibilita` compreso) + `area_geografica`, `tematica[]`, `link_bando`, `link_candidatura`, `contenuto` (JSON strutturato a sezioni/segmenti, renderizzato dal frontend), `allegati[]`, `programma`, `settori[]`, `beneficiari[]`, `codici_ateco[]`. `404` se lo slug non esiste o il bando non è pubblicabile.
 
 ## Bandi salvati
 

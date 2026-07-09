@@ -13,6 +13,7 @@ verdetti qualitativi ancorati a citazioni; qui:
 """
 
 from app.schemas.ai_check import ExtractionResult, MatchingResult
+from app.services.openapi_mapping import company_regioni_ids
 
 DISCLAIMER = (
     "Analisi automatica generata da un modello linguistico a scopo orientativo: "
@@ -85,22 +86,28 @@ def facet_prechecks(bando: dict, company: dict | None, derived: dict | None) -> 
     derived = derived or {}
     checks: dict[str, dict] = {}
 
-    # Regione
+    # Regione — TUTTE le sedi (sede legale + unità locali): basta una sede in
+    # una regione ammessa perché il vincolo territoriale sia soddisfatto.
     bando_regioni = _junction_items(bando, "bando_regioni", "regioni")
     if not bando_regioni:
         checks["regione"] = {"esito": "non_applicabile", "bando": [], "azienda": company.get("regione_nome")}
     else:
         nomi = [r.get("nome") for r in bando_regioni]
-        regione_id = company.get("regione_id") or derived.get("regione_id")
-        if regione_id is None:
+        regioni_ids = company_regioni_ids(company, derived)
+        if not regioni_ids:
             esito = "dato_mancante"
         else:
             esito = (
                 "soddisfatto"
-                if any(r.get("id") == regione_id for r in bando_regioni)
+                if any(r.get("id") in regioni_ids for r in bando_regioni)
                 else "non_soddisfatto"
             )
-        checks["regione"] = {"esito": esito, "bando": nomi, "azienda": company.get("regione_nome") or derived.get("regione_nome")}
+        checks["regione"] = {
+            "esito": esito,
+            "bando": nomi,
+            "azienda": company.get("regione_nome") or derived.get("regione_nome"),
+            "azienda_sedi": len(regioni_ids),
+        }
 
     # ATECO (divisioni a 2 cifre; contano anche i secondari certificati)
     bando_ateco = _junction_items(bando, "bando_codici_ateco", "codici_ateco")

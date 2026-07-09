@@ -278,6 +278,13 @@ async def import_company(
             on_conflict="company_profile_id",
         ).execute()
 
+        # L'import è l'azione che ABILITA il punteggio di compatibilità (ateco +
+        # regione + regioni_ids): la cache va scaduta subito, o il badge non
+        # comparirebbe fino al TTL.
+        from app.services.compatibility import invalidate_company_facets  # import locale: evita cicli
+
+        invalidate_company_facets(parent_id)
+
         people = extract_people(payload)
         await primary.table("company_people").delete().eq(
             "company_profile_id", company_row["id"]

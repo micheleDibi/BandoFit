@@ -74,6 +74,9 @@ Imprese»). I nomi tecnici vanno SOLO in `dato_azienda.campo` e in \
 `dati_mancanti.campo`.
 - Le VERIFICHE STRUTTURATE fornite sono fatti già accertati con confronto \
 esatto sui dati del catalogo: non contraddirle mai.
+- Per i requisiti TERRITORIALI considera TUTTE le sedi dell'azienda (sede \
+legale e ogni unità locale in `dossier.sede.unita_locali`): il vincolo è \
+soddisfatto se ANCHE UNA SOLA sede si trova in una regione ammessa.
 - `criteri`: usa `parzialmente_soddisfatto` quando l'azienda copre solo in \
 parte il criterio. NON assegnare MAI punteggi numerici: solo verdetti.
 - Compila anche punti di forza, punti di debolezza e l'elenco dei dati \

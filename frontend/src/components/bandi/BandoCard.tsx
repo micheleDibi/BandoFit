@@ -4,6 +4,7 @@ import { formatEur } from "../../lib/format";
 import type { BandoListItem } from "../../types";
 import { Badge } from "../ui/Badge";
 import { ScadenzaBadge, StatoBadge } from "./badges";
+import { CompatibilitaBadge } from "./CompatibilitaBadge";
 
 export function BandoCard({ bando }: { bando: BandoListItem }) {
   const titolo = bando.titolo_breve ?? bando.titolo ?? "Bando senza titolo";
@@ -15,10 +16,13 @@ export function BandoCard({ bando }: { bando: BandoListItem }) {
       to={`/app/bandi/${bando.slug}`}
       className="group block h-full rounded-xl border border-slate-200 bg-white p-5 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-card-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
     >
-      <div className="flex flex-wrap items-center gap-2">
+      {/* pr-10: il toggle «salva» è sovrapposto in alto a destra (absolute,
+          opaco) — senza spazio riservato coprirebbe l'ultimo badge della riga. */}
+      <div className="flex flex-wrap items-center gap-2 pr-10">
         <StatoBadge stato={bando.stato_bando} />
         {bando.tipologia && <Badge tone="brand">{bando.tipologia.nome}</Badge>}
         {bando.modalita_erogazione && <Badge tone="slate">{bando.modalita_erogazione.nome}</Badge>}
+        {bando.compatibilita && <CompatibilitaBadge compatibilita={bando.compatibilita} />}
       </div>
 
       <h3 className="mt-3 font-display text-base font-semibold text-slate-900 transition-colors group-hover:text-brand-700">

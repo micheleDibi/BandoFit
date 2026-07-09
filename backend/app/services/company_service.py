@@ -93,6 +93,11 @@ async def upsert_company(primary, secondary, parent: dict, data: CompanyIn) -> C
         payload, on_conflict="parent_id"
     ).execute()
 
+    # Il punteggio di compatibilità legge questi campi da una cache TTL.
+    from app.services.compatibility import invalidate_company_facets  # import locale: evita cicli
+
+    invalidate_company_facets(parent["id"])
+
     await primary.table("audit_log").insert(
         {
             "actor_id": parent["id"],

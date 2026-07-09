@@ -450,6 +450,43 @@ def build_autofill(
 
 # ------------------------------------------------------------------- derived
 
+def _match_regione_id(name: Any, lookups) -> int | None:
+    """Id del catalogo per un nome regione (confronto normalizzato)."""
+    target = normalize_region(name) if name else None
+    if not target:
+        return None
+    match = next((r for r in lookups.regioni if normalize_region(r.nome) == target), None)
+    return match.id if match else None
+
+
+def all_regioni_ids(payload: dict, lookups) -> list[int]:
+    """Id del catalogo per le regioni di TUTTE le sedi: sede legale +
+    ogni unità locale (`allOffices`). Le stringhe non mappabili (estere o
+    anomale) vengono ignorate. Ordine stabile, senza duplicati."""
+    names = [_get(payload, "address", "region", "description")]
+    for office in payload.get("allOffices") or []:
+        if isinstance(office, dict):
+            names.append(_get(office, "address", "region", "description"))
+    ids: list[int] = []
+    for name in names:
+        rid = _match_regione_id(name, lookups)
+        if rid is not None and rid not in ids:
+            ids.append(rid)
+    return ids
+
+
+def company_regioni_ids(company: dict | None, derived: dict | None) -> set[int]:
+    """Insieme delle regioni (id catalogo) dell'azienda, TUTTE le sedi.
+    Usa `derived.regioni_ids` (popolato all'import); per le aziende importate
+    prima di questa modifica ricade sulla sola sede legale (`regione_id`)."""
+    company = company or {}
+    derived = derived or {}
+    raw_ids = derived.get("regioni_ids")
+    if raw_ids:
+        return {int(i) for i in raw_ids if i is not None}
+    return {int(i) for i in (company.get("regione_id"), derived.get("regione_id")) if i is not None}
+
+
 def build_derived(payload: dict, lookups) -> dict:
     """Valori calcolati all'import, salvati in company_data.derived: input
     pronti per il futuro AI-check senza dover rifare il parsing."""
@@ -457,18 +494,15 @@ def build_derived(payload: dict, lookups) -> dict:
         _get(payload, "atecoClassification", "ateco2022", "code")
     )
     region_name = _get(payload, "address", "region", "description")
-    target = normalize_region(region_name) if region_name else None
-    region_match = (
-        next((r for r in lookups.regioni if normalize_region(r.nome) == target), None)
-        if target
-        else None
-    )
     return {
         "ateco_principale": primary_code,
         "ateco_divisione": ateco_division(primary_code),
         "ateco_secondari": secondary_ateco_codes(payload),
         "regione_nome": _clean(region_name),
-        "regione_id": region_match.id if region_match else None,
+        "regione_id": _match_regione_id(region_name, lookups),
+        # Tutte le sedi (sede legale + unità locali): usato dal punteggio di
+        # compatibilità e dall'AI-check per l'eleggibilità territoriale.
+        "regioni_ids": all_regioni_ids(payload, lookups),
         "classe_dimensionale": classe_dimensionale(payload),
         "fascia_fatturato": fascia_fatturato(payload),
         "beneficiari": derive_beneficiari(payload, lookups.beneficiari),

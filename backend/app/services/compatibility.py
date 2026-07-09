@@ -101,7 +101,7 @@ def compute_compatibilita(
         "beneficiari": facets.beneficiari_ids,
     }
 
-    dimensioni: dict[str, dict[str, int]] = {}
+    dimensioni: dict[str, dict] = {}
     matched_tot = 0
     totale_tot = 0
     for dim, company_set in company_sets.items():
@@ -110,11 +110,18 @@ def compute_compatibilita(
         if not bando_set or not company_set:
             continue
         totale = len(bando_set)
-        if dim == "regioni" and totale >= totale_regioni > 0:
-            matched = totale  # bando nazionale → territorio pieno
-        else:
-            matched = len(bando_set & company_set)
-        dimensioni[dim] = {"matched": matched, "totale": totale}
+        intersezione = bando_set & company_set
+        # Bando nazionale (copre tutte le regioni del catalogo) → il territorio
+        # non vincola nessuno: conta come pienamente in comune. `matched_ids`
+        # resta però l'intersezione vera (le regioni dove l'azienda ha una sede).
+        nazionale = dim == "regioni" and totale >= totale_regioni > 0
+        matched = totale if nazionale else len(intersezione)
+        dimensioni[dim] = {
+            "matched": matched,
+            "totale": totale,
+            "matched_ids": sorted(intersezione),
+            "nazionale": nazionale,
+        }
         matched_tot += matched
         totale_tot += totale
 

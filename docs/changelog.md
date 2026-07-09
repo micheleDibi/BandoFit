@@ -2,6 +2,13 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-09 — Pre-check: sezione dedicata nel dettaglio, card più pulita
+
+- **Nuova sezione «Compatibilità con la tua azienda»** nel dettaglio bando (full-width, sotto i meta tile): frazione grande + barra colorata e, per ogni dimensione (Regioni, Codici ATECO, Settori, Beneficiari), **tutte le voci richieste dal bando con evidenziate quelle in comune**. Rende espliciti i casi limite: badge «Nazionale» + nota (territorio pieno, evidenziate le regioni dove hai una sede), «non valutato» per le dimensioni su cui l'azienda non ha dati, callout con link ad Azienda se la P.IVA non è importata. **Assorbe la card «A chi si rivolge»** (stesse liste, ora col confronto): in sidebar restano le Tematiche.
+- Il backend espone ora, per dimensione, anche **`matched_ids`** (le voci del bando davvero in comune) e **`nazionale`**: per un bando nazionale `matched == totale` ma `matched_ids` resta l'intersezione vera, così la UI non finge che l'azienda abbia sede in tutte le regioni.
+- **Card dell'elenco più pulita**: via il badge della modalità di erogazione (Fondo perduto / Contributo in conto interessi), che affollava la riga senza aiutare a scegliere (resta nell'header del dettaglio); il pre-check diventa **«Compatibilità 18/23»** con etichetta esplicita — la sola frazione non si capiva.
+- Resa verificata a video (Chrome headless su un'anteprima temporanea dei componenti): nessun overflow orizzontale a 500/1440 px, nessuna collisione col toggle «salva», colonne non più frastagliate (Regioni e Beneficiari a piena larghezza).
+
 ## 2026-07-09 — Punteggio di compatibilità a-priori + AI-check multi-sede
 
 - **Punteggio di compatibilità** azienda↔bando, **dinamico** (mai persistito), mostrato subito in elenco e dettaglio come frazione «in comune / totale» (es. «18/23») colorata per banda — prima e senza l'AI-check. Conta quante relazioni di catalogo del bando (regioni, divisioni ATECO, settori, beneficiari) l'azienda ha in comune, tutte a **peso uguale**. **Tutte le sedi** valgono sul territorio; i **bandi nazionali** (tutte le regioni del catalogo) non vengono penalizzati (territorio pieno); compare solo con **P.IVA importata** (`ateco_id`+`regione_id`), altrimenti nessun badge. Nuovo `services/compatibility.py` + `components/bandi/CompatibilitaBadge.tsx`; i due DB non si uniscono in SQL, quindi i facet azienda si costruiscono una volta per richiesta (cache TTL) e il confronto per-bando è Python puro — nessun round-trip in più (i facet del bando viaggiano nella stessa query dell'elenco).

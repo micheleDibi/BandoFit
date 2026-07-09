@@ -16,12 +16,14 @@ export function BandoCard({ bando }: { bando: BandoListItem }) {
       to={`/app/bandi/${bando.slug}`}
       className="group block h-full rounded-xl border border-slate-200 bg-white p-5 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-card-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
     >
-      {/* pr-10: il toggle «salva» è sovrapposto in alto a destra (absolute,
+      {/* La modalità di erogazione (Fondo perduto, Contributo in conto interessi…)
+          non sta in card: è un dettaglio che affolla la riga senza aiutare a
+          scegliere. Resta nell'header del dettaglio.
+          pr-10: il toggle «salva» è sovrapposto in alto a destra (absolute,
           opaco) — senza spazio riservato coprirebbe l'ultimo badge della riga. */}
       <div className="flex flex-wrap items-center gap-2 pr-10">
         <StatoBadge stato={bando.stato_bando} />
         {bando.tipologia && <Badge tone="brand">{bando.tipologia.nome}</Badge>}
-        {bando.modalita_erogazione && <Badge tone="slate">{bando.modalita_erogazione.nome}</Badge>}
         {bando.compatibilita && <CompatibilitaBadge compatibilita={bando.compatibilita} />}
       </div>
 

@@ -75,13 +75,20 @@ class TestComputeCompatibilita:
         assert out["matched"] == 4
         assert out["totale"] == 9
         assert out["punteggio"] == round(4 / 9 * 100)
-        assert out["dimensioni"]["settori"] == {"matched": 1, "totale": 3}
+        assert out["dimensioni"]["settori"] == {
+            "matched": 1, "totale": 3, "matched_ids": [7], "nazionale": False,
+        }
+        assert out["dimensioni"]["ateco"]["matched_ids"] == [620]
 
     def test_bando_nazionale_territorio_pieno(self):
         # Bando che copre tutte le regioni del catalogo: territorio non penalizza.
         bando = {"regioni": [12, 3, 15], "ateco": [620]}
         out = compute_compatibilita(_facets(regioni_ids={12}), bando, totale_regioni=3)
-        assert out["dimensioni"]["regioni"] == {"matched": 3, "totale": 3}
+        # matched=totale (non penalizza) ma matched_ids resta l'intersezione vera:
+        # le regioni dove l'azienda ha davvero una sede.
+        assert out["dimensioni"]["regioni"] == {
+            "matched": 3, "totale": 3, "matched_ids": [12], "nazionale": True,
+        }
         assert out["matched"] == 4 and out["totale"] == 4
         assert out["punteggio"] == 100
 
@@ -112,6 +119,16 @@ class TestComputeCompatibilita:
         bando = {"regioni": [3], "ateco": [850]}
         out = compute_compatibilita(_facets(regioni_ids={12}, ateco_ids={620}), bando, totale_regioni=3)
         assert out["matched"] == 0 and out["totale"] == 2 and out["punteggio"] == 0
+        assert out["dimensioni"]["regioni"]["matched_ids"] == []
+
+    def test_regioni_non_nazionale_matched_ids_coerenti(self):
+        # Bando su 2 regioni su 3 del catalogo: NON nazionale.
+        bando = {"regioni": [12, 3]}
+        out = compute_compatibilita(_facets(regioni_ids={12, 15}), bando, totale_regioni=3)
+        dim = out["dimensioni"]["regioni"]
+        assert dim["nazionale"] is False
+        assert dim["matched"] == len(dim["matched_ids"]) == 1
+        assert dim["matched_ids"] == [12]
 
 
 class TestCompanyRegioniIds:

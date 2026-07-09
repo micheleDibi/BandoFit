@@ -15,6 +15,7 @@ import { AiCheckCard } from "../components/bandi/AiCheckCard";
 import { AiCheckReport } from "../components/bandi/AiCheckReport";
 import { ScadenzaBadge, StatoBadge } from "../components/bandi/badges";
 import { CompatibilitaBadge } from "../components/bandi/CompatibilitaBadge";
+import { CompatibilitaSection } from "../components/bandi/CompatibilitaSection";
 import { ContenutoRenderer } from "../components/bandi/ContenutoRenderer";
 import { SaveBandoButton } from "../components/bandi/SaveBandoButton";
 import { Badge } from "../components/ui/Badge";
@@ -183,6 +184,11 @@ export default function BandoDetail() {
         </div>
       )}
 
+      {/* Pre-check: i requisiti di catalogo del bando confrontati con l'azienda.
+          Assorbe la vecchia card «A chi si rivolge» (stesse liste, ma con il
+          confronto): tenerle entrambe sarebbe un doppione. */}
+      <CompatibilitaSection bando={bando} />
+
       <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_320px]">
         {/* Contenuto */}
         <article className="min-w-0">
@@ -257,87 +263,18 @@ export default function BandoDetail() {
               </Card>
             )}
 
-            {(bando.regioni.length > 0 ||
-              bando.settori.length > 0 ||
-              bando.beneficiari.length > 0 ||
-              bando.codici_ateco.length > 0 ||
-              bando.tematica.length > 0) && (
+            {/* Regioni/settori/beneficiari/ATECO vivono ora nella sezione
+                «Compatibilità»: qui restano solo le tematiche. */}
+            {bando.tematica.length > 0 && (
               <Card className="p-5">
-                <h2 className="font-display text-sm font-semibold text-slate-900">
-                  A chi si rivolge
-                </h2>
-                <dl className="mt-3 space-y-3 text-sm">
-                  {bando.regioni.length > 0 && (
-                    <div>
-                      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                        Regioni
-                      </dt>
-                      <dd className="mt-1 flex flex-wrap gap-1.5">
-                        {bando.regioni.map((r) => (
-                          <Badge key={r.id} tone="slate">
-                            {r.nome}
-                          </Badge>
-                        ))}
-                      </dd>
-                    </div>
-                  )}
-                  {bando.beneficiari.length > 0 && (
-                    <div>
-                      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                        Beneficiari
-                      </dt>
-                      <dd className="mt-1 flex flex-wrap gap-1.5">
-                        {bando.beneficiari.map((b) => (
-                          <Badge key={b.id} tone="slate">
-                            {b.nome}
-                          </Badge>
-                        ))}
-                      </dd>
-                    </div>
-                  )}
-                  {bando.settori.length > 0 && (
-                    <div>
-                      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                        Settori
-                      </dt>
-                      <dd className="mt-1 flex flex-wrap gap-1.5">
-                        {bando.settori.map((s) => (
-                          <Badge key={s.id} tone="slate">
-                            {s.nome}
-                          </Badge>
-                        ))}
-                      </dd>
-                    </div>
-                  )}
-                  {bando.codici_ateco.length > 0 && (
-                    <div>
-                      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                        Codici ATECO
-                      </dt>
-                      <dd className="mt-1 flex flex-wrap gap-1.5">
-                        {bando.codici_ateco.map((c) => (
-                          <Badge key={c.id} tone="slate" title={c.descrizione ?? undefined}>
-                            {c.codice}
-                          </Badge>
-                        ))}
-                      </dd>
-                    </div>
-                  )}
-                  {bando.tematica.length > 0 && (
-                    <div>
-                      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                        Tematiche
-                      </dt>
-                      <dd className="mt-1 flex flex-wrap gap-1.5">
-                        {bando.tematica.map((t) => (
-                          <Badge key={t} tone="brand">
-                            {t}
-                          </Badge>
-                        ))}
-                      </dd>
-                    </div>
-                  )}
-                </dl>
+                <h2 className="font-display text-sm font-semibold text-slate-900">Tematiche</h2>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {bando.tematica.map((t) => (
+                    <Badge key={t} tone="brand">
+                      {t}
+                    </Badge>
+                  ))}
+                </div>
               </Card>
             )}
           </div>

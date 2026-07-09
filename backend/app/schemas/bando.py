@@ -6,6 +6,19 @@ from pydantic import BaseModel
 from app.schemas.common import AtecoItem, LookupItem
 
 
+class CompatibilitaDimensione(BaseModel):
+    """Dettaglio di una dimensione del pre-check. `matched_ids` sono gli id
+    del bando REALMENTE in comune con l'azienda (servono al dettaglio per
+    evidenziare le voci). Per un bando `nazionale` il territorio conta come
+    pienamente in comune (`matched == totale`) anche se le sedi dell'azienda
+    coprono solo alcune regioni: lì `matched_ids` resta l'intersezione vera."""
+
+    matched: int
+    totale: int
+    matched_ids: list[int] = []
+    nazionale: bool = False
+
+
 class Compatibilita(BaseModel):
     """Punteggio a-priori azienda↔bando: relazioni in comune / totali (es.
     18/23). `punteggio` è la percentuale (per la banda di colore); `dimensioni`
@@ -14,7 +27,7 @@ class Compatibilita(BaseModel):
     punteggio: int
     matched: int
     totale: int
-    dimensioni: dict[str, dict[str, int]] | None = None
+    dimensioni: dict[str, CompatibilitaDimensione] | None = None
 
 
 class BandoListItem(BaseModel):

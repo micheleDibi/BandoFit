@@ -24,6 +24,7 @@ import { LinkButton } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/states";
 import { useAuth } from "../hooks/useAuth";
 import { usePlans } from "../hooks/usePlans";
+import { LANDING_COPY } from "../lib/copy";
 
 const FEATURES = [
   {
@@ -82,7 +83,7 @@ const STEPS = [
 ];
 
 const STATS = [
-  { value: "1.200+", label: "Bandi attivi monitorati" },
+  { value: LANDING_COPY.bandiValore, label: LANDING_COPY.bandiEtichetta },
   { value: "UE → locale", label: "Copertura su quattro livelli" },
   { value: "0–100", label: "Punteggio AI-check con citazioni" },
   { value: "Registro Imprese", label: "Dati aziendali certificati" },
@@ -134,7 +135,7 @@ const FAQS: FaqItem[] = [
   },
   {
     q: "Quanti bandi trovo?",
-    a: "Oltre 1.200 bandi attivi monitorati e aggiornati di continuo, su quattro livelli: europeo, nazionale, regionale e locale.",
+    a: LANDING_COPY.bandiFaq,
   },
   {
     q: "Posso gestire più account per la mia azienda?",
@@ -190,7 +191,7 @@ export default function Landing() {
           <div className="max-w-2xl">
             <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-brand-100 ring-1 ring-inset ring-white/20">
               <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden />
-              Oltre 1.200 bandi attivi monitorati
+              {LANDING_COPY.bandiClaim}
             </span>
             <h1 className="mt-5 font-display text-4xl font-bold leading-tight tracking-tight sm:text-5xl">
               Il radar sui bandi,

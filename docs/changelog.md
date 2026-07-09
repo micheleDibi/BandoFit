@@ -11,6 +11,12 @@ Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descr
 - Copy: la landing non promette più «visura camerale in PDF» (due punti), e la card dell'AI-check non la cita più.
 - **DB**: migration **0012** (distruttiva, da eseguire a mano) fa il `drop table company_documents cascade`. **I PDF nel bucket `company-documents` non vengono cancellati da nessun codice** — la vecchia documentazione sosteneva il contrario: vanno svuotati a mano dalla console. `api_usage_events` resta (condivisa con IT-full e verifica CF), smette solo di ricevere righe `service='visura'`.
 
+## 2026-07-09 — Claim bandi della landing: «Più di 4.000 bandi monitorati»
+
+- Il claim passa da «Oltre 1.200 bandi **attivi** monitorati» a **«Più di 4.000 bandi monitorati»**, su richiesta esplicita. Era ripetuto e hardcodato in **tre** punti di `pages/Landing.tsx` (fascia statistiche, badge dell'hero, risposta FAQ): ora vive in **una sola costante** in `lib/copy.ts`, così non possono più divergere.
+- **Trasparenza**: il conteggio **non è un dato**, la landing non interroga il catalogo. Il catalogo contiene circa 1.262 bandi pubblicabili, quindi il nuovo numero non è verificabile dai nostri dati; «monitorati» (al posto di «attivi») è un claim più largo. La voce del 2026-07-06 che rivendicava «solo fatti reali (~1.200 bandi)» va letta alla luce di questa.
+- Nessuna occorrenza altrove: `index.html` non ha numeri né meta OG; `ReimpostaPassword.tsx` contiene `1200` come ritardo in millisecondi e `BandiList.tsx` dice «bandi attivi» senza numero, in altro contesto. Entrambe lasciate intatte.
+
 ## 2026-07-09 — Le categorie di beneficiario si dichiarano, non si deducono
 
 - **Nuovo campo multi-valore «Categorie di beneficiario»** sui dati aziendali (`TagSelect` in `CompanyCard`, scelto dalla lookup `beneficiari` del catalogo): un'azienda può essere insieme PMI e Organismo di formazione. Salvato su `company_profiles.beneficiari` jsonb `[{id, nome}]` (migration **0011**), denormalizzato come `settore_nome`; `PUT /me/company` accetta `beneficiari_ids` e risponde con `beneficiari`. La colonna sta lì, e non su una tabella ponte, perché il pre-check la rilegge a ogni `GET /bandi`, dove `company_profiles` è già nella query: zero letture aggiuntive.

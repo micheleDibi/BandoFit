@@ -196,6 +196,106 @@ async def send_recovery_email(to_email: str, cta_url: str) -> bool:
     return await _dispatch(to_email, "Reimposta la tua password — BandoFit", html_body, text)
 
 
+async def send_consulting_request_email(to_email: str, bando_titolo: str, cta_url: str) -> bool:
+    """Evento 1 — a ogni progettista: nuova richiesta di consulto nel pool."""
+    titolo = html.escape(bando_titolo)
+    html_body = _branded_html(
+        "Nuova richiesta di consulto",
+        [
+            f"Un'azienda ha richiesto un consulto sul bando <strong>{titolo}</strong>.",
+            "Trovi i dettagli e l'AI-check nella sezione richieste: se il caso rientra "
+            "nelle tue competenze, invia una proposta.",
+        ],
+        "Vedi le richieste",
+        cta_url,
+        "Ricevi questa email perché sei un progettista di BandoFit.",
+    )
+    text = (
+        f"Un'azienda ha richiesto un consulto sul bando «{bando_titolo}».\n\n"
+        f"Vedi le richieste: {cta_url}"
+    )
+    return await _dispatch(to_email, "Nuova richiesta di consulto — BandoFit", html_body, text)
+
+
+async def send_proposal_email(
+    to_email: str, codice_progettista: str, bando_titolo: str, cta_url: str
+) -> bool:
+    """Evento 2 — al titolare: un progettista ha inviato una proposta."""
+    codice = html.escape(codice_progettista)
+    titolo = html.escape(bando_titolo)
+    html_body = _branded_html(
+        "Hai ricevuto una proposta di consulenza",
+        [
+            f"Il <strong>Progettista {codice}</strong> ti ha inviato una proposta per "
+            f"il consulto sul bando <strong>{titolo}</strong>.",
+            "Leggila dalla piattaforma: accettandola assegni la consulenza in via "
+            "definitiva e puoi prenotare un appuntamento.",
+        ],
+        "Vedi la proposta",
+        cta_url,
+        "Ricevi questa email perché hai attivato il consulto esperto su questo bando.",
+    )
+    text = (
+        f"Il Progettista {codice_progettista} ti ha inviato una proposta per il bando "
+        f"«{bando_titolo}».\n\nVedi la proposta: {cta_url}"
+    )
+    return await _dispatch(
+        to_email, "Hai ricevuto una proposta di consulenza — BandoFit", html_body, text
+    )
+
+
+async def send_booking_email(
+    to_email: str, ragione_sociale: str, quando: str, cta_url: str
+) -> bool:
+    """Evento 3 — al progettista: un cliente ha prenotato uno slot.
+    `quando` arriva già formattato con il fuso dichiarato (ora italiana)."""
+    azienda = html.escape(ragione_sociale)
+    orario = html.escape(quando)
+    html_body = _branded_html(
+        "Nuova consulenza prenotata",
+        [
+            f"<strong>{azienda}</strong> ha prenotato una consulenza con te "
+            f"il <strong>{orario}</strong>.",
+            "Trovi i dettagli dell'azienda e del bando nella tua area progettista.",
+        ],
+        "Vedi la consulenza",
+        cta_url,
+        "Ricevi questa email perché il cliente ha scelto uno dei tuoi slot di disponibilità.",
+    )
+    text = (
+        f"{ragione_sociale} ha prenotato una consulenza con te il {quando}.\n\n"
+        f"Vedi la consulenza: {cta_url}"
+    )
+    return await _dispatch(to_email, "Nuova consulenza prenotata — BandoFit", html_body, text)
+
+
+async def send_assignment_email(
+    to_email: str, ragione_sociale: str, bando_titolo: str, cta_url: str
+) -> bool:
+    """Evento 4 — al progettista: la sua proposta è stata accettata."""
+    azienda = html.escape(ragione_sociale)
+    titolo = html.escape(bando_titolo)
+    html_body = _branded_html(
+        "Ti è stata assegnata una consulenza",
+        [
+            f"<strong>{azienda}</strong> ha accettato la tua proposta per il bando "
+            f"<strong>{titolo}</strong>: la consulenza è assegnata a te in via definitiva.",
+            "Da ora hai accesso completo ai dati dell'azienda e al suo dossier "
+            "certificato dalla tua area progettista.",
+        ],
+        "Vedi la consulenza",
+        cta_url,
+        "Ricevi questa email perché la tua proposta è stata accettata dal cliente.",
+    )
+    text = (
+        f"{ragione_sociale} ha accettato la tua proposta per il bando «{bando_titolo}».\n\n"
+        f"Vedi la consulenza: {cta_url}"
+    )
+    return await _dispatch(
+        to_email, "Ti è stata assegnata una consulenza — BandoFit", html_body, text
+    )
+
+
 async def send_family_invitation_email(
     to_email: str,
     parent_display_name: str,

@@ -21,12 +21,14 @@ const directLinks: NavItem[] = [
 // Raggruppate sotto «Impostazioni»: profilo aziendale e account.
 const impostazioniLinks: NavItem[] = [
   { to: "/app/azienda", label: "Azienda" },
+  { to: "/app/consulenze", label: "Consulenze" },
   { to: "/app/preferenze", label: "Preferenze" },
   { to: "/app/abbonamento", label: "Abbonamento" },
 ];
 
 // Raggruppate sotto «Progettista» (solo per il ruolo progettista).
 const progettistaLinks: NavItem[] = [
+  { to: "/app/progettista/richieste", label: "Richieste" },
   { to: "/app/progettista/disponibilita", label: "Disponibilità" },
 ];
 

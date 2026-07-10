@@ -68,6 +68,34 @@ export const ADMIN_RUOLO_COPY = {
     "Perderà l'accesso all'area progettista. Il suo codice resta riservato: una futura ri-promozione lo riutilizzerà.",
 } as const;
 
+/** Stati del flusso consulenze: compaiono nei badge di liste e dettagli, sia
+ *  lato cliente sia lato progettista. */
+export const CONSULENZA_STATO_LABELS: Record<
+  import("../types").ConsulenzaStato,
+  string
+> = {
+  nuova: "In attesa di proposte",
+  assegnata: "Assegnata",
+  annullata: "Annullata",
+};
+
+export const PROPOSTA_STATO_LABELS: Record<import("../types").PropostaStato, string> = {
+  inviata: "Inviata",
+  accettata: "Accettata",
+  rifiutata: "Rifiutata",
+  superata: "Superata",
+  ritirata: "Ritirata",
+};
+
+/** Flusso consulenze: stringhe condivise tra CTA, dettaglio cliente e area
+ *  progettista. Il testo di consenso è parte della base giuridica del
+ *  trattamento: non riformularlo senza rivedere l'informativa privacy. */
+export const CONSULENZE_COPY = {
+  consenso:
+    "Attivando il consulto, i progettisti della piattaforma vedranno la ragione sociale, la partita IVA, la tua email e l'esito dell'AI-check di questo bando. Il resto dei dati aziendali resta riservato: lo vedrà solo il progettista che sceglierai.",
+  fusoOrario: "Gli orari sono mostrati nel tuo fuso orario.",
+} as const;
+
 /** Chiude la frase senza raddoppiare il punto: le ragioni sociali finiscono
  *  quasi sempre per «S.R.L.» o «S.P.A.». */
 const chiudi = (frase: string) => (frase.endsWith(".") ? frase : `${frase}.`);

@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     # cooldown: chi annulla e ci ripensa non deve ripagare il fetch.
     company_import_draft_ttl_minutes: int = 30
 
+    # Slug dell'addon che attiva il flusso consulenze (l'addon vive a catalogo
+    # nel DB; la migration 0017 lo garantisce con un seed idempotente).
+    consulting_addon_slug: str = "consulto-esperto"
+
     # AI-check (API Anthropic). Chiave vuota = feature disattivata (le rotte
     # rispondono 503 ai_not_configured). Ogni report costa ~0,10 $ di API.
     anthropic_api_key: str = ""

@@ -33,6 +33,13 @@ async def _fetch_company(primary, parent_id: str) -> CompanyOut | None:
     return CompanyOut(**row)
 
 
+async def get_company_for_owner(primary, owner_id: str) -> CompanyOut | None:
+    """Dati aziendali del titolare indicato, SENZA regole di visibilità: il
+    chiamante ha già autorizzato l'accesso (nel flusso consulenze: progettista
+    assegnato, con audit)."""
+    return await _fetch_company(primary, owner_id)
+
+
 async def get_company(primary, requester: dict) -> CompanyResponse:
     """Il padre (o un utente singolo) vede e modifica i propri dati; un figlio
     ATTIVO vede in sola lettura quelli della famiglia."""

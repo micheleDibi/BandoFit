@@ -219,6 +219,97 @@ export interface Slot {
   prenotato: boolean;
 }
 
+export type ConsulenzaStato = "nuova" | "assegnata" | "annullata";
+export type PropostaStato = "inviata" | "accettata" | "rifiutata" | "superata" | "ritirata";
+
+/** Come il cliente vede il progettista: sempre il codice, il nome solo dopo
+ *  l'assegnazione. */
+export interface ProgettistaPubblico {
+  codice: string | null;
+  nome: string | null;
+}
+
+export interface Proposta {
+  id: string;
+  codice_progettista: string | null;
+  messaggio: string;
+  stato: PropostaStato;
+  created_at: string;
+}
+
+export interface Appuntamento {
+  id: string;
+  inizio: string;
+  fine: string;
+  stato: "confermata" | "annullata";
+}
+
+/** Richiesta di consulto vista dal cliente. */
+export interface Consulenza {
+  id: string;
+  stato: ConsulenzaStato;
+  bando_id: number;
+  bando_slug: string;
+  bando_titolo: string;
+  esito: AiEsito | null;
+  punteggio: number | null;
+  created_at: string;
+  assigned_at: string | null;
+  /** false per gli account collegati: vedono, non agiscono. */
+  editable: boolean;
+  progettista: ProgettistaPubblico | null;
+  proposte_aperte: number;
+  proposte: Proposta[];
+  appuntamento: Appuntamento | null;
+}
+
+/** Vista PARZIALE del progettista sul pool (requisito: ragione sociale,
+ *  P.IVA, denominazione utente, email, bando, esito AI-check). */
+export interface RichiestaPool {
+  id: string;
+  stato: ConsulenzaStato;
+  ragione_sociale: string | null;
+  partita_iva: string | null;
+  denominazione_utente: string;
+  email: string | null;
+  bando_id: number;
+  bando_slug: string;
+  bando_titolo: string;
+  esito: AiEsito | null;
+  punteggio: number | null;
+  created_at: string;
+  assegnata_a_me: boolean;
+  mia_proposta_stato: PropostaStato | null;
+  appuntamento: Appuntamento | null;
+}
+
+export interface RichiestaPoolDetail extends RichiestaPool {
+  ai_check: AiCheck | null;
+  mie_proposte: Proposta[];
+}
+
+export interface RichiestePool {
+  aperte: RichiestaPool[];
+  assegnate: RichiestaPool[];
+}
+
+/** Vista FULL post-assegnazione (l'accesso è registrato lato server). */
+export interface FullCompany {
+  company: CompanyProfile | null;
+  dossier: DossierResponse;
+}
+
+export interface AppuntamentoProgettista {
+  id: string;
+  request_id: string;
+  inizio: string;
+  fine: string;
+  stato: string;
+  bando_titolo: string;
+  ragione_sociale: string | null;
+  email: string | null;
+}
+
 export interface Notifica {
   id: number;
   tipo: string;

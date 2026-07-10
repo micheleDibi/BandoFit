@@ -12,8 +12,12 @@ import BandiList from "./pages/BandiList";
 import BandoDetail from "./pages/BandoDetail";
 import Calendario from "./pages/Calendario";
 import ConfermaEmail from "./pages/ConfermaEmail";
+import Consulenze from "./pages/Consulenze";
+import ConsulenzaDetail from "./pages/ConsulenzaDetail";
 import Disponibilita from "./pages/progettista/Disponibilita";
 import Landing from "./pages/Landing";
+import Richieste from "./pages/progettista/Richieste";
+import RichiestaDetail from "./pages/progettista/RichiestaDetail";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import Preferenze from "./pages/Preferenze";
@@ -51,6 +55,24 @@ export default function App() {
         <Route path="preferenze" element={<Preferenze />} />
         <Route path="abbonamento" element={<Abbonamento />} />
         <Route path="profilo" element={<Profilo />} />
+        <Route path="consulenze" element={<Consulenze />} />
+        <Route path="consulenze/:id" element={<ConsulenzaDetail />} />
+        <Route
+          path="progettista/richieste"
+          element={
+            <ProgettistaRoute>
+              <Richieste />
+            </ProgettistaRoute>
+          }
+        />
+        <Route
+          path="progettista/richieste/:id"
+          element={
+            <ProgettistaRoute>
+              <RichiestaDetail />
+            </ProgettistaRoute>
+          }
+        />
         <Route
           path="progettista/disponibilita"
           element={

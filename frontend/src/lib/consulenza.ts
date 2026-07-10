@@ -8,6 +8,11 @@
  * add-on «su richiesta» restano comunque NON attivabili self-serve: il blocco
  * è applicato dal backend (cambio piano e registrazione).
  */
+/** Slug stabile dell'addon che attiva il flusso consulenze post AI-check.
+ *  Deve coincidere con `consulting_addon_slug` del backend e con il seed
+ *  della migration 0017. */
+export const CONSULTO_ADDON_SLUG = "consulto-esperto";
+
 export interface ConsultationRequest {
   kind: "plan" | "addon";
   slug: string;

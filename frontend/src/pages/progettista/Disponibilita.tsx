@@ -1,15 +1,86 @@
-import { CalendarPlus, Pencil, Trash2 } from "lucide-react";
+import { CalendarClock, CalendarPlus, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { Dialog } from "../../components/ui/Dialog";
 import { TextField } from "../../components/ui/Field";
 import { EmptyState, ErrorState, Skeleton } from "../../components/ui/states";
+import {
+  useAnnullaAppuntamento,
+  useAppuntamenti,
+} from "../../hooks/useProgettistaRichieste";
 import { useCreateSlot, useDeleteSlot, useSlots, useUpdateSlot } from "../../hooks/useSlots";
 import { apiErrorMessage } from "../../lib/api";
 import { formatSlotGiorno, formatSlotOra, toLocalIsoDate } from "../../lib/format";
 import type { Slot } from "../../types";
+
+/** Gli appuntamenti confermati del progettista, sopra il calendario delle
+ *  disponibilità: sono la ragione per cui gli slot esistono. */
+function AppuntamentiSection() {
+  const { data: appuntamenti } = useAppuntamenti();
+  const annulla = useAnnullaAppuntamento();
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  if (!appuntamenti || appuntamenti.length === 0) return null;
+
+  return (
+    <section className="mt-6" aria-label="Appuntamenti confermati">
+      <h2 className="font-display text-lg font-bold tracking-tight text-slate-900">
+        Appuntamenti
+      </h2>
+      <Card className="mt-2 divide-y divide-slate-100">
+        {appuntamenti.map((appuntamento) => (
+          <div
+            key={appuntamento.id}
+            className="flex flex-wrap items-center justify-between gap-2 px-4 py-3"
+          >
+            <div className="min-w-0">
+              <p className="inline-flex items-center gap-2 text-sm font-medium text-slate-900">
+                <CalendarClock className="size-4 text-brand-500" aria-hidden />
+                <span className="capitalize">{formatSlotGiorno(appuntamento.inizio)}</span>,{" "}
+                {formatSlotOra(appuntamento.inizio)} – {formatSlotOra(appuntamento.fine)}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                {appuntamento.ragione_sociale ?? "Azienda"} · {appuntamento.bando_titolo}
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Link
+                to={`/app/progettista/richieste/${appuntamento.request_id}`}
+                className="text-sm font-medium text-brand-600 underline-offset-2 hover:underline"
+              >
+                Vedi la consulenza
+              </Link>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                loading={annulla.isPending}
+                onClick={async () => {
+                  setCancelError(null);
+                  try {
+                    await annulla.mutateAsync(appuntamento.id);
+                  } catch (err) {
+                    setCancelError(apiErrorMessage(err));
+                  }
+                }}
+              >
+                Annulla
+              </Button>
+            </div>
+          </div>
+        ))}
+      </Card>
+      {cancelError && (
+        <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+          {cancelError}
+        </p>
+      )}
+    </section>
+  );
+}
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const toLocalTime = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -122,6 +193,8 @@ export default function Disponibilita() {
           Nuovo slot
         </Button>
       </div>
+
+      <AppuntamentiSection />
 
       <div className="mt-6">
         {isPending ? (

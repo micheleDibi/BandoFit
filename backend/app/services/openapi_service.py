@@ -670,7 +670,15 @@ async def get_dossier(primary, user: dict) -> DossierResponse:
         owner_id, editable = str(membership["parent_id"]), False
     else:
         owner_id, editable = str(user["id"]), True
+    return await get_dossier_for_owner(primary, owner_id, editable=editable)
 
+
+async def get_dossier_for_owner(
+    primary, owner_id: str, *, editable: bool = False
+) -> DossierResponse:
+    """Dossier del titolare indicato, SENZA regole di visibilità: il chiamante
+    ha già autorizzato l'accesso (famiglia in get_dossier; assegnazione, con
+    audit, nel flusso consulenze)."""
     company_row = await _fetch_company_row(primary, owner_id)
     if company_row is None:
         return DossierResponse(editable=editable, imported=False)

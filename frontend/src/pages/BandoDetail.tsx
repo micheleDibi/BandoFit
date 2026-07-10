@@ -13,6 +13,7 @@ import {
 import { Link, useParams } from "react-router-dom";
 import { AiCheckCard } from "../components/bandi/AiCheckCard";
 import { AiCheckReport } from "../components/bandi/AiCheckReport";
+import { ConsultoCard } from "../components/bandi/ConsultoCard";
 import { ScadenzaBadge, StatoBadge } from "../components/bandi/badges";
 import { CompatibilitaBadge } from "../components/bandi/CompatibilitaBadge";
 import { CompatibilitaCard } from "../components/bandi/CompatibilitaCard";
@@ -212,6 +213,7 @@ export default function BandoDetail() {
                 l'esito) — tenerle entrambe sarebbe un doppione. */}
             <CompatibilitaCard bando={bando} />
             <AiCheckCard slug={bando.slug} />
+            <ConsultoCard slug={bando.slug} />
 
             {linkPrincipale && (
               <Card className="p-5">

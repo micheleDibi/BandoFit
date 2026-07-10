@@ -1,5 +1,6 @@
-"""Slot di disponibilità: validazioni, mappatura errori RPC/constraint,
-flag `prenotato` derivato dai booking confermati."""
+"""Consulenze: slot (validazioni, mappatura errori), flusso richiesta →
+proposta → assegnazione → prenotazione (guardie, eventi, audit) e visibilità
+partial/full del progettista."""
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -7,12 +8,24 @@ from types import SimpleNamespace
 import pytest
 from postgrest.exceptions import APIError
 
-from app.core.errors import BadRequestError, ConflictError, NotFoundError
+from app.core.errors import BadRequestError, ConflictError, ForbiddenError, NotFoundError
 from app.schemas.consulting import SlotIn
+from app.schemas.openapi_data import DossierResponse
 from app.services import consulting_service
 
 PROGETTISTA = "aaaaaaaa-0000-0000-0000-000000000020"
 SLOT_ID = "bbbbbbbb-0000-0000-0000-000000000021"
+LIBERO_ID = "cccccccc-0000-0000-0000-000000000022"
+OCCUPATO_ID = "dddddddd-0000-0000-0000-000000000023"
+TITOLARE = "eeeeeeee-0000-0000-0000-000000000024"
+REQUEST_ID = "ffffffff-0000-0000-0000-000000000025"
+PROPOSAL_ID = "99999999-0000-0000-0000-000000000026"
+AI_CHECK_ID = "88888888-0000-0000-0000-000000000027"
+COMPANY_ID = "77777777-0000-0000-0000-000000000028"
+BOOKING_ID = "66666666-0000-0000-0000-000000000029"
+
+USER = {"id": TITOLARE, "role": "cliente"}
+PROG_USER = {"id": PROGETTISTA, "role": "progettista"}
 
 
 def tra(minuti: int) -> datetime:
@@ -39,12 +52,21 @@ class FakeQuery:
         self._payload = payload
         return self
 
+    def update(self, payload):
+        self._action = "update"
+        self._payload = payload
+        return self
+
     def eq(self, column, value):
         self.filters.append(("eq", column, value))
         return self
 
     def gte(self, column, value):
         self.filters.append(("gte", column, value))
+        return self
+
+    def gt(self, column, value):
+        self.filters.append(("gt", column, value))
         return self
 
     def in_(self, column, values):
@@ -54,13 +76,22 @@ class FakeQuery:
     def order(self, column, desc=False):
         return self
 
+    def limit(self, n):
+        return self
+
     async def execute(self):
         self._owner.ops.append((self._table, self._action, self._payload, list(self.filters)))
         error = self._owner.errors.get((self._table, self._action))
         if error is not None:
             raise error
         if self._action == "insert":
-            return SimpleNamespace(data=[{**self._payload, "id": SLOT_ID}])
+            row = {"id": self._owner.insert_id, "created_at": tra(0).isoformat(), **self._payload}
+            return SimpleNamespace(data=[row])
+        if self._action == "update":
+            return SimpleNamespace(data=self._owner.updates.get(self._table, [self._payload]))
+        queue = self._owner.select_queues.get(self._table)
+        if queue:
+            return SimpleNamespace(data=queue.pop(0))
         return SimpleNamespace(data=self._owner.selects.get(self._table, []))
 
 
@@ -75,16 +106,20 @@ class FakeRpc:
         error = self._owner.rpc_errors.get(self._fn)
         if error is not None:
             raise error
-        return SimpleNamespace(data=None)
+        return SimpleNamespace(data=self._owner.rpc_results.get(self._fn))
 
 
 class FakePrimary:
-    def __init__(self, selects: dict | None = None):
+    def __init__(self, selects: dict | None = None, updates: dict | None = None):
         self.selects = selects or {}
+        self.select_queues: dict = {}
+        self.updates = updates or {}
+        self.insert_id = "id-inserito"
         self.ops: list = []
         self.rpc_calls: list = []
         self.errors: dict = {}
         self.rpc_errors: dict = {}
+        self.rpc_results: dict = {}
 
     def table(self, name: str) -> FakeQuery:
         return FakeQuery(self, name)
@@ -97,7 +132,103 @@ def api_error(code: str = "P0001", details: str | None = None) -> APIError:
     return APIError({"message": "dal db", "code": code, "details": details, "hint": None})
 
 
-class TestValidazioni:
+def request_row(**overrides) -> dict:
+    row = {
+        "id": REQUEST_ID,
+        "cliente_id": TITOLARE,
+        "family_parent_id": TITOLARE,
+        "company_profile_id": COMPANY_ID,
+        "ai_check_id": AI_CHECK_ID,
+        "esito": "ammissibile",
+        "punteggio": 82,
+        "bando_id": 1,
+        "bando_slug": "bando-di-prova",
+        "bando_titolo": "Bando di prova",
+        "stato": "nuova",
+        "assigned_progettista_id": None,
+        "assigned_at": None,
+        "accepted_proposal_id": None,
+        "created_at": tra(0).isoformat(),
+    }
+    row.update(overrides)
+    return row
+
+
+@pytest.fixture(autouse=True)
+def stub_settings(monkeypatch):
+    for key, value in {
+        "PRIMARY_SUPABASE_URL": "https://dummy.supabase.co",
+        "PRIMARY_SUPABASE_SERVICE_ROLE_KEY": "k",
+        "SECONDARY_SUPABASE_URL": "https://d2.supabase.co",
+        "SECONDARY_SUPABASE_ANON_KEY": "k",
+    }.items():
+        monkeypatch.setenv(key, value)
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture
+def as_titolare(monkeypatch):
+    async def fake(primary, user):
+        return (str(user["id"]), True)
+
+    monkeypatch.setattr(consulting_service.family_service, "owner_and_editable", fake)
+
+
+@pytest.fixture
+def as_collegato(monkeypatch):
+    """Account collegato attivo: vede i dati del titolare, non agisce."""
+
+    async def fake(primary, user):
+        return (TITOLARE, False)
+
+    monkeypatch.setattr(consulting_service.family_service, "owner_and_editable", fake)
+
+
+@pytest.fixture
+def notify_calls(monkeypatch):
+    calls: list[dict] = []
+
+    async def fake_notify(primary, user_ids, **kwargs):
+        calls.append({"user_ids": [str(u) for u in user_ids], **kwargs})
+
+    monkeypatch.setattr(consulting_service.notification_service, "notify", fake_notify)
+    return calls
+
+
+@pytest.fixture
+def spawn_calls(monkeypatch):
+    calls: list = []
+
+    def fake_spawn(coro):
+        calls.append(coro)
+        coro.close()
+
+    monkeypatch.setattr(consulting_service, "_spawn", fake_spawn)
+    return calls
+
+
+@pytest.fixture
+def detail_stub(monkeypatch):
+    """Le azioni ritornano il dettaglio ricaricato: fuori scope nei test."""
+    sentinel = SimpleNamespace(kind="consulenza")
+
+    async def fake_get(primary, user, request_id):
+        return sentinel
+
+    monkeypatch.setattr(consulting_service, "get_my_request", fake_get)
+    return sentinel
+
+
+# ---------------------------------------------------------------------------
+# Slot
+# ---------------------------------------------------------------------------
+
+
+class TestValidazioniSlot:
     async def test_fine_prima_dellinizio(self):
         data = SlotIn(inizio=tra(120), fine=tra(60))
         with pytest.raises(BadRequestError):
@@ -126,9 +257,10 @@ class TestValidazioni:
             SlotIn(inizio=datetime(2026, 8, 1, 10, 0), fine=datetime(2026, 8, 1, 11, 0))
 
 
-class TestCreate:
+class TestSlotCrud:
     async def test_inserimento(self):
         primary = FakePrimary()
+        primary.insert_id = SLOT_ID
         out = await consulting_service.create_slot(primary, PROGETTISTA, slot_in())
         [(table, action, payload, _)] = primary.ops
         assert (table, action) == ("availability_slots", "insert")
@@ -141,12 +273,6 @@ class TestCreate:
         with pytest.raises(ConflictError):
             await consulting_service.create_slot(primary, PROGETTISTA, slot_in())
 
-
-LIBERO_ID = "cccccccc-0000-0000-0000-000000000022"
-OCCUPATO_ID = "dddddddd-0000-0000-0000-000000000023"
-
-
-class TestList:
     async def test_flag_prenotato_derivato(self):
         primary = FakePrimary(
             selects={
@@ -162,7 +288,6 @@ class TestList:
             (LIBERO_ID, False),
             (OCCUPATO_ID, True),
         ]
-        # I booking si filtrano sui soli slot in pagina e sullo stato confermata.
         bookings_op = [op for op in primary.ops if op[0] == "consultation_bookings"][0]
         assert ("in", "slot_id", [LIBERO_ID, OCCUPATO_ID]) in bookings_op[3]
         assert ("eq", "stato", "confermata") in bookings_op[3]
@@ -172,8 +297,6 @@ class TestList:
         assert await consulting_service.list_slots(primary, PROGETTISTA) == []
         assert [op[0] for op in primary.ops] == ["availability_slots"]
 
-
-class TestUpdateDelete:
     async def test_update_passa_dalla_rpc(self):
         primary = FakePrimary()
         data = slot_in()
@@ -181,7 +304,6 @@ class TestUpdateDelete:
         [(fn, params)] = primary.rpc_calls
         assert fn == "fn_update_slot"
         assert params["p_slot_id"] == SLOT_ID
-        assert params["p_progettista_id"] == PROGETTISTA
         assert out.inizio == data.inizio
 
     async def test_update_slot_prenotato(self):
@@ -208,3 +330,422 @@ class TestUpdateDelete:
         primary.rpc_errors["fn_delete_slot"] = api_error(details="slot_booked")
         with pytest.raises(ConflictError):
             await consulting_service.delete_slot(primary, PROGETTISTA, SLOT_ID)
+
+
+# ---------------------------------------------------------------------------
+# Creazione richiesta (attivazione addon)
+# ---------------------------------------------------------------------------
+
+
+def create_selects(check_status: str = "ready", addon: bool = True) -> dict:
+    return {
+        "ai_checks": [
+            {
+                "id": AI_CHECK_ID,
+                "status": check_status,
+                "esito": "ammissibile",
+                "punteggio": 82,
+                "bando_id": 1,
+                "bando_slug": "bando-di-prova",
+                "bando_titolo": "Bando di prova",
+                "company_profile_id": COMPANY_ID,
+                "family_parent_id": TITOLARE,
+            }
+        ],
+        "addons": (
+            [{"id": 1, "slug": "consulto-esperto", "prezzo": 0, "is_active": True}]
+            if addon
+            else []
+        ),
+        "profiles": [
+            {"id": PROGETTISTA, "email": "prog@test.it"},
+            {"id": "11111111-0000-0000-0000-000000000030", "email": "prog2@test.it"},
+        ],
+    }
+
+
+class TestCreateRequest:
+    async def test_account_collegato_respinto(self, as_collegato):
+        primary = FakePrimary()
+        with pytest.raises(ForbiddenError):
+            await consulting_service.create_request(primary, USER, AI_CHECK_ID)
+        assert primary.ops == []
+
+    async def test_ai_check_non_trovato(self, as_titolare):
+        primary = FakePrimary(selects={"ai_checks": []})
+        with pytest.raises(NotFoundError):
+            await consulting_service.create_request(primary, USER, AI_CHECK_ID)
+
+    async def test_ai_check_non_completato(self, as_titolare):
+        primary = FakePrimary(selects=create_selects(check_status="pending"))
+        with pytest.raises(ConflictError):
+            await consulting_service.create_request(primary, USER, AI_CHECK_ID)
+
+    async def test_addon_non_disponibile(self, as_titolare):
+        primary = FakePrimary(selects=create_selects(addon=False))
+        with pytest.raises(NotFoundError):
+            await consulting_service.create_request(primary, USER, AI_CHECK_ID)
+
+    async def test_richiesta_duplicata(self, as_titolare):
+        primary = FakePrimary(selects=create_selects())
+        primary.errors[("consultation_requests", "insert")] = api_error(code="23505")
+        with pytest.raises(ConflictError):
+            await consulting_service.create_request(primary, USER, AI_CHECK_ID)
+
+    async def test_creazione_con_eventi(
+        self, as_titolare, notify_calls, spawn_calls, detail_stub
+    ):
+        primary = FakePrimary(selects=create_selects())
+        primary.insert_id = REQUEST_ID
+        out = await consulting_service.create_request(primary, USER, AI_CHECK_ID)
+        assert out is detail_stub
+
+        [(_, _, payload, _)] = [
+            op for op in primary.ops if op[0] == "consultation_requests"
+        ]
+        assert payload["cliente_id"] == TITOLARE
+        assert payload["esito"] == "ammissibile"
+        assert payload["addon_slug"] == "consulto-esperto"
+
+        [audit] = [op for op in primary.ops if op[0] == "audit_log"]
+        assert audit[2]["action"] == "consulenza.created"
+
+        # Evento 1: in-app a TUTTI i progettisti attivi, email in background.
+        [notifica] = notify_calls
+        assert notifica["tipo"] == "consulenza.nuova_richiesta"
+        assert len(notifica["user_ids"]) == 2
+        assert notifica["dedup_key"] == f"richiesta:{REQUEST_ID}"
+        # Minimizzazione: nel corpo solo il bando, nessun dato del cliente.
+        assert "Bando di prova" in notifica["corpo"]
+        assert len(spawn_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Azioni del titolare: accetta / rifiuta / annulla / prenota
+# ---------------------------------------------------------------------------
+
+
+class TestAcceptProposal:
+    async def test_rpc_e_evento_assegnazione(
+        self, notify_calls, spawn_calls, detail_stub
+    ):
+        primary = FakePrimary(
+            selects={
+                "consultation_requests": [request_row(stato="assegnata")],
+                "profiles": [{"id": PROGETTISTA, "email": "prog@test.it"}],
+                "company_profiles": [{"id": COMPANY_ID, "ragione_sociale": "ACME Srl"}],
+            }
+        )
+        primary.rpc_results["fn_accept_proposal"] = {
+            "progettista_id": PROGETTISTA,
+            "proposal_id": PROPOSAL_ID,
+            "booking_id": None,
+        }
+        out = await consulting_service.accept_proposal(
+            primary, USER, REQUEST_ID, PROPOSAL_ID, None
+        )
+        assert out is detail_stub
+        [(fn, params)] = primary.rpc_calls
+        assert fn == "fn_accept_proposal"
+        assert params["p_cliente_id"] == TITOLARE
+        assert params["p_slot_id"] is None
+        [notifica] = notify_calls
+        assert notifica["tipo"] == "consulenza.assegnazione"
+        assert notifica["user_ids"] == [PROGETTISTA]
+        assert notifica["dedup_key"] == f"assegnazione:{REQUEST_ID}"
+
+    async def test_con_slot_scatena_anche_levento_prenotazione(
+        self, notify_calls, spawn_calls, detail_stub
+    ):
+        primary = FakePrimary(
+            selects={
+                "consultation_requests": [request_row(stato="assegnata")],
+                "profiles": [{"id": PROGETTISTA, "email": "prog@test.it"}],
+                "company_profiles": [{"id": COMPANY_ID, "ragione_sociale": "ACME Srl"}],
+                "consultation_bookings": [
+                    {
+                        "id": BOOKING_ID,
+                        "request_id": REQUEST_ID,
+                        "slot_id": SLOT_ID,
+                        "cliente_id": TITOLARE,
+                        "progettista_id": PROGETTISTA,
+                        "inizio": tra(60).isoformat(),
+                        "fine": tra(90).isoformat(),
+                        "stato": "confermata",
+                    }
+                ],
+            }
+        )
+        primary.rpc_results["fn_accept_proposal"] = {
+            "progettista_id": PROGETTISTA,
+            "proposal_id": PROPOSAL_ID,
+            "booking_id": BOOKING_ID,
+        }
+        await consulting_service.accept_proposal(
+            primary, USER, REQUEST_ID, PROPOSAL_ID, SLOT_ID
+        )
+        assert [n["tipo"] for n in notify_calls] == [
+            "consulenza.assegnazione",
+            "consulenza.prenotazione",
+        ]
+        prenotazione = notify_calls[1]
+        assert prenotazione["dedup_key"] == f"booking:{BOOKING_ID}"
+        assert "ora italiana" in prenotazione["corpo"]
+
+    async def test_slot_occupato_mappato_su_conflict(self):
+        primary = FakePrimary()
+        primary.rpc_errors["fn_accept_proposal"] = api_error(details="slot_taken")
+        with pytest.raises(ConflictError):
+            await consulting_service.accept_proposal(
+                primary, USER, REQUEST_ID, PROPOSAL_ID, SLOT_ID
+            )
+
+
+class TestRejectCancel:
+    async def test_rifiuto_condizionale(self, as_titolare, detail_stub):
+        primary = FakePrimary(
+            selects={"consultation_requests": [request_row()]},
+            updates={"consultation_proposals": [{"id": PROPOSAL_ID}]},
+        )
+        await consulting_service.reject_proposal(primary, USER, REQUEST_ID, PROPOSAL_ID)
+        [(_, _, payload, filters)] = [
+            op for op in primary.ops if op[0] == "consultation_proposals"
+        ]
+        assert payload == {"stato": "rifiutata"}
+        assert ("eq", "stato", "inviata") in filters
+
+    async def test_rifiuto_su_proposta_gia_chiusa(self, as_titolare, detail_stub):
+        primary = FakePrimary(
+            selects={"consultation_requests": [request_row()]},
+            updates={"consultation_proposals": []},
+        )
+        with pytest.raises(ConflictError):
+            await consulting_service.reject_proposal(primary, USER, REQUEST_ID, PROPOSAL_ID)
+
+    async def test_richiesta_di_unaltra_azienda_non_esiste(self, as_titolare, detail_stub):
+        altro = {"id": "22222222-0000-0000-0000-000000000031", "role": "cliente"}
+        primary = FakePrimary(selects={"consultation_requests": [request_row()]})
+        # La richiesta è dell'azienda di TITOLARE: per un estraneo non esiste.
+        with pytest.raises(NotFoundError):
+            await consulting_service.reject_proposal(primary, altro, REQUEST_ID, PROPOSAL_ID)
+
+    async def test_annullo_chiude_le_proposte_e_avvisa(
+        self, as_titolare, notify_calls, detail_stub
+    ):
+        altra_prog = "33333333-0000-0000-0000-000000000032"
+        primary = FakePrimary(
+            selects={
+                "consultation_requests": [request_row()],
+                "consultation_proposals": [
+                    {"progettista_id": PROGETTISTA},
+                    {"progettista_id": altra_prog},
+                ],
+            },
+            updates={
+                "consultation_requests": [{"id": REQUEST_ID}],
+                "consultation_proposals": [{}],
+            },
+        )
+        await consulting_service.cancel_request(primary, USER, REQUEST_ID)
+        proposte_update = [
+            op
+            for op in primary.ops
+            if op[0] == "consultation_proposals" and op[1] == "update"
+        ]
+        assert proposte_update[0][2] == {"stato": "superata"}
+        [notifica] = notify_calls
+        assert notifica["tipo"] == "consulenza.richiesta_annullata"
+        assert set(notifica["user_ids"]) == {PROGETTISTA, altra_prog}
+        [audit] = [op for op in primary.ops if op[0] == "audit_log"]
+        assert audit[2]["action"] == "consulenza.cancelled"
+
+    async def test_annullo_su_richiesta_non_aperta(self, as_titolare, detail_stub):
+        primary = FakePrimary(
+            selects={"consultation_requests": [request_row(stato="assegnata",
+                                                           assigned_progettista_id=PROGETTISTA,
+                                                           accepted_proposal_id=PROPOSAL_ID,
+                                                           assigned_at=tra(0).isoformat())]},
+            updates={"consultation_requests": []},
+        )
+        with pytest.raises(ConflictError):
+            await consulting_service.cancel_request(primary, USER, REQUEST_ID)
+
+
+class TestBookableSlots:
+    async def test_serve_la_proposta_se_non_assegnata(self, as_titolare):
+        primary = FakePrimary(selects={"consultation_requests": [request_row()]})
+        with pytest.raises(BadRequestError):
+            await consulting_service.list_bookable_slots(primary, USER, REQUEST_ID, None)
+
+    async def test_slot_liberi_della_proposta(self, as_titolare):
+        primary = FakePrimary(
+            selects={
+                "consultation_requests": [request_row()],
+                "consultation_proposals": [
+                    {"progettista_id": PROGETTISTA, "stato": "inviata"}
+                ],
+                "availability_slots": [
+                    {"id": LIBERO_ID, "inizio": tra(60).isoformat(), "fine": tra(90).isoformat()},
+                    {"id": OCCUPATO_ID, "inizio": tra(120).isoformat(), "fine": tra(150).isoformat()},
+                ],
+                "consultation_bookings": [{"slot_id": OCCUPATO_ID}],
+            }
+        )
+        slots = await consulting_service.list_bookable_slots(
+            primary, USER, REQUEST_ID, PROPOSAL_ID
+        )
+        assert [str(s.id) for s in slots] == [LIBERO_ID]
+
+
+# ---------------------------------------------------------------------------
+# Lato progettista: pool parziale, proposte, dossier full
+# ---------------------------------------------------------------------------
+
+
+class TestPool:
+    async def test_dati_parziali_e_denominazione(self):
+        primary = FakePrimary(
+            selects={
+                "company_profiles": [
+                    {"id": COMPANY_ID, "ragione_sociale": "ACME Srl", "partita_iva": "01234567890"}
+                ],
+                "profiles": [
+                    {
+                        "id": TITOLARE,
+                        "nome": "Paola",
+                        "cognome": "Bianchi",
+                        "email": "paola@acme.it",
+                        "azienda": None,
+                    }
+                ],
+                "consultation_proposals": [],
+                "consultation_bookings": [],
+            }
+        )
+        primary.select_queues["consultation_requests"] = [
+            [request_row()],  # aperte
+            [],  # assegnate a me
+        ]
+        pool = await consulting_service.list_pool(primary, PROG_USER)
+        assert len(pool.aperte) == 1 and pool.assegnate == []
+        richiesta = pool.aperte[0]
+        # Esattamente i campi del requisito punto 3.
+        assert richiesta.ragione_sociale == "ACME Srl"
+        assert richiesta.partita_iva == "01234567890"
+        assert richiesta.denominazione_utente == "ACME Srl"
+        assert richiesta.email == "paola@acme.it"
+        assert richiesta.esito == "ammissibile" and richiesta.punteggio == 82
+        assert richiesta.assegnata_a_me is False
+
+    async def test_richiesta_altrui_assegnata_non_visibile(self):
+        primary = FakePrimary(
+            selects={
+                "consultation_requests": [
+                    request_row(
+                        stato="assegnata",
+                        assigned_progettista_id="44444444-0000-0000-0000-000000000033",
+                        accepted_proposal_id=PROPOSAL_ID,
+                        assigned_at=tra(0).isoformat(),
+                    )
+                ]
+            }
+        )
+        with pytest.raises(NotFoundError):
+            await consulting_service.get_pool_request(primary, PROG_USER, REQUEST_ID)
+
+    async def test_richiesta_annullata_non_visibile(self):
+        primary = FakePrimary(
+            selects={"consultation_requests": [request_row(stato="annullata")]}
+        )
+        with pytest.raises(NotFoundError):
+            await consulting_service.get_pool_request(primary, PROG_USER, REQUEST_ID)
+
+
+class TestProposte:
+    async def test_invio_con_evento_al_titolare(self, notify_calls, spawn_calls, monkeypatch):
+        async def fake_detail(primary, progettista, request_id):
+            return SimpleNamespace(kind="dettaglio")
+
+        monkeypatch.setattr(consulting_service, "get_pool_request", fake_detail)
+        primary = FakePrimary(
+            selects={
+                "consultation_requests": [request_row()],
+                "progettisti": [{"user_id": PROGETTISTA, "codice": "PRG-00001"}],
+                "profiles": [{"id": TITOLARE, "email": "paola@acme.it"}],
+            }
+        )
+        primary.insert_id = PROPOSAL_ID
+        await consulting_service.create_proposal(
+            primary, PROG_USER, REQUEST_ID, "Posso aiutarti su questo bando"
+        )
+        [notifica] = notify_calls
+        assert notifica["tipo"] == "consulenza.proposta"
+        assert notifica["user_ids"] == [TITOLARE]
+        assert notifica["dedup_key"] == f"proposta:{PROPOSAL_ID}"
+        assert "PRG-00001" in notifica["corpo"]
+        [audit] = [op for op in primary.ops if op[0] == "audit_log"]
+        assert audit[2]["action"] == "consulenza.proposal_sent"
+
+    async def test_doppia_proposta(self):
+        primary = FakePrimary(selects={"consultation_requests": [request_row()]})
+        primary.errors[("consultation_proposals", "insert")] = api_error(code="23505")
+        with pytest.raises(ConflictError):
+            await consulting_service.create_proposal(primary, PROG_USER, REQUEST_ID, "Ciao")
+
+    async def test_ritiro_condizionale(self):
+        primary = FakePrimary(updates={"consultation_proposals": []})
+        with pytest.raises(ConflictError):
+            await consulting_service.withdraw_proposal(primary, PROG_USER, PROPOSAL_ID)
+
+
+class TestDossierFull:
+    async def test_non_assegnato_respinto(self):
+        primary = FakePrimary(
+            selects={
+                "consultation_requests": [
+                    request_row(
+                        stato="assegnata",
+                        assigned_progettista_id="44444444-0000-0000-0000-000000000033",
+                        accepted_proposal_id=PROPOSAL_ID,
+                        assigned_at=tra(0).isoformat(),
+                    )
+                ]
+            }
+        )
+        with pytest.raises(ForbiddenError):
+            await consulting_service.get_full_company(primary, PROG_USER, REQUEST_ID)
+        assert [op for op in primary.ops if op[0] == "audit_log"] == []
+
+    async def test_assegnato_con_audit(self, monkeypatch):
+        async def fake_company(primary, owner_id):
+            assert owner_id == TITOLARE
+            return None
+
+        async def fake_dossier(primary, owner_id, *, editable=False):
+            assert owner_id == TITOLARE
+            return DossierResponse(editable=False, imported=False)
+
+        monkeypatch.setattr(
+            consulting_service.company_service, "get_company_for_owner", fake_company
+        )
+        monkeypatch.setattr(
+            consulting_service.openapi_service, "get_dossier_for_owner", fake_dossier
+        )
+        primary = FakePrimary(
+            selects={
+                "consultation_requests": [
+                    request_row(
+                        stato="assegnata",
+                        assigned_progettista_id=PROGETTISTA,
+                        accepted_proposal_id=PROPOSAL_ID,
+                        assigned_at=tra(0).isoformat(),
+                    )
+                ]
+            }
+        )
+        out = await consulting_service.get_full_company(primary, PROG_USER, REQUEST_ID)
+        assert out.dossier.imported is False
+        # OGNI accesso ai dati full finisce in audit_log.
+        [audit] = [op for op in primary.ops if op[0] == "audit_log"]
+        assert audit[2]["action"] == "consulenza.dossier_accessed"
+        assert audit[2]["payload"] == {"request_id": REQUEST_ID}

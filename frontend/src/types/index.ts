@@ -210,6 +210,15 @@ export interface Progettista {
   codice: string;
 }
 
+/** Slot di disponibilità del progettista: istanti UTC, mostrati nel fuso del
+ *  browser (a differenza del calendario personale, wall-clock italiano). */
+export interface Slot {
+  id: string;
+  inizio: string;
+  fine: string;
+  prenotato: boolean;
+}
+
 export interface Notifica {
   id: number;
   tipo: string;

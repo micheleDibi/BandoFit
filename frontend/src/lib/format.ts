@@ -73,6 +73,32 @@ export function formatDateNumeric(iso: string | null | undefined): string {
 // fuso del browser darebbe badge in contrasto con l'ordinamento.
 const romeDateFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Rome" });
 
+// Slot e appuntamenti di consulenza: ISTANTI (timestamptz UTC), mostrati nel
+// fuso del BROWSER — a differenza del calendario personale, che è wall-clock
+// italiano per scelta dichiarata (migration 0008).
+const slotDayFormatter = new Intl.DateTimeFormat("it-IT", {
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+});
+const slotTimeFormatter = new Intl.DateTimeFormat("it-IT", {
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+export function formatSlotGiorno(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return slotDayFormatter.format(date);
+}
+
+export function formatSlotOra(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return slotTimeFormatter.format(date);
+}
+
 const monthYearFormatter = new Intl.DateTimeFormat("it-IT", {
   month: "long",
   year: "numeric",

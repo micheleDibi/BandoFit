@@ -29,6 +29,7 @@ from app.api.routers import (
     notifications,
     plans,
     preferences,
+    progettista,
     saved_bandi,
 )
 from app.clients.anthropic_ai import AiCheckClient
@@ -125,6 +126,7 @@ for router in (
     company.router,
     preferences.router,
     notifications.router,
+    progettista.router,
     ai_check.router,
     saved_bandi.router,
     calendar.router,

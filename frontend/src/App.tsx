@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from "react-router-dom";
-import { AdminRoute, ProtectedRoute } from "./components/layout/guards";
+import { AdminRoute, ProgettistaRoute, ProtectedRoute } from "./components/layout/guards";
 import { AppShell } from "./components/layout/AppShell";
 import Abbonamento from "./pages/Abbonamento";
 import AccettaInvito from "./pages/AccettaInvito";
@@ -12,6 +12,7 @@ import BandiList from "./pages/BandiList";
 import BandoDetail from "./pages/BandoDetail";
 import Calendario from "./pages/Calendario";
 import ConfermaEmail from "./pages/ConfermaEmail";
+import Disponibilita from "./pages/progettista/Disponibilita";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
@@ -50,6 +51,14 @@ export default function App() {
         <Route path="preferenze" element={<Preferenze />} />
         <Route path="abbonamento" element={<Abbonamento />} />
         <Route path="profilo" element={<Profilo />} />
+        <Route
+          path="progettista/disponibilita"
+          element={
+            <ProgettistaRoute>
+              <Disponibilita />
+            </ProgettistaRoute>
+          }
+        />
         <Route
           path="admin/utenti"
           element={

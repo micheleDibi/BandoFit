@@ -1,4 +1,4 @@
-import { LogOut, Menu, ShieldCheck, User, X } from "lucide-react";
+import { Briefcase, LogOut, Menu, ShieldCheck, User, X } from "lucide-react";
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
@@ -25,6 +25,11 @@ const impostazioniLinks: NavItem[] = [
   { to: "/app/abbonamento", label: "Abbonamento" },
 ];
 
+// Raggruppate sotto «Progettista» (solo per il ruolo progettista).
+const progettistaLinks: NavItem[] = [
+  { to: "/app/progettista/disponibilita", label: "Disponibilità" },
+];
+
 // Raggruppate sotto «Admin» (solo per gli amministratori).
 const adminLinks: NavItem[] = [
   { to: "/app/admin/utenti", label: "Utenti" },
@@ -46,6 +51,7 @@ export function AppShell() {
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = me?.profile.role === "admin";
+  const isProgettista = me?.profile.role === "progettista";
 
   const handleSignOut = async () => {
     await signOut();
@@ -90,6 +96,13 @@ export function AppShell() {
               </NavLink>
             ))}
             <NavMenu label="Impostazioni" items={impostazioniLinks} />
+            {isProgettista && (
+              <NavMenu
+                label="Progettista"
+                items={progettistaLinks}
+                icon={<Briefcase className="size-3.5" aria-hidden />}
+              />
+            )}
             {isAdmin && (
               <NavMenu
                 label="Admin"
@@ -139,6 +152,12 @@ export function AppShell() {
             {directLinks.map(mobileLink)}
             <p className={mobileSectionLabel}>Impostazioni</p>
             {impostazioniLinks.map(mobileLink)}
+            {isProgettista && (
+              <>
+                <p className={mobileSectionLabel}>Progettista</p>
+                {progettistaLinks.map(mobileLink)}
+              </>
+            )}
             {isAdmin && (
               <>
                 <p className={mobileSectionLabel}>Amministrazione</p>

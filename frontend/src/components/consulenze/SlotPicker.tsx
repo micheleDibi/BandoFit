@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSlotDisponibili } from "../../hooks/useConsulenze";
 import { cn } from "../../lib/cn";
 import { CONSULENZE_COPY } from "../../lib/copy";
@@ -38,6 +38,13 @@ export function SlotPicker({
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const { data: slots, isPending } = useSlotDisponibili(requestId, propostaId, open);
+
+  // Reset a ogni apertura: il picker di prenotazione resta montato tra un
+  // uso e l'altro, e uno slot selezionato in una sessione precedente
+  // (magari nel frattempo eliminato o prenotato) resterebbe inviabile.
+  useEffect(() => {
+    if (open) setSelected(null);
+  }, [open]);
 
   // Slot raggruppati per giorno nel fuso del browser.
   const gruppi = (slots ?? []).reduce<Array<{ giorno: string; slots: Slot[] }>>(

@@ -692,10 +692,85 @@ class TestProposte:
         with pytest.raises(ConflictError):
             await consulting_service.create_proposal(primary, PROG_USER, REQUEST_ID, "Ciao")
 
+    async def test_richiesta_chiusa_in_gara_compensata(self, notify_calls):
+        """TOCTOU guardia→insert: se la richiesta viene assegnata nel mezzo,
+        la proposta appena inserita si chiude come «superata», il titolare
+        NON viene notificato e il progettista riceve un 409 chiaro."""
+        primary = FakePrimary()
+        primary.insert_id = PROPOSAL_ID
+        primary.select_queues["consultation_requests"] = [
+            [request_row()],  # guardia: ancora nuova
+            [
+                request_row(
+                    stato="assegnata",
+                    assigned_progettista_id="44444444-0000-0000-0000-000000000033",
+                    accepted_proposal_id="55555555-0000-0000-0000-000000000034",
+                    assigned_at=tra(0).isoformat(),
+                )
+            ],  # ricontrollo post-insert: assegnata a un altro
+        ]
+        with pytest.raises(ConflictError):
+            await consulting_service.create_proposal(
+                primary, PROG_USER, REQUEST_ID, "Arrivo tardi"
+            )
+        [(_, _, payload, filters)] = [
+            op
+            for op in primary.ops
+            if op[0] == "consultation_proposals" and op[1] == "update"
+        ]
+        assert payload == {"stato": "superata"}
+        assert ("eq", "id", PROPOSAL_ID) in filters
+        assert ("eq", "stato", "inviata") in filters
+        assert notify_calls == []
+
     async def test_ritiro_condizionale(self):
         primary = FakePrimary(updates={"consultation_proposals": []})
         with pytest.raises(ConflictError):
             await consulting_service.withdraw_proposal(primary, PROG_USER, PROPOSAL_ID)
+
+
+class TestAnnulloAppuntamentoProgettista:
+    def booking_row(self) -> dict:
+        return {
+            "id": BOOKING_ID,
+            "request_id": REQUEST_ID,
+            "slot_id": SLOT_ID,
+            "cliente_id": TITOLARE,
+            "progettista_id": PROGETTISTA,
+            "inizio": tra(60).isoformat(),
+            "fine": tra(90).isoformat(),
+            "stato": "annullata",
+        }
+
+    async def test_annullo_atomico_sul_booking_indicato(self, notify_calls):
+        primary = FakePrimary(
+            selects={"consultation_requests": [request_row(stato="assegnata",
+                                                           assigned_progettista_id=PROGETTISTA,
+                                                           accepted_proposal_id=PROPOSAL_ID,
+                                                           assigned_at=tra(0).isoformat())]},
+            updates={"consultation_bookings": [self.booking_row()]},
+        )
+        await consulting_service.progettista_cancel_booking(primary, PROG_USER, BOOKING_ID)
+        [(_, _, payload, filters)] = [
+            op for op in primary.ops if op[0] == "consultation_bookings"
+        ]
+        # L'update deve puntare al booking INDICATO e solo se confermato:
+        # senza il filtro su stato, l'id di un appuntamento già annullato
+        # finirebbe per colpire la prenotazione confermata della richiesta.
+        assert payload == {"stato": "annullata"}
+        assert ("eq", "id", BOOKING_ID) in filters
+        assert ("eq", "progettista_id", PROGETTISTA) in filters
+        assert ("eq", "stato", "confermata") in filters
+        [notifica] = notify_calls
+        assert notifica["user_ids"] == [TITOLARE]
+        assert notifica["dedup_key"] == f"appuntamento-annullato:{BOOKING_ID}"
+
+    async def test_booking_gia_annullato_o_altrui(self):
+        primary = FakePrimary(updates={"consultation_bookings": []})
+        with pytest.raises(NotFoundError):
+            await consulting_service.progettista_cancel_booking(
+                primary, PROG_USER, BOOKING_ID
+            )
 
 
 class TestDossierFull:

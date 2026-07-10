@@ -859,9 +859,7 @@ async def book_slot(primary, user: dict, request_id: str, slot_id: str) -> Consu
 async def cancel_booking(primary, user: dict, request_id: str) -> ConsulenzaOut:
     request, _ = await _fetch_request_for_family(primary, user, request_id)
     _require_actor(request, user)
-    booking = await _cancel_booking_row(
-        primary, request_id=request["id"], progettista_id=None
-    )
+    booking = await _cancel_booking_row(primary, request_id=request["id"])
     await notification_service.notify(
         primary,
         [booking["progettista_id"]],
@@ -882,20 +880,17 @@ async def cancel_booking(primary, user: dict, request_id: str) -> ConsulenzaOut:
     return await get_my_request(primary, user, request_id)
 
 
-async def _cancel_booking_row(
-    primary, *, request_id: str, progettista_id: str | None
-) -> dict:
-    """Annulla la prenotazione confermata; lo slot torna prenotabile da solo
+async def _cancel_booking_row(primary, *, request_id: str) -> dict:
+    """Annulla la prenotazione confermata della richiesta (per il titolare,
+    che agisce per consulenza); lo slot torna prenotabile da solo
     (l'indice parziale copre solo stato='confermata')."""
-    query = (
-        primary.table("consultation_bookings")
+    resp = (
+        await primary.table("consultation_bookings")
         .update({"stato": "annullata"})
         .eq("request_id", str(request_id))
         .eq("stato", "confermata")
+        .execute()
     )
-    if progettista_id:
-        query = query.eq("progettista_id", str(progettista_id))
-    resp = await query.execute()
     if not resp.data:
         raise ConflictError("Nessun appuntamento confermato da annullare")
     return resp.data[0]
@@ -1138,6 +1133,18 @@ async def create_proposal(
         raise
     proposal = resp.data[0]
 
+    # La finestra guardia→insert non è serializzata (due chiamate PostgREST
+    # in transazioni separate): un'accettazione o un annullo committati nel
+    # mezzo lascerebbero questa proposta «inviata» per sempre — orfana e non
+    # più accettabile. Ricontrollo e compensazione: la proposta si chiude
+    # come «superata» e il titolare NON viene notificato.
+    request_after = await _fetch_request(primary, request["id"])
+    if request_after is None or request_after["stato"] != "nuova":
+        await primary.table("consultation_proposals").update(
+            {"stato": "superata"}
+        ).eq("id", proposal["id"]).eq("stato", "inviata").execute()
+        raise ConflictError("La richiesta non è più aperta")
+
     await _audit(
         primary,
         progettista["id"],
@@ -1244,24 +1251,21 @@ async def list_appointments(primary, progettista: dict) -> list[AppuntamentoOut]
 async def progettista_cancel_booking(
     primary, progettista: dict, booking_id: str
 ) -> None:
-    booking_resp = (
+    # Update condizionale ATOMICO sul booking indicato: senza il filtro su
+    # stato, un id di un appuntamento già annullato finirebbe per annullare
+    # la prenotazione CONFERMATA della stessa richiesta (un altro booking).
+    resp = (
         await primary.table("consultation_bookings")
-        .select(BOOKING_SELECT)
+        .update({"stato": "annullata"})
         .eq("id", str(booking_id))
         .eq("progettista_id", str(progettista["id"]))
-        .limit(1)
+        .eq("stato", "confermata")
         .execute()
     )
-    if not booking_resp.data:
-        raise NotFoundError("Appuntamento non trovato")
-    booking = booking_resp.data[0]
+    if not resp.data:
+        raise NotFoundError("Appuntamento confermato non trovato")
+    booking = resp.data[0]
     request = await _fetch_request(primary, booking["request_id"])
-
-    await _cancel_booking_row(
-        primary,
-        request_id=booking["request_id"],
-        progettista_id=str(progettista["id"]),
-    )
     if request:
         await notification_service.notify(
             primary,

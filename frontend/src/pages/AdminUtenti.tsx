@@ -334,6 +334,7 @@ export default function AdminUtenti() {
       <Dialog
         open={!!pending}
         onClose={() => setPending(null)}
+        dismissible={!actionBusy}
         title="Conferma operazione"
         footer={
           <>

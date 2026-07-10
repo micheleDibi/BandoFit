@@ -92,7 +92,7 @@ export const PROPOSTA_STATO_LABELS: Record<import("../types").PropostaStato, str
  *  trattamento: non riformularlo senza rivedere l'informativa privacy. */
 export const CONSULENZE_COPY = {
   consenso:
-    "Attivando il consulto, i progettisti della piattaforma vedranno la ragione sociale, la partita IVA, la tua email e l'esito dell'AI-check di questo bando. Il resto dei dati aziendali resta riservato: lo vedrà solo il progettista che sceglierai.",
+    "Attivando il consulto, i progettisti della piattaforma vedranno la ragione sociale, la partita IVA, la tua email e il report completo dell'AI-check di questo bando, comprese le informazioni aziendali citate nelle sue verifiche. Il dossier certificato e gli altri dati aziendali restano riservati: li vedrà solo il progettista che sceglierai.",
   fusoOrario: "Gli orari sono mostrati nel tuo fuso orario.",
 } as const;
 

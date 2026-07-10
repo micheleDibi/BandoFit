@@ -60,7 +60,7 @@ Piani di abbonamento attivi, ordinati per `ordering`. Usato dallo step 2 della r
 ## Endpoint autenticati
 
 ### `GET /addons`
-Catalogo **add-on attivi**, ordinati per `ordering`: `[{id, nome, slug, descrizione, prezzo, tipo_prezzo, etichetta_prezzo, ordering, is_active, updated_at}]`. Lo `slug` è l'identificativo STABILE a cui verranno agganciate le funzionalità future. A differenza di `GET /plans` (pubblico perché serve alla registrazione) la rotta è **autenticata**: il catalogo si vede solo dentro l'app. Il flusso di acquisto non esiste ancora (il bottone «Acquista» — «Attiva» per gli add-on `gratis` — mostra l'avviso «In arrivo» tramite lo stub `purchaseAddon`); per gli add-on `su_richiesta` la CTA è «Richiedi una consulenza» e passa dallo stub `requestConsultation` (il futuro endpoint di acquisto dovrà rifiutarli lato server).
+Catalogo **add-on attivi**, ordinati per `ordering`: `[{id, nome, slug, descrizione, prezzo, tipo_prezzo, etichetta_prezzo, ordering, is_active, updated_at}]`. Lo `slug` è l'identificativo STABILE a cui verranno agganciate le funzionalità future. A differenza di `GET /plans` (pubblico perché serve alla registrazione) la rotta è **autenticata**: il catalogo si vede solo dentro l'app. Il flusso di acquisto non esiste ancora (il bottone «Acquista» — «Attiva» per gli add-on `gratis` — mostra l'avviso «In arrivo» tramite lo stub `purchaseAddon`); per gli add-on `su_richiesta` la CTA è «Richiedi una consulenza» e passa dallo stub `requestConsultation` (il futuro endpoint di acquisto dovrà rifiutarli lato server). **Eccezione: `consulto-esperto`** — è l'aggancio del flusso consulenze (`POST /me/consulenze`, senza pagamento in questa fase) e si attiva dalla pagina del bando dopo un AI-check, non dalla card in Abbonamento.
 
 ### `GET /me`
 Profilo dell'utente corrente + abbonamento attivo con il piano.
@@ -70,6 +70,7 @@ Profilo dell'utente corrente + abbonamento attivo con il piano.
   "subscription": { "id": "uuid", "status": "active", "data_inizio": "2026-07-03",
                     "data_scadenza": "2027-07-03", "plan": { ...come /plans... } } }
 ```
+`role` ∈ `admin`/`cliente`/`progettista`. Per i progettisti la risposta include anche `progettista: {codice}` (il codice `PRG-00001`, assegnato dal sistema alla promozione e immutabile); il progettista conserva tutte le funzionalità cliente.
 
 ### `PATCH /me`
 Aggiorna l'anagrafica. Body (tutti opzionali): `nome`, `cognome`, `azienda`, `telefono`. → come `GET /me`.
@@ -244,13 +245,70 @@ Errori: `404 not_found` (evento inesistente/altrui/id malformato), `400 bad_requ
 ### `DELETE /me/calendar/{event_id}` (204)
 Elimina l'evento (`404` se inesistente o di un altro utente). Per gli eventi `bando` NON tocca il bando salvato.
 
+## Notifiche in-app
+
+Il canale **affidabile** degli eventi (le email sono best-effort). Idempotenti per `(user_id, dedup_key)`: i retry non creano doppioni. I contenuti sono minimizzati (nessun dato personale di terzi): i dettagli si leggono seguendo `url`, dove vale l'autorizzazione dell'endpoint di destinazione.
+
+### `GET /me/notifications?page=&page_size=`
+Pagina di notifiche (`page_size` max 50) + **`non_lette`** complessive (il numero sul badge): `{ items: [{id, tipo, titolo, corpo, url, read_at, created_at}], total, page, page_size, total_pages, non_lette }`. Il frontend la interroga in polling (60s).
+
+### `POST /me/notifications/read` (204)
+Body: `{"all": true}` oppure `{"ids": [1, 2]}` (almeno uno dei due). Segna come lette solo le proprie non lette.
+
+## Consulenze (lato cliente)
+
+Flusso: AI-check completato → attivazione dell'addon `consulto-esperto` → richiesta nel pool dei progettisti → proposte → **accettazione = assegnazione definitiva 1:1** (+ prenotazione slot opzionale, contestuale o successiva). Le **azioni** (creare, accettare, rifiutare, annullare, prenotare) sono riservate al **titolare** dell'Azienda; gli account collegati leggono. Eventi: ogni transizione genera notifica in-app + email (vedi `docs/database.md`, audit incluso).
+
+### `GET /me/consulenze` · `GET /me/consulenze/{id}`
+Richieste dell'Azienda (visibilità per `family_parent_id`). Item: `{id, stato, bando_id, bando_slug, bando_titolo, esito, punteggio, created_at, assigned_at, editable, progettista, proposte_aperte, proposte, appuntamento}` — `stato` ∈ `nuova`/`assegnata`/`annullata`; `progettista = {codice, nome}` (il **nome** solo dopo l'assegnazione, prima solo il codice); `proposte` (solo nel dettaglio): `[{id, codice_progettista, messaggio, stato, created_at}]`; `appuntamento = {id, inizio, fine, stato}` in UTC.
+
+### `POST /me/consulenze` (201) *(solo titolare)*
+Body: `{"ai_check_id": "uuid"}` (un AI-check `ready` della propria Azienda). Crea la richiesta con gli snapshot (esito/punteggio, bando, addon+prezzo) e avvisa **tutti i progettisti attivi** (evento 1). Il pagamento dell'addon è fuori scope: l'innesto del checkout è in `consulting_service.create_request`. Errori: `403` account collegato; `404` AI-check non trovato / addon non a catalogo; `409` AI-check non completato / **richiesta già aperta per questo bando** (una sola `nuova` per bando per Azienda).
+
+### `POST /me/consulenze/{id}/proposte/{pid}/accetta` *(solo titolare)*
+Body: `{"slot_id": "uuid" | null}`. Accetta la proposta = assegna la consulenza in via definitiva (RPC atomica: le altre proposte diventano `superate`); con `slot_id` prenota nella stessa transazione (**all-or-nothing**: `409 slot_taken` ⇒ non resta nemmeno l'assegnazione, si riprova). Eventi 4 (+3 se prenota) al progettista. Errori: `409` richiesta non più aperta / proposta non più disponibile / progettista non più disponibile / slot preso.
+
+### `POST /me/consulenze/{id}/proposte/{pid}/rifiuta` *(solo titolare)*
+Rifiuto esplicito di una singola proposta (il progettista può inviarne una nuova). `409` se non più `inviata`.
+
+### `GET /me/consulenze/{id}/slots?proposta=`
+Slot **liberi e futuri** del progettista assegnato o — con `proposta` — di quello della proposta indicata (per prenotare contestualmente all'accettazione). In UTC: la UI li mostra nel fuso del browser.
+
+### `POST /me/consulenze/{id}/prenota` (201) · `POST /me/consulenze/{id}/prenotazione/annulla` *(solo titolare)*
+Prenota uno slot dopo l'assegnazione (`{"slot_id"}`; RPC serializzata: `409 slot_taken` se appena preso, `409` se esiste già un appuntamento) / annulla l'appuntamento confermato (lo slot torna prenotabile; il progettista riceve una notifica in-app). Evento 3 al progettista sulla prenotazione.
+
+### `POST /me/consulenze/{id}/annulla` *(solo titolare)*
+Annulla la richiesta finché è `nuova`: esce dal pool, le proposte aperte diventano `superate` e i loro autori ricevono una notifica in-app. `409` se non più aperta.
+
+## Area progettista
+
+Tutte dietro `require_progettista` (il ruolo si legge dal DB a ogni richiesta, non dal JWT). Il progettista vede: nel **pool** i dati PARZIALI del requisito (ragione sociale, P.IVA, denominazione utente, email del titolare, bando, esito+punteggio e report dell'AI-check); i dati **FULL** (tutti i dati aziendali + dossier certificato) **solo per le consulenze assegnate a lui**, con ogni accesso registrato in `audit_log`.
+
+### `GET /progettista/richieste`
+`{ aperte: [...], assegnate: [...] }` — le richieste `nuova` di tutte le aziende (pool globale) + le proprie assegnate. Item: `{id, stato, ragione_sociale, partita_iva, denominazione_utente, email, bando_id, bando_slug, bando_titolo, esito, punteggio, created_at, assegnata_a_me, mia_proposta_stato, appuntamento}`. Le richieste annullate o assegnate ad altri **non esistono** per il progettista (404 sul dettaglio).
+
+### `GET /progettista/richieste/{id}`
+Dettaglio (pool o assegnata a sé): campi della lista + **`ai_check`** completo (report con verdetti e citazioni — richiesto dal flusso: è ciò su cui il progettista valuta se proporsi) + `mie_proposte`.
+
+### `POST /progettista/richieste/{id}/proposte` (201) · `POST /progettista/proposte/{pid}/ritira` (204)
+Invia una proposta (`{"messaggio"}`, ≤4000; solo su richieste `nuova`; **una sola proposta aperta** per richiesta → `409`; il titolare riceve evento 2) / ritira la propria proposta ancora `inviata` (`409` altrimenti; dopo il ritiro se ne può inviare una nuova).
+
+### `GET /progettista/richieste/{id}/dossier`
+Vista FULL, **solo se assegnata a sé** (`403` altrimenti): `{ company: {...dati dichiarati...}, dossier: {...come GET /me/company/dossier...} }`. **Ogni lettura scrive `consulenza.dossier_accessed` in audit_log.** Il `raw` di `company_data` non esce mai dal server (vale l'invariante dell'import).
+
+### `GET /progettista/appuntamenti` · `POST /progettista/appuntamenti/{id}/annulla` (204)
+Appuntamenti confermati (`[{id, request_id, inizio, fine, stato, bando_titolo, ragione_sociale, email}]`, in UTC) / annullo da parte del progettista (il titolare riceve una notifica in-app; lo slot torna prenotabile).
+
+### `GET/POST/PATCH/DELETE /progettista/slots`
+CRUD degli slot di disponibilità: `{inizio, fine}` timestamp ISO **con offset** (UTC; durata 15 min–12 h, solo futuri; `prenotato` derivato nei GET). Sovrapposizioni rifiutate a livello DB (`409 slot_overlap`); modifica/cancellazione di uno slot prenotato rifiutate (`409 slot_booked`) e serializzate contro le prenotazioni concorrenti (RPC con `FOR UPDATE`).
+
 ## Endpoint admin
 
 ### `GET /admin/users`
-Elenco utenti con abbonamento attivo. Parametri: `q` (cerca in email/nome/cognome/azienda), `role` (`admin`|`cliente`), `page`, `page_size` (max 100). Item: `{ "profile": {...}, "subscription": {...} | null, "family": {...} | null }` — per i figli `family = {type:'child', status, parent_email}` e `subscription` è quella ereditata (`inherited: true`); per i titolari `family = {type:'parent', members_count}`.
+Elenco utenti con abbonamento attivo. Parametri: `q` (cerca in email/nome/cognome/azienda), `role` (`admin`|`cliente`|`progettista`), `page`, `page_size` (max 100). Item: `{ "profile": {...}, "subscription": {...} | null, "family": {...} | null, "progettista": {codice} | null }` — per i figli `family = {type:'child', status, parent_email}` e `subscription` è quella ereditata (`inherited: true`); per i titolari `family = {type:'parent', members_count}`.
 
 ### `PATCH /admin/users/{user_id}`
-Body (opzionali): `role` (`admin`|`cliente`), `is_active` (bool). Protezioni: un admin non può togliersi il ruolo né disattivarsi da solo (`400`).
+Body (opzionali): `role` (`admin`|`cliente`|`progettista`), `is_active` (bool). La promozione a progettista passa da `fn_promote_progettista` (assegna il codice `PRG-…`, riusandolo alla ri-promozione, e finisce in audit_log); la demozione cambia solo il ruolo (la riga `progettisti` e il codice restano). Protezioni: un admin non può togliersi il ruolo (verso **qualunque** ruolo) né disattivarsi da solo (`400`).
 
 ### `POST /admin/users/{user_id}/subscription`
 Cambio piano forzato per un utente. Body: `{"plan_id": 2}`. `403` sui figli di famiglia (pending/attivi): il piano si gestisce sull'account titolare; forzare il piano di un titolare applica le stesse retrocessioni automatiche del cambio normale. **Scavalca il guard `su_richiesta`** (`self_serve=False`): assegnare da qui un piano su richiesta è il completamento manuale di quel flusso.

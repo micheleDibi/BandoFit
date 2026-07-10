@@ -38,9 +38,11 @@ function AppuntamentiSection() {
           >
             <div className="min-w-0">
               <p className="inline-flex items-center gap-2 text-sm font-medium text-slate-900">
-                <CalendarClock className="size-4 text-brand-500" aria-hidden />
-                <span className="capitalize">{formatSlotGiorno(appuntamento.inizio)}</span>,{" "}
-                {formatSlotOra(appuntamento.inizio)} – {formatSlotOra(appuntamento.fine)}
+                <CalendarClock className="size-4 shrink-0 text-brand-500" aria-hidden />
+                <span>
+                  <span className="capitalize">{formatSlotGiorno(appuntamento.inizio)}</span>,{" "}
+                  {formatSlotOra(appuntamento.inizio)} – {formatSlotOra(appuntamento.fine)}
+                </span>
               </p>
               <p className="mt-0.5 text-xs text-slate-500">
                 {appuntamento.ragione_sociale ?? "Azienda"} · {appuntamento.bando_titolo}

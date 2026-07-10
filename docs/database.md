@@ -21,7 +21,7 @@ Contiene i dati della piattaforma. Schema in `supabase/migrations/` (eseguire in
 | `num_account_aziendali` | integer | ≥ 1 |
 | `ordering`, `is_active` | int, bool | ordinamento in UI; i piani non si eliminano, si disattivano |
 
-**`profiles`** — 1:1 con `auth.users` (PK = `auth.users.id`, on delete cascade): `email` (denormalizzata per la ricerca admin), `nome`, `cognome`, `azienda`, `telefono`, `role` (enum `admin`/`cliente`, default `cliente`), `is_active` (bool, default true).
+**`profiles`** — 1:1 con `auth.users` (PK = `auth.users.id`, on delete cascade): `email` (denormalizzata per la ricerca admin), `nome`, `cognome`, `azienda`, `telefono`, `role` (enum `admin`/`cliente`/`progettista` — il terzo valore arriva dalla migration 0014, in un file a sé perché un valore enum non è usabile nella stessa transazione che lo crea), `is_active` (bool, default true).
 
 **`user_subscriptions`** — storico abbonamenti: `user_id` → profiles, `plan_id` → plans, `status` (enum `active`/`cancelled`/`expired`), `data_inizio`, `data_scadenza` (default +1 anno). Indice unico parziale `user_subscriptions_one_active` ⇒ **un solo abbonamento `active` per utente**; il cambio piano cancella l'attivo e ne crea uno nuovo (lo storico resta).
 
@@ -69,11 +69,38 @@ _(La tabella `company_documents` e il bucket `company-documents` sono stati **ri
 
 ### Add-on (migration 0009)
 
-**`addons`** — catalogo add-on acquistabili gestito dagli admin, gemello di `subscription_plans`: `nome`, **`slug` unico** (identificativo STABILE per agganciare le funzionalità future), `descrizione`, `prezzo numeric(10,2) ≥ 0` (euro, stessa convenzione dei piani), `tipo_prezzo`/`etichetta_prezzo` (migration 0010, stessa semantica dei piani), `ordering`, `is_active`. Come i piani, **non si eliminano: si disattivano**. Nessun seed: il catalogo parte vuoto. Il flusso di acquisto non è ancora implementato.
+**`addons`** — catalogo add-on acquistabili gestito dagli admin, gemello di `subscription_plans`: `nome`, **`slug` unico** (identificativo STABILE per agganciare le funzionalità future), `descrizione`, `prezzo numeric(10,2) ≥ 0` (euro, stessa convenzione dei piani), `tipo_prezzo`/`etichetta_prezzo` (migration 0010, stessa semantica dei piani), `ordering`, `is_active`. Come i piani, **non si eliminano: si disattivano**. Il catalogo parte vuoto, con un'eccezione: la migration 0017 garantisce con un seed idempotente l'addon **`consulto-esperto`** (aggancio del flusso consulenze; slug in `consulting_addon_slug` del backend). Il flusso di acquisto non è ancora implementato: attivare il consulto crea direttamente la richiesta (l'innesto del checkout è documentato in `consulting_service.create_request`).
 
 ### Modalità di visualizzazione prezzo (migration 0010)
 
 Su `subscription_plans` e `addons`: `tipo_prezzo text not null default 'importo'` con check sui tre valori (`importo`, `gratis`, `su_richiesta` — valori di dominio in italiano come `tipo_punteggio`/`esito`) ed `etichetta_prezzo text` libera. La migration fa un **backfill una tantum**: tutto ciò che aveva prezzo 0 diventa `gratis` (nel seed è il piano Gratuito); i record creati a 0 € in seguito restano `importo` finché l'admin non li cambia. Il valore numerico del prezzo resta sempre salvato, anche quando non è mostrato.
+
+### Progettisti (migration 0014–0015)
+
+**`progettisti`** — attributi del ruolo progettista, 1:1 con profiles (PK `user_id`, cascade): **`codice`** leggibile `PRG-00001` (sequence, unico, **immutabile** — un trigger `BEFORE UPDATE` rifiuta il cambio con detail `codice_immutabile`), `bio`, `specializzazioni` (descrittiva, predisposta per un futuro routing per specializzazione, oggi non filtrata). La riga **sopravvive alla demozione**: una ri-promozione riusa lo stesso codice, così i riferimenti storici restano coerenti.
+
+`fn_promote_progettista(p_user_id, p_actor_id) → codice` — promozione atomica (lock `FOR UPDATE` sul profilo): imposta `role='progettista'`, assegna il codice solo se assente e registra `admin.progettista_promoted` in audit_log. Chiamata da `admin_update_user`; la demozione è un update di ruolo normale (anch'esso in audit_log come `admin.role_changed`).
+
+### Notifiche in-app (migration 0016)
+
+**`notifications`** — il canale AFFIDABILE degli eventi applicativi (le email sono best-effort): `user_id` → profiles (cascade), `tipo` (codice macchina, es. `consulenza.nuova_richiesta`), `titolo` (1-200), `corpo` (≤1000), `url` (deep-link in-app), **`dedup_key` NOT NULL** con **constraint pieno** `unique (user_id, dedup_key)` — è l'arbiter dell'upsert ignore-duplicates di PostgREST (un indice parziale non lo sarebbe): il retry di un fan-out inserisce solo i destinatari mancanti. `read_at` per il badge (indice parziale sulle non lette). **Minimizzazione**: titolo/corpo non contengono dati personali di terzi; i dettagli si leggono seguendo `url`, dove l'endpoint applica l'autorizzazione live — una notifica recapitata a un progettista non trattiene dati di un cliente che poi si cancella.
+
+### Consulenze (migration 0017)
+
+Flusso: richiesta (`nuova`) → proposte dei progettisti → accettazione = **assegnazione definitiva 1:1** (+ prenotazione slot opzionale). Stati con `text + check` (pattern ai_checks). Chi riferisce persone segue il pattern di `ai_checks`: `cliente_id`, `family_parent_id`, i `progettista_id` di proposte/booking **senza FK** (lo storico sopravvive alle persone); `company_profile_id` con cascade (lo storico muore con l'azienda: right to erasure del titolare).
+
+**`availability_slots`** — disponibilità del progettista in **UTC** (`timestamptz` — divergenza deliberata dal wall-clock di `calendar_events`: qui due utenti diversi guardano lo stesso istante, la UI mostra il fuso del browser). Anti-sovrapposizione a livello DB: `exclude using gist (progettista_id with =, tstzrange(inizio, fine) with &&)` (estensione `btree_gist`; range `[)`: slot adiacenti validi). Nessuna colonna di stato: «libero» = nessun booking confermato.
+
+**`consultation_requests`** — la richiesta di consulto: snapshot dell'AI-check (`ai_check_id` set null + `esito`/`punteggio`), bando denormalizzato, `addon_id`/`addon_slug`/`addon_prezzo` (innesto del futuro pagamento), `stato` (`nuova`/`assegnata`/`annullata`, con check di coerenza: assegnata ⇔ progettista+proposta+data valorizzati). Indice unico parziale `(family_parent_id, bando_id) where stato='nuova'`: **una sola richiesta aperta per bando per azienda** — una richiesta già assegnata non blocca un futuro secondo consulto sullo stesso bando.
+
+**`consultation_proposals`** — proposte dei progettisti: `stato` (`inviata`/`accettata`/`rifiutata`/`superata`/`ritirata`). Indice unico parziale `(request_id, progettista_id) where stato='inviata'`: una sola proposta **aperta** per progettista; dopo un ritiro o un rifiuto se ne può inviare una nuova.
+
+**`consultation_bookings`** — appuntamenti: `slot_id` → availability_slots **on delete set null** + snapshot `inizio`/`fine` (l'appuntamento sopravvive allo slot e alla cancellazione dell'account del progettista). Indici unici parziali `(slot_id) where stato='confermata'` (anti doppia prenotazione a livello DB) e `(request_id) where stato='confermata'` (un appuntamento attivo per consulenza). L'annullamento libera lo slot da solo.
+
+RPC (SECURITY DEFINER, errori a detail-code, ordine di lock uniforme richiesta→slot):
+- `fn_accept_proposal(request, proposal, cliente, slot?)` — `FOR UPDATE` su richiesta **e proposta** (un ritiro concorrente non può essere sovrascritto: l'accettazione si mette in coda dietro il suo lock); guardie su titolare, stato, e progettista ancora attivo (`progettista_not_available`); chiude le altre proposte come `superate`; con `slot` prenota nella stessa transazione (**all-or-nothing**: slot preso ⇒ salta anche l'assegnazione, detail `slot_taken`). Audit `consulenza.assigned` (+ `consulenza.booked`).
+- `fn_book_slot(request, slot, actor)` — serializza sullo slot (`FOR UPDATE`); l'indice parziale resta il backstop e il suo 23505 viene ricatturato come `slot_taken` (senza, il client vedrebbe 502 invece di 409).
+- `fn_update_slot` / `fn_delete_slot` — anche il CRUD dello slot serializza sulla riga: un update condizionale non basterebbe (in READ COMMITTED la subquery userebbe lo snapshot preso prima del lock e non vedrebbe una prenotazione appena committata). Slot prenotato ⇒ `slot_booked`.
 
 ### Funzioni e trigger
 
@@ -87,7 +114,8 @@ Su `subscription_plans` e `addons`: `tipo_prezzo text not null default 'importo'
 ### Sicurezza
 
 - **RLS deny-all**: RLS abilitata su tutte le tabelle (incluse `family_members`, `company_profiles`, `audit_log`) senza alcuna policy → `anon` e `authenticated` non leggono/scrivono nulla; il backend usa `service_role` che bypassa la RLS. In più, `REVOKE ALL` esplicito sui ruoli client.
-- **RPC bloccate**: Supabase concede di default `EXECUTE` ad `anon`/`authenticated` su ogni funzione di `public`, e PostgREST le espone come `POST /rest/v1/rpc/<nome>`. Le migration revocano esplicitamente `EXECUTE` su `fn_switch_plan` e `promote_to_admin` dai ruoli client: senza questa revoca chiunque potrebbe auto-promuoversi admin o cambiare piano ad altri.
+- **RPC bloccate**: Supabase concede di default `EXECUTE` ad `anon`/`authenticated` su ogni funzione di `public`, e PostgREST le espone come `POST /rest/v1/rpc/<nome>`. Le migration revocano esplicitamente `EXECUTE` su `fn_switch_plan`, `promote_to_admin`, `fn_promote_progettista` e sulle RPC delle consulenze (`fn_accept_proposal`, `fn_book_slot`, `fn_update_slot`, `fn_delete_slot`) dai ruoli client: senza queste revoche chiunque potrebbe auto-promuoversi o assegnarsi consulenze.
+- **Audit degli accessi full**: ogni lettura dei dati completi di un'azienda da parte del progettista assegnato scrive `consulenza.dossier_accessed` in `audit_log` (oltre alle transizioni: `consulenza.created` / `proposal_sent` / `assigned` / `booked` / `cancelled` / `booking_cancelled`).
 
 ## DB secondario (Supabase, SOLA LETTURA)
 

@@ -143,12 +143,14 @@ export default function ConsulenzaDetail() {
           {consulenza.appuntamento ? (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3">
               <p className="inline-flex items-center gap-2 text-sm font-medium text-slate-800">
-                <CalendarClock className="size-4 text-brand-500" aria-hidden />
-                <span className="capitalize">
-                  {formatSlotGiorno(consulenza.appuntamento.inizio)}
+                <CalendarClock className="size-4 shrink-0 text-brand-500" aria-hidden />
+                <span>
+                  <span className="capitalize">
+                    {formatSlotGiorno(consulenza.appuntamento.inizio)}
+                  </span>
+                  , {formatSlotOra(consulenza.appuntamento.inizio)} –{" "}
+                  {formatSlotOra(consulenza.appuntamento.fine)}
                 </span>
-                , {formatSlotOra(consulenza.appuntamento.inizio)} –{" "}
-                {formatSlotOra(consulenza.appuntamento.fine)}
               </p>
               {editable && (
                 <Button

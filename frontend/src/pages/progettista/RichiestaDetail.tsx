@@ -182,12 +182,14 @@ export default function RichiestaDetail() {
         </Link>
         {richiesta.appuntamento && (
           <p className="mt-3 inline-flex items-center gap-2 rounded-xl bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800">
-            <CalendarClock className="size-4 text-brand-500" aria-hidden />
-            <span className="capitalize">
-              {formatSlotGiorno(richiesta.appuntamento.inizio)}
+            <CalendarClock className="size-4 shrink-0 text-brand-500" aria-hidden />
+            <span>
+              <span className="capitalize">
+                {formatSlotGiorno(richiesta.appuntamento.inizio)}
+              </span>
+              , {formatSlotOra(richiesta.appuntamento.inizio)} –{" "}
+              {formatSlotOra(richiesta.appuntamento.fine)}
             </span>
-            , {formatSlotOra(richiesta.appuntamento.inizio)} –{" "}
-            {formatSlotOra(richiesta.appuntamento.fine)}
           </p>
         )}
       </Card>

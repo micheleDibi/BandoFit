@@ -16,7 +16,7 @@ async def list_users(
     _admin: AdminUser,
     primary: PrimaryClient,
     q: str | None = Query(default=None, max_length=200),
-    role: Literal["admin", "cliente"] | None = Query(default=None),
+    role: Literal["admin", "cliente", "progettista"] | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> Page[AdminUserOut]:

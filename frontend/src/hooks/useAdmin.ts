@@ -1,10 +1,10 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import type { Addon, AdminUser, Page, Plan, TipoPrezzo } from "../types";
+import type { Addon, AdminUser, Page, Plan, TipoPrezzo, UserRole } from "../types";
 
 export interface AdminUsersParams {
   q: string;
-  role: "" | "admin" | "cliente";
+  role: "" | UserRole;
   page: number;
 }
 
@@ -27,7 +27,7 @@ export function useAdminUpdateUser() {
       data,
     }: {
       userId: string;
-      data: { role?: "admin" | "cliente"; is_active?: boolean };
+      data: { role?: UserRole; is_active?: boolean };
     }) => (await api.patch<AdminUser>(`/admin/users/${userId}`, data)).data,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-users"] }),
   });

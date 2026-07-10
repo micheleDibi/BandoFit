@@ -81,6 +81,15 @@ async def require_admin(user: CurrentUser) -> dict:
 AdminUser = Annotated[dict, Depends(require_admin)]
 
 
+async def require_progettista(user: CurrentUser) -> dict:
+    if user["role"] != "progettista":
+        raise ForbiddenError("Riservato ai progettisti")
+    return user
+
+
+ProgettistaUser = Annotated[dict, Depends(require_progettista)]
+
+
 async def require_parent(user: CurrentUser, primary: PrimaryClient) -> dict:
     """L'utente non deve essere membro (corrente) di una famiglia altrui:
     solo il titolare gestisce gli account collegati e i dati aziendali."""

@@ -1,5 +1,6 @@
 """Profili utente e abbonamenti (DB primario, service_role)."""
 
+import logging
 import re
 from uuid import UUID
 
@@ -16,9 +17,12 @@ from app.schemas.user import (
     MeOut,
     ProfileOut,
     ProfileUpdate,
+    ProgettistaOut,
     SubscriptionOut,
 )
 from app.services import family_service
+
+logger = logging.getLogger("bandofit.users")
 
 PROFILE_SELECT = (
     "id,email,nome,cognome,azienda,telefono,codice_fiscale,cf_verified_at,"
@@ -120,6 +124,23 @@ async def _fetch_active_subscription(primary, user_id: str) -> SubscriptionOut |
     return _map_subscription(resp.data)
 
 
+async def _fetch_progettista(primary, user_id: str, role: str) -> ProgettistaOut | None:
+    """Codice progettista per la risposta /me e admin. Solo per il ruolo attivo:
+    dopo una demozione la riga resta a DB (codice riservato) ma non si espone."""
+    if role != "progettista":
+        return None
+    resp = (
+        await primary.table("progettisti")
+        .select("codice")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not resp.data:
+        return None
+    return ProgettistaOut(codice=resp.data[0]["codice"])
+
+
 async def get_me(primary, user_id: str) -> MeOut:
     resp = (
         await primary.table("profiles")
@@ -151,6 +172,7 @@ async def get_me(primary, user_id: str) -> MeOut:
         profile=ProfileOut(**{k: row[k] for k in row if k != "user_subscriptions"}),
         subscription=subscription,
         family=family,
+        progettista=await _fetch_progettista(primary, user_id, row["role"]),
     )
 
 
@@ -275,6 +297,18 @@ async def admin_list_users(
         )
         parent_emails = {r["id"]: r["email"] for r in emails_resp.data}
 
+    # Codici dei progettisti in pagina, in una query batch.
+    progettista_ids = [row["id"] for row in rows if row["role"] == "progettista"]
+    codici: dict[str, str] = {}
+    if progettista_ids:
+        prog_resp = (
+            await primary.table("progettisti")
+            .select("user_id,codice")
+            .in_("user_id", progettista_ids)
+            .execute()
+        )
+        codici = {r["user_id"]: r["codice"] for r in prog_resp.data}
+
     items = []
     for row in rows:
         subscription = _map_subscription(row.get("user_subscriptions"))
@@ -291,11 +325,13 @@ async def admin_list_users(
                 subscription = parent_subs.get(parent_id) or subscription
         elif counts_by_parent.get(row["id"]):
             family = AdminFamilyInfo(type="parent", members_count=counts_by_parent[row["id"]])
+        codice = codici.get(row["id"])
         items.append(
             AdminUserOut(
                 profile=ProfileOut(**{k: row[k] for k in row if k != "user_subscriptions"}),
                 subscription=subscription,
                 family=family,
+                progettista=ProgettistaOut(codice=codice) if codice else None,
             )
         )
     return Page.build(items, resp.count or 0, page, page_size)
@@ -338,22 +374,58 @@ async def admin_update_user(
         raise BadRequestError("Nessun campo da aggiornare")
 
     if str(target_user_id) == str(acting_admin_id):
-        if changes.get("role") == "cliente":
+        # Qualunque ruolo di destinazione diverso da admin è un auto-lockout.
+        if changes.get("role") not in (None, "admin"):
             raise BadRequestError("Non puoi rimuovere il ruolo admin a te stesso")
         if changes.get("is_active") is False:
             raise BadRequestError("Non puoi disattivare il tuo stesso account")
 
-    resp = (
-        await primary.table("profiles")
-        .update(changes)
-        .eq("id", str(target_user_id))
-        .execute()
-    )
-    if not resp.data:
-        raise NotFoundError("Utente non trovato")
+    role_change = changes.get("role")
+
+    # La promozione a progettista passa dalla RPC: serializza sul profilo,
+    # assegna il codice identificativo (riusando quello di una promozione
+    # precedente) e registra l'azione in audit_log.
+    if role_change == "progettista":
+        changes.pop("role")
+        try:
+            await primary.rpc(
+                "fn_promote_progettista",
+                {"p_user_id": str(target_user_id), "p_actor_id": str(acting_admin_id)},
+            ).execute()
+        except APIError as exc:
+            family_service.raise_from_rpc(exc)
+
+    if changes:
+        resp = (
+            await primary.table("profiles")
+            .update(changes)
+            .eq("id", str(target_user_id))
+            .execute()
+        )
+        if not resp.data:
+            raise NotFoundError("Utente non trovato")
+
+    # I cambi di ruolo che non passano dalla RPC (demozioni, nomina admin)
+    # sono comunque transizioni sensibili: best-effort, come gli altri audit.
+    if role_change is not None and role_change != "progettista":
+        try:
+            await primary.table("audit_log").insert(
+                {
+                    "actor_id": str(acting_admin_id),
+                    "action": "admin.role_changed",
+                    "target_user_id": str(target_user_id),
+                    "payload": {"role": role_change},
+                }
+            ).execute()
+        except Exception:
+            logger.warning("audit_log non scrivibile per admin.role_changed", exc_info=True)
+
     me = await get_me(primary, str(target_user_id))
     return AdminUserOut(
-        profile=me.profile, subscription=me.subscription, family=me_family_to_admin(me)
+        profile=me.profile,
+        subscription=me.subscription,
+        family=me_family_to_admin(me),
+        progettista=me.progettista,
     )
 
 
@@ -376,7 +448,12 @@ async def admin_switch_user_plan(primary, target_user_id: UUID, plan_id: int) ->
 
     # self_serve=False: l'admin può assegnare anche i piani «su richiesta».
     me = await switch_plan(primary, str(target_user_id), plan_id, self_serve=False)
-    return AdminUserOut(profile=me.profile, subscription=me.subscription, family=me_family_to_admin(me))
+    return AdminUserOut(
+        profile=me.profile,
+        subscription=me.subscription,
+        family=me_family_to_admin(me),
+        progettista=me.progettista,
+    )
 
 
 def me_family_to_admin(me: MeOut) -> AdminFamilyInfo | None:

@@ -131,7 +131,7 @@ export interface Plan {
   updated_at: string | null;
 }
 
-export type UserRole = "admin" | "cliente";
+export type UserRole = "admin" | "cliente" | "progettista";
 
 export interface Profile {
   id: string;
@@ -205,10 +205,17 @@ export interface PlanSwitchAdjustment {
   revoked_pending: Array<{ member_id: string; denominazione: string }>;
 }
 
+/** Attributi del ruolo progettista (il codice è assegnato dal sistema). */
+export interface Progettista {
+  codice: string;
+}
+
 export interface Me {
   profile: Profile;
   subscription: Subscription | null;
   family: MeFamily | null;
+  /** Valorizzato solo per gli utenti con ruolo progettista. */
+  progettista?: Progettista | null;
   plan_switch_adjustment?: PlanSwitchAdjustment | null;
 }
 
@@ -223,6 +230,7 @@ export interface AdminUser {
   profile: Profile;
   subscription: Subscription | null;
   family: AdminFamilyInfo | null;
+  progettista?: Progettista | null;
 }
 
 export type ClasseDimensionale = "micro" | "piccola" | "media" | "grande";

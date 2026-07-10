@@ -6,6 +6,8 @@
  *  (fascia statistiche, hero, FAQ) e bastava aggiornarne due per renderla
  *  incoerente. Non aggiungere qui stringhe usate una volta sola. */
 
+import type { UserRole } from "../types";
+
 /** Il conteggio è un claim di marketing, NON un dato: la landing non interroga
  *  il catalogo. Aggiornarlo qui lo aggiorna in tutti e tre i punti. */
 const BANDI_MONITORATI = "4.000";
@@ -38,6 +40,22 @@ export const QUOTA_BANNER_COPY = {
   pianoMassimoSenzaData: "Il tuo è già il piano più completo.",
   cta: "Vedi i piani",
   chiudi: "Nascondi questo avviso",
+} as const;
+
+/** Etichette dei ruoli utente: compaiono nel badge della lista admin, nel
+ *  filtro, nel select di cambio ruolo e nel dialog di conferma. */
+export const RUOLO_LABELS: Record<UserRole, string> = {
+  admin: "Admin",
+  cliente: "Cliente",
+  progettista: "Progettista",
+};
+
+/** Note del dialog di conferma cambio ruolo: cosa comporta la transizione. */
+export const ADMIN_RUOLO_COPY = {
+  promozioneProgettista:
+    "Riceverà un codice identificativo e l'accesso all'area progettista, mantenendo tutte le funzionalità cliente.",
+  demozioneProgettista:
+    "Perderà l'accesso all'area progettista. Il suo codice resta riservato: una futura ri-promozione lo riutilizzerà.",
 } as const;
 
 /** Chiude la frase senza raddoppiare il punto: le ragioni sociali finiscono

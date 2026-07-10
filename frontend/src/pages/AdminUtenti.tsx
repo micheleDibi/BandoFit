@@ -1,4 +1,4 @@
-import { Search, ShieldCheck, UserRound, UsersRound } from "lucide-react";
+import { Briefcase, Search, ShieldCheck, UserRound, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -15,19 +15,48 @@ import { useDebounce } from "../hooks/useDebounce";
 import { useMe } from "../hooks/useMe";
 import { usePlans } from "../hooks/usePlans";
 import { apiErrorMessage } from "../lib/api";
+import { ADMIN_RUOLO_COPY, RUOLO_LABELS } from "../lib/copy";
 import { formatDate } from "../lib/format";
-import type { AdminUser } from "../types";
+import type { AdminUser, UserRole } from "../types";
 
 type PendingAction =
-  | { kind: "role"; user: AdminUser; role: "admin" | "cliente" }
+  | { kind: "role"; user: AdminUser; role: UserRole }
   | { kind: "active"; user: AdminUser; is_active: boolean }
   | { kind: "plan"; user: AdminUser; planId: number; planName: string };
+
+/** Ordine di presentazione nei select (dal ruolo base al più privilegiato). */
+const RUOLI: UserRole[] = ["cliente", "progettista", "admin"];
+
+function RuoloBadge({ role }: { role: UserRole }) {
+  if (role === "admin") {
+    return (
+      <Badge tone="brand">
+        <ShieldCheck className="size-3" aria-hidden />
+        {RUOLO_LABELS.admin}
+      </Badge>
+    );
+  }
+  if (role === "progettista") {
+    return (
+      <Badge tone="emerald">
+        <Briefcase className="size-3" aria-hidden />
+        {RUOLO_LABELS.progettista}
+      </Badge>
+    );
+  }
+  return (
+    <Badge tone="slate">
+      <UserRound className="size-3" aria-hidden />
+      {RUOLO_LABELS.cliente}
+    </Badge>
+  );
+}
 
 export default function AdminUtenti() {
   const { data: me } = useMe();
   const { data: plans } = usePlans();
   const [searchInput, setSearchInput] = useState("");
-  const [role, setRole] = useState<"" | "admin" | "cliente">("");
+  const [role, setRole] = useState<"" | UserRole>("");
   const [page, setPage] = useState(1);
   const q = useDebounce(searchInput, 400);
 
@@ -102,6 +131,7 @@ export default function AdminUtenti() {
         >
           <option value="">Tutti i ruoli</option>
           <option value="admin">Solo admin</option>
+          <option value="progettista">Solo progettisti</option>
           <option value="cliente">Solo clienti</option>
         </select>
       </div>
@@ -161,16 +191,11 @@ export default function AdminUtenti() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        {user.profile.role === "admin" ? (
-                          <Badge tone="brand">
-                            <ShieldCheck className="size-3" aria-hidden />
-                            Admin
-                          </Badge>
-                        ) : (
-                          <Badge tone="slate">
-                            <UserRound className="size-3" aria-hidden />
-                            Cliente
-                          </Badge>
+                        <RuoloBadge role={user.profile.role} />
+                        {user.progettista?.codice && (
+                          <p className="tabular mt-1 text-xs text-slate-400">
+                            {user.progettista.codice}
+                          </p>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -255,23 +280,26 @@ export default function AdminUtenti() {
                         {formatDate(user.profile.created_at)}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex justify-end gap-1.5">
-                          <Button
-                            variant="ghost"
-                            size="sm"
+                        <div className="flex items-center justify-end gap-1.5">
+                          <select
+                            value={user.profile.role}
                             disabled={isSelf}
                             title={isSelf ? "Non puoi modificare il tuo ruolo" : undefined}
-                            onClick={() => {
+                            onChange={(e) => {
+                              const nextRole = e.target.value as UserRole;
+                              if (nextRole === user.profile.role) return;
                               setActionError(null);
-                              setPending({
-                                kind: "role",
-                                user,
-                                role: user.profile.role === "admin" ? "cliente" : "admin",
-                              });
+                              setPending({ kind: "role", user, role: nextRole });
                             }}
+                            aria-label={`Ruolo di ${user.profile.email}`}
+                            className="h-9 cursor-pointer rounded-lg border border-slate-200 bg-white px-2 text-sm focus:border-brand-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
                           >
-                            {user.profile.role === "admin" ? "Rendi cliente" : "Rendi admin"}
-                          </Button>
+                            {RUOLI.map((r) => (
+                              <option key={r} value={r}>
+                                {RUOLO_LABELS[r]}
+                              </option>
+                            ))}
+                          </select>
                           <Button
                             variant="ghost"
                             size="sm"
@@ -323,10 +351,20 @@ export default function AdminUtenti() {
         }
       >
         {pending?.kind === "role" && (
-          <p>
-            Cambiare il ruolo di <strong className="text-slate-900">{pending.user.profile.email}</strong>{" "}
-            in <strong className="text-slate-900">{pending.role}</strong>?
-          </p>
+          <>
+            <p>
+              Cambiare il ruolo di{" "}
+              <strong className="text-slate-900">{pending.user.profile.email}</strong> da{" "}
+              <strong className="text-slate-900">{RUOLO_LABELS[pending.user.profile.role]}</strong>{" "}
+              a <strong className="text-slate-900">{RUOLO_LABELS[pending.role]}</strong>?
+            </p>
+            {pending.role === "progettista" && (
+              <p className="mt-2 text-sm text-slate-500">{ADMIN_RUOLO_COPY.promozioneProgettista}</p>
+            )}
+            {pending.user.profile.role === "progettista" && (
+              <p className="mt-2 text-sm text-slate-500">{ADMIN_RUOLO_COPY.demozioneProgettista}</p>
+            )}
+          </>
         )}
         {pending?.kind === "active" && (
           <p>

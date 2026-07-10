@@ -29,3 +29,11 @@ export function AdminRoute({ children }: { children: ReactNode }) {
   if (me?.profile.role !== "admin") return <Navigate to="/app/bandi" replace />;
   return <>{children}</>;
 }
+
+export function ProgettistaRoute({ children }: { children: ReactNode }) {
+  const { data: me, isPending } = useMe();
+
+  if (isPending) return <FullPageSpinner />;
+  if (me?.profile.role !== "progettista") return <Navigate to="/app/bandi" replace />;
+  return <>{children}</>;
+}

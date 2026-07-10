@@ -27,15 +27,23 @@ class ProfileOut(BaseModel):
     telefono: str | None = None
     codice_fiscale: str | None = None
     cf_verified_at: datetime | None = None
-    role: Literal["admin", "cliente"]
+    role: Literal["admin", "cliente", "progettista"]
     is_active: bool
     created_at: datetime
+
+
+class ProgettistaOut(BaseModel):
+    """Attributi del ruolo progettista (il codice è assegnato dal sistema)."""
+
+    codice: str
 
 
 class MeOut(BaseModel):
     profile: ProfileOut
     subscription: SubscriptionOut | None = None
     family: MeFamilyOut | None = None
+    # Valorizzato solo per gli utenti con ruolo progettista.
+    progettista: ProgettistaOut | None = None
     # Presente solo nella risposta di un cambio piano che ha causato retrocessioni.
     plan_switch_adjustment: PlanSwitchAdjustment | None = None
 
@@ -88,8 +96,9 @@ class AdminUserOut(BaseModel):
     profile: ProfileOut
     subscription: SubscriptionOut | None = None
     family: AdminFamilyInfo | None = None
+    progettista: ProgettistaOut | None = None
 
 
 class AdminUserUpdate(BaseModel):
-    role: Literal["admin", "cliente"] | None = None
+    role: Literal["admin", "cliente", "progettista"] | None = None
     is_active: bool | None = None

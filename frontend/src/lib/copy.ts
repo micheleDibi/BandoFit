@@ -50,6 +50,16 @@ export const RUOLO_LABELS: Record<UserRole, string> = {
   progettista: "Progettista",
 };
 
+/** Campanella e pannello notifiche in-app. */
+export const NOTIFICHE_COPY = {
+  apri: "Notifiche",
+  apriConNonLette: (n: number) => `Notifiche: ${n} non lett${n === 1 ? "a" : "e"}`,
+  titoloPannello: "Notifiche",
+  vuoto: "Nessuna notifica.",
+  erroreCaricamento: "Impossibile caricare le notifiche.",
+  segnaTutteLette: "Segna tutte come lette",
+} as const;
+
 /** Note del dialog di conferma cambio ruolo: cosa comporta la transizione. */
 export const ADMIN_RUOLO_COPY = {
   promozioneProgettista:

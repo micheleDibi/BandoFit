@@ -210,6 +210,21 @@ export interface Progettista {
   codice: string;
 }
 
+export interface Notifica {
+  id: number;
+  tipo: string;
+  titolo: string;
+  corpo: string | null;
+  url: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface NotifichePage extends Page<Notifica> {
+  /** Non lette complessive (non solo della pagina): il numero sul badge. */
+  non_lette: number;
+}
+
 export interface Me {
   profile: Profile;
   subscription: Subscription | null;

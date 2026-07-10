@@ -8,6 +8,7 @@ import { InviteBanner } from "../shared/InviteBanner";
 import { PoweredBy } from "../shared/PoweredBy";
 import { Logo } from "./Logo";
 import { NavMenu, type NavItem } from "./NavMenu";
+import { NotificationBell } from "./NotificationBell";
 
 // Voci sempre dirette (le azioni più frequenti sui bandi).
 const directLinks: NavItem[] = [
@@ -99,6 +100,7 @@ export function AppShell() {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
+            <NotificationBell />
             <Link
               to="/app/profilo"
               aria-label="Vai al tuo profilo"

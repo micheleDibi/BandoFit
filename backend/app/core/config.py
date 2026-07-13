@@ -28,6 +28,17 @@ class Settings(BaseSettings):
     # per i link assoluti nelle email che puntano al backend (unsubscribe).
     api_public_url: str = "http://localhost:8000/api/v1"
 
+    # Alert email sui nuovi bandi (migration 0021). L'aritmetica dei ritardi
+    # è su DATE in alert_fuso; la data di attivazione è il gate no-backfill:
+    # in produzione va impostata alla data del deploy della feature.
+    alert_scheduler_attivo: bool = True
+    alert_ora_invio: str = "08:00"
+    alert_fuso: str = "Europe/Rome"
+    alert_data_attivazione: str = "2026-07-13"
+    alert_orizzonte_giorni: int = 60
+    alert_max_tentativi: int = 3
+    alert_pausa_invii_secondi: float = 0.7
+
     # Istanza Jitsi self-hosted (APERTA, senza JWT) per le videochiamate
     # delle consulenze. URL stanza = {base}/bandofit-{videocall_token}: a DB
     # vive solo il token, l'URL è derivato.

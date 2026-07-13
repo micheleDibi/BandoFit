@@ -1,4 +1,4 @@
-import { Briefcase, LogOut, Menu, ShieldCheck, User, X } from "lucide-react";
+import { LogOut, Menu, ShieldCheck, User, X } from "lucide-react";
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
@@ -99,11 +99,7 @@ export function AppShell() {
             ))}
             <NavMenu label="Impostazioni" items={impostazioniLinks} />
             {isProgettista && (
-              <NavMenu
-                label="Progettista"
-                items={progettistaLinks}
-                icon={<Briefcase className="size-3.5" aria-hidden />}
-              />
+              <NavMenu label="Progettista" items={progettistaLinks} />
             )}
             {isAdmin && (
               <NavMenu

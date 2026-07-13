@@ -20,6 +20,7 @@ from app.api.routers import (
     admin_plans,
     admin_users,
     ai_check,
+    alerts,
     auth,
     bandi,
     calendar,
@@ -137,6 +138,8 @@ async def httpx_error_handler(_: Request, exc: httpx.HTTPError) -> JSONResponse:
 for router in (
     health.router,
     auth.router,
+    alerts.router,
+    alerts.me_router,
     plans.router,
     addons.router,
     me.router,

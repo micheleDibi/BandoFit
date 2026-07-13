@@ -637,7 +637,42 @@ async def get_abilitati(primary, user_id: str) -> bool:
 
 async def unsubscribe_by_token(primary, token: str) -> None:
     """Disiscrizione a un clic: idempotente, silenziosa anche con token
-    ignoto (nessuna enumerazione possibile)."""
-    await primary.table("bando_alert_settings").update({"abilitati": False}).eq(
-        "unsubscribe_token", token
-    ).execute()
+    ignoto (nessuna enumerazione possibile). Audit best-effort."""
+    resp = (
+        await primary.table("bando_alert_settings")
+        .update({"abilitati": False})
+        .eq("unsubscribe_token", token)
+        .execute()
+    )
+    if resp.data:
+        try:
+            await primary.table("audit_log").insert(
+                {
+                    "actor_id": str(resp.data[0]["user_id"]),
+                    "action": "alerts.unsubscribed",
+                    "target_user_id": str(resp.data[0]["user_id"]),
+                    "payload": {"canale": "email"},
+                }
+            ).execute()
+        except Exception:
+            logger.warning("audit_log non scrivibile per alerts.unsubscribed", exc_info=True)
+
+
+async def alert_settings_for_user(primary, user: dict) -> dict:
+    """Impostazioni + piano EFFETTIVO: per i collegati attivi vale il piano
+    del titolare (stessa regola delle quote)."""
+    from app.services import family_service, user_service  # import locale: evita cicli
+
+    abilitati = await get_abilitati(primary, user["id"])
+    owner_id = str(user["id"])
+    membership = await family_service.get_membership(primary, owner_id)
+    if membership and membership["status"] == "active":
+        owner_id = membership["parent_id"]
+    subscription = await user_service._fetch_active_subscription(primary, owner_id)
+    plan = subscription.plan if subscription else None
+    include = bool(plan and plan.alert_attivo and plan.alert_ritardo_giorni is not None)
+    return {
+        "abilitati": abilitati,
+        "piano_include_alert": include,
+        "ritardo_giorni": plan.alert_ritardo_giorni if include else None,
+    }

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { useMe } from "../../hooks/useMe";
+import { hasAreaProgettista } from "../../lib/roles";
 
 function FullPageSpinner() {
   return (
@@ -34,6 +35,6 @@ export function ProgettistaRoute({ children }: { children: ReactNode }) {
   const { data: me, isPending } = useMe();
 
   if (isPending) return <FullPageSpinner />;
-  if (me?.profile.role !== "progettista") return <Navigate to="/app/bandi" replace />;
+  if (!hasAreaProgettista(me?.profile.role)) return <Navigate to="/app/bandi" replace />;
   return <>{children}</>;
 }

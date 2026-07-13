@@ -17,6 +17,7 @@ import { useAppuntamenti } from "../hooks/useProgettistaRichieste";
 import { useSlots } from "../hooks/useSlots";
 import { apiErrorMessage } from "../lib/api";
 import { formatMonthYear, todayItalyIso } from "../lib/format";
+import { hasAreaProgettista } from "../lib/roles";
 import type { AppuntamentoProgettista } from "../types";
 
 /** "YYYY-MM" valido → {anno, mese}; altrimenti il mese di oggi (Roma). */
@@ -43,10 +44,11 @@ export default function Calendario() {
 
   const { data: events, isPending, isError, error, refetch } = useCalendarEvents(anno, mese);
 
-  // Per i progettisti il calendario mostra anche disponibilità e appuntamenti
-  // (query disattivate per gli altri: zero richieste in più).
+  // Per chi ha l'area progettista (progettisti e admin: parità completa) il
+  // calendario mostra anche disponibilità e appuntamenti (query disattivate
+  // per gli altri: zero richieste in più).
   const { data: me } = useMe();
-  const isProgettista = me?.profile.role === "progettista";
+  const isProgettista = hasAreaProgettista(me?.profile.role);
   const { data: slots } = useSlots(isProgettista);
   const { data: appuntamenti } = useAppuntamenti(isProgettista);
 

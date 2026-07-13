@@ -60,12 +60,16 @@ export const NOTIFICHE_COPY = {
   segnaTutteLette: "Segna tutte come lette",
 } as const;
 
-/** Note del dialog di conferma cambio ruolo: cosa comporta la transizione. */
+/** Note del dialog di conferma cambio ruolo: cosa comporta la transizione.
+ *  Parità admin: l'area progettista è di progettisti E amministratori, quindi
+ *  si «perde» solo tornando cliente. */
 export const ADMIN_RUOLO_COPY = {
   promozioneProgettista:
-    "Riceverà un codice identificativo e l'accesso all'area progettista, mantenendo tutte le funzionalità cliente.",
-  demozioneProgettista:
-    "Perderà l'accesso all'area progettista. Il suo codice resta riservato: una futura ri-promozione lo riutilizzerà.",
+    "Avrà l'area progettista con un codice identificativo (assegnato ora, o riusato se già esistente), mantenendo tutte le funzionalità cliente.",
+  nominaAdmin:
+    "Come amministratore ha anche l'area progettista (stesse funzioni dei progettisti); il codice identificativo viene assegnato alla prima proposta inviata.",
+  perditaAreaProgettista:
+    "Perderà l'accesso all'area progettista. Il suo eventuale codice resta riservato: un futuro ritorno all'area lo riutilizzerà.",
 } as const;
 
 /** Stati del flusso consulenze: compaiono nei badge di liste e dettagli, sia

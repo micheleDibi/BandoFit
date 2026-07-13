@@ -205,7 +205,8 @@ export interface PlanSwitchAdjustment {
   revoked_pending: Array<{ member_id: string; denominazione: string }>;
 }
 
-/** Attributi del ruolo progettista (il codice è assegnato dal sistema). */
+/** Attributi dell'area progettista (il codice è assegnato dal sistema; per
+ *  gli admin arriva pigramente alla prima proposta — parità admin). */
 export interface Progettista {
   codice: string;
 }

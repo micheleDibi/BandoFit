@@ -17,6 +17,7 @@ import { usePlans } from "../hooks/usePlans";
 import { apiErrorMessage } from "../lib/api";
 import { ADMIN_RUOLO_COPY, RUOLO_LABELS } from "../lib/copy";
 import { formatDate } from "../lib/format";
+import { hasAreaProgettista } from "../lib/roles";
 import type { AdminUser, UserRole } from "../types";
 
 type PendingAction =
@@ -362,8 +363,12 @@ export default function AdminUtenti() {
             {pending.role === "progettista" && (
               <p className="mt-2 text-sm text-slate-500">{ADMIN_RUOLO_COPY.promozioneProgettista}</p>
             )}
-            {pending.user.profile.role === "progettista" && (
-              <p className="mt-2 text-sm text-slate-500">{ADMIN_RUOLO_COPY.demozioneProgettista}</p>
+            {pending.role === "admin" && (
+              <p className="mt-2 text-sm text-slate-500">{ADMIN_RUOLO_COPY.nominaAdmin}</p>
+            )}
+            {/* L'area progettista si perde solo tornando cliente (parità admin). */}
+            {hasAreaProgettista(pending.user.profile.role) && !hasAreaProgettista(pending.role) && (
+              <p className="mt-2 text-sm text-slate-500">{ADMIN_RUOLO_COPY.perditaAreaProgettista}</p>
             )}
           </>
         )}

@@ -4,6 +4,7 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { useMe } from "../../hooks/useMe";
 import { cn } from "../../lib/cn";
+import { hasAreaProgettista } from "../../lib/roles";
 import { InviteBanner } from "../shared/InviteBanner";
 import { PoweredBy } from "../shared/PoweredBy";
 import { Logo } from "./Logo";
@@ -26,8 +27,8 @@ const impostazioniLinks: NavItem[] = [
   { to: "/app/abbonamento", label: "Abbonamento" },
 ];
 
-// Raggruppate sotto «Progettista» (solo per il ruolo progettista). Le
-// disponibilità si gestiscono dal Calendario, non da una pagina dedicata.
+// Raggruppate sotto «Progettista» (per progettisti e admin: parità completa).
+// Le disponibilità si gestiscono dal Calendario, non da una pagina dedicata.
 const progettistaLinks: NavItem[] = [
   { to: "/app/progettista/richieste", label: "Richieste" },
 ];
@@ -53,7 +54,7 @@ export function AppShell() {
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = me?.profile.role === "admin";
-  const isProgettista = me?.profile.role === "progettista";
+  const isProgettista = hasAreaProgettista(me?.profile.role);
 
   const handleSignOut = async () => {
     await signOut();

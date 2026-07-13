@@ -2,6 +2,14 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-13 — Parità admin ↔ progettista (migration 0019)
+
+- **Gli amministratori hanno le stesse funzioni dei progettisti, senza differenze**: pool richieste, invio/ritiro proposte, dossier full delle consulenze assegnate, slot di disponibilità (CRUD + serie ricorrenti), appuntamenti e gestione dal calendario; menu «Progettista» nell'header anche per gli admin (predicato unico `hasAreaProgettista` in `lib/roles.ts`; `require_progettista` ammette entrambi i ruoli). Le notifiche di **nuova richiesta** (evento 1, in-app + email) arrivano ora a tutti i progettisti **e admin** attivi.
+- **Codice PRG pigro**: un admin non ha un codice alla nomina — lo riceve automaticamente alla **prima proposta inviata** (`fn_ensure_progettista_codice`, migration **0019**: stessa sequence e stessa riga di `fn_promote_progettista`, quindi una futura promozione riusa il codice e viceversa; il ruolo non cambia). Per il cliente nessuna differenza visibile: le proposte restano «Progettista PRG-xxxxx».
+- **`fn_accept_proposal` ridefinita** (0019): la guardia sull'autore accetta anche un admin attivo — prima una proposta inviata da un admin non sarebbe mai stata accettabile.
+- Le note del dialog di cambio ruolo in AdminUtenti sono state riallineate alla parità (l'area progettista si «perde» solo tornando cliente; la nomina ad admin dichiara che include l'area progettista).
+- ⚠️ Migration **0019** da eseguire dallo SQL Editor (prerequisito la 0017) **PRIMA di deployare questo backend**: la prima proposta di un admin chiama una RPC che senza la migration non esiste.
+
 ## 2026-07-13 — Calendario unificato del progettista e slot ricorrenti (migration 0018)
 
 - **Il calendario è ora il gestionale delle disponibilità**: per i progettisti la pagina Calendario mostra e gestisce anche gli **slot liberi** (chip verde) e gli **appuntamenti** (chip viola), accanto a eventi personali e scadenze bandi (legenda a 4 voci). Integrazione **solo frontend**: `/me/calendar` è intatto e per i non-progettisti non cambia nulla (query disattivate, rendering identico). Convenzione mista deliberata e documentata: eventi wall-clock italiano, slot/appuntamenti istanti UTC ancorati al giorno locale del browser. Dedup: uno slot prenotato non compare come slot — il suo booking è già l'appuntamento con gli stessi orari.

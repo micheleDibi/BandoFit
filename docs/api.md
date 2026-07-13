@@ -70,7 +70,7 @@ Profilo dell'utente corrente + abbonamento attivo con il piano.
   "subscription": { "id": "uuid", "status": "active", "data_inizio": "2026-07-03",
                     "data_scadenza": "2027-07-03", "plan": { ...come /plans... } } }
 ```
-`role` ∈ `admin`/`cliente`/`progettista`. Per i progettisti la risposta include anche `progettista: {codice}` (il codice `PRG-00001`, assegnato dal sistema alla promozione e immutabile); il progettista conserva tutte le funzionalità cliente.
+`role` ∈ `admin`/`cliente`/`progettista`. Per i progettisti — e per gli admin che hanno già un codice — la risposta include anche `progettista: {codice}` (il codice `PRG-00001`, assegnato dal sistema alla promozione, o alla prima proposta per gli admin, e immutabile); il progettista conserva tutte le funzionalità cliente.
 
 ### `PATCH /me`
 Aggiorna l'anagrafica. Body (tutti opzionali): `nome`, `cognome`, `azienda`, `telefono`. → come `GET /me`.
@@ -263,7 +263,7 @@ Flusso: AI-check completato → attivazione dell'addon `consulto-esperto` → ri
 Richieste dell'Azienda (visibilità per `family_parent_id`). Item: `{id, stato, bando_id, bando_slug, bando_titolo, esito, punteggio, created_at, assigned_at, editable, progettista, proposte_aperte, proposte, appuntamento}` — `stato` ∈ `nuova`/`assegnata`/`annullata`; `progettista = {codice, nome}` (il **nome** solo dopo l'assegnazione, prima solo il codice); `proposte` (solo nel dettaglio): `[{id, codice_progettista, messaggio, stato, created_at}]`; `appuntamento = {id, inizio, fine, stato}` in UTC.
 
 ### `POST /me/consulenze` (201) *(solo titolare)*
-Body: `{"ai_check_id": "uuid"}` (un AI-check `ready` della propria Azienda). Crea la richiesta con gli snapshot (esito/punteggio, bando, addon+prezzo) e avvisa **tutti i progettisti attivi** (evento 1). Il pagamento dell'addon è fuori scope: l'innesto del checkout è in `consulting_service.create_request`. Errori: `403` account collegato; `404` AI-check non trovato / addon non a catalogo; `409` AI-check non completato / **richiesta già aperta per questo bando** (una sola `nuova` per bando per Azienda).
+Body: `{"ai_check_id": "uuid"}` (un AI-check `ready` della propria Azienda). Crea la richiesta con gli snapshot (esito/punteggio, bando, addon+prezzo) e avvisa **tutti i progettisti e gli admin attivi** (evento 1; parità admin). Il pagamento dell'addon è fuori scope: l'innesto del checkout è in `consulting_service.create_request`. Errori: `403` account collegato; `404` AI-check non trovato / addon non a catalogo; `409` AI-check non completato / **richiesta già aperta per questo bando** (una sola `nuova` per bando per Azienda).
 
 ### `POST /me/consulenze/{id}/proposte/{pid}/accetta` *(solo titolare)*
 Body: `{"slot_id": "uuid" | null}`. Accetta la proposta = assegna la consulenza in via definitiva (RPC atomica: le altre proposte diventano `superate`); con `slot_id` prenota nella stessa transazione (**all-or-nothing**: `409 slot_taken` ⇒ non resta nemmeno l'assegnazione, si riprova). Eventi 4 (+3 se prenota) al progettista. Errori: `409` richiesta non più aperta / proposta non più disponibile / progettista non più disponibile / slot preso.
@@ -282,7 +282,7 @@ Annulla la richiesta finché è `nuova`: esce dal pool, le proposte aperte diven
 
 ## Area progettista
 
-Tutte dietro `require_progettista` (il ruolo si legge dal DB a ogni richiesta, non dal JWT). Il progettista vede: nel **pool** i dati PARZIALI del requisito (ragione sociale, P.IVA, denominazione utente, email del titolare, bando, esito+punteggio e report dell'AI-check); i dati **FULL** (tutti i dati aziendali + dossier certificato) **solo per le consulenze assegnate a lui**, con ogni accesso registrato in `audit_log`.
+Tutte dietro `require_progettista` (il ruolo si legge dal DB a ogni richiesta, non dal JWT). **Parità admin**: il gate ammette anche il ruolo `admin` — gli amministratori hanno esattamente le stesse funzioni dell'area progettista (le loro proposte sono accettabili grazie alla guardia ridefinita in migration 0019, e il codice PRG viene assegnato pigramente alla prima proposta). Il progettista vede: nel **pool** i dati PARZIALI del requisito (ragione sociale, P.IVA, denominazione utente, email del titolare, bando, esito+punteggio e report dell'AI-check); i dati **FULL** (tutti i dati aziendali + dossier certificato) **solo per le consulenze assegnate a lui**, con ogni accesso registrato in `audit_log`.
 
 ### `GET /progettista/richieste`
 `{ aperte: [...], assegnate: [...] }` — le richieste `nuova` di tutte le aziende (pool globale) + le proprie assegnate. Item: `{id, stato, ragione_sociale, partita_iva, denominazione_utente, email, bando_id, bando_slug, bando_titolo, esito, punteggio, created_at, assegnata_a_me, mia_proposta_stato, appuntamento}`. Le richieste annullate o assegnate ad altri **non esistono** per il progettista (404 sul dettaglio).

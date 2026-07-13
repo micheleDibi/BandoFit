@@ -1,5 +1,6 @@
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 # I logger applicativi (bandofit.*) devono essere visibili nei log del
 # container: senza questa configurazione i livelli INFO/WARNING dei moduli
@@ -15,6 +16,7 @@ from postgrest.exceptions import APIError
 from app.api.routers import (
     addons,
     admin_addons,
+    admin_alerts,
     admin_plans,
     admin_users,
     ai_check,
@@ -55,7 +57,22 @@ async def lifespan(app: FastAPI):
     app.state.ai = AiCheckClient(settings)
     if not app.state.ai.enabled:
         logger.warning("API Anthropic non configurata: AI-check disattivato")
+    # Scheduler degli alert nuovi-bandi: task in-process (uvicorn è un solo
+    # processo); il claim a DB protegge comunque da esecuzioni concorrenti.
+    # Import locale: in questo modulo ogni import top-level dopo basicConfig
+    # aggiungerebbe un E402 alla baseline ruff.
+    from app.services import alert_scheduler
+
+    app.state.alert_task = None
+    if settings.alert_scheduler_attivo:
+        app.state.alert_task = asyncio.create_task(
+            alert_scheduler.run_forever(app.state.primary, app.state.secondary)
+        )
     yield
+    if app.state.alert_task is not None:
+        app.state.alert_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await app.state.alert_task
     await app.state.openapi.aclose()
     await app.state.ai.aclose()
 
@@ -137,5 +154,6 @@ for router in (
     admin_users.router,
     admin_plans.router,
     admin_addons.router,
+    admin_alerts.router,
 ):
     app.include_router(router, prefix=API_PREFIX)

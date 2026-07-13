@@ -2,6 +2,12 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-13 — Il cliente vede il progettista per nome e cognome
+
+- Nelle viste del cliente (lista e dettaglio consulenza, dialog di accettazione, email di proposta) il progettista compare per **nome e cognome** invece che come «Progettista PRG-xxxxx» — più umano. Il codice resta nel payload API e nelle viste interne/admin (AdminUtenti), ma la UI del cliente non lo mostra più.
+- `ProposalOut` guadagna `nome_progettista` (batch da `profiles`, helper `_nomi_progettisti`); l'email dell'evento 2 si firma col nome dell'autore. La **notifica in-app conservata resta minimizzata**: cita solo il bando (né codice né nome), i dettagli si leggono seguendo il deep-link.
+- Nessuna migration: modifica solo applicativa.
+
 ## 2026-07-13 — Parità admin ↔ progettista (migration 0019)
 
 - **Gli amministratori hanno le stesse funzioni dei progettisti, senza differenze**: pool richieste, invio/ritiro proposte, dossier full delle consulenze assegnate, slot di disponibilità (CRUD + serie ricorrenti), appuntamenti e gestione dal calendario; menu «Progettista» nell'header anche per gli admin (predicato unico `hasAreaProgettista` in `lib/roles.ts`; `require_progettista` ammette entrambi i ruoli). Le notifiche di **nuova richiesta** (evento 1, in-app + email) arrivano ora a tutti i progettisti **e admin** attivi.

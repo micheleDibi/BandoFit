@@ -372,15 +372,16 @@ async def _event_nuova_richiesta(primary, request: dict) -> None:
     )
 
 
-async def _event_proposta_ricevuta(primary, request: dict, proposal_id: str, codice: str | None) -> None:
-    """Evento 2: al titolare della richiesta."""
-    label = f"Progettista {codice}" if codice else "Un progettista"
+async def _event_proposta_ricevuta(primary, request: dict, proposal_id: str, autore: str | None) -> None:
+    """Evento 2: al titolare della richiesta. La notifica CONSERVATA non
+    contiene il nome dell'autore (minimizzazione: solo il bando, i dettagli
+    si leggono seguendo l'url); il nome viaggia nell'email, effimera."""
     await notification_service.notify(
         primary,
         [request["cliente_id"]],
         tipo="consulenza.proposta",
         titolo="Hai ricevuto una proposta di consulenza",
-        corpo=f"{label} — {request['bando_titolo']}",
+        corpo=f"Bando: {request['bando_titolo']}",
         url=f"/app/consulenze/{request['id']}",
         dedup_key=f"proposta:{proposal_id}",
     )
@@ -398,7 +399,7 @@ async def _event_proposta_ricevuta(primary, request: dict, proposal_id: str, cod
                     partial(
                         email_service.send_proposal_email,
                         cliente.data[0]["email"],
-                        codice or "—",
+                        autore or "Un progettista",
                         request["bando_titolo"],
                         _frontend_link(f"/app/consulenze/{request['id']}"),
                     )
@@ -526,6 +527,26 @@ async def _codici_progettisti(primary, progettista_ids: list[str]) -> dict[str, 
     return {row["user_id"]: row["codice"] for row in resp.data}
 
 
+async def _nomi_progettisti(primary, progettista_ids: list[str]) -> dict[str, str]:
+    """Nome e cognome degli autori, in batch: il cliente vede le PERSONE,
+    non i codici (il codice resta per gli usi interni/admin)."""
+    ids = [str(pid) for pid in progettista_ids if pid]
+    if not ids:
+        return {}
+    resp = (
+        await primary.table("profiles")
+        .select("id,nome,cognome")
+        .in_("id", ids)
+        .execute()
+    )
+    nomi: dict[str, str] = {}
+    for row in resp.data:
+        nome = " ".join(filter(None, [row.get("nome"), row.get("cognome")]))
+        if nome:
+            nomi[row["id"]] = nome
+    return nomi
+
+
 async def _bookings_by_request(primary, request_ids: list[str]) -> dict[str, dict]:
     if not request_ids:
         return {}
@@ -548,7 +569,8 @@ def _map_booking(row: dict | None) -> BookingOut | None:
 async def _progettista_pubblico(
     primary, request: dict, codici: dict[str, str]
 ) -> ProgettistaPublicOut | None:
-    """Codice sempre; il nome del progettista solo dopo l'assegnazione."""
+    """L'assegnato, per il cliente: nome e cognome (la UI mostra quelli;
+    il codice resta nel payload per gli usi interni)."""
     assigned = request.get("assigned_progettista_id")
     if not assigned:
         return None
@@ -722,11 +744,11 @@ async def get_my_request(primary, user: dict, request_id: str) -> ConsulenzaOut:
         .execute()
     )
     proposte_rows = proposte_resp.data
+    autori = [row["progettista_id"] for row in proposte_rows]
     codici = await _codici_progettisti(
-        primary,
-        [row["progettista_id"] for row in proposte_rows]
-        + [request.get("assigned_progettista_id")],
+        primary, autori + [request.get("assigned_progettista_id")]
     )
+    nomi = await _nomi_progettisti(primary, autori)
     bookings = await _bookings_by_request(primary, [request["id"]])
 
     return ConsulenzaOut(
@@ -746,6 +768,7 @@ async def get_my_request(primary, user: dict, request_id: str) -> ConsulenzaOut:
             ProposalOut(
                 id=row["id"],
                 codice_progettista=codici.get(row["progettista_id"]),
+                nome_progettista=nomi.get(row["progettista_id"]),
                 messaggio=row["messaggio"],
                 stato=row["stato"],
                 created_at=row["created_at"],
@@ -1234,10 +1257,12 @@ async def create_proposal(
         family_parent_id=request["family_parent_id"],
         payload={"request_id": request["id"], "proposal_id": proposal["id"]},
     )
-    codici = await _codici_progettisti(primary, [str(progettista["id"])])
-    await _event_proposta_ricevuta(
-        primary, request, proposal["id"], codici.get(str(progettista["id"]))
-    )
+    # L'autore per il cliente è una persona, non un codice: nome e cognome
+    # arrivano dal profilo già caricato in CurrentUser.
+    autore = " ".join(
+        filter(None, [progettista.get("nome"), progettista.get("cognome")])
+    ) or None
+    await _event_proposta_ricevuta(primary, request, proposal["id"], autore)
     return await get_pool_request(primary, progettista, request_id)
 
 

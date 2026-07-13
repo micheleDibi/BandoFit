@@ -225,8 +225,8 @@ export interface Slot {
 export type ConsulenzaStato = "nuova" | "assegnata" | "annullata";
 export type PropostaStato = "inviata" | "accettata" | "rifiutata" | "superata" | "ritirata";
 
-/** Come il cliente vede il progettista: sempre il codice, il nome solo dopo
- *  l'assegnazione. */
+/** Come il cliente vede il progettista assegnato: per nome e cognome (il
+ *  codice resta nel payload per usi interni, la UI non lo mostra). */
 export interface ProgettistaPubblico {
   codice: string | null;
   nome: string | null;
@@ -234,7 +234,9 @@ export interface ProgettistaPubblico {
 
 export interface Proposta {
   id: string;
+  /** Uso interno/admin: la UI del cliente mostra il nome, non il codice. */
   codice_progettista: string | null;
+  nome_progettista: string | null;
   messaggio: string;
   stato: PropostaStato;
   created_at: string;

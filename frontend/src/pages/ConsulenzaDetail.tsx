@@ -133,12 +133,9 @@ export default function ConsulenzaDetail() {
           </h2>
           <p className="mt-1.5 text-sm text-slate-600">
             Progettista{" "}
-            <span className="tabular font-medium text-slate-900">
-              {consulenza.progettista?.codice ?? "—"}
+            <span className="font-medium text-slate-900">
+              {consulenza.progettista?.nome ?? "—"}
             </span>
-            {consulenza.progettista?.nome && (
-              <span className="font-medium text-slate-900"> — {consulenza.progettista.nome}</span>
-            )}
           </p>
           {consulenza.appuntamento ? (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3">
@@ -207,8 +204,8 @@ export default function ConsulenzaDetail() {
               <Card key={proposta.id} className="p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="tabular text-sm font-semibold text-slate-900">
-                      Progettista {proposta.codice_progettista ?? "—"}
+                    <p className="text-sm font-semibold text-slate-900">
+                      {proposta.nome_progettista ?? "Un progettista"}
                     </p>
                     <p className="mt-0.5 text-xs text-slate-400">
                       {formatDateTime(proposta.created_at)}
@@ -280,7 +277,7 @@ export default function ConsulenzaDetail() {
           onClose={() => setAccepting(null)}
           requestId={consulenza.id}
           propostaId={accepting.id}
-          title={`Accetta la proposta di ${accepting.codice_progettista ?? "questo progettista"}`}
+          title={`Accetta la proposta di ${accepting.nome_progettista ?? "questo progettista"}`}
           confirmLabel="Accetta"
           allowSkip
           busy={accetta.isPending}

@@ -516,6 +516,33 @@ class TestCreateRequest:
         assert ("eq", "is_active", True) in destinatari[3]
 
 
+class TestDettaglioCliente:
+    async def test_proposte_con_nome_e_codice(self, as_titolare):
+        """Il cliente vede l'autore per nome e cognome (il codice resta nel
+        payload per usi interni, la UI non lo mostra)."""
+        primary = FakePrimary(
+            selects={
+                "consultation_requests": [request_row()],
+                "consultation_proposals": [
+                    {
+                        "id": PROPOSAL_ID,
+                        "request_id": REQUEST_ID,
+                        "progettista_id": PROGETTISTA,
+                        "messaggio": "Posso aiutarti",
+                        "stato": "inviata",
+                        "created_at": tra(0).isoformat(),
+                    }
+                ],
+                "progettisti": [{"user_id": PROGETTISTA, "codice": "PRG-00001"}],
+                "profiles": [{"id": PROGETTISTA, "nome": "Paola", "cognome": "Verdi"}],
+            }
+        )
+        out = await consulting_service.get_my_request(primary, USER, REQUEST_ID)
+        [proposta] = out.proposte
+        assert proposta.nome_progettista == "Paola Verdi"
+        assert proposta.codice_progettista == "PRG-00001"
+
+
 # ---------------------------------------------------------------------------
 # Azioni del titolare: accetta / rifiuta / annulla / prenota
 # ---------------------------------------------------------------------------
@@ -778,7 +805,9 @@ class TestProposte:
         assert notifica["tipo"] == "consulenza.proposta"
         assert notifica["user_ids"] == [TITOLARE]
         assert notifica["dedup_key"] == f"proposta:{PROPOSAL_ID}"
-        assert "PRG-00001" in notifica["corpo"]
+        # Minimizzazione: la notifica CONSERVATA cita solo il bando (il nome
+        # dell'autore viaggia nell'email, effimera).
+        assert notifica["corpo"] == "Bando: Bando di prova"
         [audit] = [op for op in primary.ops if op[0] == "audit_log"]
         assert audit[2]["action"] == "consulenza.proposal_sent"
         # Il progettista ha già il codice: nessuna RPC di ensure.
@@ -809,7 +838,7 @@ class TestProposte:
         assert fn == "fn_ensure_progettista_codice"
         assert params == {"p_user_id": PROGETTISTA}
         [notifica] = notify_calls
-        assert "PRG-00009" in notifica["corpo"]
+        assert notifica["corpo"] == "Bando: Bando di prova"
 
     async def test_ensure_codice_in_errore_blocca_prima_dellinsert(self, notify_calls):
         primary = FakePrimary(selects={"consultation_requests": [request_row()]})

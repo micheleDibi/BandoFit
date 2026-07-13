@@ -83,8 +83,9 @@ class BookIn(BaseModel):
 
 
 class ProgettistaPublicOut(BaseModel):
-    """Come il cliente vede il progettista: sempre il codice; il nome solo
-    dopo l'assegnazione."""
+    """Come il cliente vede il progettista assegnato: per NOME E COGNOME
+    (più umano). Il codice resta nel payload per gli usi interni/admin,
+    la UI del cliente non lo mostra."""
 
     codice: str | None = None
     nome: str | None = None
@@ -93,6 +94,8 @@ class ProgettistaPublicOut(BaseModel):
 class ProposalOut(BaseModel):
     id: UUID
     codice_progettista: str | None = None
+    # Il cliente vede l'autore della proposta per nome e cognome.
+    nome_progettista: str | None = None
     messaggio: str
     stato: str
     created_at: datetime

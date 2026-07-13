@@ -71,13 +71,12 @@ export default function Consulenze() {
                             : `${consulenza.proposte_aperte} proposte da valutare`}
                       </span>
                     )}
-                    {consulenza.progettista?.codice && (
+                    {consulenza.progettista?.nome && (
                       <span>
                         Progettista{" "}
-                        <span className="tabular font-medium text-slate-800">
-                          {consulenza.progettista.codice}
+                        <span className="font-medium text-slate-800">
+                          {consulenza.progettista.nome}
                         </span>
-                        {consulenza.progettista.nome && ` — ${consulenza.progettista.nome}`}
                       </span>
                     )}
                     {consulenza.appuntamento && (

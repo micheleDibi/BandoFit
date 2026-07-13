@@ -218,15 +218,16 @@ async def send_consulting_request_email(to_email: str, bando_titolo: str, cta_ur
 
 
 async def send_proposal_email(
-    to_email: str, codice_progettista: str, bando_titolo: str, cta_url: str
+    to_email: str, nome_progettista: str, bando_titolo: str, cta_url: str
 ) -> bool:
-    """Evento 2 — al titolare: un progettista ha inviato una proposta."""
-    codice = html.escape(codice_progettista)
+    """Evento 2 — al titolare: un progettista ha inviato una proposta.
+    L'autore si presenta per nome e cognome (più umano del codice)."""
+    autore = html.escape(nome_progettista)
     titolo = html.escape(bando_titolo)
     html_body = _branded_html(
         "Hai ricevuto una proposta di consulenza",
         [
-            f"Il <strong>Progettista {codice}</strong> ti ha inviato una proposta per "
+            f"<strong>{autore}</strong> ti ha inviato una proposta per "
             f"il consulto sul bando <strong>{titolo}</strong>.",
             "Leggila dalla piattaforma: accettandola assegni la consulenza in via "
             "definitiva e puoi prenotare un appuntamento.",
@@ -236,7 +237,7 @@ async def send_proposal_email(
         "Ricevi questa email perché hai attivato il consulto esperto su questo bando.",
     )
     text = (
-        f"Il Progettista {codice_progettista} ti ha inviato una proposta per il bando "
+        f"{nome_progettista} ti ha inviato una proposta per il bando "
         f"«{bando_titolo}».\n\nVedi la proposta: {cta_url}"
     )
     return await _dispatch(

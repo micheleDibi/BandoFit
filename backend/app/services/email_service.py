@@ -77,7 +77,12 @@ def _sanitize_header(value: str) -> str:
 
 
 async def _send_via_smtp(
-    settings: Settings, to_email: str, subject: str, html_body: str, text_body: str
+    settings: Settings,
+    to_email: str,
+    subject: str,
+    html_body: str,
+    text_body: str,
+    headers: dict[str, str] | None = None,
 ) -> bool:
     import aiosmtplib
 
@@ -96,6 +101,8 @@ async def _send_via_smtp(
     # la loro assenza è un forte segnale di spam per Gmail/Outlook.
     message["Message-ID"] = make_msgid(domain=sender_domain)
     message["Date"] = formatdate(localtime=True)
+    for key, value in (headers or {}).items():
+        message[_sanitize_header(key)] = _sanitize_header(value)
     message.set_content(text_body)
     message.add_alternative(html_body, subtype="html")
 
@@ -115,18 +122,29 @@ async def _send_via_smtp(
 
 
 async def _send_via_resend(
-    settings: Settings, to_email: str, subject: str, html_body: str
+    settings: Settings,
+    to_email: str,
+    subject: str,
+    html_body: str,
+    text_body: str,
+    headers: dict[str, str] | None = None,
 ) -> bool:
+    payload: dict = {
+        "from": settings.email_from,
+        "to": [to_email],
+        "subject": subject,
+        "html": html_body,
+        "text": text_body,
+    }
+    if headers:
+        payload["headers"] = {
+            _sanitize_header(k): _sanitize_header(v) for k, v in headers.items()
+        }
     async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
         resp = await client.post(
             _RESEND_URL,
             headers={"Authorization": f"Bearer {settings.resend_api_key}"},
-            json={
-                "from": settings.email_from,
-                "to": [to_email],
-                "subject": subject,
-                "html": html_body,
-            },
+            json=payload,
         )
     if resp.status_code >= 400:
         logger.error("Resend ha rifiutato l'invio (%s): %s", resp.status_code, resp.text[:300])
@@ -134,19 +152,30 @@ async def _send_via_resend(
     return True
 
 
-async def _dispatch(to_email: str, subject: str, html_body: str, text_body: str) -> bool:
+async def _dispatch(
+    to_email: str,
+    subject: str,
+    html_body: str,
+    text_body: str,
+    headers: dict[str, str] | None = None,
+) -> bool:
     """Invia con il provider configurato (SMTP → Resend → log). Mai raise.
     Ogni tentativo viene loggato, riuscito o meno: è il punto di verità
-    quando "le email non arrivano"."""
+    quando "le email non arrivano". `headers` = intestazioni extra
+    (es. List-Unsubscribe), sanificate contro l'header injection."""
     settings = get_settings()
     subject = _sanitize_header(subject)
     try:
         if settings.smtp_host:
-            sent = await _send_via_smtp(settings, to_email, subject, html_body, text_body)
+            sent = await _send_via_smtp(
+                settings, to_email, subject, html_body, text_body, headers
+            )
             logger.info("Email inviata via SMTP a %s (%r)", to_email, subject)
             return sent
         if settings.resend_api_key:
-            sent = await _send_via_resend(settings, to_email, subject, html_body)
+            sent = await _send_via_resend(
+                settings, to_email, subject, html_body, text_body, headers
+            )
             if sent:
                 logger.info("Email inviata via Resend a %s (%r)", to_email, subject)
             return sent
@@ -362,4 +391,132 @@ async def send_family_invitation_email(
         f"{parent_display_name} ti ha invitato su BandoFit",
         _invitation_html(parent_display_name, denominazione, cta_url),
         _plain_text(parent_display_name, denominazione, cta_url),
+    )
+
+
+def _format_eur(value: int | None) -> str | None:
+    """Importo in euro con separatore migliaia italiano («1.500.000 €»)."""
+    if value is None:
+        return None
+    return f"{value:,.0f}".replace(",", ".") + " €"
+
+
+def _digest_card(bando: dict) -> str:
+    """Card HTML di un bando nel digest. Tutti i dati catalogo sono escapati
+    qui (il template li tratta come HTML già pronto)."""
+    titolo = html.escape(bando.get("titolo") or "Bando senza titolo")
+    url = html.escape(bando["url"], quote=True)
+    righe: list[str] = []
+    if bando.get("ente_erogatore"):
+        righe.append(html.escape(bando["ente_erogatore"]))
+    importo = _format_eur(bando.get("importo_eur"))
+    importo_max = _format_eur(bando.get("importo_max_eur"))
+    if importo and importo_max:
+        righe.append(f"Dotazione {importo} · fino a {importo_max} per progetto")
+    elif importo:
+        righe.append(f"Dotazione {importo}")
+    elif importo_max:
+        righe.append(f"Fino a {importo_max} per progetto")
+    dettagli = "<br>".join(righe)
+
+    giorni = bando.get("giorni_alla_scadenza")
+    if bando.get("scadenza_label") is None:
+        scadenza = '<span style="color:#64748b">Senza scadenza dichiarata</span>'
+    else:
+        label = html.escape(bando["scadenza_label"])
+        scadenza = f'<strong style="color:#b45309">Scadenza: {label}</strong>'
+        if giorni is not None and giorni <= 14:
+            scadenza += (
+                ' <span style="background:#fef3c7;color:#92400e;border-radius:6px;'
+                'padding:1px 8px;font-size:12px;font-weight:600">'
+                f"scade tra {giorni} giorni</span>"
+                if giorni > 0
+                else ' <span style="background:#fee2e2;color:#b91c1c;border-radius:6px;'
+                'padding:1px 8px;font-size:12px;font-weight:600">scade oggi</span>'
+            )
+
+    motivo = html.escape(bando.get("motivo") or "")
+    riga_motivo = (
+        f'<span style="font-size:13px;color:#64748b">Perché lo vedi: {motivo}</span>'
+        if motivo
+        else ""
+    )
+    return (
+        '<span style="display:block;border:1px solid #e2e8f0;border-radius:10px;'
+        'padding:14px 16px;margin:0 0 4px">'
+        f'<a href="{url}" style="font-size:16px;font-weight:600;color:#1E5EFF;'
+        f'text-decoration:none">{titolo}</a><br>'
+        f'<span style="font-size:13px;color:#475569">{dettagli}</span>'
+        f'{"<br>" if dettagli else ""}'
+        f'<span style="font-size:13px">{scadenza}</span><br>'
+        f"{riga_motivo}"
+        "</span>"
+    )
+
+
+async def send_bandi_digest_email(
+    to_email: str,
+    bandi: list[dict],
+    cta_url: str,
+    unsubscribe_url: str,
+) -> bool:
+    """Digest giornaliero dei nuovi bandi compatibili. `bandi` = dict con
+    titolo, ente_erogatore, importo_eur, importo_max_eur, scadenza_label,
+    giorni_alla_scadenza, motivo, url — già risolti dal chiamante.
+    Include il link di disiscrizione a un clic e gli header RFC 8058."""
+    quanti = len(bandi)
+    heading = (
+        "C'è un nuovo bando per la tua azienda"
+        if quanti == 1
+        else f"Ci sono {quanti} nuovi bandi per la tua azienda"
+    )
+    unsubscribe_href = html.escape(unsubscribe_url, quote=True)
+    intro = (
+        "In base al profilo della tua azienda, questo bando sembra compatibile con te:"
+        if quanti == 1
+        else "In base al profilo della tua azienda, questi bandi sembrano compatibili con te:"
+    )
+    paragraphs = [
+        intro,
+        *[_digest_card(bando) for bando in bandi],
+        f'<span style="font-size:12px;color:#94a3b8">Non vuoi più ricevere questi avvisi? '
+        f'<a href="{unsubscribe_href}" style="color:#64748b">Disattivali con un clic</a> '
+        "o dalle Preferenze della piattaforma.</span>",
+    ]
+    html_body = _branded_html(
+        heading,
+        paragraphs,
+        "Vedi tutti i bandi",
+        cta_url,
+        "Ricevi questa email perché il tuo piano include gli avvisi sui nuovi bandi.",
+    )
+    righe_testo = []
+    for bando in bandi:
+        riga = f"- {bando.get('titolo') or 'Bando'}"
+        if bando.get("scadenza_label"):
+            riga += f" (scadenza {bando['scadenza_label']})"
+        riga += f"\n  {bando['url']}"
+        if bando.get("motivo"):
+            riga += f"\n  Perché lo vedi: {bando['motivo']}"
+        righe_testo.append(riga)
+    text = (
+        f"{heading}.\n\n"
+        + "\n\n".join(righe_testo)
+        + f"\n\nTutti i bandi: {cta_url}"
+        + f"\n\nPer non ricevere più questi avvisi: {unsubscribe_url}"
+    )
+    subject = (
+        "Un nuovo bando per la tua azienda — BandoFit"
+        if quanti == 1
+        else f"{quanti} nuovi bandi per la tua azienda — BandoFit"
+    )
+    return await _dispatch(
+        to_email,
+        subject,
+        html_body,
+        text,
+        headers={
+            "List-Unsubscribe": f"<{unsubscribe_url}>",
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
     )

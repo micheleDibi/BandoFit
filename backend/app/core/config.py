@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     # URL pubblico del frontend (redirect degli inviti, link nelle email).
     frontend_url: str = "http://localhost:5173"
 
+    # Base pubblica dell'API (come VITE_API_BASE_URL, include /api/v1): serve
+    # per i link assoluti nelle email che puntano al backend (unsubscribe).
+    api_public_url: str = "http://localhost:8000/api/v1"
+
     # Istanza Jitsi self-hosted (APERTA, senza JWT) per le videochiamate
     # delle consulenze. URL stanza = {base}/bandofit-{videocall_token}: a DB
     # vive solo il token, l'URL è derivato.

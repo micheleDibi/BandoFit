@@ -4,14 +4,22 @@ import { cn } from "../../lib/cn";
 import { prezzoDisplay } from "../../lib/prezzo";
 import type { Plan } from "../../types";
 
+function alertFeature(plan: Plan): string {
+  // Avvisi nuovi-bandi: copy onesto guidato dal ritardo del piano.
+  if (plan.alert_attivo && plan.alert_ritardo_giorni != null) {
+    if (plan.alert_ritardo_giorni === 0)
+      return "Nuovi bandi compatibili via email il giorno stesso della pubblicazione";
+    if (plan.alert_ritardo_giorni === 1)
+      return "Nuovi bandi compatibili via email il giorno dopo la pubblicazione";
+    return `Nuovi bandi compatibili via email dopo ${plan.alert_ritardo_giorni} giorni dalla pubblicazione`;
+  }
+  return "Avvisi email sui nuovi bandi non inclusi";
+}
+
 export function planFeatures(plan: Plan): string[] {
   const features = [
     plan.ai_check > 0 ? `${plan.ai_check} AI-check all'anno` : "AI-check non inclusi",
-    plan.alert_attivo
-      ? // Gli alert via email non sono ancora attivi: è una quota del piano
-        // ma il recapito arriverà in seguito → marcato «(in arrivo)».
-        `Alert personalizzati con ${plan.alert_giorni_preavviso ?? "-"} giorni di preavviso (in arrivo)`
-      : "Alert personalizzati non inclusi",
+    alertFeature(plan),
     plan.num_account_aziendali === 1
       ? "1 account aziendale"
       : `Fino a ${plan.num_account_aziendali} account aziendali`,

@@ -1,5 +1,6 @@
 import {
   ArrowRight,
+  BellRing,
   Building2,
   Coins,
   FileText,
@@ -20,6 +21,7 @@ import { TagSelect, type TagSelectOption } from "../components/ui/TagSelect";
 import { Skeleton } from "../components/ui/states";
 import { useCompanyFacets } from "../hooks/useCompany";
 import { useLookups } from "../hooks/useLookups";
+import { useAlertSettings, useSaveAlertSettings } from "../hooks/useAlertSettings";
 import { EMPTY_PREFERENCES, usePreferences, useSavePreferences } from "../hooks/usePreferences";
 import { apiErrorMessage } from "../lib/api";
 import { buildBandiPerTePreset, presetHasValues, presetSearchParams } from "../lib/bandiPreset";
@@ -97,6 +99,74 @@ const sameSet = (a: number[], b: number[]) =>
 interface InheritedValue {
   id: number;
   label: string;
+}
+
+function descrizioneRitardo(giorni: number | null): string {
+  if (giorni === 0) return "il giorno stesso della pubblicazione";
+  if (giorni === 1) return "il giorno dopo la pubblicazione";
+  return `dopo ${giorni} giorni dalla pubblicazione`;
+}
+
+/** Toggle degli avvisi email sui nuovi bandi: stessa fonte di verità del
+ *  link di disiscrizione presente in fondo a ogni email. */
+function AlertEmailCard() {
+  const { data: settings, isPending } = useAlertSettings();
+  const save = useSaveAlertSettings();
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <Card className="p-5">
+      <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
+        <BellRing className="size-4 text-brand-500" aria-hidden />
+        Avvisi email sui nuovi bandi
+      </h2>
+      {isPending || !settings ? (
+        <Skeleton className="mt-3 h-10 w-full" />
+      ) : settings.piano_include_alert ? (
+        <>
+          <p className="mt-1 text-sm text-slate-500">
+            Quando esce un bando compatibile con la tua azienda te lo segnaliamo via
+            email {descrizioneRitardo(settings.ritardo_giorni)}.
+          </p>
+          <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-700">
+            <input
+              type="checkbox"
+              className="size-4 cursor-pointer accent-brand-500"
+              checked={settings.abilitati}
+              disabled={save.isPending}
+              onChange={async (e) => {
+                setError(null);
+                try {
+                  await save.mutateAsync({ abilitati: e.target.checked });
+                } catch (err) {
+                  setError(apiErrorMessage(err));
+                }
+              }}
+            />
+            Ricevi gli avvisi via email
+          </label>
+          <p className="mt-2 text-xs text-slate-400">
+            Puoi disattivarli quando vuoi, anche dal link in fondo a ogni email.
+          </p>
+          {error && (
+            <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+              {error}
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <p className="mt-1 text-sm text-slate-500">
+            Gli avvisi email sui nuovi bandi compatibili con la tua azienda sono inclusi
+            nei piani a pagamento.
+          </p>
+          <LinkButton to="/app/abbonamento" variant="secondary" size="sm" className="mt-3">
+            Scopri i piani
+          </LinkButton>
+        </>
+      )}
+    </Card>
+  );
 }
 
 export default function Preferenze() {
@@ -198,8 +268,8 @@ export default function Preferenze() {
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-500">
             Il profilo della tua azienda è la base; qui aggiungi ciò che vuoi seguire in
-            più. Insieme alimentano il filtro «Bandi per te» e, in futuro, notifiche e
-            AI-check.
+            più. Insieme alimentano il filtro «Bandi per te»; qui gestisci anche gli
+            avvisi email sui nuovi bandi.
           </p>
         </div>
         {presetHasValues(preset) && (
@@ -285,8 +355,9 @@ export default function Preferenze() {
           </Card>
         </aside>
 
-        {/* Colonna destra: le preferenze per faccetta */}
+        {/* Colonna destra: avvisi email + le preferenze per faccetta */}
         <div className="space-y-4">
+          <AlertEmailCard />
           {FACETS.map((facet) => {
             const inheritedHere = inherited[facet.key];
             const inheritedIds = inheritedHere.map((v) => v.id);

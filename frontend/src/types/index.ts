@@ -125,10 +125,20 @@ export interface Plan {
   ai_check: number;
   alert_attivo: boolean;
   alert_giorni_preavviso: number | null;
+  /** Alert nuovi-bandi: giorni di ritardo dalla pubblicazione (null = esclusi). */
+  alert_ritardo_giorni: number | null;
   num_account_aziendali: number;
   ordering: number;
   is_active: boolean;
   updated_at: string | null;
+}
+
+/** Impostazioni degli avvisi email sui nuovi bandi (GET/PUT /me/alert-settings). */
+export interface AlertSettings {
+  abilitati: boolean;
+  /** Il piano EFFETTIVO (per i collegati: quello del titolare) li include? */
+  piano_include_alert: boolean;
+  ritardo_giorni: number | null;
 }
 
 export type UserRole = "admin" | "cliente" | "progettista";

@@ -58,6 +58,7 @@ export interface PlanPayload {
   ai_check?: number;
   alert_attivo?: boolean;
   alert_giorni_preavviso?: number | null;
+  alert_ritardo_giorni?: number | null;
   num_account_aziendali?: number;
   ordering?: number;
   is_active?: boolean;

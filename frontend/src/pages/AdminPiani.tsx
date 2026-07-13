@@ -25,6 +25,7 @@ interface PlanFormState {
   ai_check: string;
   alert_attivo: boolean;
   alert_giorni_preavviso: string;
+  alert_ritardo_giorni: string;
   num_account_aziendali: string;
   ordering: string;
   is_active: boolean;
@@ -41,6 +42,9 @@ function toFormState(plan: Plan): PlanFormState {
     ai_check: String(plan.ai_check),
     alert_attivo: plan.alert_attivo,
     alert_giorni_preavviso: plan.alert_giorni_preavviso ? String(plan.alert_giorni_preavviso) : "",
+    // != null: lo zero («stesso giorno») è un valore valido.
+    alert_ritardo_giorni:
+      plan.alert_ritardo_giorni != null ? String(plan.alert_ritardo_giorni) : "",
     num_account_aziendali: String(plan.num_account_aziendali),
     ordering: String(plan.ordering),
     is_active: plan.is_active,
@@ -57,6 +61,7 @@ const EMPTY_FORM: PlanFormState = {
   ai_check: "0",
   alert_attivo: false,
   alert_giorni_preavviso: "",
+  alert_ritardo_giorni: "",
   num_account_aziendali: "1",
   ordering: "10",
   is_active: true,
@@ -72,6 +77,11 @@ function validate(form: PlanFormState): string | null {
     return "Il numero di AI-check non è valido.";
   if (form.alert_attivo && (!form.alert_giorni_preavviso || Number(form.alert_giorni_preavviso) < 1))
     return "Con gli alert attivi servono i giorni di preavviso (≥ 1).";
+  if (
+    form.alert_ritardo_giorni !== "" &&
+    (!Number.isInteger(Number(form.alert_ritardo_giorni)) || Number(form.alert_ritardo_giorni) < 0)
+  )
+    return "Il ritardo degli avvisi nuovi bandi non è valido (intero ≥ 0, o vuoto per escluderli).";
   if (!Number.isInteger(Number(form.num_account_aziendali)) || Number(form.num_account_aziendali) < 1)
     return "Gli account aziendali devono essere almeno 1.";
   return null;
@@ -87,6 +97,10 @@ function toPayload(form: PlanFormState): PlanPayload {
     ai_check: Number(form.ai_check),
     alert_attivo: form.alert_attivo,
     alert_giorni_preavviso: form.alert_attivo ? Number(form.alert_giorni_preavviso) : null,
+    alert_ritardo_giorni:
+      form.alert_attivo && form.alert_ritardo_giorni !== ""
+        ? Number(form.alert_ritardo_giorni)
+        : null,
     num_account_aziendali: Number(form.num_account_aziendali),
     ordering: Number(form.ordering) || 0,
     is_active: form.is_active,
@@ -179,13 +193,30 @@ function PlanFormFields({
         <option value="si">Inclusi</option>
       </SelectField>
       <TextField
-        label="Giorni di preavviso"
+        label="Preavviso scadenze (giorni)"
         type="number"
         min={1}
         disabled={!form.alert_attivo}
-        helper={form.alert_attivo ? undefined : "Attiva gli alert per impostarli"}
+        helper={
+          form.alert_attivo
+            ? "Promemoria scadenze: funzione futura"
+            : "Attiva gli alert per impostarli"
+        }
         value={form.alert_giorni_preavviso}
         onChange={(e) => setForm((f) => ({ ...f, alert_giorni_preavviso: e.target.value }))}
+      />
+      <TextField
+        label="Ritardo avvisi nuovi bandi (giorni)"
+        type="number"
+        min={0}
+        disabled={!form.alert_attivo}
+        helper={
+          form.alert_attivo
+            ? "Vuoto = avvisi nuovi bandi esclusi · 0 = stesso giorno della pubblicazione"
+            : "Attiva gli alert per impostarlo"
+        }
+        value={form.alert_ritardo_giorni}
+        onChange={(e) => setForm((f) => ({ ...f, alert_ritardo_giorni: e.target.value }))}
       />
       <TextField
         label="Account aziendali"

@@ -39,6 +39,7 @@ class TestTipoPrezzo:
         assert changes == {"etichetta_prezzo": None}
 
     def test_out_tollera_righe_senza_campi_nuovi(self):
+        # (vedi anche TestAlertRitardo per il campo 0021)
         # Robustezza sugli embed: una riga serializzata senza i campi 0010
         # (es. select non aggiornata) ricade sul default 'importo'.
         plan = PlanOut(
@@ -55,3 +56,30 @@ class TestTipoPrezzo:
         )
         assert plan.tipo_prezzo == "importo"
         assert plan.etichetta_prezzo is None
+        assert plan.alert_ritardo_giorni is None
+
+
+class TestAlertRitardo:
+    """Alert nuovi-bandi (0021): nullable-as-disabled, zero = stesso giorno."""
+
+    def test_default_none(self):
+        assert make_create().alert_ritardo_giorni is None
+
+    def test_zero_valido(self):
+        assert make_create(alert_ritardo_giorni=0).alert_ritardo_giorni == 0
+
+    def test_negativo_respinto(self):
+        with pytest.raises(ValueError):
+            make_create(alert_ritardo_giorni=-1)
+
+    def test_nessun_obbligo_con_alert_attivi(self):
+        # Gate della feature = alert_attivo AND ritardo non-null: un piano può
+        # avere gli alert scadenze attivi senza includere i nuovi-bandi.
+        plan = make_create(alert_attivo=True, alert_giorni_preavviso=7)
+        assert plan.alert_ritardo_giorni is None
+
+    def test_update_azzera_esplicitamente(self):
+        changes = PlanUpdate(alert_ritardo_giorni=None).model_dump(
+            mode="json", exclude_unset=True
+        )
+        assert changes == {"alert_ritardo_giorni": None}

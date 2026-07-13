@@ -22,6 +22,9 @@ class PlanOut(BaseModel):
     ai_check: int
     alert_attivo: bool
     alert_giorni_preavviso: int | None = None
+    # Alert nuovi-bandi (0021): giorni di ritardo dalla pubblicazione.
+    # NULL = feature esclusa dal piano anche con alert_attivo.
+    alert_ritardo_giorni: int | None = None
     num_account_aziendali: int
     ordering: int
     is_active: bool
@@ -38,6 +41,8 @@ class PlanCreate(BaseModel):
     ai_check: int = Field(ge=0)
     alert_attivo: bool = False
     alert_giorni_preavviso: int | None = Field(default=None, gt=0)
+    # 0 = alert il giorno stesso della pubblicazione; None = feature esclusa.
+    alert_ritardo_giorni: int | None = Field(default=None, ge=0)
     num_account_aziendali: int = Field(ge=1)
     ordering: int = 0
     is_active: bool = True
@@ -59,6 +64,8 @@ class PlanUpdate(BaseModel):
     ai_check: int | None = Field(default=None, ge=0)
     alert_attivo: bool | None = None
     alert_giorni_preavviso: int | None = Field(default=None, gt=0)
+    # None esplicito disattiva gli alert nuovi-bandi per il piano.
+    alert_ritardo_giorni: int | None = Field(default=None, ge=0)
     num_account_aziendali: int | None = Field(default=None, ge=1)
     ordering: int | None = None
     is_active: bool | None = None

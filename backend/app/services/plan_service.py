@@ -8,7 +8,7 @@ from app.schemas.plan import PlanCreate, PlanOut, PlanUpdate
 PLAN_SELECT = (
     "id,nome,slug,descrizione,prezzo_annuale,tipo_prezzo,etichetta_prezzo,"
     "ai_check,alert_attivo,"
-    "alert_giorni_preavviso,num_account_aziendali,ordering,is_active,updated_at"
+    "alert_giorni_preavviso,alert_ritardo_giorni,num_account_aziendali,ordering,is_active,updated_at"
 )
 
 _UNIQUE_VIOLATION = "23505"

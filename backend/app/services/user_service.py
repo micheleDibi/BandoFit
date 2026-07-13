@@ -35,7 +35,7 @@ SUBSCRIPTION_EMBED = (
     "user_subscriptions(id,status,data_inizio,data_scadenza,"
     "subscription_plans(id,nome,slug,descrizione,prezzo_annuale,tipo_prezzo,"
     "etichetta_prezzo,ai_check,"
-    "alert_attivo,alert_giorni_preavviso,num_account_aziendali,ordering,is_active,updated_at))"
+    "alert_attivo,alert_giorni_preavviso,alert_ritardo_giorni,num_account_aziendali,ordering,is_active,updated_at))"
 )
 
 
@@ -111,7 +111,7 @@ async def _fetch_active_subscription(primary, user_id: str) -> SubscriptionOut |
             "id,status,data_inizio,data_scadenza,"
             "subscription_plans(id,nome,slug,descrizione,prezzo_annuale,tipo_prezzo,"
             "etichetta_prezzo,ai_check,"
-            "alert_attivo,alert_giorni_preavviso,num_account_aziendali,ordering,"
+            "alert_attivo,alert_giorni_preavviso,alert_ritardo_giorni,num_account_aziendali,ordering,"
             "is_active,updated_at)"
         )
         .eq("user_id", user_id)
@@ -279,7 +279,7 @@ async def admin_list_users(
                 "user_id,id,status,data_inizio,data_scadenza,"
                 "subscription_plans(id,nome,slug,descrizione,prezzo_annuale,tipo_prezzo,"
                 "etichetta_prezzo,ai_check,"
-                "alert_attivo,alert_giorni_preavviso,num_account_aziendali,ordering,"
+                "alert_attivo,alert_giorni_preavviso,alert_ritardo_giorni,num_account_aziendali,ordering,"
                 "is_active,updated_at)"
             )
             .in_("user_id", active_parent_ids)

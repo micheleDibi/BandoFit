@@ -109,6 +109,27 @@ def ops_for(primary: FakePrimary, table: str, action: str) -> list:
     return [op for op in primary.ops if op[0] == table and op[1] == action]
 
 
+class TestFetchProgettista:
+    """Parità admin (0019): il codice si espone anche agli admin, se la riga
+    esiste (per loro arriva pigramente alla prima proposta)."""
+
+    async def test_admin_con_codice(self):
+        primary = FakePrimary(selects={"progettisti": [{"codice": "PRG-00007"}]})
+        out = await user_service._fetch_progettista(primary, str(TARGET_ID), "admin")
+        assert out == ProgettistaOut(codice="PRG-00007")
+
+    async def test_admin_senza_codice(self):
+        primary = FakePrimary(selects={"progettisti": []})
+        out = await user_service._fetch_progettista(primary, str(TARGET_ID), "admin")
+        assert out is None
+
+    async def test_cliente_senza_query(self):
+        primary = FakePrimary()
+        out = await user_service._fetch_progettista(primary, str(TARGET_ID), "cliente")
+        assert out is None
+        assert primary.ops == []
+
+
 class TestPromozioneProgettista:
     async def test_passa_dalla_rpc_e_non_tocca_profiles(self):
         primary = FakePrimary()

@@ -106,6 +106,7 @@ _RPC_ERRORS: dict[str, tuple[type[AppError], str]] = {
         "Tutti gli slot della serie si sovrappongono alle tue disponibilità: nessuno slot creato",
     ),
     "serie_not_found": (NotFoundError, "Serie non trovata"),
+    "user_not_found": (NotFoundError, "Utente non trovato"),
 }
 
 
@@ -336,11 +337,11 @@ async def _send_emails_best_effort(sends: list) -> None:
 
 
 async def _event_nuova_richiesta(primary, request: dict) -> None:
-    """Evento 1: a tutti i progettisti attivi."""
+    """Evento 1: a tutti i progettisti e admin attivi (parità admin, 0019)."""
     resp = (
         await primary.table("profiles")
         .select("id,email")
-        .eq("role", "progettista")
+        .in_("role", ["progettista", "admin"])
         .eq("is_active", True)
         .execute()
     )
@@ -1182,6 +1183,17 @@ async def create_proposal(
     request = await _fetch_request_for_progettista(primary, progettista, request_id)
     if request["stato"] != "nuova":
         raise ConflictError("La richiesta non è più aperta")
+
+    # Parità admin: alla prima proposta l'admin riceve pigramente il codice
+    # PRG (senza cambio ruolo, RPC 0019), così l'evento 2 («dal Progettista
+    # {codice}») e la UI del titolare lo mostrano da subito.
+    if progettista.get("role") == "admin":
+        try:
+            await primary.rpc(
+                "fn_ensure_progettista_codice", {"p_user_id": str(progettista["id"])}
+            ).execute()
+        except APIError as exc:
+            raise_from_rpc(exc)
 
     try:
         resp = (

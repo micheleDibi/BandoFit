@@ -82,7 +82,9 @@ AdminUser = Annotated[dict, Depends(require_admin)]
 
 
 async def require_progettista(user: CurrentUser) -> dict:
-    if user["role"] != "progettista":
+    # Parità admin ↔ progettista: gli amministratori hanno le stesse funzioni
+    # dell'area progettista (decisione di prodotto, migration 0019).
+    if user["role"] not in ("progettista", "admin"):
         raise ForbiddenError("Riservato ai progettisti")
     return user
 

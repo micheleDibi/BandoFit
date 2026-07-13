@@ -502,7 +502,8 @@ class TestCreateRequest:
         [audit] = [op for op in primary.ops if op[0] == "audit_log"]
         assert audit[2]["action"] == "consulenza.created"
 
-        # Evento 1: in-app a TUTTI i progettisti attivi, email in background.
+        # Evento 1: in-app a TUTTI i progettisti e admin attivi (parità 0019),
+        # email in background.
         [notifica] = notify_calls
         assert notifica["tipo"] == "consulenza.nuova_richiesta"
         assert len(notifica["user_ids"]) == 2
@@ -510,6 +511,9 @@ class TestCreateRequest:
         # Minimizzazione: nel corpo solo il bando, nessun dato del cliente.
         assert "Bando di prova" in notifica["corpo"]
         assert len(spawn_calls) == 1
+        [destinatari] = [op for op in primary.ops if op[0] == "profiles"]
+        assert ("in", "role", ["progettista", "admin"]) in destinatari[3]
+        assert ("eq", "is_active", True) in destinatari[3]
 
 
 # ---------------------------------------------------------------------------
@@ -777,6 +781,48 @@ class TestProposte:
         assert "PRG-00001" in notifica["corpo"]
         [audit] = [op for op in primary.ops if op[0] == "audit_log"]
         assert audit[2]["action"] == "consulenza.proposal_sent"
+        # Il progettista ha già il codice: nessuna RPC di ensure.
+        assert primary.rpc_calls == []
+
+    async def test_proposta_da_admin_garantisce_il_codice(
+        self, notify_calls, monkeypatch
+    ):
+        """Parità admin: la prima proposta assegna pigramente il codice PRG
+        (RPC 0019) prima dell'insert, così l'evento 2 lo mostra da subito."""
+
+        async def fake_detail(primary, progettista, request_id):
+            return SimpleNamespace(kind="dettaglio")
+
+        monkeypatch.setattr(consulting_service, "get_pool_request", fake_detail)
+        primary = FakePrimary(
+            selects={
+                "consultation_requests": [request_row()],
+                "progettisti": [{"user_id": PROGETTISTA, "codice": "PRG-00009"}],
+                "profiles": [{"id": TITOLARE, "email": "paola@acme.it"}],
+            }
+        )
+        primary.insert_id = PROPOSAL_ID
+        await consulting_service.create_proposal(
+            primary, {"id": PROGETTISTA, "role": "admin"}, REQUEST_ID, "Posso aiutarti"
+        )
+        [(fn, params)] = primary.rpc_calls
+        assert fn == "fn_ensure_progettista_codice"
+        assert params == {"p_user_id": PROGETTISTA}
+        [notifica] = notify_calls
+        assert "PRG-00009" in notifica["corpo"]
+
+    async def test_ensure_codice_in_errore_blocca_prima_dellinsert(self, notify_calls):
+        primary = FakePrimary(selects={"consultation_requests": [request_row()]})
+        primary.rpc_errors["fn_ensure_progettista_codice"] = api_error(
+            details="user_not_found"
+        )
+        with pytest.raises(NotFoundError):
+            await consulting_service.create_proposal(
+                primary, {"id": PROGETTISTA, "role": "admin"}, REQUEST_ID, "Ciao"
+            )
+        inserts = [op for op in primary.ops if op[0] == "consultation_proposals"]
+        assert inserts == []
+        assert notify_calls == []
 
     async def test_doppia_proposta(self):
         primary = FakePrimary(selects={"consultation_requests": [request_row()]})

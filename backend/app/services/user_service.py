@@ -125,9 +125,11 @@ async def _fetch_active_subscription(primary, user_id: str) -> SubscriptionOut |
 
 
 async def _fetch_progettista(primary, user_id: str, role: str) -> ProgettistaOut | None:
-    """Codice progettista per la risposta /me e admin. Solo per il ruolo attivo:
-    dopo una demozione la riga resta a DB (codice riservato) ma non si espone."""
-    if role != "progettista":
+    """Codice progettista per la risposta /me e admin. Per i ruoli con l'area
+    progettista (parità admin, 0019): per un admin la riga può non esistere
+    ancora (il codice arriva alla prima proposta) → None. Dopo una demozione
+    a cliente la riga resta a DB (codice riservato) ma non si espone."""
+    if role not in ("progettista", "admin"):
         return None
     resp = (
         await primary.table("progettisti")
@@ -297,8 +299,8 @@ async def admin_list_users(
         )
         parent_emails = {r["id"]: r["email"] for r in emails_resp.data}
 
-    # Codici dei progettisti in pagina, in una query batch.
-    progettista_ids = [row["id"] for row in rows if row["role"] == "progettista"]
+    # Codici dei progettisti (e degli admin, parità 0019) in pagina, batch.
+    progettista_ids = [row["id"] for row in rows if row["role"] in ("progettista", "admin")]
     codici: dict[str, str] = {}
     if progettista_ids:
         prog_resp = (

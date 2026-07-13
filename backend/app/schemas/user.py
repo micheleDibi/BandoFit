@@ -42,7 +42,8 @@ class MeOut(BaseModel):
     profile: ProfileOut
     subscription: SubscriptionOut | None = None
     family: MeFamilyOut | None = None
-    # Valorizzato solo per gli utenti con ruolo progettista.
+    # Valorizzato per i progettisti e per gli admin che hanno già un codice
+    # (assegnato alla prima proposta inviata — parità admin, 0019).
     progettista: ProgettistaOut | None = None
     # Presente solo nella risposta di un cambio piano che ha causato retrocessioni.
     plan_switch_adjustment: PlanSwitchAdjustment | None = None

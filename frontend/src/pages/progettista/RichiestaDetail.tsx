@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { ConsulenzaStatoBadge } from "../Consulenze";
 import { AiReportBody } from "../../components/bandi/AiReportBody";
 import { DossierView } from "../../components/company/dossier/DossierView";
+import { VideocallButton } from "../../components/consulenze/VideocallButton";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
@@ -181,16 +182,23 @@ export default function RichiestaDetail() {
           Vai al bando →
         </Link>
         {richiesta.appuntamento && (
-          <p className="mt-3 inline-flex items-center gap-2 rounded-xl bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800">
-            <CalendarClock className="size-4 shrink-0 text-brand-500" aria-hidden />
-            <span>
-              <span className="capitalize">
-                {formatSlotGiorno(richiesta.appuntamento.inizio)}
+          <div className="mt-3 rounded-xl bg-slate-50 px-4 py-3">
+            <p className="inline-flex items-center gap-2 text-sm font-medium text-slate-800">
+              <CalendarClock className="size-4 shrink-0 text-brand-500" aria-hidden />
+              <span>
+                <span className="capitalize">
+                  {formatSlotGiorno(richiesta.appuntamento.inizio)}
+                </span>
+                , {formatSlotOra(richiesta.appuntamento.inizio)} –{" "}
+                {formatSlotOra(richiesta.appuntamento.fine)}
               </span>
-              , {formatSlotOra(richiesta.appuntamento.inizio)} –{" "}
-              {formatSlotOra(richiesta.appuntamento.fine)}
-            </span>
-          </p>
+            </p>
+            {richiesta.appuntamento.videocall_url && (
+              <div className="mt-3">
+                <VideocallButton url={richiesta.appuntamento.videocall_url} />
+              </div>
+            )}
+          </div>
         )}
       </Card>
 

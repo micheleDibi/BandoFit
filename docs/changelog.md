@@ -2,6 +2,13 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-13 — Videochiamata Jitsi per gli appuntamenti (migration 0020)
+
+- **Ogni prenotazione genera la sua videochiamata**: stanza Jitsi dedicata sull'istanza self-hosted (`JITSI_BASE_URL`, default `https://bandofitvtc.edunews24.it`). A DB vive solo il **token** (`videocall_token uuid`, default `gen_random_uuid()`, unique — migration **0020**): nasce una sola volta all'INSERT e non viene mai rigenerato (idempotenza per costruzione); l'URL (`{base}/bandofit-{token}`) lo deriva il backend. L'istanza è **aperta**: la sicurezza sta nel nome-stanza non indovinabile, quindi il link è trattato come una credenziale e **non entra mai nelle notifiche in-app conservate** (viaggia solo nelle email, effimere).
+- **Dove**: pulsante «Avvia videochiamata» (nuova scheda, `noopener noreferrer`) + «Copia link» nel dettaglio consulenza del cliente, nel dialog appuntamento del calendario progettista e nel dettaglio richiesta — sempre attivo, per entrambe le parti. Nelle **email**: l'evento 3 al progettista include il link, e il cliente riceve una **nuova email di conferma** con orario e link.
+- **Ciclo di vita**: l'annullo nasconde il link (le letture mostrano solo prenotazioni confermate); una ri-prenotazione è una riga nuova → **link nuovo**.
+- ⚠️ Migration **0020** da eseguire dallo SQL Editor (additiva; prerequisito solo la 0017). Le prenotazioni esistenti ricevono retroattivamente un token ciascuna (rewrite col default volatile, un token distinto per riga).
+
 ## 2026-07-13 — Il cliente vede il progettista per nome e cognome
 
 - Nelle viste del cliente (lista e dettaglio consulenza, dialog di accettazione, email di proposta) il progettista compare per **nome e cognome** invece che come «Progettista PRG-xxxxx» — più umano. Il codice resta nel payload API e nelle viste interne/admin (AdminUtenti), ma la UI del cliente non lo mostra più.

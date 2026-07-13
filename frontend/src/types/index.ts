@@ -247,6 +247,8 @@ export interface Appuntamento {
   inizio: string;
   fine: string;
   stato: "confermata" | "annullata";
+  /** Stanza Jitsi dedicata all'appuntamento (URL completo, derivato a server). */
+  videocall_url: string | null;
 }
 
 /** Richiesta di consulto vista dal cliente. */
@@ -313,6 +315,8 @@ export interface AppuntamentoProgettista {
   bando_titolo: string;
   ragione_sociale: string | null;
   email: string | null;
+  /** Stanza Jitsi dedicata all'appuntamento (URL completo, derivato a server). */
+  videocall_url: string | null;
 }
 
 export interface Notifica {

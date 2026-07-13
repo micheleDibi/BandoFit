@@ -2,6 +2,7 @@ import { CalendarClock } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAnnullaAppuntamento } from "../../hooks/useProgettistaRichieste";
+import { VideocallButton } from "../consulenze/VideocallButton";
 import { apiErrorMessage } from "../../lib/api";
 import { formatSlotGiorno, formatSlotOra } from "../../lib/format";
 import type { AppuntamentoProgettista } from "../../types";
@@ -84,6 +85,9 @@ export function AppuntamentoDialog({
               <p className="mt-0.5 text-xs text-slate-500">{appuntamento.email}</p>
             )}
           </div>
+          {appuntamento.videocall_url && (
+            <VideocallButton url={appuntamento.videocall_url} />
+          )}
           <Link
             to={`/app/progettista/richieste/${appuntamento.request_id}`}
             onClick={onClose}

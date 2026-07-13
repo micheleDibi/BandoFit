@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ConsulenzaStatoBadge } from "./Consulenze";
 import { SlotPicker } from "../components/consulenze/SlotPicker";
+import { VideocallButton } from "../components/consulenze/VideocallButton";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -138,34 +139,43 @@ export default function ConsulenzaDetail() {
             </span>
           </p>
           {consulenza.appuntamento ? (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3">
-              <p className="inline-flex items-center gap-2 text-sm font-medium text-slate-800">
-                <CalendarClock className="size-4 shrink-0 text-brand-500" aria-hidden />
-                <span>
-                  <span className="capitalize">
-                    {formatSlotGiorno(consulenza.appuntamento.inizio)}
+            <div className="mt-3 rounded-xl bg-slate-50 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="inline-flex items-center gap-2 text-sm font-medium text-slate-800">
+                  <CalendarClock className="size-4 shrink-0 text-brand-500" aria-hidden />
+                  <span>
+                    <span className="capitalize">
+                      {formatSlotGiorno(consulenza.appuntamento.inizio)}
+                    </span>
+                    , {formatSlotOra(consulenza.appuntamento.inizio)} –{" "}
+                    {formatSlotOra(consulenza.appuntamento.fine)}
                   </span>
-                  , {formatSlotOra(consulenza.appuntamento.inizio)} –{" "}
-                  {formatSlotOra(consulenza.appuntamento.fine)}
-                </span>
-              </p>
-              {editable && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                  loading={annullaPrenotazione.isPending}
-                  onClick={async () => {
-                    setActionError(null);
-                    try {
-                      await annullaPrenotazione.mutateAsync();
-                    } catch (err) {
-                      setActionError(apiErrorMessage(err));
-                    }
-                  }}
-                >
-                  Annulla appuntamento
-                </Button>
+                </p>
+                {editable && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                    loading={annullaPrenotazione.isPending}
+                    onClick={async () => {
+                      setActionError(null);
+                      try {
+                        await annullaPrenotazione.mutateAsync();
+                      } catch (err) {
+                        setActionError(apiErrorMessage(err));
+                      }
+                    }}
+                  >
+                    Annulla appuntamento
+                  </Button>
+                )}
+              </div>
+              {/* Non gated su editable: aprire/copiare il link non è una
+                  mutazione, gli account collegati partecipano alla call. */}
+              {consulenza.appuntamento.videocall_url && (
+                <div className="mt-3">
+                  <VideocallButton url={consulenza.appuntamento.videocall_url} />
+                </div>
               )}
             </div>
           ) : (

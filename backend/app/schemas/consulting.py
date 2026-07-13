@@ -29,6 +29,34 @@ class SlotOut(BaseModel):
     fine: datetime
     # Derivato: esiste una prenotazione confermata (nessuna colonna di stato a DB).
     prenotato: bool = False
+    # Serie di ricorrenza (0018): null = slot singolo.
+    serie_id: UUID | None = None
+
+
+# Tetto per una serie di ricorrenza: giornaliera per 12 mesi = 367 occorrenze.
+# Allineato al limite dentro fn_create_slot_serie (0018).
+MAX_OCCORRENZE_SERIE = 370
+
+
+class SerieIn(BaseModel):
+    """Occorrenze già materializzate dal browser (l'unico a conoscere il fuso
+    dell'utente: l'orario a muro resta stabile attraverso i cambi di ora
+    legale); il backend valida ciascuna come uno slot singolo."""
+
+    occorrenze: list[SlotIn] = Field(min_length=1, max_length=MAX_OCCORRENZE_SERIE)
+
+
+class SerieCreateOut(BaseModel):
+    serie_id: UUID
+    creati: list[SlotOut]
+    # Occorrenze scartate perché sovrapposte a slot esistenti (o tra loro).
+    saltati: int
+
+
+class SerieDeleteOut(BaseModel):
+    eliminati: int
+    # Slot prenotati: l'eliminazione della serie non li tocca mai.
+    mantenuti: int
 
 
 # ---------------------------------------------------------------------------

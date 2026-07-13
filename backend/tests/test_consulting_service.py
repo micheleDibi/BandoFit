@@ -7,9 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 from postgrest.exceptions import APIError
+from pydantic import ValidationError
 
 from app.core.errors import BadRequestError, ConflictError, ForbiddenError, NotFoundError
-from app.schemas.consulting import SlotIn
+from app.schemas.consulting import MAX_OCCORRENZE_SERIE, SerieIn, SlotIn
 from app.schemas.openapi_data import DossierResponse
 from app.services import consulting_service
 
@@ -23,6 +24,7 @@ PROPOSAL_ID = "99999999-0000-0000-0000-000000000026"
 AI_CHECK_ID = "88888888-0000-0000-0000-000000000027"
 COMPANY_ID = "77777777-0000-0000-0000-000000000028"
 BOOKING_ID = "66666666-0000-0000-0000-000000000029"
+SERIE_ID = "55555555-0000-0000-0000-000000000030"
 
 USER = {"id": TITOLARE, "role": "cliente"}
 PROG_USER = {"id": PROGETTISTA, "role": "progettista"}
@@ -330,6 +332,96 @@ class TestSlotCrud:
         primary.rpc_errors["fn_delete_slot"] = api_error(details="slot_booked")
         with pytest.raises(ConflictError):
             await consulting_service.delete_slot(primary, PROGETTISTA, SLOT_ID)
+
+    async def test_serie_id_propagato_in_lista(self):
+        primary = FakePrimary(
+            selects={
+                "availability_slots": [
+                    {
+                        "id": LIBERO_ID,
+                        "inizio": tra(60).isoformat(),
+                        "fine": tra(90).isoformat(),
+                        "serie_id": SERIE_ID,
+                    },
+                ],
+            }
+        )
+        [slot] = await consulting_service.list_slots(primary, PROGETTISTA)
+        assert str(slot.serie_id) == SERIE_ID
+
+
+class TestSerieSlot:
+    def _rpc_result(self) -> dict:
+        return {
+            "serie_id": SERIE_ID,
+            "creati": [
+                {
+                    "id": LIBERO_ID,
+                    "inizio": tra(60).isoformat(),
+                    "fine": tra(90).isoformat(),
+                    "serie_id": SERIE_ID,
+                },
+                {
+                    "id": OCCUPATO_ID,
+                    "inizio": tra(24 * 60 + 60).isoformat(),
+                    "fine": tra(24 * 60 + 90).isoformat(),
+                    "serie_id": SERIE_ID,
+                },
+            ],
+            "saltati": 1,
+        }
+
+    async def test_crea_serie_passa_dalla_rpc(self):
+        primary = FakePrimary()
+        primary.rpc_results["fn_create_slot_serie"] = self._rpc_result()
+        data = SerieIn(occorrenze=[slot_in(60), slot_in(24 * 60), slot_in(48 * 60)])
+        out = await consulting_service.create_slot_serie(primary, PROGETTISTA, data)
+        [(fn, params)] = primary.rpc_calls
+        assert fn == "fn_create_slot_serie"
+        assert params["p_progettista_id"] == PROGETTISTA
+        assert len(params["p_occorrenze"]) == 3
+        assert set(params["p_occorrenze"][0]) == {"inizio", "fine"}
+        assert out.saltati == 1
+        assert str(out.serie_id) == SERIE_ID
+        assert [str(s.serie_id) for s in out.creati] == [SERIE_ID, SERIE_ID]
+        assert all(s.prenotato is False for s in out.creati)
+
+    async def test_occorrenza_nel_passato_niente_rpc(self):
+        """La validazione è PRIMA della RPC: 400 senza alcuna scrittura."""
+        primary = FakePrimary()
+        data = SerieIn(occorrenze=[slot_in(60), slot_in(start_min=-120)])
+        with pytest.raises(BadRequestError):
+            await consulting_service.create_slot_serie(primary, PROGETTISTA, data)
+        assert primary.rpc_calls == []
+
+    async def test_serie_tutta_sovrapposta_mappata(self):
+        primary = FakePrimary()
+        primary.rpc_errors["fn_create_slot_serie"] = api_error(
+            details="serie_tutta_sovrapposta"
+        )
+        with pytest.raises(ConflictError):
+            await consulting_service.create_slot_serie(
+                primary, PROGETTISTA, SerieIn(occorrenze=[slot_in()])
+            )
+
+    def test_serie_oltre_il_tetto_rifiutata_dallo_schema(self):
+        with pytest.raises(ValidationError):
+            SerieIn(occorrenze=[slot_in()] * (MAX_OCCORRENZE_SERIE + 1))
+
+    async def test_delete_serie_passa_dalla_rpc(self):
+        primary = FakePrimary()
+        primary.rpc_results["fn_delete_slot_serie"] = {"eliminati": 2, "mantenuti": 1}
+        out = await consulting_service.delete_slot_serie(primary, PROGETTISTA, SERIE_ID)
+        [(fn, params)] = primary.rpc_calls
+        assert fn == "fn_delete_slot_serie"
+        assert params == {"p_serie_id": SERIE_ID, "p_progettista_id": PROGETTISTA}
+        assert (out.eliminati, out.mantenuti) == (2, 1)
+
+    async def test_delete_serie_not_found(self):
+        primary = FakePrimary()
+        primary.rpc_errors["fn_delete_slot_serie"] = api_error(details="serie_not_found")
+        with pytest.raises(NotFoundError):
+            await consulting_service.delete_slot_serie(primary, PROGETTISTA, SERIE_ID)
 
 
 # ---------------------------------------------------------------------------

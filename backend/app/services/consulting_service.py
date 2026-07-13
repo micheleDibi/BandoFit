@@ -40,6 +40,9 @@ from app.schemas.consulting import (
     RichiestaPoolDetailOut,
     RichiestaPoolOut,
     RichiestePoolResponse,
+    SerieCreateOut,
+    SerieDeleteOut,
+    SerieIn,
     SlotIn,
     SlotOut,
 )
@@ -58,7 +61,7 @@ logger = logging.getLogger("bandofit.consulting")
 MIN_SLOT = timedelta(minutes=15)
 MAX_SLOT = timedelta(hours=12)
 
-SLOT_SELECT = "id,inizio,fine"
+SLOT_SELECT = "id,inizio,fine,serie_id"
 REQUEST_SELECT = (
     "id,cliente_id,family_parent_id,company_profile_id,ai_check_id,esito,punteggio,"
     "bando_id,bando_slug,bando_titolo,stato,assigned_progettista_id,assigned_at,"
@@ -93,6 +96,16 @@ _RPC_ERRORS: dict[str, tuple[type[AppError], str]] = {
     "booking_already_exists": (ConflictError, "Questa consulenza ha già un appuntamento"),
     "slot_booked": (ConflictError, "Lo slot è prenotato: non può essere modificato o eliminato"),
     "slot_overlap": (ConflictError, "Lo slot si sovrappone a un'altra tua disponibilità"),
+    "serie_vuota": (BadRequestError, "La serie non contiene occorrenze"),
+    "serie_troppo_lunga": (
+        BadRequestError,
+        "La serie contiene troppi slot: avvicina la data di fine",
+    ),
+    "serie_tutta_sovrapposta": (
+        ConflictError,
+        "Tutti gli slot della serie si sovrappongono alle tue disponibilità: nessuno slot creato",
+    ),
+    "serie_not_found": (NotFoundError, "Serie non trovata"),
 }
 
 
@@ -215,7 +228,13 @@ async def create_slot(primary, progettista_id: str, data: SlotIn) -> SlotOut:
             ) from exc
         raise
     row = resp.data[0]
-    return SlotOut(id=row["id"], inizio=row["inizio"], fine=row["fine"], prenotato=False)
+    return SlotOut(
+        id=row["id"],
+        inizio=row["inizio"],
+        fine=row["fine"],
+        prenotato=False,
+        serie_id=row.get("serie_id"),
+    )
 
 
 async def update_slot(primary, progettista_id: str, slot_id: str, data: SlotIn) -> SlotOut:
@@ -234,7 +253,19 @@ async def update_slot(primary, progettista_id: str, slot_id: str, data: SlotIn) 
         ).execute()
     except APIError as exc:
         raise_from_rpc(exc)
-    return SlotOut(id=slot_id, inizio=data.inizio, fine=data.fine, prenotato=False)
+    # Il PATCH non stacca lo slot dalla sua serie: si rilegge il serie_id per
+    # non mentire nella risposta (la RPC 0017 ritorna void).
+    sel = (
+        await primary.table("availability_slots")
+        .select("serie_id")
+        .eq("id", str(slot_id))
+        .limit(1)
+        .execute()
+    )
+    serie_id = sel.data[0]["serie_id"] if sel.data else None
+    return SlotOut(
+        id=slot_id, inizio=data.inizio, fine=data.fine, prenotato=False, serie_id=serie_id
+    )
 
 
 async def delete_slot(primary, progettista_id: str, slot_id: str) -> None:
@@ -245,6 +276,45 @@ async def delete_slot(primary, progettista_id: str, slot_id: str) -> None:
         ).execute()
     except APIError as exc:
         raise_from_rpc(exc)
+
+
+async def create_slot_serie(primary, progettista_id: str, data: SerieIn) -> SerieCreateOut:
+    """Serie di ricorrenza: le occorrenze arrivano già materializzate dal
+    browser. Ognuna viene validata come uno slot singolo PRIMA della RPC
+    (400 senza scritture); quelle sovrapposte le salta la RPC, riga per riga."""
+    for occorrenza in data.occorrenze:
+        _validate_slot_times(occorrenza)
+    try:
+        resp = await primary.rpc(
+            "fn_create_slot_serie",
+            {
+                "p_progettista_id": progettista_id,
+                "p_occorrenze": [
+                    {"inizio": occ.inizio.isoformat(), "fine": occ.fine.isoformat()}
+                    for occ in data.occorrenze
+                ],
+            },
+        ).execute()
+    except APIError as exc:
+        raise_from_rpc(exc)
+    result = resp.data
+    return SerieCreateOut(
+        serie_id=result["serie_id"],
+        creati=[SlotOut(**row, prenotato=False) for row in result["creati"]],
+        saltati=result["saltati"],
+    )
+
+
+async def delete_slot_serie(primary, progettista_id: str, serie_id: str) -> SerieDeleteOut:
+    """Elimina gli slot LIBERI della serie; i prenotati non si toccano mai."""
+    try:
+        resp = await primary.rpc(
+            "fn_delete_slot_serie",
+            {"p_serie_id": str(serie_id), "p_progettista_id": progettista_id},
+        ).execute()
+    except APIError as exc:
+        raise_from_rpc(exc)
+    return SerieDeleteOut(**resp.data)
 
 
 # ---------------------------------------------------------------------------

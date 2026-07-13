@@ -9,6 +9,9 @@ from app.schemas.consulting import (
     ProposalIn,
     RichiestaPoolDetailOut,
     RichiestePoolResponse,
+    SerieCreateOut,
+    SerieDeleteOut,
+    SerieIn,
     SlotIn,
     SlotOut,
 )
@@ -92,3 +95,18 @@ async def update_slot(
 @router.delete("/slots/{slot_id}", status_code=204)
 async def delete_slot(slot_id: UUID, user: ProgettistaUser, primary: PrimaryClient) -> None:
     await consulting_service.delete_slot(primary, user["id"], str(slot_id))
+
+
+@router.post("/slots/serie", response_model=SerieCreateOut, status_code=201)
+async def create_slot_serie(
+    data: SerieIn, user: ProgettistaUser, primary: PrimaryClient
+) -> SerieCreateOut:
+    return await consulting_service.create_slot_serie(primary, user["id"], data)
+
+
+@router.delete("/slots/serie/{serie_id}", response_model=SerieDeleteOut)
+async def delete_slot_serie(
+    serie_id: UUID, user: ProgettistaUser, primary: PrimaryClient
+) -> SerieDeleteOut:
+    # 200 con body (non 204): il conteggio eliminati/mantenuti serve alla UI.
+    return await consulting_service.delete_slot_serie(primary, user["id"], str(serie_id))

@@ -1,10 +1,13 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { AddItemChooser } from "../components/calendar/AddItemChooser";
+import { AppuntamentoDialog } from "../components/calendar/AppuntamentoDialog";
 import { DayEventsDialog } from "../components/calendar/DayEventsDialog";
 import { EventDialog, type DialogState } from "../components/calendar/EventDialog";
 import { itemDay, itemSortKey, type CalendarItem } from "../components/calendar/items";
 import { MonthGrid } from "../components/calendar/MonthGrid";
+import { SlotDialog, type SlotDialogState } from "../components/calendar/SlotDialog";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { ErrorState, Skeleton } from "../components/ui/states";
@@ -14,6 +17,7 @@ import { useAppuntamenti } from "../hooks/useProgettistaRichieste";
 import { useSlots } from "../hooks/useSlots";
 import { apiErrorMessage } from "../lib/api";
 import { formatMonthYear, todayItalyIso } from "../lib/format";
+import type { AppuntamentoProgettista } from "../types";
 
 /** "YYYY-MM" valido → {anno, mese}; altrimenti il mese di oggi (Roma). */
 function parseMonthParam(raw: string | null): { anno: number; mese: number } {
@@ -47,6 +51,10 @@ export default function Calendario() {
   const { data: appuntamenti } = useAppuntamenti(isProgettista);
 
   const [dialog, setDialog] = useState<DialogState>(null);
+  const [slotDialog, setSlotDialog] = useState<SlotDialogState>(null);
+  const [appuntamentoFor, setAppuntamentoFor] = useState<AppuntamentoProgettista | null>(null);
+  // Giorno per cui scegliere COSA aggiungere (solo progettisti: evento o slot).
+  const [chooserFor, setChooserFor] = useState<string | null>(null);
   // Giorno di cui mostrare l'ELENCO degli item (celle affollate / tap su mobile).
   const [dayListFor, setDayListFor] = useState<string | null>(null);
 
@@ -97,6 +105,12 @@ export default function Calendario() {
   // Click su un giorno: apre subito il form di creazione (data precompilata).
   // Su mobile i chip non ci sono: se il giorno ha eventi si apre l'elenco
   // (da cui si può comunque aggiungere). Un giorno di un altro mese naviga lì.
+  // Creazione da un giorno: i progettisti scelgono prima COSA aggiungere.
+  const startCreate = (iso: string) => {
+    if (isProgettista) setChooserFor(iso);
+    else setDialog({ mode: "create", date: iso });
+  };
+
   const handleDayClick = (iso: string) => {
     if (!iso.startsWith(monthKey)) {
       goToMonth(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)));
@@ -106,14 +120,22 @@ export default function Calendario() {
     if (hasItems && !isDesktop) {
       setDayListFor(iso);
     } else {
-      setDialog({ mode: "create", date: iso });
+      startCreate(iso);
     }
   };
 
   const handleOpenItem = (item: CalendarItem) => {
     setDayListFor(null);
-    if (item.kind === "evento") {
-      setDialog({ mode: "edit", event: item.event });
+    switch (item.kind) {
+      case "evento":
+        setDialog({ mode: "edit", event: item.event });
+        break;
+      case "slot":
+        setSlotDialog({ mode: "edit", slot: item.slot });
+        break;
+      case "appuntamento":
+        setAppuntamentoFor(item.appuntamento);
+        break;
     }
   };
 
@@ -125,7 +147,9 @@ export default function Calendario() {
             Calendario
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Clicca su un giorno per aggiungere un evento, su un evento per modificarlo.
+            {isProgettista
+              ? "Clicca su un giorno per aggiungere un evento o una disponibilità, su una voce per gestirla."
+              : "Clicca su un giorno per aggiungere un evento, su un evento per modificarlo."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
@@ -206,15 +230,34 @@ export default function Calendario() {
         date={dayListFor}
         items={dayListFor ? (itemsByDay.get(dayListFor) ?? []) : []}
         onClose={() => setDayListFor(null)}
+        createLabel={isProgettista ? "Aggiungi" : undefined}
         onCreate={() => {
           const date = dayListFor;
           setDayListFor(null);
-          if (date) setDialog({ mode: "create", date });
+          if (date) startCreate(date);
         }}
         onOpenItem={handleOpenItem}
       />
 
+      <AddItemChooser
+        date={chooserFor}
+        onClose={() => setChooserFor(null)}
+        onEvento={(date) => {
+          setChooserFor(null);
+          setDialog({ mode: "create", date });
+        }}
+        onSlot={(date) => {
+          setChooserFor(null);
+          setSlotDialog({ mode: "create", date });
+        }}
+      />
+
       <EventDialog state={dialog} onClose={() => setDialog(null)} />
+      <SlotDialog state={slotDialog} onClose={() => setSlotDialog(null)} />
+      <AppuntamentoDialog
+        appuntamento={appuntamentoFor}
+        onClose={() => setAppuntamentoFor(null)}
+      />
     </div>
   );
 }

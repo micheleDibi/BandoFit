@@ -14,7 +14,6 @@ import Calendario from "./pages/Calendario";
 import ConfermaEmail from "./pages/ConfermaEmail";
 import Consulenze from "./pages/Consulenze";
 import ConsulenzaDetail from "./pages/ConsulenzaDetail";
-import Disponibilita from "./pages/progettista/Disponibilita";
 import Landing from "./pages/Landing";
 import Richieste from "./pages/progettista/Richieste";
 import RichiestaDetail from "./pages/progettista/RichiestaDetail";
@@ -73,13 +72,11 @@ export default function App() {
             </ProgettistaRoute>
           }
         />
+        {/* La gestione delle disponibilità vive nel calendario: redirect di
+            cortesia per bookmark e vecchie notifiche. */}
         <Route
           path="progettista/disponibilita"
-          element={
-            <ProgettistaRoute>
-              <Disponibilita />
-            </ProgettistaRoute>
-          }
+          element={<Navigate to="/app/calendario" replace />}
         />
         <Route
           path="admin/utenti"

@@ -26,10 +26,10 @@ const impostazioniLinks: NavItem[] = [
   { to: "/app/abbonamento", label: "Abbonamento" },
 ];
 
-// Raggruppate sotto «Progettista» (solo per il ruolo progettista).
+// Raggruppate sotto «Progettista» (solo per il ruolo progettista). Le
+// disponibilità si gestiscono dal Calendario, non da una pagina dedicata.
 const progettistaLinks: NavItem[] = [
   { to: "/app/progettista/richieste", label: "Richieste" },
-  { to: "/app/progettista/disponibilita", label: "Disponibilità" },
 ];
 
 // Raggruppate sotto «Admin» (solo per gli amministratori).

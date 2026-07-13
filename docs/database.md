@@ -17,7 +17,8 @@ Contiene i dati della piattaforma. Schema in `supabase/migrations/` (eseguire in
 | `etichetta_prezzo` | text | mostrata al posto del prezzo SOLO con `su_richiesta`; NULL/vuota ⇒ la UI mostra «Su richiesta» (nessun check cross-campo) |
 | `ai_check` | integer | numero di AI-check inclusi/anno |
 | `alert_attivo` | boolean | se true, `alert_giorni_preavviso` è obbligatorio (check `plans_alert_coherence`) |
-| `alert_giorni_preavviso` | integer | > 0 o NULL |
+| `alert_giorni_preavviso` | integer | > 0 o NULL (preavviso scadenze — funzione futura) |
+| `alert_ritardo_giorni` | integer | ≥ 0 o NULL (migration 0021): ritardo dell'alert nuovi-bandi dalla pubblicazione; NULL = feature esclusa dal piano |
 | `num_account_aziendali` | integer | ≥ 1 |
 | `ordering`, `is_active` | int, bool | ordinamento in UI; i piani non si eliminano, si disattivano |
 
@@ -118,6 +119,18 @@ Decisione di prodotto: gli **admin hanno le stesse funzioni dei progettisti** (p
 
 Ogni appuntamento nasce con la sua stanza Jitsi: colonna `videocall_token uuid not null default gen_random_uuid()` **unique** su `consultation_bookings`. L'istanza Jitsi self-hosted è **aperta** (niente JWT): la sicurezza sta nel nome-stanza non indovinabile, quindi il token è un **segreto** — generato una sola volta all'INSERT (gli update non lo toccano mai: idempotenza per costruzione), mai esposto nelle notifiche conservate. A DB vive solo il token; l'**URL** (`{JITSI_BASE_URL}/bandofit-{token}`) lo deriva il backend, così un cambio di istanza non richiede backfill. Ri-prenotazione = riga nuova = token nuovo; l'annullo lo nasconde da solo (le letture filtrano `stato='confermata'`). Retroattività: l'`ADD COLUMN` con default **volatile** riscrive la tabella valutando il default per riga → anche le prenotazioni pre-esistenti hanno ricevuto un token proprio e distinto.
 
+### Alert nuovi bandi (migration 0021)
+
+**Nessuna pre-schedulazione**: il job giornaliero (scheduler in-process, claim per insert su `bando_alert_runs` — PK `giorno`, un 23505 = già eseguita) ricalcola l'idoneità a OGNI run dallo stato corrente; gli edge case su cambio piano, ritiro del bando e opt-out tardivo si risolvono da soli. Oggetti:
+- `subscription_plans.alert_ritardo_giorni` — giorni di ritardo dalla pubblicazione (0 = stesso giorno; NULL = feature esclusa dal piano). Semantica DIVERSA da `alert_giorni_preavviso` (promemoria scadenze, funzione futura, intatto).
+- **`bando_alert_settings`** — opt-in/out per utente (riga pigra: assenza = abilitati) + `unsubscribe_token` unico: il link RFC 8058 nelle email e il toggle in Preferenze scrivono la STESSA riga.
+- **`bando_alert_sends`** — ledger idempotenza, `unique (user_id, bando_id)` come arbiter del claim-by-insert. Stati: `in_invio → inviata | fallita` (ritentabile fino a 3 tentativi) ; `incerta` = run interrotta tra invio e conferma, MAI ritentata (at-most-once). Nessun contenuto personale (minimizzazione).
+- **`bando_alert_runs`** — una riga per esecuzione con i contatori (candidati/destinatari/inviate/fallite): l'osservabilità del job.
+- **`email_suppressions`** — indirizzi da non contattare mai (hard bounce/reclami/manuale), unicità case-insensitive su `lower(email)`.
+- RPC **`fn_email_verificate(uuid[])`** SECURITY DEFINER — ponte su `auth.users.email_confirmed_at` (PostgREST non espone lo schema auth); EXECUTE revocato ai client.
+
+Base giuridica (GDPR): esecuzione del contratto — gli avvisi sono una feature del piano — con opt-out immediato (toggle in-app + one-click nelle email, stessa fonte di verità); il riferimento temporale è `coalesce(data_pubblicazione, created_at)` in Europe/Rome e il gate `ALERT_DATA_ATTIVAZIONE` impedisce il backfill al primo avvio.
+
 ### Funzioni e trigger
 
 - `handle_new_user()` — trigger `AFTER INSERT ON auth.users`: crea profilo + abbonamento iniziale (fallback `gratuito`); per gli utenti invitati in famiglia (metadata `family_invite='true'`) crea **solo il profilo**, senza abbonamento. **Difensiva: non solleva mai eccezioni.**
@@ -130,7 +143,7 @@ Ogni appuntamento nasce con la sua stanza Jitsi: colonna `videocall_token uuid n
 ### Sicurezza
 
 - **RLS deny-all**: RLS abilitata su tutte le tabelle (incluse `family_members`, `company_profiles`, `audit_log`) senza alcuna policy → `anon` e `authenticated` non leggono/scrivono nulla; il backend usa `service_role` che bypassa la RLS. In più, `REVOKE ALL` esplicito sui ruoli client.
-- **RPC bloccate**: Supabase concede di default `EXECUTE` ad `anon`/`authenticated` su ogni funzione di `public`, e PostgREST le espone come `POST /rest/v1/rpc/<nome>`. Le migration revocano esplicitamente `EXECUTE` su `fn_switch_plan`, `promote_to_admin`, `fn_promote_progettista`, `fn_ensure_progettista_codice` e sulle RPC delle consulenze (`fn_accept_proposal`, `fn_book_slot`, `fn_update_slot`, `fn_delete_slot`, `fn_create_slot_serie`, `fn_delete_slot_serie`) dai ruoli client: senza queste revoche chiunque potrebbe auto-promuoversi o assegnarsi consulenze.
+- **RPC bloccate**: Supabase concede di default `EXECUTE` ad `anon`/`authenticated` su ogni funzione di `public`, e PostgREST le espone come `POST /rest/v1/rpc/<nome>`. Le migration revocano esplicitamente `EXECUTE` su `fn_switch_plan`, `promote_to_admin`, `fn_promote_progettista`, `fn_ensure_progettista_codice`, `fn_email_verificate` e sulle RPC delle consulenze (`fn_accept_proposal`, `fn_book_slot`, `fn_update_slot`, `fn_delete_slot`, `fn_create_slot_serie`, `fn_delete_slot_serie`) dai ruoli client: senza queste revoche chiunque potrebbe auto-promuoversi o assegnarsi consulenze.
 - **Audit degli accessi full**: ogni lettura dei dati completi di un'azienda da parte del progettista assegnato scrive `consulenza.dossier_accessed` in `audit_log` (oltre alle transizioni: `consulenza.created` / `proposal_sent` / `assigned` / `booked` / `cancelled` / `booking_cancelled`).
 
 ## DB secondario (Supabase, SOLA LETTURA)

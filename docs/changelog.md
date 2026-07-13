@@ -2,6 +2,13 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-13 — Alert email sui nuovi bandi compatibili (migration 0021)
+
+- **La promessa «Alert personalizzati (in arrivo)» diventa reale**: quando un bando entra in piattaforma, gli utenti con azienda **compatibile** (pre-check, punteggio ≥ 60) ricevono un'email **digest** giornaliera — titolo, ente, importo, scadenza evidenziata, «perché lo vedi» coi nomi delle dimensioni in comune, link — con il **ritardo del piano** (nuova colonna `alert_ritardo_giorni`: Advisor 1 · Pro 7 · Smart 14 giorni dalla pubblicazione; riferimento = `data_pubblicazione`, o l'ingestione se assente; Gratuito escluso). Il vecchio `alert_giorni_preavviso` resta per il futuro promemoria scadenze.
+- **Nessuna pre-schedulazione**: un job giornaliero in-process (08:00 Europe/Rome, catch-up al riavvio, claim per PK su `bando_alert_runs`) ricalcola l'idoneità a ogni run — piano corrente, opt-in, **email verificata** (RPC su `auth.users`), suppression list, account attivo, bando ancora aperto — e il ledger `bando_alert_sends` (unique utente+bando) rende gli invii **idempotenti**: retry e run sovrapposte non producono doppioni; run manuale da `POST /admin/alerts/run`.
+- **Opt-out conforme**: toggle in Preferenze e link di **disiscrizione a un clic** in ogni email (header `List-Unsubscribe` + `List-Unsubscribe-Post`, RFC 8058) scrivono la stessa riga; il POST pubblico è idempotente e anti-enumeration, il GET mostra solo una pagina di conferma (non muta: gli scanner antispam pre-aprono i link). Suppression list per bounce/reclami. PlanCard e AdminPiani aggiornati (via il «(in arrivo)»).
+- ⚠️ Migration **0021** da eseguire dallo SQL Editor del DB primario **prima del deploy**. In `.env` di produzione: `API_PUBLIC_URL` e `ALERT_DATA_ATTIVAZIONE=<data del deploy>` (gate anti-backfill); configurare SPF/DKIM/DMARC sul dominio mittente (vedi docs/deploy.md).
+
 ## 2026-07-13 — Videochiamata Jitsi per gli appuntamenti (migration 0020)
 
 - **Ogni prenotazione genera la sua videochiamata**: stanza Jitsi dedicata sull'istanza self-hosted (`JITSI_BASE_URL`, default `https://bandofitvtc.edunews24.it`). A DB vive solo il **token** (`videocall_token uuid`, default `gen_random_uuid()`, unique — migration **0020**): nasce una sola volta all'INSERT e non viene mai rigenerato (idempotenza per costruzione); l'URL (`{base}/bandofit-{token}`) lo deriva il backend. L'istanza è **aperta**: la sicurezza sta nel nome-stanza non indovinabile, quindi il link è trattato come una credenziale e **non entra mai nelle notifiche in-app conservate** (viaggia solo nelle email, effimere).

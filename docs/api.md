@@ -255,6 +255,16 @@ Pagina di notifiche (`page_size` max 50) + **`non_lette`** complessive (il numer
 ### `POST /me/notifications/read` (204)
 Body: `{"all": true}` oppure `{"ids": [1, 2]}` (almeno uno dei due). Segna come lette solo le proprie non lette.
 
+## Alert email sui nuovi bandi
+
+Quando un bando diventa disponibile, gli utenti con azienda **compatibile** (pre-check con punteggio ≥ 60) lo ricevono in un'email **digest** giornaliera, con il ritardo del piano (`alert_ritardo_giorni`: Advisor 1 · Pro 7 · Smart 14 giorni dalla pubblicazione). Nessuna pre-schedulazione: l'idoneità si ricalcola a ogni run (piano corrente, opt-in, email verificata su `auth.users`, account attivo, bando ancora aperto); il ledger `(utente, bando)` garantisce che nessun bando venga inviato due volte. Il digest include per ogni bando: titolo, ente, importo, **scadenza evidenziata**, «perché lo vedi» (le dimensioni di compatibilità con i nomi) e il link; header `List-Unsubscribe` + `List-Unsubscribe-Post` (RFC 8058).
+
+### `GET /me/alert-settings` · `PUT /me/alert-settings`
+`{abilitati, piano_include_alert, ritardo_giorni}` — il piano effettivo per i collegati attivi è quello del titolare. Il PUT (`{"abilitati": bool}`) è consentito anche se il piano non include gli alert (il gate vero è alla run). Stessa riga di verità del link di disiscrizione nelle email.
+
+### `POST /alerts/unsubscribe?token=` · `GET /alerts/unsubscribe?token=` *(pubblici, nessuna auth)*
+Disiscrizione **a un clic** (RFC 8058): il POST è idempotente e risponde **sempre allo stesso modo** (204; pagina HTML di conferma se la richiesta arriva da un form del browser) con token valido, ignoto o malformato — nessuna enumerazione possibile. Il GET mostra solo una pagina con un bottone di conferma e **non muta nulla**: gli scanner antispam pre-aprono i link GET delle email.
+
 ## Consulenze (lato cliente)
 
 Flusso: AI-check completato → attivazione dell'addon `consulto-esperto` → richiesta nel pool dei progettisti → proposte → **accettazione = assegnazione definitiva 1:1** (+ prenotazione slot opzionale, contestuale o successiva). Le **azioni** (creare, accettare, rifiutare, annullare, prenotare) sono riservate al **titolare** dell'Azienda; gli account collegati leggono. Eventi: ogni transizione genera notifica in-app + email (vedi `docs/database.md`, audit incluso).
@@ -330,3 +340,6 @@ Aggiornamento parziale (stessi campi, tranne `slug`). I piani **non si eliminano
 
 ### `GET /admin/addons` · `POST /admin/addons` (201) · `PATCH /admin/addons/{addon_id}`
 Gestione del catalogo add-on, gemella di `/admin/plans` (stessi permessi admin): GET tutti (anche disattivati), POST crea (`nome`, `slug` — unico, immutabile, `[a-z0-9-]+` → `409` se duplicato —, `descrizione?`, `prezzo ≥ 0` in €, `tipo_prezzo?`/`etichetta_prezzo?` come per i piani, `ordering`, `is_active`), PATCH aggiorna i campi passati (slug escluso) o disattiva. Gli add-on **non si eliminano**: si disattivano.
+
+### `POST /admin/alerts/run` · `GET /admin/alerts/runs?limit=`
+Esegue subito la run giornaliera degli alert (senza `ripeti`: `409` se quella di oggi è già stata eseguita; `ripeti=true` riesegue — il ledger impedisce comunque i doppi invii) e ritorna i contatori `{giorno, esito, bandi_candidati, destinatari, email_inviate, email_fallite, dettagli}`. `GET /runs` = registro delle esecuzioni (osservabilità).

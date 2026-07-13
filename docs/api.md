@@ -272,7 +272,7 @@ Body: `{"slot_id": "uuid" | null}`. Accetta la proposta = assegna la consulenza 
 Rifiuto esplicito di una singola proposta (il progettista può inviarne una nuova). `409` se non più `inviata`.
 
 ### `GET /me/consulenze/{id}/slots?proposta=`
-Slot **liberi e futuri** del progettista assegnato o — con `proposta` — di quello della proposta indicata (per prenotare contestualmente all'accettazione). In UTC: la UI li mostra nel fuso del browser.
+Slot **liberi e futuri** del progettista assegnato o — con `proposta` — di quello della proposta indicata (per prenotare contestualmente all'accettazione). In UTC: la UI li mostra nel fuso del browser. Item: `{id, inizio, fine, prenotato, serie_id}` (`serie_id` = raggruppamento di ricorrenza, uuid opaco).
 
 ### `POST /me/consulenze/{id}/prenota` (201) · `POST /me/consulenze/{id}/prenotazione/annulla` *(solo titolare)*
 Prenota uno slot dopo l'assegnazione (`{"slot_id"}`; RPC serializzata: `409 slot_taken` se appena preso, `409` se esiste già un appuntamento) / annulla l'appuntamento confermato (lo slot torna prenotabile; il progettista riceve una notifica in-app). Evento 3 al progettista sulla prenotazione.
@@ -300,7 +300,13 @@ Vista FULL, **solo se assegnata a sé** (`403` altrimenti): `{ company: {...dati
 Appuntamenti confermati (`[{id, request_id, inizio, fine, stato, bando_titolo, ragione_sociale, email}]`, in UTC) / annullo da parte del progettista (il titolare riceve una notifica in-app; lo slot torna prenotabile).
 
 ### `GET/POST/PATCH/DELETE /progettista/slots`
-CRUD degli slot di disponibilità: `{inizio, fine}` timestamp ISO **con offset** (UTC; durata 15 min–12 h, solo futuri; `prenotato` derivato nei GET). Sovrapposizioni rifiutate a livello DB (`409 slot_overlap`); modifica/cancellazione di uno slot prenotato rifiutate (`409 slot_booked`) e serializzate contro le prenotazioni concorrenti (RPC con `FOR UPDATE`).
+CRUD degli slot di disponibilità: `{inizio, fine}` timestamp ISO **con offset** (UTC; durata 15 min–12 h, solo futuri; `prenotato` derivato nei GET; `serie_id` = raggruppamento di ricorrenza, `null` per gli slot singoli). Sovrapposizioni rifiutate a livello DB (`409 slot_overlap`); modifica/cancellazione di uno slot prenotato rifiutate (`409 slot_booked`) e serializzate contro le prenotazioni concorrenti (RPC con `FOR UPDATE`). Il PATCH di una singola occorrenza **non** la stacca dalla sua serie.
+
+### `POST /progettista/slots/serie` (201)
+Crea una serie di slot ricorrenti. Body: `{"occorrenze": [{inizio, fine}, …]}` (1–370 occorrenze, ognuna validata come uno slot singolo: futura, 15 min–12 h). L'**espansione della ricorrenza è a carico del client** (`lib/ricorrenza.ts`): solo il browser conosce il fuso dell'utente, e «ogni settimana alle 10:00» deve restare alle 10:00 a muro anche attraverso i cambi di ora legale. Le occorrenze che si sovrappongono a slot esistenti (o tra loro) vengono **saltate**, non fanno fallire la serie (RPC `fn_create_slot_serie`, transazione unica). Risposta: `{serie_id, creati: [SlotOut…], saltati}`. Errori: `400` occorrenza non valida (nessuna scrittura); `409 serie_tutta_sovrapposta` se nessuna occorrenza entra.
+
+### `DELETE /progettista/slots/serie/{serie_id}` (200)
+Elimina gli slot **liberi** della serie; quelli prenotati non si toccano mai. Risposta con conteggi per la UI: `{eliminati, mantenuti}`. `404 serie_not_found` se la serie non esiste o è di un altro progettista.
 
 ## Endpoint admin
 

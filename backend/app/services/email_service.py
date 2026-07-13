@@ -246,28 +246,74 @@ async def send_proposal_email(
 
 
 async def send_booking_email(
-    to_email: str, ragione_sociale: str, quando: str, cta_url: str
+    to_email: str,
+    ragione_sociale: str,
+    quando: str,
+    cta_url: str,
+    videocall_url: str | None = None,
 ) -> bool:
     """Evento 3 — al progettista: un cliente ha prenotato uno slot.
-    `quando` arriva già formattato con il fuso dichiarato (ora italiana)."""
+    `quando` arriva già formattato con il fuso dichiarato (ora italiana);
+    `videocall_url` è la stanza Jitsi dedicata all'appuntamento."""
     azienda = html.escape(ragione_sociale)
     orario = html.escape(quando)
+    paragraphs = [
+        f"<strong>{azienda}</strong> ha prenotato una consulenza con te "
+        f"il <strong>{orario}</strong>.",
+        "Trovi i dettagli dell'azienda e del bando nella tua area progettista.",
+    ]
+    if videocall_url:
+        link = html.escape(videocall_url, quote=True)
+        paragraphs.insert(
+            1,
+            f'La consulenza si terrà in videochiamata: <a href="{link}">{link}</a> '
+            "(si apre dal browser, senza installare nulla).",
+        )
     html_body = _branded_html(
         "Nuova consulenza prenotata",
-        [
-            f"<strong>{azienda}</strong> ha prenotato una consulenza con te "
-            f"il <strong>{orario}</strong>.",
-            "Trovi i dettagli dell'azienda e del bando nella tua area progettista.",
-        ],
+        paragraphs,
         "Vedi la consulenza",
         cta_url,
         "Ricevi questa email perché il cliente ha scelto uno dei tuoi slot di disponibilità.",
     )
     text = (
         f"{ragione_sociale} ha prenotato una consulenza con te il {quando}.\n\n"
-        f"Vedi la consulenza: {cta_url}"
+        + (f"Videochiamata: {videocall_url}\n\n" if videocall_url else "")
+        + f"Vedi la consulenza: {cta_url}"
     )
     return await _dispatch(to_email, "Nuova consulenza prenotata — BandoFit", html_body, text)
+
+
+async def send_booking_confirmation_email(
+    to_email: str, quando: str, videocall_url: str | None, cta_url: str
+) -> bool:
+    """Conferma della prenotazione al CLIENTE: orario + link videochiamata.
+    Il link Jitsi viaggia solo via email (mai nelle notifiche conservate)."""
+    orario = html.escape(quando)
+    paragraphs = [
+        f"Il tuo appuntamento di consulenza è confermato per il <strong>{orario}</strong>.",
+    ]
+    if videocall_url:
+        link = html.escape(videocall_url, quote=True)
+        paragraphs.append(
+            "All'orario dell'appuntamento avvia la videochiamata da questo link: "
+            f'<a href="{link}">{link}</a> (si apre dal browser, senza installare nulla).'
+        )
+    html_body = _branded_html(
+        "Appuntamento confermato",
+        paragraphs,
+        "Vedi la consulenza",
+        cta_url,
+        "Ricevi questa email perché hai prenotato una consulenza su BandoFit.",
+    )
+    text = (
+        f"Il tuo appuntamento di consulenza è confermato per il {quando}.\n\n"
+        + (f"Videochiamata: {videocall_url}\n\n" if videocall_url else "")
+        + f"Vedi la consulenza: {cta_url}"
+    )
+    return await _dispatch(
+        to_email, "Appuntamento di consulenza confermato — BandoFit", html_body, text
+    )
 
 
 async def send_assignment_email(

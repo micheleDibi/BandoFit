@@ -106,6 +106,8 @@ class BookingOut(BaseModel):
     inizio: datetime
     fine: datetime
     stato: str
+    # URL completo della stanza Jitsi, derivato dal token persistito (0020).
+    videocall_url: str | None = None
 
 
 class ConsulenzaOut(BaseModel):
@@ -182,3 +184,5 @@ class AppuntamentoOut(BaseModel):
     bando_titolo: str
     ragione_sociale: str | None = None
     email: str | None = None
+    # URL completo della stanza Jitsi, derivato dal token persistito (0020).
+    videocall_url: str | None = None

@@ -25,6 +25,8 @@ AI_CHECK_ID = "88888888-0000-0000-0000-000000000027"
 COMPANY_ID = "77777777-0000-0000-0000-000000000028"
 BOOKING_ID = "66666666-0000-0000-0000-000000000029"
 SERIE_ID = "55555555-0000-0000-0000-000000000030"
+VIDEOCALL_TOKEN = "12345678-0000-0000-0000-000000000034"
+VIDEOCALL_URL = f"https://bandofitvtc.edunews24.it/bandofit-{VIDEOCALL_TOKEN}"
 
 USER = {"id": TITOLARE, "role": "cliente"}
 PROG_USER = {"id": PROGETTISTA, "role": "progettista"}
@@ -163,6 +165,8 @@ def stub_settings(monkeypatch):
         "PRIMARY_SUPABASE_SERVICE_ROLE_KEY": "k",
         "SECONDARY_SUPABASE_URL": "https://d2.supabase.co",
         "SECONDARY_SUPABASE_ANON_KEY": "k",
+        # Il default in Settings basterebbe: il setenv immunizza da un .env locale.
+        "JITSI_BASE_URL": "https://bandofitvtc.edunews24.it",
     }.items():
         monkeypatch.setenv(key, value)
     from app.core.config import get_settings
@@ -535,12 +539,28 @@ class TestDettaglioCliente:
                 ],
                 "progettisti": [{"user_id": PROGETTISTA, "codice": "PRG-00001"}],
                 "profiles": [{"id": PROGETTISTA, "nome": "Paola", "cognome": "Verdi"}],
+                "consultation_bookings": [
+                    {
+                        "id": BOOKING_ID,
+                        "request_id": REQUEST_ID,
+                        "slot_id": SLOT_ID,
+                        "cliente_id": TITOLARE,
+                        "progettista_id": PROGETTISTA,
+                        "inizio": tra(60).isoformat(),
+                        "fine": tra(90).isoformat(),
+                        "stato": "confermata",
+                        "videocall_token": VIDEOCALL_TOKEN,
+                    }
+                ],
             }
         )
         out = await consulting_service.get_my_request(primary, USER, REQUEST_ID)
         [proposta] = out.proposte
         assert proposta.nome_progettista == "Paola Verdi"
         assert proposta.codice_progettista == "PRG-00001"
+        # L'URL della videochiamata è derivato dal token persistito (0020).
+        assert out.appuntamento is not None
+        assert out.appuntamento.videocall_url == VIDEOCALL_URL
 
 
 # ---------------------------------------------------------------------------
@@ -595,6 +615,7 @@ class TestAcceptProposal:
                         "inizio": tra(60).isoformat(),
                         "fine": tra(90).isoformat(),
                         "stato": "confermata",
+                        "videocall_token": VIDEOCALL_TOKEN,
                     }
                 ],
             }
@@ -614,6 +635,9 @@ class TestAcceptProposal:
         prenotazione = notify_calls[1]
         assert prenotazione["dedup_key"] == f"booking:{BOOKING_ID}"
         assert "ora italiana" in prenotazione["corpo"]
+        # Minimizzazione: il link Jitsi (credenziale, istanza aperta) non
+        # entra MAI nel corpo delle notifiche conservate.
+        assert "bandofit-" not in prenotazione["corpo"]
 
     async def test_slot_occupato_mappato_su_conflict(self):
         primary = FakePrimary()
@@ -896,6 +920,135 @@ class TestProposte:
             await consulting_service.withdraw_proposal(primary, PROG_USER, PROPOSAL_ID)
 
 
+class TestBookSlot:
+    @pytest.fixture
+    def email_calls(self, monkeypatch):
+        calls: list[tuple] = []
+
+        async def fake_booking(*args):
+            calls.append(("progettista", *args))
+            return True
+
+        async def fake_confirmation(*args):
+            calls.append(("cliente", *args))
+            return True
+
+        monkeypatch.setattr(
+            consulting_service.email_service, "send_booking_email", fake_booking
+        )
+        monkeypatch.setattr(
+            consulting_service.email_service,
+            "send_booking_confirmation_email",
+            fake_confirmation,
+        )
+        return calls
+
+    @pytest.fixture
+    def spawn_coros(self, monkeypatch):
+        """Variante di spawn_calls che NON chiude la coroutine: il test la
+        awaita per eseguire davvero gli invii email."""
+        coros: list = []
+        monkeypatch.setattr(consulting_service, "_spawn", coros.append)
+        return coros
+
+    async def test_prenotazione_manda_il_link_a_entrambi(
+        self, notify_calls, email_calls, spawn_coros, detail_stub
+    ):
+        primary = FakePrimary(
+            selects={
+                "consultation_requests": [
+                    request_row(
+                        stato="assegnata",
+                        assigned_progettista_id=PROGETTISTA,
+                        accepted_proposal_id=PROPOSAL_ID,
+                        assigned_at=tra(0).isoformat(),
+                    )
+                ],
+                "company_profiles": [{"id": COMPANY_ID, "ragione_sociale": "ACME Srl"}],
+                "consultation_bookings": [
+                    {
+                        "id": BOOKING_ID,
+                        "request_id": REQUEST_ID,
+                        "slot_id": SLOT_ID,
+                        "cliente_id": TITOLARE,
+                        "progettista_id": PROGETTISTA,
+                        "inizio": tra(60).isoformat(),
+                        "fine": tra(90).isoformat(),
+                        "stato": "confermata",
+                        "videocall_token": VIDEOCALL_TOKEN,
+                    }
+                ],
+            }
+        )
+        # Due letture di profiles nell'evento: prima il progettista, poi il cliente.
+        primary.select_queues["profiles"] = [
+            [{"id": PROGETTISTA, "email": "prog@test.it"}],
+            [{"id": TITOLARE, "email": "cliente@acme.it"}],
+        ]
+        primary.rpc_results["fn_book_slot"] = BOOKING_ID
+
+        out = await consulting_service.book_slot(primary, USER, REQUEST_ID, SLOT_ID)
+        assert out is detail_stub
+        [notifica] = notify_calls
+        assert "bandofit-" not in notifica["corpo"]  # mai il link nelle notifiche
+
+        for coro in spawn_coros:
+            await coro
+        progettista = next(c for c in email_calls if c[0] == "progettista")
+        cliente = next(c for c in email_calls if c[0] == "cliente")
+        # send_booking_email(to, ragione, quando, cta, videocall_url)
+        assert progettista[1] == "prog@test.it"
+        assert progettista[5] == VIDEOCALL_URL
+        # send_booking_confirmation_email(to, quando, videocall_url, cta)
+        assert cliente[1] == "cliente@acme.it"
+        assert "ora italiana" in cliente[2]
+        assert cliente[3] == VIDEOCALL_URL
+
+
+class TestAppuntamentiProgettista:
+    async def test_lista_con_url_videochiamata(self):
+        primary = FakePrimary(
+            selects={
+                "consultation_bookings": [
+                    {
+                        "id": BOOKING_ID,
+                        "request_id": REQUEST_ID,
+                        "slot_id": SLOT_ID,
+                        "cliente_id": TITOLARE,
+                        "progettista_id": PROGETTISTA,
+                        "inizio": tra(60).isoformat(),
+                        "fine": tra(90).isoformat(),
+                        "stato": "confermata",
+                        "videocall_token": VIDEOCALL_TOKEN,
+                    }
+                ],
+                "consultation_requests": [
+                    {
+                        "id": REQUEST_ID,
+                        "bando_titolo": "Bando di prova",
+                        "company_profile_id": COMPANY_ID,
+                        "cliente_id": TITOLARE,
+                    }
+                ],
+                "company_profiles": [
+                    {"id": COMPANY_ID, "ragione_sociale": "ACME Srl", "partita_iva": "01234567890"}
+                ],
+                "profiles": [
+                    {
+                        "id": TITOLARE,
+                        "nome": "Paola",
+                        "cognome": "Verdi",
+                        "email": "cliente@acme.it",
+                        "azienda": None,
+                    }
+                ],
+            }
+        )
+        [appuntamento] = await consulting_service.list_appointments(primary, PROG_USER)
+        assert appuntamento.videocall_url == VIDEOCALL_URL
+        assert appuntamento.ragione_sociale == "ACME Srl"
+
+
 class TestAnnulloAppuntamentoProgettista:
     def booking_row(self) -> dict:
         return {
@@ -907,6 +1060,7 @@ class TestAnnulloAppuntamentoProgettista:
             "inizio": tra(60).isoformat(),
             "fine": tra(90).isoformat(),
             "stato": "annullata",
+            "videocall_token": VIDEOCALL_TOKEN,
         }
 
     async def test_annullo_atomico_sul_booking_indicato(self, notify_calls):

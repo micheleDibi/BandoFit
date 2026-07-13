@@ -68,7 +68,7 @@ REQUEST_SELECT = (
     "accepted_proposal_id,created_at"
 )
 PROPOSAL_SELECT = "id,request_id,progettista_id,messaggio,stato,created_at"
-BOOKING_SELECT = "id,request_id,slot_id,cliente_id,progettista_id,inizio,fine,stato"
+BOOKING_SELECT = "id,request_id,slot_id,cliente_id,progettista_id,inizio,fine,stato,videocall_token"
 
 # Codici PostgreSQL: violazione di UNIQUE e di EXCLUDE constraint.
 _UNIQUE_VIOLATION = "23505"
@@ -139,6 +139,13 @@ def _spawn(coro) -> None:
 
 def _frontend_link(path: str) -> str:
     return f"{get_settings().frontend_url.rstrip('/')}{path}"
+
+
+def _videocall_url(token: str) -> str:
+    """Stanza Jitsi dell'appuntamento: il TOKEN è il dato persistito, l'URL è
+    derivato. L'istanza è aperta, quindi l'URL è di fatto una credenziale:
+    viaggia nelle risposte API e nelle email, MAI nelle notifiche conservate."""
+    return f"{get_settings().jitsi_base_url.rstrip('/')}/bandofit-{token}"
 
 
 def _format_quando(dt: datetime) -> str:
@@ -460,7 +467,10 @@ async def _event_assegnazione(primary, request: dict, progettista_id: str) -> No
 
 
 async def _event_prenotazione(primary, request: dict, booking: dict) -> None:
-    """Evento 3: al progettista dello slot prenotato."""
+    """Evento 3: notifica al progettista + email col link videochiamata a
+    ENTRAMBI (conferma al cliente inclusa). Il link Jitsi viaggia SOLO nelle
+    email, effimere: l'istanza è aperta e l'URL è una credenziale, quindi
+    non entra mai nel corpo delle notifiche conservate (minimizzazione)."""
     inizio = datetime.fromisoformat(booking["inizio"])
     await notification_service.notify(
         primary,
@@ -471,22 +481,42 @@ async def _event_prenotazione(primary, request: dict, booking: dict) -> None:
         url=f"/app/progettista/richieste/{request['id']}",
         dedup_key=f"booking:{booking['id']}",
     )
+
+    token = booking.get("videocall_token")
+    videocall_url = _videocall_url(token) if token else None
+    sends = []
     email = await _progettista_email(primary, booking["progettista_id"])
     if email:
         ragione = await _ragione_sociale(primary, request["company_profile_id"])
-        _spawn(
-            _send_emails_best_effort(
-                [
-                    partial(
-                        email_service.send_booking_email,
-                        email,
-                        ragione or "Un'azienda",
-                        _format_quando(inizio),
-                        _frontend_link(f"/app/progettista/richieste/{request['id']}"),
-                    )
-                ]
+        sends.append(
+            partial(
+                email_service.send_booking_email,
+                email,
+                ragione or "Un'azienda",
+                _format_quando(inizio),
+                _frontend_link(f"/app/progettista/richieste/{request['id']}"),
+                videocall_url,
             )
         )
+    cliente = (
+        await primary.table("profiles")
+        .select("email")
+        .eq("id", booking["cliente_id"])
+        .limit(1)
+        .execute()
+    )
+    if cliente.data and cliente.data[0].get("email"):
+        sends.append(
+            partial(
+                email_service.send_booking_confirmation_email,
+                cliente.data[0]["email"],
+                _format_quando(inizio),
+                videocall_url,
+                _frontend_link(f"/app/consulenze/{request['id']}"),
+            )
+        )
+    if sends:
+        _spawn(_send_emails_best_effort(sends))
 
 
 # ---------------------------------------------------------------------------
@@ -563,7 +593,14 @@ async def _bookings_by_request(primary, request_ids: list[str]) -> dict[str, dic
 def _map_booking(row: dict | None) -> BookingOut | None:
     if not row:
         return None
-    return BookingOut(id=row["id"], inizio=row["inizio"], fine=row["fine"], stato=row["stato"])
+    token = row.get("videocall_token")
+    return BookingOut(
+        id=row["id"],
+        inizio=row["inizio"],
+        fine=row["fine"],
+        stato=row["stato"],
+        videocall_url=_videocall_url(token) if token else None,
+    )
 
 
 async def _progettista_pubblico(
@@ -1350,6 +1387,11 @@ async def list_appointments(primary, progettista: dict) -> list[AppuntamentoOut]
                 bando_titolo=request.get("bando_titolo") or "—",
                 ragione_sociale=(company or {}).get("ragione_sociale"),
                 email=(profilo or {}).get("email"),
+                videocall_url=(
+                    _videocall_url(row["videocall_token"])
+                    if row.get("videocall_token")
+                    else None
+                ),
             )
         )
     return items

@@ -247,7 +247,7 @@ Elimina l'evento (`404` se inesistente o di un altro utente). Per gli eventi `ba
 
 ## Notifiche in-app
 
-Il canale **affidabile** degli eventi (le email sono best-effort). Idempotenti per `(user_id, dedup_key)`: i retry non creano doppioni. I contenuti sono minimizzati (nessun dato personale di terzi): i dettagli si leggono seguendo `url`, dove vale l'autorizzazione dell'endpoint di destinazione.
+Il canale **affidabile** degli eventi (le email sono best-effort). Idempotenti per `(user_id, dedup_key)`: i retry non creano doppioni. I contenuti sono minimizzati (nessun dato personale di terzi, e MAI il link videochiamata — è una credenziale, l'istanza Jitsi è aperta): i dettagli si leggono seguendo `url`, dove vale l'autorizzazione dell'endpoint di destinazione.
 
 ### `GET /me/notifications?page=&page_size=`
 Pagina di notifiche (`page_size` max 50) + **`non_lette`** complessive (il numero sul badge): `{ items: [{id, tipo, titolo, corpo, url, read_at, created_at}], total, page, page_size, total_pages, non_lette }`. Il frontend la interroga in polling (60s).
@@ -260,7 +260,7 @@ Body: `{"all": true}` oppure `{"ids": [1, 2]}` (almeno uno dei due). Segna come 
 Flusso: AI-check completato → attivazione dell'addon `consulto-esperto` → richiesta nel pool dei progettisti → proposte → **accettazione = assegnazione definitiva 1:1** (+ prenotazione slot opzionale, contestuale o successiva). Le **azioni** (creare, accettare, rifiutare, annullare, prenotare) sono riservate al **titolare** dell'Azienda; gli account collegati leggono. Eventi: ogni transizione genera notifica in-app + email (vedi `docs/database.md`, audit incluso).
 
 ### `GET /me/consulenze` · `GET /me/consulenze/{id}`
-Richieste dell'Azienda (visibilità per `family_parent_id`). Item: `{id, stato, bando_id, bando_slug, bando_titolo, esito, punteggio, created_at, assigned_at, editable, progettista, proposte_aperte, proposte, appuntamento}` — `stato` ∈ `nuova`/`assegnata`/`annullata`; `progettista = {codice, nome}` (assegnato; la UI mostra **nome e cognome** — più umano — e il codice resta nel payload per usi interni); `proposte` (solo nel dettaglio): `[{id, codice_progettista, nome_progettista, messaggio, stato, created_at}]` — anche qui il cliente vede l'autore per `nome_progettista`; `appuntamento = {id, inizio, fine, stato}` in UTC. La notifica in-app dell'evento 2 resta minimizzata (solo il bando); il nome dell'autore compare nell'email, effimera.
+Richieste dell'Azienda (visibilità per `family_parent_id`). Item: `{id, stato, bando_id, bando_slug, bando_titolo, esito, punteggio, created_at, assigned_at, editable, progettista, proposte_aperte, proposte, appuntamento}` — `stato` ∈ `nuova`/`assegnata`/`annullata`; `progettista = {codice, nome}` (assegnato; la UI mostra **nome e cognome** — più umano — e il codice resta nel payload per usi interni); `proposte` (solo nel dettaglio): `[{id, codice_progettista, nome_progettista, messaggio, stato, created_at}]` — anche qui il cliente vede l'autore per `nome_progettista`; `appuntamento = {id, inizio, fine, stato, videocall_url}` in UTC — `videocall_url` è la stanza Jitsi dedicata (`{JITSI_BASE_URL}/bandofit-{token}`, derivata dal token a DB; solo prenotazioni confermate). La notifica in-app dell'evento 2 resta minimizzata (solo il bando); il nome dell'autore compare nell'email, effimera.
 
 ### `POST /me/consulenze` (201) *(solo titolare)*
 Body: `{"ai_check_id": "uuid"}` (un AI-check `ready` della propria Azienda). Crea la richiesta con gli snapshot (esito/punteggio, bando, addon+prezzo) e avvisa **tutti i progettisti e gli admin attivi** (evento 1; parità admin). Il pagamento dell'addon è fuori scope: l'innesto del checkout è in `consulting_service.create_request`. Errori: `403` account collegato; `404` AI-check non trovato / addon non a catalogo; `409` AI-check non completato / **richiesta già aperta per questo bando** (una sola `nuova` per bando per Azienda).
@@ -275,7 +275,7 @@ Rifiuto esplicito di una singola proposta (il progettista può inviarne una nuov
 Slot **liberi e futuri** del progettista assegnato o — con `proposta` — di quello della proposta indicata (per prenotare contestualmente all'accettazione). In UTC: la UI li mostra nel fuso del browser. Item: `{id, inizio, fine, prenotato, serie_id}` (`serie_id` = raggruppamento di ricorrenza, uuid opaco).
 
 ### `POST /me/consulenze/{id}/prenota` (201) · `POST /me/consulenze/{id}/prenotazione/annulla` *(solo titolare)*
-Prenota uno slot dopo l'assegnazione (`{"slot_id"}`; RPC serializzata: `409 slot_taken` se appena preso, `409` se esiste già un appuntamento) / annulla l'appuntamento confermato (lo slot torna prenotabile; il progettista riceve una notifica in-app). Evento 3 al progettista sulla prenotazione.
+Prenota uno slot dopo l'assegnazione (`{"slot_id"}`; RPC serializzata: `409 slot_taken` se appena preso, `409` se esiste già un appuntamento) / annulla l'appuntamento confermato (lo slot torna prenotabile; il progettista riceve una notifica in-app). Evento 3 sulla prenotazione: notifica al progettista + email col **link videochiamata** a ENTRAMBI (al cliente arriva l'email di conferma con orario e link). Un annullo nasconde il link; una ri-prenotazione genera un link **nuovo** (token per prenotazione).
 
 ### `POST /me/consulenze/{id}/annulla` *(solo titolare)*
 Annulla la richiesta finché è `nuova`: esce dal pool, le proposte aperte diventano `superate` e i loro autori ricevono una notifica in-app. `409` se non più aperta.
@@ -297,7 +297,7 @@ Invia una proposta (`{"messaggio"}`, ≤4000; solo su richieste `nuova`; **una s
 Vista FULL, **solo se assegnata a sé** (`403` altrimenti): `{ company: {...dati dichiarati...}, dossier: {...come GET /me/company/dossier...} }`. **Ogni lettura scrive `consulenza.dossier_accessed` in audit_log.** Il `raw` di `company_data` non esce mai dal server (vale l'invariante dell'import).
 
 ### `GET /progettista/appuntamenti` · `POST /progettista/appuntamenti/{id}/annulla` (204)
-Appuntamenti confermati (`[{id, request_id, inizio, fine, stato, bando_titolo, ragione_sociale, email}]`, in UTC) / annullo da parte del progettista (il titolare riceve una notifica in-app; lo slot torna prenotabile).
+Appuntamenti confermati (`[{id, request_id, inizio, fine, stato, bando_titolo, ragione_sociale, email, videocall_url}]`, in UTC) / annullo da parte del progettista (il titolare riceve una notifica in-app; lo slot torna prenotabile). Anche l'`appuntamento` del pool (`GET /progettista/richieste*`) porta `videocall_url`: le richieste aperte non hanno booking, quindi il link è visibile solo all'assegnato.
 
 ### `GET/POST/PATCH/DELETE /progettista/slots`
 CRUD degli slot di disponibilità: `{inizio, fine}` timestamp ISO **con offset** (UTC; durata 15 min–12 h, solo futuri; `prenotato` derivato nei GET; `serie_id` = raggruppamento di ricorrenza, `null` per gli slot singoli). Sovrapposizioni rifiutate a livello DB (`409 slot_overlap`); modifica/cancellazione di uno slot prenotato rifiutate (`409 slot_booked`) e serializzate contro le prenotazioni concorrenti (RPC con `FOR UPDATE`). Il PATCH di una singola occorrenza **non** la stacca dalla sua serie.

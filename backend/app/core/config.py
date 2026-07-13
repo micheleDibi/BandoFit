@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # URL pubblico del frontend (redirect degli inviti, link nelle email).
     frontend_url: str = "http://localhost:5173"
 
+    # Istanza Jitsi self-hosted (APERTA, senza JWT) per le videochiamate
+    # delle consulenze. URL stanza = {base}/bandofit-{videocall_token}: a DB
+    # vive solo il token, l'URL è derivato.
+    jitsi_base_url: str = "https://bandofitvtc.edunews24.it"
+
     # Email transazionali. Provider scelto automaticamente:
     # SMTP se smtp_host è valorizzato → altrimenti Resend se c'è la API key →
     # altrimenti le email vengono solo loggate (sviluppo).

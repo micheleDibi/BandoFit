@@ -68,13 +68,15 @@ export function useDossierRichiesta(requestId: string, enabled: boolean) {
   });
 }
 
-export function useAppuntamenti() {
+/** Appuntamenti confermati del progettista. `enabled` permette al Calendario
+ *  di non chiamare l'endpoint (403) quando l'utente non è un progettista. */
+export function useAppuntamenti(enabled = true) {
   const { session } = useAuth();
   return useQuery({
     queryKey: ["progettista-appuntamenti"],
     queryFn: async () =>
       (await api.get<AppuntamentoProgettista[]>("/progettista/appuntamenti")).data,
-    enabled: !!session,
+    enabled: !!session && enabled,
   });
 }
 

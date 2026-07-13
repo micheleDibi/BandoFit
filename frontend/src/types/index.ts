@@ -217,6 +217,8 @@ export interface Slot {
   inizio: string;
   fine: string;
   prenotato: boolean;
+  /** Serie di ricorrenza (null = slot singolo). */
+  serie_id: string | null;
 }
 
 export type ConsulenzaStato = "nuova" | "assegnata" | "annullata";

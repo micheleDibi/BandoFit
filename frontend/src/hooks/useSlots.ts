@@ -8,13 +8,15 @@ export interface SlotPayload {
   fine: string;
 }
 
-/** Slot di disponibilità del progettista autenticato (futuri, con flag prenotato). */
-export function useSlots() {
+/** Slot di disponibilità del progettista autenticato (futuri, con flag
+ *  prenotato). `enabled` permette al Calendario di non chiamare l'endpoint
+ *  (403) quando l'utente non è un progettista. */
+export function useSlots(enabled = true) {
   const { session } = useAuth();
   return useQuery({
     queryKey: ["progettista-slots"],
     queryFn: async () => (await api.get<Slot[]>("/progettista/slots")).data,
-    enabled: !!session,
+    enabled: !!session && enabled,
   });
 }
 
@@ -47,6 +49,42 @@ export function useDeleteSlot() {
     mutationFn: async (slotId: string) => {
       await api.delete(`/progettista/slots/${slotId}`);
     },
+    onSuccess: invalidate,
+  });
+}
+
+export interface SerieCreatePayload {
+  /** Occorrenze già materializzate nel fuso del browser (lib/ricorrenza.ts). */
+  occorrenze: SlotPayload[];
+}
+
+export interface SerieCreateResult {
+  serie_id: string;
+  creati: Slot[];
+  /** Occorrenze scartate perché sovrapposte a disponibilità esistenti. */
+  saltati: number;
+}
+
+export interface SerieDeleteResult {
+  eliminati: number;
+  /** Slot prenotati: l'eliminazione della serie non li tocca mai. */
+  mantenuti: number;
+}
+
+export function useCreateSlotSerie() {
+  const invalidate = useInvalidateSlots();
+  return useMutation({
+    mutationFn: async (payload: SerieCreatePayload) =>
+      (await api.post<SerieCreateResult>("/progettista/slots/serie", payload)).data,
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteSlotSerie() {
+  const invalidate = useInvalidateSlots();
+  return useMutation({
+    mutationFn: async (serieId: string) =>
+      (await api.delete<SerieDeleteResult>(`/progettista/slots/serie/${serieId}`)).data,
     onSuccess: invalidate,
   });
 }

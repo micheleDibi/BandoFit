@@ -3,14 +3,17 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DayEventsDialog } from "../components/calendar/DayEventsDialog";
 import { EventDialog, type DialogState } from "../components/calendar/EventDialog";
+import { itemDay, itemSortKey, type CalendarItem } from "../components/calendar/items";
 import { MonthGrid } from "../components/calendar/MonthGrid";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { ErrorState, Skeleton } from "../components/ui/states";
 import { useCalendarEvents } from "../hooks/useCalendar";
+import { useMe } from "../hooks/useMe";
+import { useAppuntamenti } from "../hooks/useProgettistaRichieste";
+import { useSlots } from "../hooks/useSlots";
 import { apiErrorMessage } from "../lib/api";
 import { formatMonthYear, todayItalyIso } from "../lib/format";
-import type { CalendarEvent } from "../types";
 
 /** "YYYY-MM" valido → {anno, mese}; altrimenti il mese di oggi (Roma). */
 function parseMonthParam(raw: string | null): { anno: number; mese: number } {
@@ -36,19 +39,44 @@ export default function Calendario() {
 
   const { data: events, isPending, isError, error, refetch } = useCalendarEvents(anno, mese);
 
+  // Per i progettisti il calendario mostra anche disponibilità e appuntamenti
+  // (query disattivate per gli altri: zero richieste in più).
+  const { data: me } = useMe();
+  const isProgettista = me?.profile.role === "progettista";
+  const { data: slots } = useSlots(isProgettista);
+  const { data: appuntamenti } = useAppuntamenti(isProgettista);
+
   const [dialog, setDialog] = useState<DialogState>(null);
-  // Giorno di cui mostrare l'ELENCO eventi (celle affollate / tap su mobile).
+  // Giorno di cui mostrare l'ELENCO degli item (celle affollate / tap su mobile).
   const [dayListFor, setDayListFor] = useState<string | null>(null);
 
-  const eventsByDay = useMemo(() => {
-    const map = new Map<string, CalendarEvent[]>();
-    for (const event of events ?? []) {
-      const list = map.get(event.data);
-      if (list) list.push(event);
-      else map.set(event.data, [event]);
+  // Item misti: eventi wall-clock italiano + slot/appuntamenti come istanti
+  // UTC ancorati al giorno LOCALE del browser (convenzione mista deliberata,
+  // vedi items.ts). Dedup: gli slot prenotati NON si renderizzano — il loro
+  // booking compare già come appuntamento con gli stessi orari. Un errore
+  // sulle query progettista non blocca il calendario: le chip non compaiono.
+  const itemsByDay = useMemo(() => {
+    const items: CalendarItem[] = (events ?? []).map((event) => ({ kind: "evento", event }));
+    if (isProgettista) {
+      for (const slot of slots ?? []) {
+        if (!slot.prenotato) items.push({ kind: "slot", slot });
+      }
+      for (const appuntamento of appuntamenti ?? []) {
+        items.push({ kind: "appuntamento", appuntamento });
+      }
+    }
+    const map = new Map<string, CalendarItem[]>();
+    for (const item of items) {
+      const day = itemDay(item);
+      const list = map.get(day);
+      if (list) list.push(item);
+      else map.set(day, [item]);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => itemSortKey(a).localeCompare(itemSortKey(b)));
     }
     return map;
-  }, [events]);
+  }, [events, slots, appuntamenti, isProgettista]);
 
   const goToMonth = (nextAnno: number, nextMese: number) => {
     setSearchParams(
@@ -73,18 +101,20 @@ export default function Calendario() {
     if (!iso.startsWith(monthKey)) {
       goToMonth(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)));
     }
-    const hasEvents = (eventsByDay.get(iso) ?? []).length > 0;
+    const hasItems = (itemsByDay.get(iso) ?? []).length > 0;
     const isDesktop = window.matchMedia("(min-width: 640px)").matches;
-    if (hasEvents && !isDesktop) {
+    if (hasItems && !isDesktop) {
       setDayListFor(iso);
     } else {
       setDialog({ mode: "create", date: iso });
     }
   };
 
-  const handleOpenEvent = (event: CalendarEvent) => {
+  const handleOpenItem = (item: CalendarItem) => {
     setDayListFor(null);
-    setDialog({ mode: "edit", event });
+    if (item.kind === "evento") {
+      setDialog({ mode: "edit", event: item.event });
+    }
   };
 
   return (
@@ -98,7 +128,7 @@ export default function Calendario() {
             Clicca su un giorno per aggiungere un evento, su un evento per modificarlo.
           </p>
         </div>
-        <div className="flex items-center gap-4 text-xs text-slate-500">
+        <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
           <span className="inline-flex items-center gap-1.5">
             <span className="size-2 rounded-full bg-brand-500" aria-hidden />
             Personali
@@ -107,6 +137,18 @@ export default function Calendario() {
             <span className="size-2 rounded-full bg-amber-500" aria-hidden />
             Scadenze bandi
           </span>
+          {isProgettista && (
+            <>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="size-2 rounded-full bg-emerald-500" aria-hidden />
+                Disponibilità
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="size-2 rounded-full bg-violet-500" aria-hidden />
+                Appuntamenti
+              </span>
+            </>
+          )}
         </div>
       </div>
 
@@ -151,10 +193,10 @@ export default function Calendario() {
           <MonthGrid
             anno={anno}
             mese={mese}
-            eventsByDay={eventsByDay}
+            itemsByDay={itemsByDay}
             todayIso={todayIso}
             onDayClick={handleDayClick}
-            onOpenEvent={handleOpenEvent}
+            onOpenItem={handleOpenItem}
             onShowDay={setDayListFor}
           />
         </Card>
@@ -162,14 +204,14 @@ export default function Calendario() {
 
       <DayEventsDialog
         date={dayListFor}
-        events={dayListFor ? (eventsByDay.get(dayListFor) ?? []) : []}
+        items={dayListFor ? (itemsByDay.get(dayListFor) ?? []) : []}
         onClose={() => setDayListFor(null)}
         onCreate={() => {
           const date = dayListFor;
           setDayListFor(null);
           if (date) setDialog({ mode: "create", date });
         }}
-        onOpenEvent={handleOpenEvent}
+        onOpenItem={handleOpenItem}
       />
 
       <EventDialog state={dialog} onClose={() => setDialog(null)} />

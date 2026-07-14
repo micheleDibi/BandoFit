@@ -25,7 +25,7 @@ Stato del servizio. → `{"status": "ok"}`
 > **Link di dominio**: tutti i link nelle email (conferma, recovery, inviti) sono token **propri** di BandoFit (256 bit, salvati solo come SHA-256 in `auth_tokens`, monouso, con scadenza) e puntano al dominio dell'app. GoTrue non genera MAI link né invia email: Supabase è solo il deposito di utenti e dati (Admin API `create_user`/`update_user_by_id`).
 
 ### `POST /auth/register` (201)
-Registrazione. Body: `email`, `password` (≥8), `nome`, `cognome`, `azienda?`, `plan_slug`. Crea l'utente via Admin API (non confermato) e invia l'email di conferma col link `/conferma-email?token=...`. → `{"confirmation_required": true}`. Errori: `409` email già registrata o cooldown 60s, `400` password non valida, `400` se `plan_slug` punta a un piano `su_richiesta` (non selezionabile alla registrazione; il rifiuto avviene PRIMA del cooldown e non lo consuma).
+Registrazione. Body: `email`, `password` (≥8), `nome`, `cognome`, `azienda?`, `telefono` (obbligatorio; normalizzato e validato in **E.164** dal validator Pydantic — «347 1234567» → `+393471234567`, prefisso `+39` di default, lo zero dei fissi si conserva), `job_position_slug` (obbligatorio, dalla lookup `GET /job-positions`), `job_position_altro?` (testo libero, tenuto solo se la posizione è «Altro»), `plan_slug`. Crea l'utente via Admin API (non confermato) e invia l'email di conferma col link `/conferma-email?token=...`. → `{"confirmation_required": true}`. Errori: `409` email già registrata o cooldown 60s, `400` password non valida, `400` se `plan_slug` punta a un piano `su_richiesta`, `400` se `job_position_slug` è ignoto o disattivato, `422` telefono non valido (i rifiuti avvengono PRIMA del cooldown e non lo consumano). Telefono e posizione viaggiano nello `user_metadata` e li scrive il trigger `handle_new_user` (0022).
 
 ### `POST /auth/confirm`
 Body: `{"token": "..."}` (dal link email, monouso, TTL 48h). Conferma l'indirizzo e sblocca il login. → `{"email": "..."}` (per il prefill di `/login?email=`). `404` se non valido/scaduto/già usato.
@@ -57,6 +57,9 @@ Piani di abbonamento attivi, ordinati per `ordering`. Usato dallo step 2 della r
 
 `tipo_prezzo` (`importo`/`gratis`/`su_richiesta`) decide come la UI mostra il prezzo; con `su_richiesta` il piano **non è selezionabile alla registrazione** (`POST /auth/register` risponde `400` se lo slug punta a un piano su richiesta) né attivabile con il cambio piano self-serve — l'`etichetta_prezzo` sostituisce l'importo (fallback UI «Su richiesta»).
 
+### `GET /job-positions`
+Posizioni aziendali **attive**, ordinate per `ordering`: `[{id, nome, slug}]`. Pubblico come `GET /plans` (serve al form di registrazione, non autenticato). Lo `slug` è l'identificativo stabile che il form invia a `POST /auth/register`; il catalogo (migration 0022) è soft-disable e si amministra via SQL.
+
 ## Endpoint autenticati
 
 ### `GET /addons`
@@ -66,14 +69,18 @@ Catalogo **add-on attivi**, ordinati per `ordering`: `[{id, nome, slug, descrizi
 Profilo dell'utente corrente + abbonamento attivo con il piano.
 ```json
 { "profile": { "id": "uuid", "email": "...", "nome": "...", "cognome": "...", "azienda": null,
-               "telefono": null, "role": "cliente", "is_active": true, "created_at": "..." },
+               "telefono": null, "job_position_id": 3,
+               "job_position": { "id": 3, "nome": "CTO / Direttore Tecnico", "slug": "cto" },
+               "job_position_altro": null,
+               "role": "cliente", "is_active": true, "created_at": "..." },
   "subscription": { "id": "uuid", "status": "active", "data_inizio": "2026-07-03",
                     "data_scadenza": "2027-07-03", "plan": { ...come /plans... } } }
 ```
+`job_position` è presente anche se la voce è stata **disattivata** nel frattempo (catalogo soft-disable): chi l'aveva scelta continua a vederla.
 `role` ∈ `admin`/`cliente`/`progettista`. Per i progettisti — e per gli admin che hanno già un codice — la risposta include anche `progettista: {codice}` (il codice `PRG-00001`, assegnato dal sistema alla promozione, o alla prima proposta per gli admin, e immutabile); il progettista conserva tutte le funzionalità cliente.
 
 ### `PATCH /me`
-Aggiorna l'anagrafica. Body (tutti opzionali): `nome`, `cognome`, `azienda`, `telefono`. → come `GET /me`.
+Aggiorna l'anagrafica. Body (tutti opzionali): `nome`, `cognome`, `azienda`, `telefono`, `job_position_id`, `job_position_altro`. → come `GET /me`. Regole: il telefono è validato in E.164 **solo se la chiave è presente** (il client la omette quando il campo non cambia, così i valori pre-0022 a testo libero non bloccano il salvataggio degli altri campi; stringa vuota = azzeramento); `job_position_id` deve esistere ed essere **attivo** (`400` altrimenti — la FK da sola non intercetterebbe le voci disattivate), `null` azzera; `job_position_altro` sopravvive solo se la posizione (inviata o corrente) è «Altro», negli altri casi il server lo azzera.
 
 ### `POST /me/verify-cf`
 Verifica il **codice fiscale personale** all'Anagrafe Tributaria via openapi.it (**a pagamento**, ~0,05 € + IVA). Body: `{ "codice_fiscale": "..." }`. La validazione strutturale (checksum, omocodia inclusa) è locale e gratuita: gli input malformati non generano spesa. Idempotente: lo stesso CF già verificato risponde senza nuova chiamata. Protetta da lock per utente (doppio click/tab concorrenti) e cooldown tra tentativi a pagamento.

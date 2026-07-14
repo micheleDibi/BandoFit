@@ -22,7 +22,7 @@ Contiene i dati della piattaforma. Schema in `supabase/migrations/` (eseguire in
 | `num_account_aziendali` | integer | ≥ 1 |
 | `ordering`, `is_active` | int, bool | ordinamento in UI; i piani non si eliminano, si disattivano |
 
-**`profiles`** — 1:1 con `auth.users` (PK = `auth.users.id`, on delete cascade): `email` (denormalizzata per la ricerca admin), `nome`, `cognome`, `azienda`, `telefono`, `role` (enum `admin`/`cliente`/`progettista` — il terzo valore arriva dalla migration 0014, in un file a sé perché un valore enum non è usabile nella stessa transazione che lo crea), `is_active` (bool, default true).
+**`profiles`** — 1:1 con `auth.users` (PK = `auth.users.id`, on delete cascade): `email` (denormalizzata per la ricerca admin), `nome`, `cognome`, `azienda`, `telefono` (in **E.164** per i valori scritti dalla 0022 in poi; i precedenti restano testo libero finché non modificati), `job_position_id`/`job_position_altro` (posizione aziendale, migration 0022 — vedi sotto), `role` (enum `admin`/`cliente`/`progettista` — il terzo valore arriva dalla migration 0014, in un file a sé perché un valore enum non è usabile nella stessa transazione che lo crea), `is_active` (bool, default true).
 
 **`user_subscriptions`** — storico abbonamenti: `user_id` → profiles, `plan_id` → plans, `status` (enum `active`/`cancelled`/`expired`), `data_inizio`, `data_scadenza` (default +1 anno). Indice unico parziale `user_subscriptions_one_active` ⇒ **un solo abbonamento `active` per utente**; il cambio piano cancella l'attivo e ne crea uno nuovo (lo storico resta).
 
@@ -131,9 +131,15 @@ Ogni appuntamento nasce con la sua stanza Jitsi: colonna `videocall_token uuid n
 
 Base giuridica (GDPR): esecuzione del contratto — gli avvisi sono una feature del piano — con opt-out immediato (toggle in-app + one-click nelle email, stessa fonte di verità); il riferimento temporale è `coalesce(data_pubblicazione, created_at)` in Europe/Rome e il gate `ALERT_DATA_ATTIVAZIONE` impedisce il backfill al primo avvio.
 
+### Posizioni aziendali e telefono (migration 0022)
+
+- **`job_positions`** — lookup delle posizioni selezionabili alla registrazione e nel profilo, gemella di `addons` (id identity, `nome`, `slug` unico = identificativo STABILE, `ordering`, `is_active`): le voci **non si eliminano, si disattivano**. Seed di 29 posizioni («Altro» sempre in coda, slug `altro`); si amministra via SQL, non c'è CRUD admin.
+- **`profiles.job_position_id`** (FK, nullable, indicizzata) + **`profiles.job_position_altro`** (testo libero, valorizzato solo con la posizione «Altro» — il backend lo azzera negli altri casi). **Nessun backfill**: gli utenti pre-0022 e gli invitati in azienda restano NULL e completano dal Profilo; l'obbligatorietà vive SOLO nella validazione del form di registrazione (client + server), mai come vincolo di schema.
+- **Percorso dati alla registrazione**: form → `RegisterIn` → `user_metadata` (`telefono` già in E.164, `job_position_slug`, `job_position_altro`) → `handle_new_user` ridefinita, che risolve lo slug a id (`where slug = … and is_active`) con fallback **NULL** per slug ignoto/disattivato: il signup non si blocca mai. Il self-heal `ensure_profile` replica la stessa risoluzione.
+
 ### Funzioni e trigger
 
-- `handle_new_user()` — trigger `AFTER INSERT ON auth.users`: crea profilo + abbonamento iniziale (fallback `gratuito`); per gli utenti invitati in famiglia (metadata `family_invite='true'`) crea **solo il profilo**, senza abbonamento. **Difensiva: non solleva mai eccezioni.**
+- `handle_new_user()` — trigger `AFTER INSERT ON auth.users`: crea profilo + abbonamento iniziale (fallback `gratuito`); dalla 0022 scrive anche `telefono`, `job_position_id` (slug del metadata risolto a id, NULL se ignoto/disattivato) e `job_position_altro` (solo con posizione «Altro»); per gli utenti invitati in famiglia (metadata `family_invite='true'`) crea **solo il profilo**, senza abbonamento. **Difensiva: non solleva mai eccezioni.**
 - `fn_switch_plan(p_user_id, p_plan_id) → jsonb` — cambio piano atomico e family-aware: blocca i figli attivi (`child_plan_locked`); al downgrade revoca prima gli inviti pending (più recenti prima) e poi retrocede i figli attivi più recenti finché la famiglia rientra nel limite; i retrocessi ricevono un abbonamento Gratuito fresco. Ritorna `{demoted, revoked_pending}`.
 - `fn_create_family_member` / `fn_accept_invitation` / `fn_decline_invitation` / `fn_remove_family_member` / `fn_reactivate_family_member` — ciclo di vita dei membri, tutte sotto lock del padre (`FOR UPDATE`, serializza le race sul limite) e con errori a codice macchina (`detail`) per la mappatura API. L'accettazione e la riattivazione cancellano l'abbonamento proprio del membro (da lì eredita).
 - `fn_block_parent_delete()` — trigger `BEFORE DELETE` su profiles: un padre con membri collegati non è cancellabile.

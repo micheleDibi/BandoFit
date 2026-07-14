@@ -2,6 +2,13 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-14 — Telefono, posizione aziendale e robustezza password (migration 0022)
+
+- **La registrazione raccoglie telefono e posizione aziendale**: telefono obbligatorio, normalizzato e memorizzato in **E.164** (validatori gemelli `frontend/src/lib/telefono.ts` ↔ `backend/app/services/telefono.py`, default +39, lo zero dei fissi si conserva); posizione scelta da una nuova lookup **`job_positions`** (29 voci seminate, pattern addons: slug stabile, soft-disable) tramite `Combobox` ricercabile — con «Altro» compare un campo di testo libero (`job_position_altro`). I dati viaggiano nello user_metadata e li scrive il trigger `handle_new_user` ridefinito (slug ignoto/disattivato → NULL, il signup non si blocca mai). Endpoint pubblico `GET /job-positions`.
+- **Profilo**: telefono validato in E.164 e posizione modificabili; i campi viaggiano nel PATCH **solo se cambiati**, così i telefoni pre-esistenti a testo libero restano validi finché non modificati. **Nessun backfill**: utenti esistenti e invitati in azienda restano a NULL, senza prompt forzati (l'obbligo vive solo nel form di registrazione, client + server).
+- **Indicatore di robustezza password** in Registrazione, Reimposta password e Accetta invito: barra a 3 segmenti + etichetta Debole/Media/Forte (`role="status"`, mai solo colore), **informativo** (non blocca; resta la regola «almeno 8 caratteri»). Motore zxcvbn-ts caricato **lazy** alla prima digitazione: i dizionari restano fuori dal bundle iniziale delle pagine pubbliche.
+- ⚠️ Migration **0022** da eseguire dallo SQL Editor del DB primario **prima** del deploy del backend (le SELECT sul profilo embeddano `job_positions`: su uno schema non migrato fallirebbero).
+
 ## 2026-07-14 — La ricerca bandi copre anche i titoli mostrati in UI
 
 - La ricerca full-text (`q`) ora interroga, oltre ai campi grezzi dello scraping (`titolo_raw`, `descrizione_raw`), anche i campi **rielaborati mostrati in interfaccia**: `titolo`, `titolo_breve` e `descrizione_breve`. Prima, cercando le parole lette nel titolo di una card (che mostra `titolo_breve`) o nel dettaglio (`titolo`), spesso non si otteneva alcun risultato — su un campione del catalogo il titolo completo conteneva parole assenti dai campi cercati nel ~94% dei bandi.

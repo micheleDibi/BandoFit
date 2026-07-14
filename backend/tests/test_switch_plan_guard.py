@@ -129,6 +129,9 @@ class TestRegisterGuard:
                 nome="Mario",
                 cognome="Rossi",
                 azienda=None,
+                telefono="+393471234567",
+                job_position_slug="cto",
+                job_position_altro=None,
                 plan_slug="enterprise",
             )
         assert create_calls == []

@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.family import MeFamilyOut, PlanSwitchAdjustment
+from app.schemas.job_position import JobPositionOut
 from app.schemas.plan import PlanOut
 
 
@@ -27,6 +28,11 @@ class ProfileOut(BaseModel):
     telefono: str | None = None
     codice_fiscale: str | None = None
     cf_verified_at: datetime | None = None
+    # Posizione anche come oggetto (embed): una voce disattivata resta
+    # visibile a chi la aveva scelta (il catalogo è soft-disable).
+    job_position_id: int | None = None
+    job_position: JobPositionOut | None = None
+    job_position_altro: str | None = None
     role: Literal["admin", "cliente", "progettista"]
     is_active: bool
     created_at: datetime
@@ -53,7 +59,12 @@ class ProfileUpdate(BaseModel):
     nome: str | None = Field(default=None, max_length=100)
     cognome: str | None = Field(default=None, max_length=100)
     azienda: str | None = Field(default=None, max_length=200)
+    # Validato solo se presente nel payload: i valori legacy pre-0022 non in
+    # E.164 restano intatti finché non vengono modificati (il client omette
+    # la chiave quando il campo non cambia).
     telefono: str | None = Field(default=None, max_length=50)
+    job_position_id: int | None = None
+    job_position_altro: str | None = Field(default=None, max_length=100)
     # Salvabile anche senza verifica (il trigger DB azzera cf_verified_at se
     # cambia); la verifica all'Anagrafe è POST /me/verify-cf.
     codice_fiscale: str | None = Field(default=None, max_length=16)
@@ -69,6 +80,25 @@ class ProfileUpdate(BaseModel):
         if not is_valid_cf(cleaned):
             raise ValueError("Il codice fiscale non è formalmente valido")
         return cleaned
+
+    @field_validator("telefono")
+    @classmethod
+    def check_telefono(cls, value: str | None) -> str | None:
+        from app.services.telefono import is_valid_telefono, normalize_telefono
+
+        if value is None or value.strip() == "":
+            return None
+        normalized = normalize_telefono(value)
+        if not is_valid_telefono(normalized):
+            raise ValueError("Il numero di telefono non è valido")
+        return normalized
+
+    @field_validator("job_position_altro")
+    @classmethod
+    def clean_job_position_altro(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
 
 
 class SwitchPlanIn(BaseModel):

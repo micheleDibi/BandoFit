@@ -20,12 +20,13 @@ from app.schemas.user import (
     ProgettistaOut,
     SubscriptionOut,
 )
-from app.services import family_service
+from app.services import family_service, job_position_service
 
 logger = logging.getLogger("bandofit.users")
 
 PROFILE_SELECT = (
     "id,email,nome,cognome,azienda,telefono,codice_fiscale,cf_verified_at,"
+    "job_position_id,job_position_altro,job_positions(id,nome,slug),"
     "role,is_active,created_at"
 )
 
@@ -37,6 +38,15 @@ SUBSCRIPTION_EMBED = (
     "etichetta_prezzo,ai_check,"
     "alert_attivo,alert_giorni_preavviso,alert_ritardo_giorni,num_account_aziendali,ordering,is_active,updated_at))"
 )
+
+
+def profile_from_row(row: dict) -> ProfileOut:
+    """Costruisce ProfileOut da una riga di ``profiles``: l'embed PostgREST
+    arriva con il nome della tabella (``job_positions``), lo schema lo espone
+    al singolare; gli embed estranei (abbonamento) vengono scartati."""
+    data = {k: v for k, v in row.items() if k not in ("user_subscriptions", "job_positions")}
+    data["job_position"] = row.get("job_positions")
+    return ProfileOut(**data)
 
 
 def _map_subscription(rows: list | None) -> SubscriptionOut | None:
@@ -59,6 +69,13 @@ async def ensure_profile(primary, user_id: str, claims: dict) -> dict:
     """Crea un profilo (e un abbonamento Gratuito) per un utente autenticato che
     ne è privo, ripristinando un provisioning fallito a monte. Idempotente."""
     meta = claims.get("user_metadata") or {}
+    # Stessa risoluzione slug→posizione del trigger handle_new_user (0022),
+    # best-effort: slug assente/ignoto/disattivato → NULL.
+    position = None
+    if meta.get("job_position_slug"):
+        position = await job_position_service.get_active_by_slug(
+            primary, meta["job_position_slug"]
+        )
     await primary.table("profiles").upsert(
         {
             "id": user_id,
@@ -66,6 +83,13 @@ async def ensure_profile(primary, user_id: str, claims: dict) -> dict:
             "nome": (meta.get("nome") or meta.get("denominazione") or None),
             "cognome": (meta.get("cognome") or None),
             "azienda": (meta.get("azienda") or None),
+            "telefono": (meta.get("telefono") or None),
+            "job_position_id": position["id"] if position else None,
+            "job_position_altro": (
+                (meta.get("job_position_altro") or None)
+                if position and position["slug"] == job_position_service.SLUG_ALTRO
+                else None
+            ),
         },
         on_conflict="id",
     ).execute()
@@ -171,7 +195,7 @@ async def get_me(primary, user_id: str) -> MeOut:
             subscription = inherited
 
     return MeOut(
-        profile=ProfileOut(**{k: row[k] for k in row if k != "user_subscriptions"}),
+        profile=profile_from_row(row),
         subscription=subscription,
         family=family,
         progettista=await _fetch_progettista(primary, user_id, row["role"]),
@@ -180,6 +204,35 @@ async def get_me(primary, user_id: str) -> MeOut:
 
 async def update_profile(primary, user_id: str, data: ProfileUpdate) -> MeOut:
     changes = data.model_dump(exclude_unset=True)
+
+    if changes.get("job_position_id") is not None:
+        # La FK non basta: il catalogo è soft-disable, quindi bisogna
+        # intercettare anche le posizioni DISATTIVATE (e rispondere 400
+        # invece del 500 di una FK violation PostgREST).
+        position = await job_position_service.get_active_by_id(
+            primary, changes["job_position_id"]
+        )
+        if position is None:
+            raise BadRequestError("La posizione selezionata non è disponibile")
+        if position["slug"] != job_position_service.SLUG_ALTRO:
+            changes["job_position_altro"] = None
+    elif "job_position_id" in changes:
+        # Posizione azzerata esplicitamente: il testo libero decade con lei.
+        changes["job_position_altro"] = None
+    elif changes.get("job_position_altro") is not None:
+        # Testo libero senza posizione nel payload: vale solo se la posizione
+        # corrente è «Altro», altrimenti si azzera (coerenza lato server).
+        resp = (
+            await primary.table("profiles")
+            .select("job_positions(slug)")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+        current = (resp.data[0].get("job_positions") or {}) if resp.data else {}
+        if current.get("slug") != job_position_service.SLUG_ALTRO:
+            changes["job_position_altro"] = None
+
     if changes:
         await primary.table("profiles").update(changes).eq("id", user_id).execute()
     return await get_me(primary, user_id)
@@ -330,7 +383,7 @@ async def admin_list_users(
         codice = codici.get(row["id"])
         items.append(
             AdminUserOut(
-                profile=ProfileOut(**{k: row[k] for k in row if k != "user_subscriptions"}),
+                profile=profile_from_row(row),
                 subscription=subscription,
                 family=family,
                 progettista=ProgettistaOut(codice=codice) if codice else None,

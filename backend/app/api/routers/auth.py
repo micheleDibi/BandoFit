@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Query
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.api.deps import PrimaryClient
 from app.services import auth_service
@@ -13,7 +13,21 @@ class RegisterIn(BaseModel):
     nome: str = Field(min_length=1, max_length=100)
     cognome: str = Field(min_length=1, max_length=100)
     azienda: str | None = Field(default=None, max_length=200)
+    telefono: str = Field(min_length=1, max_length=50)
+    job_position_slug: str = Field(min_length=1, max_length=100)
+    # Testo libero abbinato alla posizione «Altro» (ignorato per le altre).
+    job_position_altro: str | None = Field(default=None, max_length=100)
     plan_slug: str = Field(default="gratuito", max_length=100)
+
+    @field_validator("telefono")
+    @classmethod
+    def check_telefono(cls, value: str) -> str:
+        from app.services.telefono import is_valid_telefono, normalize_telefono
+
+        normalized = normalize_telefono(value)
+        if not is_valid_telefono(normalized):
+            raise ValueError("Il numero di telefono non è valido")
+        return normalized
 
 
 class RegisterOut(BaseModel):
@@ -53,6 +67,9 @@ async def register(data: RegisterIn, primary: PrimaryClient) -> RegisterOut:
         nome=data.nome.strip(),
         cognome=data.cognome.strip(),
         azienda=(data.azienda or "").strip() or None,
+        telefono=data.telefono,
+        job_position_slug=data.job_position_slug.strip(),
+        job_position_altro=(data.job_position_altro or "").strip() or None,
         plan_slug=data.plan_slug,
     )
     return RegisterOut(**result)

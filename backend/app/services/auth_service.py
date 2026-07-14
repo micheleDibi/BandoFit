@@ -12,7 +12,7 @@ import time
 
 from app.core.config import get_settings
 from app.core.errors import BadRequestError, ConflictError, NotFoundError, UpstreamError
-from app.services import email_service, token_service
+from app.services import email_service, job_position_service, token_service
 
 logger = logging.getLogger("bandofit.auth")
 
@@ -57,6 +57,9 @@ async def register(
     nome: str,
     cognome: str,
     azienda: str | None,
+    telefono: str,
+    job_position_slug: str,
+    job_position_altro: str | None,
     plan_slug: str,
 ) -> dict:
     """Crea l'utente (Admin API, nessun link GoTrue) e invia l'email di
@@ -81,6 +84,17 @@ async def register(
     # Slug inesistente o disattivato: comportamento invariato, il trigger
     # handle_new_user ripiega sul piano Gratuito.
 
+    # La posizione viene da una lookup: uno slug ignoto o disattivato è un
+    # client fuori sincrono col catalogo. Anche questo PRIMA del cooldown.
+    position = await job_position_service.get_active_by_slug(primary, job_position_slug)
+    if position is None:
+        raise BadRequestError(
+            "La posizione selezionata non è più disponibile: "
+            "ricarica la pagina e riprova"
+        )
+    if position["slug"] != job_position_service.SLUG_ALTRO:
+        job_position_altro = None
+
     _check_cooldown("register", email)
     try:
         created = await primary.auth.admin.create_user(
@@ -92,6 +106,9 @@ async def register(
                     "nome": nome,
                     "cognome": cognome,
                     "azienda": azienda or None,
+                    "telefono": telefono,
+                    "job_position_slug": job_position_slug,
+                    "job_position_altro": job_position_altro,
                     "plan_slug": plan_slug,
                 },
             }

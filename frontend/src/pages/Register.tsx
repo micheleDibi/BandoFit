@@ -181,7 +181,7 @@ export default function Register() {
       </Link>
 
       {step === 1 ? (
-        <Card className="w-full max-w-md p-6 sm:p-8">
+        <Card className="w-full max-w-lg p-6 sm:p-8">
           <div className="flex items-center justify-between">
             <h1 className="font-display text-xl font-bold text-slate-900">Crea il tuo account</h1>
             <StepIndicator step={1} />
@@ -207,35 +207,50 @@ export default function Register() {
                 error={fieldErrors.cognome}
               />
             </div>
-            <TextField
-              label="Azienda"
-              autoComplete="organization"
-              value={form.azienda}
-              onChange={set("azienda")}
-              helper="Facoltativa"
-            />
-            <TextField
-              label="Telefono"
-              type="tel"
-              required
-              autoComplete="tel"
-              value={form.telefono}
-              onChange={set("telefono")}
-              error={fieldErrors.telefono}
-              helper={
-                !fieldErrors.telefono ? "Es. 347 1234567 — prefisso +39 automatico" : undefined
-              }
-            />
-            <Combobox
-              label="Posizione in azienda"
-              required
-              options={(positions ?? []).map((p) => ({ id: p.id, label: p.nome }))}
-              value={positionId}
-              onChange={setPositionId}
-              placeholder="Cerca la tua posizione…"
-              disabled={!positions}
-              error={fieldErrors.posizione}
-            />
+            {/* Contatti: email e telefono affiancati (impilati su mobile). */}
+            <div className="grid gap-4 sm:grid-cols-2 sm:gap-3">
+              <TextField
+                label="Email"
+                type="email"
+                required
+                autoComplete="email"
+                value={form.email}
+                onChange={set("email")}
+                error={fieldErrors.email}
+                placeholder="nome@azienda.it"
+              />
+              <TextField
+                label="Telefono"
+                type="tel"
+                required
+                autoComplete="tel"
+                value={form.telefono}
+                onChange={set("telefono")}
+                error={fieldErrors.telefono}
+                placeholder="347 1234567"
+                helper={!fieldErrors.telefono ? "Prefisso +39 automatico" : undefined}
+              />
+            </div>
+            {/* Azienda: nome e posizione sono una coppia semantica. */}
+            <div className="grid gap-4 sm:grid-cols-2 sm:gap-3">
+              <TextField
+                label="Azienda"
+                autoComplete="organization"
+                value={form.azienda}
+                onChange={set("azienda")}
+                helper="Facoltativa"
+              />
+              <Combobox
+                label="Posizione in azienda"
+                required
+                options={(positions ?? []).map((p) => ({ id: p.id, label: p.nome }))}
+                value={positionId}
+                onChange={setPositionId}
+                placeholder="Cerca…"
+                disabled={!positions}
+                error={fieldErrors.posizione}
+              />
+            </div>
             {positionsError && (
               <p className="text-sm text-red-600" role="alert">
                 Impossibile caricare le posizioni.{" "}
@@ -257,16 +272,6 @@ export default function Register() {
                 maxLength={100}
               />
             )}
-            <TextField
-              label="Email"
-              type="email"
-              required
-              autoComplete="email"
-              value={form.email}
-              onChange={set("email")}
-              error={fieldErrors.email}
-              placeholder="nome@azienda.it"
-            />
             <div className="relative">
               <TextField
                 label="Password"

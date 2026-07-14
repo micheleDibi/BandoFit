@@ -176,7 +176,8 @@ export default function Profilo() {
             onChange={(e) => setForm((f) => ({ ...f, telefono: e.target.value }))}
             autoComplete="tel"
             error={telefonoError ?? undefined}
-            helper={!telefonoError ? "Es. 347 1234567 — prefisso +39 automatico" : undefined}
+            placeholder="347 1234567"
+            helper={!telefonoError ? "Prefisso +39 automatico" : undefined}
           />
           <div>
             <Combobox

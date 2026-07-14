@@ -109,12 +109,16 @@ class TestJunctionFilters:
 
 
 class TestFullText:
-    def test_fts_uses_wfts_italian_on_both_columns(self, client):
+    def test_fts_uses_wfts_italian_on_all_columns(self, client):
+        # Grezzi + rielaborati: l'utente cerca le parole che legge in card.
         params = params_of(build(client, BandiFilters(q="transizione digitale")))
         [value] = params["or"]
         assert value == (
             "(titolo_raw.wfts(italian).transizione digitale,"
-            "descrizione_raw.wfts(italian).transizione digitale)"
+            "descrizione_raw.wfts(italian).transizione digitale,"
+            "titolo.wfts(italian).transizione digitale,"
+            "titolo_breve.wfts(italian).transizione digitale,"
+            "descrizione_breve.wfts(italian).transizione digitale)"
         )
 
     def test_sanitize_strips_grammar_breaking_chars(self):

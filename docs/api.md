@@ -186,7 +186,7 @@ Parametri query:
 |---|---|---|
 | `page` / `page_size` | int | default 1 / 20, `page_size` max 50 |
 | `sort` | string | `pubblicazione_desc` (default: più recenti prima), `scadenza_asc`, `scadenza_desc`, `importo_desc` |
-| `q` | string | ricerca full-text italiana (websearch) su titolo e descrizione |
+| `q` | string | ricerca full-text italiana (websearch) su titoli e descrizioni, sia grezzi (`titolo_raw`, `descrizione_raw`) sia rielaborati mostrati in UI (`titolo`, `titolo_breve`, `descrizione_breve`) |
 | `stato` | csv | tra `aperto`, `chiuso`, `in apertura prossimamente` |
 | `livello` | string | `flash_bando` o `guida_bando` |
 | `tipologie`, `modalita`, `programmi` | csv di id | filtri su colonne dirette |

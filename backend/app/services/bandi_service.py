@@ -49,6 +49,17 @@ DETAIL_SELECT = (
     "bando_codici_ateco(codici_ateco(id,codice,descrizione))"
 )
 
+# Colonne della ricerca full-text: i grezzi dello scraping E i rielaborati
+# mostrati in UI (card = titolo_breve/descrizione_breve, dettaglio = titolo);
+# senza questi ultimi le parole lette in card sarebbero spesso introvabili.
+FTS_COLUMNS = (
+    "titolo_raw",
+    "descrizione_raw",
+    "titolo",
+    "titolo_breve",
+    "descrizione_breve",
+)
+
 # faccetta -> (alias, junction, colonna id)
 JUNCTION_FACETS = {
     "regioni": ("f_reg", "bando_regioni", "regione_id"),
@@ -140,8 +151,11 @@ def apply_filters(query, filters: BandiFilters, today: date | None = None):
     if filters.q:
         term = sanitize_fts_term(filters.q)
         if term:
+            # Sia i campi grezzi dello scraping sia quelli rielaborati mostrati
+            # in UI: l'utente cerca le parole che legge in card (titolo_breve)
+            # e nel dettaglio (titolo), spesso assenti dal testo grezzo.
             query = query.or_(
-                f"titolo_raw.wfts(italian).{term},descrizione_raw.wfts(italian).{term}"
+                ",".join(f"{col}.wfts(italian).{term}" for col in FTS_COLUMNS)
             )
     if filters.stato:
         query = query.in_("stato_bando", filters.stato)

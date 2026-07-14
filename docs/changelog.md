@@ -2,6 +2,11 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-14 — La ricerca bandi copre anche i titoli mostrati in UI
+
+- La ricerca full-text (`q`) ora interroga, oltre ai campi grezzi dello scraping (`titolo_raw`, `descrizione_raw`), anche i campi **rielaborati mostrati in interfaccia**: `titolo`, `titolo_breve` e `descrizione_breve`. Prima, cercando le parole lette nel titolo di una card (che mostra `titolo_breve`) o nel dettaglio (`titolo`), spesso non si otteneva alcun risultato — su un campione del catalogo il titolo completo conteneva parole assenti dai campi cercati nel ~94% dei bandi.
+- Nessuna migration: `wfts` calcola il tsvector al volo sul DB secondario.
+
 ## 2026-07-13 — Alert email sui nuovi bandi compatibili (migration 0021)
 
 - **La promessa «Alert personalizzati (in arrivo)» diventa reale**: quando un bando entra in piattaforma, gli utenti con azienda **compatibile** (pre-check, punteggio ≥ 60) ricevono un'email **digest** giornaliera — titolo, ente, importo, scadenza evidenziata, «perché lo vedi» coi nomi delle dimensioni in comune, link — con il **ritardo del piano** (nuova colonna `alert_ritardo_giorni`: Advisor 1 · Pro 7 · Smart 14 giorni dalla pubblicazione; riferimento = `data_pubblicazione`, o l'ingestione se assente; Gratuito escluso). Il vecchio `alert_giorni_preavviso` resta per il futuro promemoria scadenze.

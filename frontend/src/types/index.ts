@@ -143,6 +143,12 @@ export interface AlertSettings {
 
 export type UserRole = "admin" | "cliente" | "progettista";
 
+export interface JobPosition {
+  id: number;
+  nome: string;
+  slug: string;
+}
+
 export interface Profile {
   id: string;
   email: string;
@@ -152,6 +158,11 @@ export interface Profile {
   telefono: string | null;
   codice_fiscale: string | null;
   cf_verified_at: string | null;
+  job_position_id: number | null;
+  /** Presente anche se la voce è stata disattivata (catalogo soft-disable). */
+  job_position: JobPosition | null;
+  /** Testo libero abbinato alla posizione «Altro». */
+  job_position_altro: string | null;
   role: UserRole;
   is_active: boolean;
   created_at: string;

@@ -17,6 +17,9 @@ export function Combobox({
   onChange,
   placeholder = "Cerca…",
   disabled = false,
+  required = false,
+  error,
+  helper,
 }: {
   label: string;
   options: ComboboxOption[];
@@ -24,6 +27,9 @@ export function Combobox({
   onChange: (id: number | null) => void;
   placeholder?: string;
   disabled?: boolean;
+  required?: boolean;
+  error?: string;
+  helper?: string;
 }) {
   const inputId = useId();
   const listboxId = useId();
@@ -94,6 +100,12 @@ export function Combobox({
     <div className="space-y-1.5" ref={containerRef}>
       <label htmlFor={inputId} className="block text-sm font-medium text-slate-700">
         {label}
+        {required && (
+          <span className="text-red-500" aria-hidden>
+            {" "}
+            *
+          </span>
+        )}
       </label>
       <div className="relative">
         <input
@@ -102,6 +114,7 @@ export function Combobox({
           aria-expanded={open}
           aria-controls={listboxId}
           aria-autocomplete="list"
+          aria-invalid={!!error}
           autoComplete="off"
           disabled={disabled}
           value={open ? search : (selected?.label ?? "")}
@@ -117,6 +130,7 @@ export function Combobox({
             "placeholder:text-slate-400 transition-colors duration-150",
             "focus:border-brand-500 focus:outline-2 focus:outline-offset-0 focus:outline-brand-500/30",
             "disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500",
+            error && "border-red-400 focus:border-red-500",
           )}
         />
         <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
@@ -179,6 +193,13 @@ export function Combobox({
           </ul>
         )}
       </div>
+      {error ? (
+        <p className="text-sm text-red-600" role="alert">
+          {error}
+        </p>
+      ) : helper ? (
+        <p className="text-sm text-slate-500">{helper}</p>
+      ) : null}
     </div>
   );
 }

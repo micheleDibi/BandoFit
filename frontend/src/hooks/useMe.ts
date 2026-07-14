@@ -20,7 +20,11 @@ export function useUpdateProfile() {
       nome?: string;
       cognome?: string;
       azienda?: string;
-      telefono?: string;
+      // Omessi quando invariati: il server valida solo le chiavi presenti
+      // (i telefoni legacy non in E.164 restano intatti finché non cambiano).
+      telefono?: string | null;
+      job_position_id?: number | null;
+      job_position_altro?: string | null;
       codice_fiscale?: string | null;
     }) => (await api.patch<Me>("/me", data)).data,
     onSuccess: (me) => queryClient.setQueryData(["me"], me),

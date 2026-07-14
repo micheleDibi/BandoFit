@@ -6,14 +6,18 @@ import { PreferenzeTeaser } from "../components/preferences/PreferenzeTeaser";
 import { AbbonamentoTeaser } from "../components/shared/AbbonamentoTeaser";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { Combobox } from "../components/ui/Combobox";
 import { Dialog } from "../components/ui/Dialog";
 import { TextField } from "../components/ui/Field";
 import { ErrorState, Skeleton } from "../components/ui/states";
+import { useJobPositions } from "../hooks/useJobPositions";
 import { useMe, useUpdateProfile, useVerifyCf } from "../hooks/useMe";
 import { apiErrorMessage } from "../lib/api";
+import { isValidTelefono, normalizeTelefono } from "../lib/telefono";
 
 export default function Profilo() {
   const { data: me, isPending, isError, error, refetch } = useMe();
+  const { data: positions } = useJobPositions();
   const updateProfile = useUpdateProfile();
   const verifyCf = useVerifyCf();
 
@@ -24,9 +28,12 @@ export default function Profilo() {
     telefono: "",
     codice_fiscale: "",
   });
+  const [positionId, setPositionId] = useState<number | null>(null);
+  const [posizioneAltro, setPosizioneAltro] = useState("");
   const [saved, setSaved] = useState(false);
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [cfError, setCfError] = useState<string | null>(null);
+  const [telefonoError, setTelefonoError] = useState<string | null>(null);
 
   useEffect(() => {
     if (me) {
@@ -37,6 +44,8 @@ export default function Profilo() {
         telefono: me.profile.telefono ?? "",
         codice_fiscale: me.profile.codice_fiscale ?? "",
       });
+      setPositionId(me.profile.job_position_id);
+      setPosizioneAltro(me.profile.job_position_altro ?? "");
     }
   }, [me]);
 
@@ -57,23 +66,63 @@ export default function Profilo() {
   const cfVerified =
     !!me?.profile.cf_verified_at && cfInput === (me.profile.codice_fiscale ?? "");
 
+  // Una posizione DISATTIVATA dopo la scelta resta visibile a chi la aveva:
+  // si aggiunge in testa alle opzioni se non è più nel catalogo attivo.
+  const positionOptions = (positions ?? []).map((p) => ({ id: p.id, label: p.nome }));
+  const currentPosition = me.profile.job_position;
+  if (currentPosition && !positionOptions.some((o) => o.id === currentPosition.id)) {
+    positionOptions.unshift({ id: currentPosition.id, label: currentPosition.nome });
+  }
+  const selectedSlug =
+    positions?.find((p) => p.id === positionId)?.slug ??
+    (currentPosition && currentPosition.id === positionId ? currentPosition.slug : null);
+
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     setSaved(false);
     setCfError(null);
+    setTelefonoError(null);
     // Validazione locale: un CF incompleto non deve bloccare il salvataggio
     // degli altri campi con un errore generico del backend.
     if (cfInput && cfInput.length !== 16) {
       setCfError("Il codice fiscale deve avere 16 caratteri (o lascialo vuoto).");
       return;
     }
-    await updateProfile.mutateAsync({
+
+    const payload: Parameters<typeof updateProfile.mutateAsync>[0] = {
       nome: form.nome.trim(),
       cognome: form.cognome.trim(),
       azienda: form.azienda.trim(),
-      telefono: form.telefono.trim(),
       codice_fiscale: cfInput || null,
-    });
+    };
+
+    // Telefono: la chiave viaggia solo se il valore è cambiato, così un
+    // numero pre-esistente non in E.164 non blocca il resto del form.
+    const telefonoRaw = form.telefono.trim();
+    if (telefonoRaw !== (me.profile.telefono ?? "")) {
+      if (telefonoRaw === "") {
+        payload.telefono = null;
+      } else {
+        const normalized = normalizeTelefono(telefonoRaw);
+        if (!isValidTelefono(normalized)) {
+          setTelefonoError("Inserisci un numero di telefono valido (es. 347 1234567).");
+          return;
+        }
+        payload.telefono = normalized;
+      }
+    }
+
+    // Posizione e testo «Altro»: stesse regole (chiave omessa se invariata).
+    const altroTrim = posizioneAltro.trim();
+    const posizioneCambiata = positionId !== me.profile.job_position_id;
+    if (posizioneCambiata) {
+      payload.job_position_id = positionId;
+      payload.job_position_altro = selectedSlug === "altro" ? altroTrim || null : null;
+    } else if (altroTrim !== (me.profile.job_position_altro ?? "")) {
+      payload.job_position_altro = altroTrim || null;
+    }
+
+    await updateProfile.mutateAsync(payload);
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
@@ -122,7 +171,26 @@ export default function Profilo() {
             value={form.telefono}
             onChange={(e) => setForm((f) => ({ ...f, telefono: e.target.value }))}
             autoComplete="tel"
+            error={telefonoError ?? undefined}
+            helper={!telefonoError ? "Es. 347 1234567 — prefisso +39 automatico" : undefined}
           />
+          <Combobox
+            label="Posizione in azienda"
+            options={positionOptions}
+            value={positionId}
+            onChange={setPositionId}
+            placeholder="Cerca la tua posizione…"
+            disabled={!positions && positionOptions.length === 0}
+          />
+          {selectedSlug === "altro" && (
+            <TextField
+              label="Specifica la posizione"
+              value={posizioneAltro}
+              onChange={(e) => setPosizioneAltro(e.target.value)}
+              helper="Facoltativa"
+              maxLength={100}
+            />
+          )}
           <div className="sm:col-span-2">
             <div className="flex items-end gap-2">
               <div className="max-w-xs flex-1">

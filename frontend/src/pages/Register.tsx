@@ -5,17 +5,21 @@ import { Logo } from "../components/layout/Logo";
 import { PlanCard } from "../components/shared/PlanCard";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { Combobox } from "../components/ui/Combobox";
 import { TextField } from "../components/ui/Field";
 import { ErrorState, Skeleton } from "../components/ui/states";
+import { useJobPositions } from "../hooks/useJobPositions";
 import { usePlans } from "../hooks/usePlans";
 import { api, apiErrorMessage } from "../lib/api";
 import { cn } from "../lib/cn";
 import { supabase } from "../lib/supabase";
+import { isValidTelefono, normalizeTelefono } from "../lib/telefono";
 
 interface FormData {
   nome: string;
   cognome: string;
   azienda: string;
+  telefono: string;
   email: string;
   password: string;
   confirm: string;
@@ -25,10 +29,13 @@ const EMPTY_FORM: FormData = {
   nome: "",
   cognome: "",
   azienda: "",
+  telefono: "",
   email: "",
   password: "",
   confirm: "",
 };
+
+type FieldErrors = Partial<Record<keyof FormData | "posizione", string>>;
 
 function StepIndicator({ step }: { step: 1 | 2 }) {
   return (
@@ -55,10 +62,17 @@ export default function Register() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { data: plans, isPending: plansLoading, isError: plansError, refetch } = usePlans();
+  const {
+    data: positions,
+    isError: positionsError,
+    refetch: refetchPositions,
+  } = useJobPositions();
 
   const [step, setStep] = useState<1 | 2>(1);
   const [form, setForm] = useState<FormData>(EMPTY_FORM);
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormData, string>>>({});
+  const [positionId, setPositionId] = useState<number | null>(null);
+  const [posizioneAltro, setPosizioneAltro] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [showPassword, setShowPassword] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<string>(searchParams.get("piano") ?? "gratuito");
   const [error, setError] = useState<string | null>(null);
@@ -81,10 +95,18 @@ export default function Register() {
   const set = (key: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
 
+  const selectedPosition = positions?.find((p) => p.id === positionId) ?? null;
+
   const validateStep1 = (): boolean => {
-    const errors: Partial<Record<keyof FormData, string>> = {};
+    const errors: FieldErrors = {};
     if (!form.nome.trim()) errors.nome = "Il nome è obbligatorio.";
     if (!form.cognome.trim()) errors.cognome = "Il cognome è obbligatorio.";
+    if (!form.telefono.trim()) {
+      errors.telefono = "Il numero di telefono è obbligatorio.";
+    } else if (!isValidTelefono(normalizeTelefono(form.telefono))) {
+      errors.telefono = "Inserisci un numero di telefono valido (es. 347 1234567).";
+    }
+    if (positionId === null) errors.posizione = "Seleziona la tua posizione in azienda.";
     if (!/^\S+@\S+\.\S+$/.test(form.email)) errors.email = "Inserisci un indirizzo email valido.";
     if (form.password.length < 8) errors.password = "La password deve avere almeno 8 caratteri.";
     if (form.confirm !== form.password) errors.confirm = "Le password non coincidono.";
@@ -110,6 +132,10 @@ export default function Register() {
         nome: form.nome.trim(),
         cognome: form.cognome.trim(),
         azienda: form.azienda.trim() || null,
+        telefono: normalizeTelefono(form.telefono),
+        job_position_slug: selectedPosition?.slug ?? "",
+        job_position_altro:
+          selectedPosition?.slug === "altro" ? posizioneAltro.trim() || null : null,
         plan_slug: selectedPlan,
       });
       if (data.confirmation_required) {
@@ -176,6 +202,49 @@ export default function Register() {
               onChange={set("azienda")}
               helper="Facoltativa"
             />
+            <TextField
+              label="Telefono"
+              type="tel"
+              required
+              autoComplete="tel"
+              value={form.telefono}
+              onChange={set("telefono")}
+              error={fieldErrors.telefono}
+              helper={
+                !fieldErrors.telefono ? "Es. 347 1234567 — prefisso +39 automatico" : undefined
+              }
+            />
+            <Combobox
+              label="Posizione in azienda"
+              required
+              options={(positions ?? []).map((p) => ({ id: p.id, label: p.nome }))}
+              value={positionId}
+              onChange={setPositionId}
+              placeholder="Cerca la tua posizione…"
+              disabled={!positions}
+              error={fieldErrors.posizione}
+            />
+            {positionsError && (
+              <p className="text-sm text-red-600" role="alert">
+                Impossibile caricare le posizioni.{" "}
+                <button
+                  type="button"
+                  onClick={() => refetchPositions()}
+                  className="cursor-pointer font-medium underline underline-offset-2"
+                >
+                  Riprova
+                </button>
+              </p>
+            )}
+            {selectedPosition?.slug === "altro" && (
+              <TextField
+                label="Specifica la posizione"
+                value={posizioneAltro}
+                onChange={(e) => setPosizioneAltro(e.target.value)}
+                helper="Facoltativa"
+                maxLength={100}
+              />
+            )}
             <TextField
               label="Email"
               type="email"

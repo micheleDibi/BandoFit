@@ -80,7 +80,9 @@ class TestUpdateProfilePosizione:
 
         monkeypatch.setattr(user_service, "get_me", fake_get_me)
 
-    async def test_posizione_valida_azzera_altro_se_non_altro(self):
+    async def test_posizione_valida_passa_cosi_come_inviata(self):
+        # La coerenza col testo «Altro» è del trigger di riga (0022, test db):
+        # il service valida solo che la posizione esista e sia attiva.
         primary = FakePrimary(selects={"job_positions": [POSIZIONE_CTO]})
         result = await user_service.update_profile(
             primary,
@@ -89,18 +91,7 @@ class TestUpdateProfilePosizione:
         )
         assert result == "me-sentinel"
         [update] = primary.ops_for("profiles", "update")
-        assert update["job_position_id"] == 3
-        assert update["job_position_altro"] is None
-
-    async def test_posizione_altro_mantiene_il_testo(self):
-        primary = FakePrimary(selects={"job_positions": [POSIZIONE_ALTRO]})
-        await user_service.update_profile(
-            primary,
-            USER["id"],
-            ProfileUpdate(job_position_id=29, job_position_altro="Responsabile qualità"),
-        )
-        [update] = primary.ops_for("profiles", "update")
-        assert update["job_position_altro"] == "Responsabile qualità"
+        assert update == {"job_position_id": 3, "job_position_altro": "testo residuo"}
 
     async def test_posizione_disattivata_respinta_senza_update(self):
         # get_active_by_id non trova nulla (voce disattivata o inesistente).
@@ -111,33 +102,14 @@ class TestUpdateProfilePosizione:
             )
         assert primary.ops_for("profiles", "update") == []
 
-    async def test_azzeramento_posizione_azzera_anche_altro(self):
+    async def test_azzeramento_posizione_senza_lookup(self):
+        # job_position_id esplicitamente None: nessuna validazione necessaria.
         primary = FakePrimary()
         await user_service.update_profile(
             primary, USER["id"], ProfileUpdate(job_position_id=None)
         )
         [update] = primary.ops_for("profiles", "update")
-        assert update == {"job_position_id": None, "job_position_altro": None}
-
-    async def test_altro_da_solo_vale_solo_se_posizione_corrente_e_altro(self):
-        primary = FakePrimary(
-            selects={"profiles": [{"job_positions": {"slug": "altro"}}]}
-        )
-        await user_service.update_profile(
-            primary, USER["id"], ProfileUpdate(job_position_altro="Aggiornato")
-        )
-        [update] = primary.ops_for("profiles", "update")
-        assert update == {"job_position_altro": "Aggiornato"}
-
-    async def test_altro_da_solo_azzerato_se_posizione_corrente_diversa(self):
-        primary = FakePrimary(
-            selects={"profiles": [{"job_positions": {"slug": "cto"}}]}
-        )
-        await user_service.update_profile(
-            primary, USER["id"], ProfileUpdate(job_position_altro="Da azzerare")
-        )
-        [update] = primary.ops_for("profiles", "update")
-        assert update == {"job_position_altro": None}
+        assert update == {"job_position_id": None}
 
     async def test_telefono_assente_non_viene_toccato(self):
         # Il payload senza la chiave telefono non deve produrre alcun campo

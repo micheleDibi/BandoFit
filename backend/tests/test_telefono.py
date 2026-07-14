@@ -32,6 +32,10 @@ class TestValidazione:
 
     def test_rifiuti(self):
         assert not is_valid_telefono("+39abc123")
+        # Cifre Unicode (fullwidth/arabe): il \d di JavaScript le rifiuta,
+        # quello di Python le accetterebbe senza re.ASCII — gemelli identici.
+        assert not is_valid_telefono("+39３４７１２３４５６７")
+        assert not is_valid_telefono("+39٣٤٧١٢٣٤٥٦٧")
         assert not is_valid_telefono("3471234567")  # non normalizzato
         assert not is_valid_telefono("+012345678")  # prefisso paese con 0
         assert not is_valid_telefono("+3912345")  # 5 cifre nazionali: troppo corto

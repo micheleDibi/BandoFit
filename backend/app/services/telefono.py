@@ -15,7 +15,9 @@ import re
 
 _SEPARATORI = re.compile(r"[\s./()\-]")
 # E.164: prefisso paese che non inizia per 0, max 15 cifre totali.
-_E164 = re.compile(r"^\+[1-9]\d{5,14}$")
+# re.ASCII: senza, \d accetterebbe qualsiasi cifra Unicode (es. ３４７ o ٣٤٧)
+# che il gemello JS rifiuta — i due validatori devono restare identici.
+_E164 = re.compile(r"^\+[1-9]\d{5,14}$", re.ASCII)
 
 
 def normalize_telefono(value: str) -> str:

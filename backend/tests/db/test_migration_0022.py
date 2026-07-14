@@ -116,6 +116,56 @@ class TestTriggerRegistrazione:
         assert slug == "pro"
 
 
+class TestCoerenzaAltro:
+    """Il trigger di riga trg_profiles_job_position_altro impone la coerenza
+    posizione/testo libero su OGNI scrittura: è la difesa race-free che il
+    backend non potrebbe dare con un check read-then-write."""
+
+    def _id_di(self, db, slug: str) -> int:
+        return db.execute(
+            "select id from public.job_positions where slug = %s", (slug,)
+        ).fetchone()[0]
+
+    def test_cambio_posizione_azzera_il_testo(self, db):
+        signup(db, UTENTE, "u22@test.it", {
+            "job_position_slug": "altro", "job_position_altro": "Testo",
+        })
+        db.execute(
+            "update public.profiles set job_position_id = %s where id = %s",
+            (self._id_di(db, "cto"), UTENTE),
+        )
+        assert profilo(db, UTENTE)[2] is None
+
+    def test_testo_su_posizione_non_altro_azzerato(self, db):
+        # Lo scenario della race: UPDATE del solo testo mentre la posizione
+        # (riga) non è più «Altro» → il trigger lo azzera comunque.
+        signup(db, UTENTE, "u22@test.it", {"job_position_slug": "cto"})
+        db.execute(
+            "update public.profiles set job_position_altro = 'orfano' where id = %s",
+            (UTENTE,),
+        )
+        assert profilo(db, UTENTE)[2] is None
+
+    def test_testo_su_posizione_altro_sopravvive(self, db):
+        signup(db, UTENTE, "u22@test.it", {"job_position_slug": "altro"})
+        db.execute(
+            "update public.profiles set job_position_altro = 'Responsabile qualità' "
+            "where id = %s",
+            (UTENTE,),
+        )
+        assert profilo(db, UTENTE)[2] == "Responsabile qualità"
+
+    def test_azzeramento_posizione_azzera_il_testo(self, db):
+        signup(db, UTENTE, "u22@test.it", {
+            "job_position_slug": "altro", "job_position_altro": "Testo",
+        })
+        db.execute(
+            "update public.profiles set job_position_id = null where id = %s",
+            (UTENTE,),
+        )
+        assert profilo(db, UTENTE) == (None, None, None)
+
+
 class TestFkProfili:
     def test_id_inesistente_rifiutato(self, db):
         signup(db, UTENTE, "u22@test.it")

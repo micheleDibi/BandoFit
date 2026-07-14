@@ -156,9 +156,38 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- 4) Coerenza posizione/testo libero a livello di RIGA: il testo «Altro»
+--    sopravvive solo se la posizione della riga è la voce con slug 'altro'.
+--    Race-free per costruzione (il trigger vede i valori finali della riga,
+--    a differenza di un check read-then-write nel backend) e copre ogni
+--    percorso di scrittura: signup, self-heal, PATCH /me.
+-- ---------------------------------------------------------------------------
+create or replace function public.fn_sync_job_position_altro()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if new.job_position_altro is not null
+     and (new.job_position_id is null
+          or not exists (
+            select 1 from public.job_positions
+            where id = new.job_position_id and slug = 'altro'
+          )) then
+    new.job_position_altro := null;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger trg_profiles_job_position_altro
+  before insert or update on public.profiles
+  for each row execute function public.fn_sync_job_position_altro();
+
+-- ---------------------------------------------------------------------------
 -- Sicurezza: pattern del repo — RLS deny-all (nessuna policy) + revoche.
--- (handle_new_user restituisce trigger: non è esponibile come RPC, niente
--- revoke, coerente con 0001/0003.)
+-- (handle_new_user e fn_sync_job_position_altro restituiscono trigger: non
+-- sono esponibili come RPC, niente revoke, coerente con 0001/0003.)
 -- ---------------------------------------------------------------------------
 alter table public.job_positions enable row level security;
 revoke all on public.job_positions from anon, authenticated;

@@ -214,25 +214,10 @@ async def update_profile(primary, user_id: str, data: ProfileUpdate) -> MeOut:
         )
         if position is None:
             raise BadRequestError("La posizione selezionata non è disponibile")
-        if position["slug"] != job_position_service.SLUG_ALTRO:
-            changes["job_position_altro"] = None
-    elif "job_position_id" in changes:
-        # Posizione azzerata esplicitamente: il testo libero decade con lei.
-        changes["job_position_altro"] = None
-    elif changes.get("job_position_altro") is not None:
-        # Testo libero senza posizione nel payload: vale solo se la posizione
-        # corrente è «Altro», altrimenti si azzera (coerenza lato server).
-        resp = (
-            await primary.table("profiles")
-            .select("job_positions(slug)")
-            .eq("id", user_id)
-            .limit(1)
-            .execute()
-        )
-        current = (resp.data[0].get("job_positions") or {}) if resp.data else {}
-        if current.get("slug") != job_position_service.SLUG_ALTRO:
-            changes["job_position_altro"] = None
 
+    # La coerenza posizione/testo «Altro» la impone il trigger di riga
+    # trg_profiles_job_position_altro (0022): race-free per costruzione,
+    # a differenza di un check read-then-write fatto qui.
     if changes:
         await primary.table("profiles").update(changes).eq("id", user_id).execute()
     return await get_me(primary, user_id)

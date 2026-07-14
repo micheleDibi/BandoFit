@@ -5,6 +5,7 @@ import { Logo } from "../components/layout/Logo";
 import { Button, LinkButton } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/Field";
+import { PasswordStrengthMeter } from "../components/ui/PasswordStrengthMeter";
 import { api, apiErrorMessage } from "../lib/api";
 import { supabase } from "../lib/supabase";
 
@@ -132,6 +133,7 @@ export default function ReimpostaPassword() {
                   )}
                 </button>
               </div>
+              <PasswordStrengthMeter password={password} userInputs={["bandofit"]} />
               <TextField
                 label="Conferma password"
                 type={showPassword ? "text" : "password"}

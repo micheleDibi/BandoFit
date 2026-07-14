@@ -7,6 +7,7 @@ import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Combobox } from "../components/ui/Combobox";
 import { TextField } from "../components/ui/Field";
+import { PasswordStrengthMeter } from "../components/ui/PasswordStrengthMeter";
 import { ErrorState, Skeleton } from "../components/ui/states";
 import { useJobPositions } from "../hooks/useJobPositions";
 import { usePlans } from "../hooks/usePlans";
@@ -275,6 +276,10 @@ export default function Register() {
                 {showPassword ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
               </button>
             </div>
+            <PasswordStrengthMeter
+              password={form.password}
+              userInputs={[form.email, form.nome, form.cognome, form.azienda, "bandofit"]}
+            />
             <TextField
               label="Conferma password"
               type={showPassword ? "text" : "password"}

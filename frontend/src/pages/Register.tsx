@@ -121,6 +121,17 @@ export default function Register() {
   };
 
   const handleSubmit = async () => {
+    // La posizione può sparire dal catalogo tra lo step 1 e il submit (voce
+    // disattivata + refetch): mai degradare a slug vuoto (422 generico) —
+    // si torna allo step 1 con l'errore sul campo.
+    if (!selectedPosition) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        posizione: "Seleziona la tua posizione in azienda.",
+      }));
+      setStep(1);
+      return;
+    }
     setError(null);
     setInfo(null);
     setLoading(true);
@@ -134,9 +145,9 @@ export default function Register() {
         cognome: form.cognome.trim(),
         azienda: form.azienda.trim() || null,
         telefono: normalizeTelefono(form.telefono),
-        job_position_slug: selectedPosition?.slug ?? "",
+        job_position_slug: selectedPosition.slug,
         job_position_altro:
-          selectedPosition?.slug === "altro" ? posizioneAltro.trim() || null : null,
+          selectedPosition.slug === "altro" ? posizioneAltro.trim() || null : null,
         plan_slug: selectedPlan,
       });
       if (data.confirmation_required) {

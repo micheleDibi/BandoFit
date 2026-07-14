@@ -17,7 +17,11 @@ import { isValidTelefono, normalizeTelefono } from "../lib/telefono";
 
 export default function Profilo() {
   const { data: me, isPending, isError, error, refetch } = useMe();
-  const { data: positions } = useJobPositions();
+  const {
+    data: positions,
+    isError: positionsError,
+    refetch: refetchPositions,
+  } = useJobPositions();
   const updateProfile = useUpdateProfile();
   const verifyCf = useVerifyCf();
 
@@ -174,14 +178,28 @@ export default function Profilo() {
             error={telefonoError ?? undefined}
             helper={!telefonoError ? "Es. 347 1234567 — prefisso +39 automatico" : undefined}
           />
-          <Combobox
-            label="Posizione in azienda"
-            options={positionOptions}
-            value={positionId}
-            onChange={setPositionId}
-            placeholder="Cerca la tua posizione…"
-            disabled={!positions && positionOptions.length === 0}
-          />
+          <div>
+            <Combobox
+              label="Posizione in azienda"
+              options={positionOptions}
+              value={positionId}
+              onChange={setPositionId}
+              placeholder="Cerca la tua posizione…"
+              disabled={!positions && positionOptions.length === 0}
+            />
+            {positionsError && (
+              <p className="mt-1.5 text-sm text-red-600" role="alert">
+                Impossibile caricare le posizioni.{" "}
+                <button
+                  type="button"
+                  onClick={() => refetchPositions()}
+                  className="cursor-pointer font-medium underline underline-offset-2"
+                >
+                  Riprova
+                </button>
+              </p>
+            )}
+          </div>
           {selectedSlug === "altro" && (
             <TextField
               label="Specifica la posizione"

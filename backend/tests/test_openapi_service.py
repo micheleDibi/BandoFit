@@ -224,10 +224,11 @@ def fake_company_response(monkeypatch):
 
         return CompanyResponse(editable=True, company=None)
 
-    # L'import (`_persist_import`) legge i dati dell'azienda con la variante
-    # owner-scoped; il GET pubblico passa dal resolver dell'azienda attiva.
+    # L'import (`_persist_import`) legge i dati dell'azienda appena scritta per
+    # `id`; il GET pubblico passa dal resolver dell'azienda attiva.
     monkeypatch.setattr("app.services.company_service.get_company", _stub)
     monkeypatch.setattr("app.services.company_service.company_response_for_owner", _stub)
+    monkeypatch.setattr("app.services.company_service.company_response_for_id", _stub)
 
 
 COMPANY_ROW = {
@@ -246,32 +247,30 @@ class TestGuardieIniziali:
     async def test_non_configurato(self):
         with pytest.raises(OpenapiNotConfiguredError):
             await openapi_service.preview_import(
-                FakePrimary(), None, fake_openapi(enabled=False), USER, PIVA
+                FakePrimary(), None, fake_openapi(enabled=False), _active(), PIVA
             )
 
-    async def test_figlio_attivo_bloccato(self, monkeypatch):
-        async def membership(primary, user_id):
-            return {"status": "active", "parent_id": "x"}
-
-        monkeypatch.setattr("app.services.family_service.get_membership", membership)
+    async def test_figlio_attivo_bloccato(self):
+        # Il resolver marca il figlio attivo come editable=False: il servizio
+        # blocca sia l'anteprima sia la conferma (non è una scorciatoia).
+        figlio = _active(editable=False)
         with pytest.raises(ForbiddenError):
             await openapi_service.preview_import(
-                FakePrimary(), None, fake_openapi(), USER, PIVA
+                FakePrimary(), None, fake_openapi(), figlio, PIVA
             )
-        # la conferma non è una scorciatoia per aggirare il permesso
         primary = FakePrimary(selects={"company_import_drafts": [draft_row()]})
         with pytest.raises(ForbiddenError):
-            await openapi_service.confirm_import(primary, None, USER, PIVA)
+            await openapi_service.confirm_import(primary, None, figlio, PIVA)
         assert primary.ops_for("company_data", "upsert") == []
 
     async def test_piva_mancante_e_invalida(self):
         with pytest.raises(BadRequestError):
             await openapi_service.preview_import(
-                FakePrimary(), None, fake_openapi(), USER, None
+                FakePrimary(), None, fake_openapi(), _active(), None
             )
         with pytest.raises(BadRequestError):
             await openapi_service.preview_import(
-                FakePrimary(), None, fake_openapi(), USER, "14061981009"
+                FakePrimary(), None, fake_openapi(), _active(), "14061981009"
             )
 
 
@@ -288,7 +287,7 @@ class TestCooldownELock:
             }
         )
         with pytest.raises(AppError) as exc:
-            await openapi_service.preview_import(primary, None, fake_openapi(), USER, PIVA)
+            await openapi_service.preview_import(primary, None, fake_openapi(), _active(), PIVA)
         assert exc.value.code == "import_cooldown"
         assert primary.rpcs == []  # nessun lock nemmeno tentato
 
@@ -301,7 +300,7 @@ class TestCooldownELock:
             }
         )
         with pytest.raises(AppError) as exc:
-            await openapi_service.preview_import(primary, None, fake_openapi(), USER, PIVA)
+            await openapi_service.preview_import(primary, None, fake_openapi(), _active(), PIVA)
         assert exc.value.code == "import_cooldown"
 
     async def test_cooldown_scaduto_procede(self):
@@ -313,7 +312,7 @@ class TestCooldownELock:
             }
         )
         await openapi_service.preview_import(
-            primary, None, fake_openapi(result=it_full_payload()), USER, PIVA
+            primary, None, fake_openapi(result=it_full_payload()), _active(), PIVA
         )
         assert primary.ops_for("company_import_drafts", "upsert")
 
@@ -333,7 +332,7 @@ class TestCooldownELock:
 
         openapi = SimpleNamespace(enabled=True, sandbox=False, it_full=it_full)
         with pytest.raises(AppError) as exc:
-            await openapi_service.preview_import(primary, None, openapi, USER, PIVA)
+            await openapi_service.preview_import(primary, None, openapi, _active(), PIVA)
         assert exc.value.code == "import_in_progress"
         assert called == []  # la chiamata a pagamento non parte
         # il messaggio dichiara l'attesa reale, non «qualche istante»
@@ -350,7 +349,7 @@ class TestCooldownELock:
                 "company_import_drafts": [draft_row()],
             }
         )
-        result = await openapi_service.confirm_import(primary, None, USER, PIVA)
+        result = await openapi_service.confirm_import(primary, None, _active(), PIVA)
         assert result.sandbox is False
         assert primary.ops_for("company_data", "upsert")[0]["fetch_count"] == 2
 
@@ -363,7 +362,7 @@ class TestCooldownELock:
             lock=False,
         )
         with pytest.raises(AppError) as exc:
-            await openapi_service.confirm_import(primary, None, USER, PIVA)
+            await openapi_service.confirm_import(primary, None, _active(), PIVA)
         assert exc.value.code == "import_in_progress"
         assert primary.ops_for("company_data", "upsert") == []
         # TTL breve: la conferma non aspetta nessuna rete esterna
@@ -377,7 +376,7 @@ class TestEsitiChiamata:
         primary = FakePrimary(selects={"company_profiles": [COMPANY_ROW]})
         with pytest.raises(NotFoundError):
             await openapi_service.preview_import(
-                primary, None, fake_openapi(error=OpenapiInvalidIdError()), USER, PIVA
+                primary, None, fake_openapi(error=OpenapiInvalidIdError()), _active(), PIVA
             )
         events = primary.ops_for("api_usage_events", "insert")
         assert events[0]["outcome"] == "error"
@@ -388,7 +387,7 @@ class TestEsitiChiamata:
         primary = FakePrimary(selects={"company_profiles": [COMPANY_ROW]})
         with pytest.raises(OpenapiTimeoutError):
             await openapi_service.preview_import(
-                primary, None, fake_openapi(error=OpenapiTimeoutError()), USER, PIVA
+                primary, None, fake_openapi(error=OpenapiTimeoutError()), _active(), PIVA
             )
         events = primary.ops_for("api_usage_events", "insert")
         assert events[0]["outcome"] == "timeout_unknown"
@@ -403,7 +402,7 @@ class TestEsitiChiamata:
         primary = FakePrimary(selects={"company_profiles": [COMPANY_ROW]})
         with pytest.raises(OpenapiUpstreamError):
             await openapi_service.preview_import(
-                primary, None, fake_openapi(result=data), USER, PIVA
+                primary, None, fake_openapi(result=data), _active(), PIVA
             )
         assert primary.ops_for("company_import_drafts", "upsert") == []
         events = primary.ops_for("api_usage_events", "insert")
@@ -415,7 +414,7 @@ class TestAnteprima:
     async def test_non_scrive_nulla_sui_dati_azienda(self):
         primary = FakePrimary(selects={"company_profiles": [COMPANY_ROW]})
         preview = await openapi_service.preview_import(
-            primary, None, fake_openapi(result=it_full_payload()), USER, PIVA
+            primary, None, fake_openapi(result=it_full_payload()), _active(), PIVA
         )
         # ledger success con costo pieno, lock rilasciato
         events = primary.ops_for("api_usage_events", "insert")
@@ -456,7 +455,7 @@ class TestAnteprima:
             called.append(piva)
 
         openapi = SimpleNamespace(enabled=True, sandbox=False, it_full=it_full)
-        preview = await openapi_service.preview_import(primary, None, openapi, USER, PIVA)
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA)
         assert preview.reused is True
         assert called == []
         assert primary.rpcs == []
@@ -471,7 +470,7 @@ class TestAnteprima:
             }
         )
         preview = await openapi_service.preview_import(
-            primary, None, fake_openapi(result=it_full_payload()), USER, PIVA
+            primary, None, fake_openapi(result=it_full_payload()), _active(), PIVA
         )
         assert preview.reused is False
         assert primary.ops_for("api_usage_events", "insert")[0]["cost_cents"] == 30
@@ -479,7 +478,7 @@ class TestAnteprima:
     async def test_sandbox_costo_zero(self):
         primary = FakePrimary(selects={"company_profiles": [COMPANY_ROW]})
         preview = await openapi_service.preview_import(
-            primary, None, fake_openapi(result=it_full_payload(), sandbox=True), USER, PIVA
+            primary, None, fake_openapi(result=it_full_payload(), sandbox=True), _active(), PIVA
         )
         assert preview.sandbox is True
         assert primary.ops_for("api_usage_events", "insert")[0]["cost_cents"] == 0
@@ -494,7 +493,7 @@ class TestConferma:
                 "company_import_drafts": [draft_row()],
             }
         )
-        result = await openapi_service.confirm_import(primary, None, USER, PIVA)
+        result = await openapi_service.confirm_import(primary, None, _active(), PIVA)
         # gratuita: nessuna chiamata a pagamento, nessuna riga nel registro consumi
         assert primary.ops_for("api_usage_events", "insert") == []
         # autofill: solo update dei campi vuoti (ragione_sociale utente intatta)
@@ -525,7 +524,7 @@ class TestConferma:
     async def test_senza_draft_o_con_draft_scaduto(self):
         primary = FakePrimary(selects={"company_profiles": [COMPANY_ROW]})
         with pytest.raises(AppError) as exc:
-            await openapi_service.confirm_import(primary, None, USER, PIVA)
+            await openapi_service.confirm_import(primary, None, _active(), PIVA)
         assert exc.value.code == "draft_not_found"
 
         scaduto = FakePrimary(
@@ -535,7 +534,7 @@ class TestConferma:
             }
         )
         with pytest.raises(AppError) as exc:
-            await openapi_service.confirm_import(scaduto, None, USER, PIVA)
+            await openapi_service.confirm_import(scaduto, None, _active(), PIVA)
         assert exc.value.code == "draft_not_found"
         assert scaduto.ops_for("company_data", "upsert") == []
 
@@ -548,7 +547,7 @@ class TestConferma:
             }
         )
         with pytest.raises(AppError) as exc:
-            await openapi_service.confirm_import(primary, None, USER, PIVA)
+            await openapi_service.confirm_import(primary, None, _active(), PIVA)
         assert exc.value.code == "draft_mismatch"
         assert primary.ops_for("company_data", "upsert") == []
         assert primary.rpcs == []  # nemmeno il lock
@@ -568,7 +567,8 @@ class TestConferma:
 
         FakeQuery.execute = execute
         try:
-            await openapi_service.confirm_import(primary, None, USER, PIVA)
+            # owner senza azienda: company_id None → bootstrap della prima azienda
+            await openapi_service.confirm_import(primary, None, _active(company_id=None), PIVA)
         finally:
             FakeQuery.execute = original_execute
 
@@ -583,7 +583,7 @@ class TestConferma:
                 "company_import_drafts": [draft_row(sandbox=True)],
             }
         )
-        result = await openapi_service.confirm_import(primary, None, USER, PIVA)
+        result = await openapi_service.confirm_import(primary, None, _active(), PIVA)
         assert result.sandbox is True
         assert primary.ops_for("company_data", "upsert")[0]["sandbox"] is True
 

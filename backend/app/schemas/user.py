@@ -51,6 +51,9 @@ class MeOut(BaseModel):
     # Valorizzato per i progettisti e per gli admin che hanno già un codice
     # (assegnato alla prima proposta inviata — parità admin, 0019).
     progettista: ProgettistaOut | None = None
+    # Limite EFFETTIVO di aziende gestibili (override utente > piano > 1). >1
+    # per gli Advisor: il frontend lo usa per mostrare lo switcher azienda.
+    max_aziende: int = 1
     # Presente solo nella risposta di un cambio piano che ha causato retrocessioni.
     plan_switch_adjustment: PlanSwitchAdjustment | None = None
 
@@ -133,3 +136,7 @@ class AdminUserOut(BaseModel):
 class AdminUserUpdate(BaseModel):
     role: Literal["admin", "cliente", "progettista"] | None = None
     is_active: bool | None = None
+    # Override del limite aziende: intero ≥1 per alzarlo/abbassarlo, `null`
+    # esplicito per rimuoverlo (torna al default di piano). La chiave omessa
+    # non tocca il valore (exclude_unset la distingue dal `null`).
+    max_aziende_override: int | None = Field(default=None, ge=1)

@@ -71,6 +71,18 @@ _RPC_ERRORS: dict[str, tuple[type[AppError], str]] = {
         UpstreamError,
         "Configurazione dei piani incompleta: piano Gratuito mancante",
     ),
+    # Gestione multi-azienda (fn_create_company / fn_soft_delete_company, 0023/0024)
+    "owner_not_found": (NotFoundError, "Titolare non trovato"),
+    "company_limit_reached": (
+        ConflictError,
+        "Hai raggiunto il numero massimo di aziende del tuo piano",
+    ),
+    "ragione_sociale_required": (BadRequestError, "La ragione sociale è obbligatoria"),
+    "partita_iva_invalid": (
+        BadRequestError,
+        "La partita IVA non è valida: controlla le 11 cifre",
+    ),
+    "company_not_found": (NotFoundError, "Azienda non trovata o già rimossa"),
 }
 
 

@@ -113,7 +113,7 @@ class TestLoadCompanyFacets:
     badge di compatibilità che mentirebbe."""
 
     async def test_multisede_e_ateco_secondari(self):
-        invalidate_company_facets(USER["id"])
+        invalidate_company_facets("c1")
         primary = _primary(
             {"ateco_id": 620, "regione_id": 12, "settore_id": 7, "beneficiari": []},
             {"ateco_secondari": ["63.01"], "regioni_ids": [12, 15]},
@@ -123,7 +123,7 @@ class TestLoadCompanyFacets:
         assert facets.ateco_ids == {620, 630}  # principale + secondario
 
     async def test_azienda_non_sufficiente_resta_utile_al_preset(self):
-        invalidate_company_facets(USER["id"])
+        invalidate_company_facets("c1")
         # Nessun ATECO, nessuna regione: solo beneficiari dichiarati a mano.
         primary = _primary({"beneficiari": [{"id": 2, "nome": "PMI"}]})
 
@@ -131,12 +131,12 @@ class TestLoadCompanyFacets:
         assert facets.sufficiente is False
         assert facets.beneficiari_ids == {2}  # il preset può filtrare lo stesso
 
-        invalidate_company_facets(USER["id"])
+        invalidate_company_facets("c1")
         # Il badge invece non deve comparire.
         assert await compatibility.get_company_facets(primary, _active(), lookups()) is None
 
     async def test_senza_azienda_nessun_facet(self):
-        invalidate_company_facets(USER["id"])
+        invalidate_company_facets("c1")
         primary = _primary(None)
         # Nessuna azienda attiva → il resolver darebbe company_id None.
         assert await compatibility.load_company_facets(
@@ -298,8 +298,8 @@ class TestCacheFacets:
         assert "owner-1" not in compatibility._cache
 
     def test_invalidate_normalizza_la_chiave(self):
-        # gli owner_id in cache sono stringhe (str(uuid)): invalidare con un
-        # non-str non deve mancare la voce.
+        # le chiavi in cache (company_id) sono stringhe (str(uuid)): invalidare
+        # con un non-str non deve mancare la voce.
         compatibility._cache["42"] = (None, time.monotonic())
         invalidate_company_facets(42)
         assert "42" not in compatibility._cache

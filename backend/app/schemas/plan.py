@@ -26,6 +26,11 @@ class PlanOut(BaseModel):
     # NULL = feature esclusa dal piano anche con alert_attivo.
     alert_ritardo_giorni: int | None = None
     num_account_aziendali: int
+    # Numero di aziende gestibili col piano (asse distinto da
+    # num_account_aziendali = posti persona). Default 1 per robustezza: gli
+    # embed di user_service serializzano il piano con lo stesso schema e uno
+    # schema non ancora migrato non deve rompere /me.
+    max_aziende: int = 1
     ordering: int
     is_active: bool
     updated_at: datetime | None = None
@@ -44,6 +49,7 @@ class PlanCreate(BaseModel):
     # 0 = alert il giorno stesso della pubblicazione; None = feature esclusa.
     alert_ritardo_giorni: int | None = Field(default=None, ge=0)
     num_account_aziendali: int = Field(ge=1)
+    max_aziende: int = Field(default=1, ge=1)
     ordering: int = 0
     is_active: bool = True
 
@@ -67,5 +73,6 @@ class PlanUpdate(BaseModel):
     # None esplicito disattiva gli alert nuovi-bandi per il piano.
     alert_ritardo_giorni: int | None = Field(default=None, ge=0)
     num_account_aziendali: int | None = Field(default=None, ge=1)
+    max_aziende: int | None = Field(default=None, ge=1)
     ordering: int | None = None
     is_active: bool | None = None

@@ -2,7 +2,6 @@ from fastapi import APIRouter
 
 from app.api.deps import (
     ActiveCompanyDep,
-    CurrentUser,
     OpenapiDep,
     PrimaryClient,
     SecondaryClient,
@@ -30,14 +29,15 @@ async def get_company(active: ActiveCompanyDep, primary: PrimaryClient) -> Compa
 @router.put("", response_model=CompanyResponse)
 async def save_company(
     data: CompanyIn,
-    user: CurrentUser,
+    active: ActiveCompanyDep,
     primary: PrimaryClient,
     secondary: SecondaryClient,
 ) -> CompanyResponse:
-    """Scrittura: bloccata SOLO per i figli attivi (che ereditano i dati della
-    famiglia); pending e retrocessi sono account indipendenti con dati propri —
-    la coerenza con `editable` di GET è verificata nel service."""
-    return await company_service.upsert_company(primary, secondary, user, data)
+    """Scrittura sull'azienda attiva: bloccata SOLO per i figli attivi (che
+    ereditano i dati della famiglia); pending e retrocessi sono account
+    indipendenti con dati propri. Se l'owner non ha ancora un'azienda, questo
+    è il bootstrap della prima."""
+    return await company_service.upsert_company(primary, secondary, active, data)
 
 
 @router.get("/facets", response_model=CompanyFacetsOut)
@@ -67,29 +67,30 @@ async def company_facets(
 @router.post("/import/preview", response_model=ImportPreview)
 async def preview_import(
     data: ImportIn,
-    user: CurrentUser,
+    active: ActiveCompanyDep,
     primary: PrimaryClient,
     secondary: SecondaryClient,
     openapi: OpenapiDep,
 ) -> ImportPreview:
-    """Recupera IT-full da openapi.it (A PAGAMENTO) e mostra cosa si sta per
-    importare. NON scrive nulla: il payload resta in staging fino alla conferma.
-    Protetto da cooldown e lock; riusa gratis un'anteprima già pagata."""
+    """Recupera IT-full da openapi.it (A PAGAMENTO) per l'azienda attiva e
+    mostra cosa si sta per importare. NON scrive nulla: il payload resta in
+    staging fino alla conferma. Protetto da cooldown e lock; riusa gratis
+    un'anteprima già pagata."""
     return await openapi_service.preview_import(
-        primary, secondary, openapi, user, data.partita_iva
+        primary, secondary, openapi, active, data.partita_iva
     )
 
 
 @router.post("/import/confirm", response_model=ImportResult, status_code=201)
 async def confirm_import(
     data: ImportConfirmIn,
-    user: CurrentUser,
+    active: ActiveCompanyDep,
     primary: PrimaryClient,
     secondary: SecondaryClient,
 ) -> ImportResult:
-    """Scrive i dati dell'anteprima e compila i campi aziendali vuoti. Nessuna
-    chiamata al provider: gratis, e fuori dal cooldown."""
-    return await openapi_service.confirm_import(primary, secondary, user, data.partita_iva)
+    """Scrive i dati dell'anteprima sull'azienda attiva e compila i campi
+    aziendali vuoti. Nessuna chiamata al provider: gratis, e fuori dal cooldown."""
+    return await openapi_service.confirm_import(primary, secondary, active, data.partita_iva)
 
 
 @router.get("/dossier", response_model=DossierResponse)

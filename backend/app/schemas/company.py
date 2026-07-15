@@ -1,5 +1,7 @@
 import re
+from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -94,6 +96,44 @@ class CompanyOut(CompanyIn):
 class CompanyResponse(BaseModel):
     editable: bool
     company: CompanyOut | None = None
+
+
+class CompanyCreate(BaseModel):
+    """Creazione di una nuova azienda gestita (Advisor). Ragione sociale e
+    P.IVA sono obbligatorie subito (colonne NOT NULL): niente "azienda vuota".
+    L'import IT-full e il resto dei campi sono azioni successive."""
+
+    ragione_sociale: str = Field(min_length=1, max_length=300)
+    partita_iva: str
+
+    @field_validator("partita_iva")
+    @classmethod
+    def check_partita_iva(cls, value: str) -> str:
+        cleaned = value.strip().upper().removeprefix("IT").replace(" ", "")
+        if not re.fullmatch(r"[0-9]{11}", cleaned):
+            raise ValueError("La partita IVA deve essere composta da 11 cifre")
+        return cleaned
+
+
+class CompanySummary(BaseModel):
+    """Voce dell'elenco delle aziende gestite (per lo switcher e la pagina
+    Aziende). Non i dati completi: solo l'essenziale per identificarle."""
+
+    id: UUID
+    ragione_sociale: str
+    partita_iva: str
+    created_at: datetime
+    # True per l'azienda che il resolver userebbe di default (la più vecchia
+    # viva) — utile alla UI prima che l'utente scelga.
+    attiva: bool = False
+
+
+class CompaniesOut(BaseModel):
+    aziende: list[CompanySummary] = Field(default_factory=list)
+    # Limite effettivo (override utente > piano > 1) e quante ne sono in uso
+    # (vive): la UI disabilita "crea" quando usate >= max.
+    max_aziende: int = 1
+    usate: int = 0
 
 
 class CompanyFacetsOut(BaseModel):

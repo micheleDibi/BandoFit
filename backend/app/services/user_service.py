@@ -36,7 +36,8 @@ SUBSCRIPTION_EMBED = (
     "user_subscriptions(id,status,data_inizio,data_scadenza,"
     "subscription_plans(id,nome,slug,descrizione,prezzo_annuale,tipo_prezzo,"
     "etichetta_prezzo,ai_check,"
-    "alert_attivo,alert_giorni_preavviso,alert_ritardo_giorni,num_account_aziendali,ordering,is_active,updated_at))"
+    "alert_attivo,alert_giorni_preavviso,alert_ritardo_giorni,num_account_aziendali,"
+    "max_aziende,ordering,is_active,updated_at))"
 )
 
 
@@ -135,8 +136,8 @@ async def _fetch_active_subscription(primary, user_id: str) -> SubscriptionOut |
             "id,status,data_inizio,data_scadenza,"
             "subscription_plans(id,nome,slug,descrizione,prezzo_annuale,tipo_prezzo,"
             "etichetta_prezzo,ai_check,"
-            "alert_attivo,alert_giorni_preavviso,alert_ritardo_giorni,num_account_aziendali,ordering,"
-            "is_active,updated_at)"
+            "alert_attivo,alert_giorni_preavviso,alert_ritardo_giorni,num_account_aziendali,"
+            "max_aziende,ordering,is_active,updated_at)"
         )
         .eq("user_id", user_id)
         .eq("status", "active")
@@ -194,11 +195,14 @@ async def get_me(primary, user_id: str) -> MeOut:
             inherited.inherited = True
             subscription = inherited
 
+    from app.services import company_service  # import locale: evita cicli
+
     return MeOut(
         profile=profile_from_row(row),
         subscription=subscription,
         family=family,
         progettista=await _fetch_progettista(primary, user_id, row["role"]),
+        max_aziende=await company_service.effective_max_aziende(primary, user_id),
     )
 
 
@@ -317,8 +321,8 @@ async def admin_list_users(
                 "user_id,id,status,data_inizio,data_scadenza,"
                 "subscription_plans(id,nome,slug,descrizione,prezzo_annuale,tipo_prezzo,"
                 "etichetta_prezzo,ai_check,"
-                "alert_attivo,alert_giorni_preavviso,alert_ritardo_giorni,num_account_aziendali,ordering,"
-                "is_active,updated_at)"
+                "alert_attivo,alert_giorni_preavviso,alert_ritardo_giorni,num_account_aziendali,"
+                "max_aziende,ordering,is_active,updated_at)"
             )
             .in_("user_id", active_parent_ids)
             .eq("status", "active")
@@ -444,6 +448,16 @@ async def admin_update_user(
         )
         if not resp.data:
             raise NotFoundError("Utente non trovato")
+
+    # Cambiare l'override del limite aziende cambia il limite EFFETTIVO: si
+    # riconciliano le aziende (archivia le eccedenti se il limite scende,
+    # riattiva le archiviate se risale). Best-effort: la RPC non solleva errori
+    # di business (ritorna se l'utente non c'è, e il .update sopra l'avrebbe
+    # già intercettato).
+    if "max_aziende_override" in changes:
+        await primary.rpc(
+            "fn_reconcile_companies", {"p_owner_id": str(target_user_id)}
+        ).execute()
 
     # I cambi di ruolo che non passano dalla RPC (demozioni, nomina admin)
     # sono comunque transizioni sensibili: best-effort, come gli altri audit.

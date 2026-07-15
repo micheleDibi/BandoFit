@@ -2,6 +2,14 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-15 — Gestione multi-azienda per l'Advisor: N aziende per owner (fase 2, migration 0024)
+
+- **Un Advisor può ora possedere N aziende** con scritture segregate. Nuovi endpoint **owner-only** (`ParentUser`): `GET /me/aziende` (elenco vivo + `max_aziende` effettivo + `usate`), `POST /me/aziende` (crea via `fn_create_company`: ragione sociale + P.IVA obbligatorie, limite race-free → `409 company_limit_reached`), `DELETE /me/aziende/{id}` (soft-delete). `/me` ora espone `max_aziende` (limite effettivo: >1 = Advisor).
+- **Scritture del Gruppo B convertite a `id`** (non più `parent_id`, che perde l'unicità): `PUT /me/company` e l'import IT-full (`preview`/`confirm`) operano sull'**azienda attiva** (`X-Active-Company`) e, se l'owner non ne ha ancora, fanno il **bootstrap** della prima. La cache dei facet di compatibilità passa da chiave `owner_id` a **`company_id`** (aziende diverse dello stesso owner non devono mischiarsi — sarebbe stato un bleed di segregazione).
+- **Migration 0024** (in lockstep col backend): **DROP** del vincolo `company_profiles_parent_id_key`; nuova RPC `fn_reconcile_companies(owner)` che allinea le aziende vive al limite (archivia le più recenti oltre il limite, riattiva le archiviate se risale — invariante «vive = le N più vecchie non-cancellate»); `fn_switch_plan` ridefinita per chiamarla → **downgrade da Advisor archivia** le aziende eccedenti (dati conservati, sola lettura), l'upgrade le riattiva. Anche l'admin, cambiando `max_aziende_override` (nuovo campo di `PATCH /admin/users`), riconcilia. I lock/draft di import restano per-owner (importazioni serializzate: scelta v1 documentata).
+- **Piani**: `subscription_plans.max_aziende` esposto/creabile/modificabile via `/plans` e `/admin/plans` (default 1; asse distinto da `num_account_aziendali`). Aggiunto a **tutte** le SELECT di piano (evita che una colonna mancante rompa `/me`).
+- ⚠️ Migration **0024** da eseguire dallo SQL Editor del DB primario **prima** del deploy del backend della fase 2. Suite: 572 unit + 225 DB verdi, ruff sulla baseline (11 E402).
+
 ## 2026-07-15 — Gestione multi-azienda per l'Advisor: azienda attiva lato server (fase 1)
 
 - **Plumbing dell'azienda attiva**, senza ancora switch né UI: nuovo resolver `deps.active_company` → `ActiveCompany{company_id, owner_id, editable}`. Risolve chi possiede i dati (riusa `family_service.owner_and_editable`: un figlio attivo resta in sola lettura) e su **quale azienda** operare. Header opzionale **`X-Active-Company`**, ri-autorizzato a ogni richiesta (l'azienda deve appartenere all'owner ed essere viva: `deleted_at`/`archived_at` nulli), altrimenti `404`; un valore non-UUID è `404`. Senza header il default è l'azienda viva più vecchia dell'owner.

@@ -218,14 +218,6 @@ async def _release_lock(primary, parent_id: str) -> None:
         logger.exception("release del lock di import fallita (scadrà da solo)")
 
 
-async def _guard_editable(primary, user: dict) -> str:
-    """Stessa regola di scrittura dei dati aziendali: un figlio ATTIVO eredita."""
-    membership = await family_service.get_membership(primary, user["id"])
-    if membership and membership["status"] == "active":
-        raise ForbiddenError("I dati aziendali li gestisce il titolare dell'azienda")
-    return str(user["id"])
-
-
 def _resolve_piva(partita_iva: str | None, company_row: dict | None) -> str:
     piva = partita_iva or (company_row or {}).get("partita_iva")
     if not piva:
@@ -300,17 +292,24 @@ def _build_preview(
 
 
 async def preview_import(
-    primary, secondary, openapi: OpenapiClient, user: dict, partita_iva: str | None
+    primary, secondary, openapi: OpenapiClient, active, partita_iva: str | None
 ) -> ImportPreview:
     """Fase 1: recupera IT-full (A PAGAMENTO) e mostra cosa si sta per importare.
 
     NON scrive nulla sui dati aziendali. Il payload pagato finisce in staging
-    (`company_import_drafts`) e la conferma lo consuma senza ripagarlo."""
+    (`company_import_drafts`) e la conferma lo consuma senza ripagarlo. Opera
+    sull'azienda ATTIVA (multi-azienda); il lock/draft restano per owner."""
     if not openapi.enabled:
         raise OpenapiNotConfiguredError()
 
-    parent_id = await _guard_editable(primary, user)
-    company_row = await _fetch_company_row(primary, parent_id)
+    if not active.editable:
+        raise ForbiddenError("I dati aziendali li gestisce il titolare dell'azienda")
+    parent_id = active.owner_id
+    company_row = (
+        await _fetch_company_row_by_id(primary, active.company_id)
+        if active.company_id
+        else None
+    )
     piva = _resolve_piva(partita_iva, company_row)
 
     settings = get_settings()
@@ -428,12 +427,15 @@ async def preview_import(
 
 
 async def confirm_import(
-    primary, secondary, user: dict, partita_iva: str | None
+    primary, secondary, active, partita_iva: str | None
 ) -> ImportResult:
-    """Fase 2: scrive i dati dell'anteprima. NON chiama il provider, quindi
-    non costa nulla e non passa dal cooldown (che protegge il fetch, non la
-    scrittura). Il draft viene consumato: una seconda conferma non trova nulla."""
-    parent_id = await _guard_editable(primary, user)
+    """Fase 2: scrive i dati dell'anteprima sull'azienda ATTIVA. NON chiama il
+    provider, quindi non costa nulla e non passa dal cooldown (che protegge il
+    fetch, non la scrittura). Il draft viene consumato: una seconda conferma
+    non trova nulla."""
+    if not active.editable:
+        raise ForbiddenError("I dati aziendali li gestisce il titolare dell'azienda")
+    parent_id = active.owner_id
 
     draft = await _fetch_draft(primary, parent_id)
     if draft is None:
@@ -460,7 +462,7 @@ async def confirm_import(
 
     try:
         result = await _persist_import(
-            primary, secondary, user, parent_id,
+            primary, secondary, active,
             piva=draft["partita_iva"],
             payload=draft["raw"],
             sandbox=draft["sandbox"],
@@ -473,37 +475,47 @@ async def confirm_import(
 
 
 async def _persist_import(
-    primary, secondary, user: dict, parent_id: str, *, piva: str, payload: dict, sandbox: bool
+    primary, secondary, active, *, piva: str, payload: dict, sandbox: bool
 ) -> ImportResult:
     """Persiste raw + derivati + persone e compila i campi aziendali VUOTI
-    (mai sovrascrivere i valori dell'utente). Nessuna chiamata esterna."""
-    company_row = await _fetch_company_row(primary, parent_id)
+    (mai sovrascrivere i valori dell'utente) sull'azienda ATTIVA. Nessuna
+    chiamata esterna."""
+    parent_id = active.owner_id
+    company_row = (
+        await _fetch_company_row_by_id(primary, active.company_id)
+        if active.company_id
+        else None
+    )
     existing_data = (
         await _fetch_company_data(primary, company_row["id"]) if company_row else None
     )
     lookups = await lookup_service.get_lookups(secondary)
 
     # Il profilo aziendale deve esistere per agganciare i dati certificati.
+    # Bootstrap (owner senza azienda): si crea qui la prima azienda. Con più
+    # aziende si scrive sempre per `id`, mai per `parent_id` (non più univoco).
     if company_row is None:
         ragione = (payload.get("companyDetails") or {}).get("companyName") or "—"
-        await primary.table("company_profiles").insert(
+        ins = await primary.table("company_profiles").insert(
             {"parent_id": parent_id, "ragione_sociale": ragione, "partita_iva": piva}
         ).execute()
-        company_row = await _fetch_company_row(primary, parent_id)
+        company_id = ins.data[0]["id"] if ins.data else None
+        company_row = await _fetch_company_row_by_id(primary, company_id) if company_id else None
         if company_row is None:  # pragma: no cover — solo per robustezza
             raise OpenapiUpstreamError()
+    company_id = company_row["id"]
 
     updates, applied, conflicts, suggestions = build_autofill(payload, company_row, lookups)
     if updates:
         await primary.table("company_profiles").update(updates).eq(
-            "parent_id", parent_id
+            "id", company_id
         ).execute()
 
     derived = build_derived(payload, lookups)
     fetched_at = datetime.now(timezone.utc).isoformat()
     await primary.table("company_data").upsert(
         {
-            "company_profile_id": company_row["id"],
+            "company_profile_id": company_id,
             "provider": "openapi.it",
             "endpoint": "IT-full",
             "piva_fetched": piva,
@@ -519,19 +531,19 @@ async def _persist_import(
     ).execute()
 
     # L'import è l'azione che ABILITA il punteggio di compatibilità (ateco +
-    # regione + regioni_ids): la cache va scaduta subito, o il badge non
-    # comparirebbe fino al TTL.
+    # regione + regioni_ids): la cache (per id azienda) va scaduta subito, o il
+    # badge non comparirebbe fino al TTL.
     from app.services.compatibility import invalidate_company_facets  # import locale: evita cicli
 
-    invalidate_company_facets(parent_id)
+    invalidate_company_facets(company_id)
 
     people = extract_people(payload)
     await primary.table("company_people").delete().eq(
-        "company_profile_id", company_row["id"]
+        "company_profile_id", company_id
     ).execute()
     if people:
         await primary.table("company_people").insert(
-            [{"company_profile_id": company_row["id"], **person} for person in people]
+            [{"company_profile_id": company_id, **person} for person in people]
         ).execute()
 
     await primary.table("audit_log").insert(
@@ -540,11 +552,16 @@ async def _persist_import(
             "action": "company.imported",
             "target_user_id": parent_id,
             "family_parent_id": parent_id,
-            "payload": {"piva": piva, "campi_compilati": applied, "sandbox": sandbox},
+            "payload": {
+                "company_profile_id": company_id,
+                "piva": piva,
+                "campi_compilati": applied,
+                "sandbox": sandbox,
+            },
         }
     ).execute()
 
-    company = await company_service.company_response_for_owner(primary, parent_id)
+    company = await company_service.company_response_for_id(primary, company_id)
     return ImportResult(
         company=company,
         dossier=build_dossier(payload),

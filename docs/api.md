@@ -54,8 +54,9 @@ Piani di abbonamento attivi, ordinati per `ordering`. Usato dallo step 2 della r
 [{ "id": 1, "nome": "Gratuito", "slug": "gratuito", "descrizione": "...", "prezzo_annuale": "0.00",
    "tipo_prezzo": "gratis", "etichetta_prezzo": null,
    "ai_check": 0, "alert_attivo": false, "alert_giorni_preavviso": null,
-   "num_account_aziendali": 1, "ordering": 1, "is_active": true, "updated_at": "..." }]
+   "num_account_aziendali": 1, "max_aziende": 1, "ordering": 1, "is_active": true, "updated_at": "..." }]
 ```
+`num_account_aziendali` (posti persona della famiglia) e `max_aziende` (numero di aziende gestibili, >1 per l'Advisor) sono **assi distinti**.
 
 `tipo_prezzo` (`importo`/`gratis`/`su_richiesta`) decide come la UI mostra il prezzo; con `su_richiesta` il piano **non è selezionabile alla registrazione** (`POST /auth/register` risponde `400` se lo slug punta a un piano su richiesta) né attivabile con il cambio piano self-serve — l'`etichetta_prezzo` sostituisce l'importo (fallback UI «Su richiesta»).
 
@@ -76,8 +77,10 @@ Profilo dell'utente corrente + abbonamento attivo con il piano.
                "job_position_altro": null,
                "role": "cliente", "is_active": true, "created_at": "..." },
   "subscription": { "id": "uuid", "status": "active", "data_inizio": "2026-07-03",
-                    "data_scadenza": "2027-07-03", "plan": { ...come /plans... } } }
+                    "data_scadenza": "2027-07-03", "plan": { ...come /plans... } },
+  "max_aziende": 1 }
 ```
+`max_aziende` è il limite **effettivo** di aziende gestibili (override utente > piano > 1): >1 identifica un Advisor multi-azienda, e il frontend lo usa per mostrare lo switcher azienda. Il piano espone anche `plan.max_aziende` (default del piano, prima dell'override).
 `job_position` è presente anche se la voce è stata **disattivata** nel frattempo (catalogo soft-disable): chi l'aveva scelta continua a vederla.
 `role` ∈ `admin`/`cliente`/`progettista`. Per i progettisti — e per gli admin che hanno già un codice — la risposta include anche `progettista: {codice}` (il codice `PRG-00001`, assegnato dal sistema alla promozione, o alla prima proposta per gli admin, e immutabile); il progettista conserva tutte le funzionalità cliente.
 
@@ -89,7 +92,7 @@ Verifica il **codice fiscale personale** all'Anagrafe Tributaria via openapi.it 
 Esiti: `200 {codice_fiscale, cf_verified_at}`; `400 cf_invalid` (malformato) / `400 cf_not_valid` (formalmente corretto ma non registrato — salvato non verificato SOLO se non c'è già un CF verificato: una verifica fallita non cancella mai un dato buono); `409 verify_in_progress`; `429 verify_cooldown`; `502 openapi_error`; `503 openapi_not_configured`; `504 openapi_timeout` (esito ignoto, nessun retry automatico). Il profilo (`GET /me`, `PATCH /me`) espone/accetta anche `codice_fiscale` (il cambio del CF azzera la verifica).
 
 ### `POST /me/subscription`
-Cambio piano (senza pagamento in questa fase). Body: `{"plan_id": 3}`. L'abbonamento attivo passa a `cancelled` e ne viene creato uno nuovo annuale. → come `GET /me`; se il downgrade ha retrocesso membri della famiglia, la risposta include `plan_switch_adjustment: {demoted, revoked_pending}`. Errori: `400` piano inesistente/non attivo; `400` piano `su_richiesta` («disponibile solo su richiesta», il guard scatta PRIMA della RPC — l'assegnazione resta possibile via `POST /admin/users/{id}/subscription`); `403 child_plan_locked` se l'utente è un figlio attivo (il piano si gestisce sul titolare).
+Cambio piano (senza pagamento in questa fase). Body: `{"plan_id": 3}`. L'abbonamento attivo passa a `cancelled` e ne viene creato uno nuovo annuale. → come `GET /me`; se il downgrade ha retrocesso membri della famiglia, la risposta include `plan_switch_adjustment: {demoted, revoked_pending}`. **Downgrade da Advisor**: le aziende oltre il nuovo `max_aziende` (le più recenti) vengono **archiviate** (sola lettura, escluse da switch/alert/export; i dati restano) e riattivate risalendo di piano — nessuna cancellazione. Errori: `400` piano inesistente/non attivo; `400` piano `su_richiesta` («disponibile solo su richiesta», il guard scatta PRIMA della RPC — l'assegnazione resta possibile via `POST /admin/users/{id}/subscription`); `403 child_plan_locked` se l'utente è un figlio attivo (il piano si gestisce sul titolare).
 
 ## Azienda (gruppo di account)
 
@@ -121,13 +124,26 @@ Accetta l'invito: l'eventuale abbonamento proprio viene annullato, da lì si ere
 ### `POST /me/invitations/{id}/decline`
 Rifiuta l'invito. → elenco inviti aggiornato.
 
+## Aziende gestite (Advisor multi-azienda)
+
+Gestione dell'elenco delle aziende di un owner (piano **Advisor**: fino a `max_aziende`). **Owner-only**: un account collegato a una famiglia riceve `403` (in v1 Advisor e collegati sono mutuamente esclusivi). L'azienda su cui operano gli altri endpoint si sceglie con l'header `X-Active-Company` (vedi sopra); questi endpoint gestiscono l'insieme.
+
+### `GET /me/aziende`
+`{ aziende: [{id, ragione_sociale, partita_iva, created_at, attiva}], max_aziende, usate }` — solo le aziende **vive** (né cancellate né archiviate), dalla più vecchia; `attiva: true` sulla prima (quella che il resolver userebbe senza header). `max_aziende` è il limite effettivo, `usate` quante ne sono in uso (la UI disabilita «crea» quando `usate >= max_aziende`).
+
+### `POST /me/aziende` (201)
+Crea una nuova azienda. Body: `{ "ragione_sociale": "...", "partita_iva": "01234567890" }` (entrambi obbligatori subito: niente azienda vuota). → `CompanySummary`. Errori: `409` limite del piano raggiunto (`company_limit_reached`, race-free), `400` P.IVA non valida / ragione sociale mancante. L'import IT-full e il resto dei campi sono azioni successive (`PUT /me/company` / import, con l'azienda come attiva).
+
+### `DELETE /me/aziende/{id}` (204)
+Soft-delete di un'azienda gestita: i dati restano (recuperabili), ma l'azienda esce da switch/alert/export. `404` se non è dell'owner o è già rimossa.
+
 ## Dati aziendali
 
 ### `GET /me/company`
 `{ "editable": true|false, "company": {...} | null }` — dell'**azienda attiva** (header `X-Active-Company`; senza header è l'unica/più vecchia). Il titolare (o un utente singolo) vede e modifica i propri; un **figlio attivo** vede quelli della famiglia in sola lettura (`editable: false`). `company: null` se il titolare non ha ancora alcuna azienda.
 
 ### `PUT /me/company`
-Upsert dei dati aziendali. Bloccato (`403`) SOLO per i **figli attivi**, che ereditano i dati della famiglia; titolari, utenti singoli, pending e retrocessi scrivono i propri. Campi: `ragione_sociale`*, `forma_giuridica`, `partita_iva`* (11 cifre, prefisso IT tollerato), `codice_fiscale`, `ateco_id`/`settore_id`/`regione_id` (id delle lookup del DB secondario → il backend denormalizza `ateco_codice`, `settore_nome`, `regione_nome`; `400` se sconosciuti), **`beneficiari_ids`** (lista di id della lookup `beneficiari`, max 50, deduplicata → in risposta arriva `beneficiari: [{id, nome}]`; `400` se un id è sconosciuto), `anno_fondazione` (1800-2100), `indirizzo`, `comune`, `provincia`, `cap` (5 cifre), `classe_dimensionale` (`micro|piccola|media|grande`), `numero_dipendenti`, `fascia_fatturato` (`fino_100k|100k_500k|500k_2m|2m_10m|10m_50m|oltre_50m`), `pec`, `telefono`, `sito_web`.
+Upsert dei dati dell'**azienda attiva** (header `X-Active-Company`). Se l'owner non ha ancora alcuna azienda, è il **bootstrap** della prima. Bloccato (`403`) SOLO per i **figli attivi**, che ereditano i dati della famiglia; titolari, utenti singoli, pending e retrocessi scrivono i propri. Campi: `ragione_sociale`*, `forma_giuridica`, `partita_iva`* (11 cifre, prefisso IT tollerato), `codice_fiscale`, `ateco_id`/`settore_id`/`regione_id` (id delle lookup del DB secondario → il backend denormalizza `ateco_codice`, `settore_nome`, `regione_nome`; `400` se sconosciuti), **`beneficiari_ids`** (lista di id della lookup `beneficiari`, max 50, deduplicata → in risposta arriva `beneficiari: [{id, nome}]`; `400` se un id è sconosciuto), `anno_fondazione` (1800-2100), `indirizzo`, `comune`, `provincia`, `cap` (5 cifre), `classe_dimensionale` (`micro|piccola|media|grande`), `numero_dipendenti`, `fascia_fatturato` (`fino_100k|100k_500k|500k_2m|2m_10m|10m_50m|oltre_50m`), `pec`, `telefono`, `sito_web`.
 
 ### `GET /me/company/facets`
 Cosa l'azienda **è davvero**, negli id delle lookup del catalogo: `{ regioni, ateco, settori, beneficiari, sufficiente }`. Non è un doppione di `GET /me/company`, che restituisce i campi del **form** (una regione, un ATECO): qui `regioni` copre **tutte le sedi** (legale + unità locali, da `company_data.derived.regioni_ids`) e `ateco` include le **divisioni secondarie** certificate. Stessa funzione che alimenta il badge di compatibilità e l'AI-check, così i tre non possono divergere. Un figlio attivo vede i facet della famiglia. `sufficiente: true` = P.IVA importata (ATECO e regione valorizzati): è la condizione del **badge**, non del preset «Bandi per te», che filtra utilmente anche con i soli beneficiari dichiarati a mano. Azienda assente → tutti gli array vuoti, `sufficiente: false` (mai `404`).
@@ -335,7 +351,7 @@ Elimina gli slot **liberi** della serie; quelli prenotati non si toccano mai. Ri
 Elenco utenti con abbonamento attivo. Parametri: `q` (cerca in email/nome/cognome/azienda), `role` (`admin`|`cliente`|`progettista`), `page`, `page_size` (max 100). Item: `{ "profile": {...}, "subscription": {...} | null, "family": {...} | null, "progettista": {codice} | null }` — per i figli `family = {type:'child', status, parent_email}` e `subscription` è quella ereditata (`inherited: true`); per i titolari `family = {type:'parent', members_count}`.
 
 ### `PATCH /admin/users/{user_id}`
-Body (opzionali): `role` (`admin`|`cliente`|`progettista`), `is_active` (bool). La promozione a progettista passa da `fn_promote_progettista` (assegna il codice `PRG-…`, riusandolo alla ri-promozione, e finisce in audit_log); la demozione cambia solo il ruolo (la riga `progettisti` e il codice restano). Protezioni: un admin non può togliersi il ruolo (verso **qualunque** ruolo) né disattivarsi da solo (`400`).
+Body (opzionali): `role` (`admin`|`cliente`|`progettista`), `is_active` (bool), `max_aziende_override` (intero ≥1, oppure `null` esplicito per rimuovere l'override e tornare al default di piano). La promozione a progettista passa da `fn_promote_progettista` (assegna il codice `PRG-…`, riusandolo alla ri-promozione, e finisce in audit_log); la demozione cambia solo il ruolo (la riga `progettisti` e il codice restano). Cambiare `max_aziende_override` **riconcilia** subito le aziende dell'utente (archivia le eccedenti se il limite scende, riattiva se risale). Protezioni: un admin non può togliersi il ruolo (verso **qualunque** ruolo) né disattivarsi da solo (`400`).
 
 ### `POST /admin/users/{user_id}/subscription`
 Cambio piano forzato per un utente. Body: `{"plan_id": 2}`. `403` sui figli di famiglia (pending/attivi): il piano si gestisce sull'account titolare; forzare il piano di un titolare applica le stesse retrocessioni automatiche del cambio normale. **Scavalca il guard `su_richiesta`** (`self_serve=False`): assegnare da qui un piano su richiesta è il completamento manuale di quel flusso.
@@ -344,7 +360,7 @@ Cambio piano forzato per un utente. Body: `{"plan_id": 2}`. `403` sui figli di f
 Tutti i piani, inclusi i disattivati.
 
 ### `POST /admin/plans` (201)
-Crea un piano. Body: `nome`, `slug` (`[a-z0-9-]+`, unico → `409` se duplicato), `descrizione?`, `prezzo_annuale`, `tipo_prezzo?` (`importo`/`gratis`/`su_richiesta`, default `importo`), `etichetta_prezzo?` (≤100, usata solo con `su_richiesta`), `ai_check`, `alert_attivo`, `alert_giorni_preavviso` (obbligatorio se `alert_attivo=true`), `num_account_aziendali`, `ordering`, `is_active`.
+Crea un piano. Body: `nome`, `slug` (`[a-z0-9-]+`, unico → `409` se duplicato), `descrizione?`, `prezzo_annuale`, `tipo_prezzo?` (`importo`/`gratis`/`su_richiesta`, default `importo`), `etichetta_prezzo?` (≤100, usata solo con `su_richiesta`), `ai_check`, `alert_attivo`, `alert_giorni_preavviso` (obbligatorio se `alert_attivo=true`), `num_account_aziendali` (posti persona), `max_aziende` (≥1, default 1: numero di aziende gestibili — asse distinto), `ordering`, `is_active`.
 
 ### `PATCH /admin/plans/{plan_id}`
 Aggiornamento parziale (stessi campi, tranne `slug`). I piani **non si eliminano** (lo storico abbonamenti li referenzia): si disattivano con `is_active=false`, che li nasconde dalla registrazione e dal cambio piano.

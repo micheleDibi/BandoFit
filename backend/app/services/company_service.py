@@ -4,8 +4,17 @@ I riferimenti ad ATECO, settore, regione e beneficiari puntano alle lookup del
 DB SECONDARIO: alla scrittura si risolvono gli id e si denormalizzano le copie
 testuali (nessuna FK cross-database)."""
 
+from postgrest.exceptions import APIError
+
 from app.core.errors import BadRequestError, ForbiddenError
-from app.schemas.company import CompanyIn, CompanyOut, CompanyResponse
+from app.schemas.company import (
+    CompaniesOut,
+    CompanyCreate,
+    CompanyIn,
+    CompanyOut,
+    CompanyResponse,
+    CompanySummary,
+)
 from app.services import family_service, lookup_service
 
 COMPANY_SELECT = (
@@ -27,10 +36,15 @@ def _map_company(row: dict | None) -> CompanyOut | None:
 
 
 async def _fetch_company(primary, parent_id: str) -> CompanyOut | None:
+    # Owner-scoped (consulenze, bootstrap import): con il multi-azienda un owner
+    # può avere più righe, quindi si sceglie deterministicamente la più vecchia
+    # NON cancellata (per i non-Advisor è l'unica).
     resp = (
         await primary.table("company_profiles")
         .select(COMPANY_SELECT)
         .eq("parent_id", str(parent_id))
+        .is_("deleted_at", "null")
+        .order("created_at")
         .limit(1)
         .execute()
     )
@@ -76,6 +90,14 @@ async def company_response_for_owner(
     return CompanyResponse(editable=editable, company=await _fetch_company(primary, owner_id))
 
 
+async def company_response_for_id(
+    primary, company_id: str, *, editable: bool = True
+) -> CompanyResponse:
+    """CompanyResponse di una specifica azienda per `id` (multi-azienda):
+    l'import ritorna i dati dell'azienda appena scritta, non della più vecchia."""
+    return CompanyResponse(editable=editable, company=await _fetch_company_by_id(primary, company_id))
+
+
 def resolve_lookups(data: CompanyIn, lookups) -> dict:
     """Risolve ateco/settore/regione/beneficiari contro le lookup del DB
     secondario e ritorna il payload con le copie denormalizzate. 400 se un id
@@ -118,35 +140,137 @@ def resolve_lookups(data: CompanyIn, lookups) -> dict:
     return payload
 
 
-async def upsert_company(primary, secondary, parent: dict, data: CompanyIn) -> CompanyResponse:
+async def upsert_company(primary, secondary, active, data: CompanyIn) -> CompanyResponse:
     # Stessa regola di editabilità di get_company: solo un figlio ATTIVO è
-    # bloccato (eredita i dati della famiglia); pending e retrocessi scrivono
-    # i propri.
-    membership = await family_service.get_membership(primary, parent["id"])
-    if membership and membership["status"] == "active":
+    # bloccato (eredita i dati della famiglia), e il resolver lo codifica in
+    # `active.editable`; pending e retrocessi scrivono i propri.
+    if not active.editable:
         raise ForbiddenError("I dati aziendali li gestisce il titolare dell'azienda")
 
     lookups = await lookup_service.get_lookups(secondary)
     payload = resolve_lookups(data, lookups)
-    payload["parent_id"] = parent["id"]
 
-    await primary.table("company_profiles").upsert(
-        payload, on_conflict="parent_id"
-    ).execute()
+    # Scrittura per `id` (multi-azienda): si aggiorna l'azienda ATTIVA. Se
+    # l'owner non ne ha ancora nessuna (company_id None) è il bootstrap della
+    # prima azienda → insert.
+    company_id = active.company_id
+    if company_id is not None:
+        await primary.table("company_profiles").update(payload).eq(
+            "id", str(company_id)
+        ).execute()
+    else:
+        payload["parent_id"] = active.owner_id
+        resp = await primary.table("company_profiles").insert(payload).execute()
+        company_id = str(resp.data[0]["id"]) if resp.data else None
 
-    # Il punteggio di compatibilità legge questi campi da una cache TTL.
+    # Il punteggio di compatibilità legge questi campi da una cache TTL (per id azienda).
     from app.services.compatibility import invalidate_company_facets  # import locale: evita cicli
 
-    invalidate_company_facets(parent["id"])
+    invalidate_company_facets(company_id)
 
     await primary.table("audit_log").insert(
         {
-            "actor_id": parent["id"],
+            "actor_id": active.owner_id,
             "action": "company.updated",
-            "target_user_id": parent["id"],
-            "family_parent_id": parent["id"],
-            "payload": {"ragione_sociale": data.ragione_sociale},
+            "target_user_id": active.owner_id,
+            "family_parent_id": active.owner_id,
+            "payload": {
+                "company_profile_id": company_id,
+                "ragione_sociale": data.ragione_sociale,
+            },
         }
     ).execute()
 
-    return CompanyResponse(editable=True, company=await _fetch_company(primary, parent["id"]))
+    company = await _fetch_company_by_id(primary, company_id) if company_id else None
+    return CompanyResponse(editable=True, company=company)
+
+
+# ---------------------------------------------------------- gestione aziende
+
+async def effective_max_aziende(primary, owner_id: str) -> int:
+    """Limite effettivo di aziende (override utente > piano > 1), dalla RPC."""
+    resp = await primary.rpc(
+        "fn_effective_max_aziende", {"p_user_id": str(owner_id)}
+    ).execute()
+    try:
+        return int(resp.data)
+    except (TypeError, ValueError):
+        return 1
+
+
+async def list_companies(primary, owner_id: str) -> CompaniesOut:
+    """Aziende VIVE gestite dall'owner (le cancellate/archiviate sono escluse),
+    con il limite effettivo e quante ne sono in uso. La prima (più vecchia) è
+    quella che il resolver userebbe di default: la marchiamo `attiva`."""
+    resp = (
+        await primary.table("company_profiles")
+        .select("id,ragione_sociale,partita_iva,created_at")
+        .eq("parent_id", str(owner_id))
+        .is_("deleted_at", "null")
+        .is_("archived_at", "null")
+        .order("created_at")
+        .execute()
+    )
+    rows = resp.data or []
+    aziende = [
+        CompanySummary(
+            id=row["id"],
+            ragione_sociale=row["ragione_sociale"],
+            partita_iva=row["partita_iva"],
+            created_at=row["created_at"],
+            attiva=(index == 0),
+        )
+        for index, row in enumerate(rows)
+    ]
+    return CompaniesOut(
+        aziende=aziende,
+        max_aziende=await effective_max_aziende(primary, owner_id),
+        usate=len(rows),
+    )
+
+
+async def create_company(primary, owner_id: str, data: CompanyCreate) -> CompanySummary:
+    """Crea un'azienda via `fn_create_company` (limite race-free, P.IVA e
+    ragione sociale obbligatorie). Gli errori della RPC diventano AppError."""
+    try:
+        resp = await primary.rpc(
+            "fn_create_company",
+            {
+                "p_owner_id": str(owner_id),
+                "p_ragione_sociale": data.ragione_sociale,
+                "p_partita_iva": data.partita_iva,
+            },
+        ).execute()
+    except APIError as exc:
+        family_service.raise_from_rpc(exc)
+
+    company_id = resp.data
+    created = (
+        await primary.table("company_profiles")
+        .select("id,ragione_sociale,partita_iva,created_at")
+        .eq("id", str(company_id))
+        .limit(1)
+        .execute()
+    )
+    row = created.data[0]
+    return CompanySummary(
+        id=row["id"],
+        ragione_sociale=row["ragione_sociale"],
+        partita_iva=row["partita_iva"],
+        created_at=row["created_at"],
+    )
+
+
+async def soft_delete_company(primary, owner_id: str, company_id: str) -> None:
+    """Soft-delete di un'azienda dell'owner via `fn_soft_delete_company`. I dati
+    collegati restano (cascade solo su purge fisica); il resolver la rifiuta."""
+    from app.services.compatibility import invalidate_company_facets  # import locale
+
+    try:
+        await primary.rpc(
+            "fn_soft_delete_company",
+            {"p_owner_id": str(owner_id), "p_company_id": str(company_id)},
+        ).execute()
+    except APIError as exc:
+        family_service.raise_from_rpc(exc)
+    invalidate_company_facets(company_id)

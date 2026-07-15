@@ -141,12 +141,14 @@ def compute_compatibilita(
     }
 
 
-def invalidate_company_facets(owner_id: str) -> None:
+def invalidate_company_facets(company_id: str | None) -> None:
     """Da chiamare dopo OGNI scrittura sui dati aziendali (import P.IVA,
     modifica del profilo): senza, il badge resterebbe fermo ai dati vecchi
     fino allo scadere del TTL — e proprio dopo l'import, che è l'azione che
-    lo abilita, non comparirebbe."""
-    _cache.pop(str(owner_id), None)
+    lo abilita, non comparirebbe. La chiave è l'`id` dell'azienda (multi-azienda:
+    ogni azienda ha i suoi facet)."""
+    if company_id is not None:
+        _cache.pop(str(company_id), None)
 
 
 async def load_company_facets(primary, active, lookups: LookupsOut) -> CompanyFacets | None:
@@ -158,40 +160,41 @@ async def load_company_facets(primary, active, lookups: LookupsOut) -> CompanyFa
     «Bandi per te» no — lì anche il solo settore, o i soli beneficiari
     dichiarati a mano, sono un filtro utile.
 
-    Cache in-memory a TTL breve per owner (invalidata dalle scritture). NB:
-    con l'Advisor multi-azienda la chiave della cache dovrà passare a
-    `company_id`; oggi owner↔azienda è 1:1, quindi la chiave owner resta
-    corretta."""
-    owner_id = active.owner_id
+    Cache in-memory a TTL breve chiavata sull'`id` dell'azienda (Advisor
+    multi-azienda: aziende diverse dello stesso owner hanno facet distinti che
+    non devono mischiarsi), invalidata dalle scritture."""
+    # Owner senza azienda: nessun dato da cachare, None diretto.
+    if active.company_id is None:
+        return None
+    cache_key = str(active.company_id)
 
-    cached = _cache.get(owner_id)
+    cached = _cache.get(cache_key)
     if cached is not None and (time.monotonic() - cached[1]) < _CACHE_TTL_SECONDS:
         return cached[0]
 
     facets: CompanyFacets | None = None
-    if active.company_id is not None:
-        company_resp = (
-            await primary.table("company_profiles")
-            .select("id,ateco_id,settore_id,regione_id,beneficiari")
-            .eq("id", active.company_id)
+    company_resp = (
+        await primary.table("company_profiles")
+        .select("id,ateco_id,settore_id,regione_id,beneficiari")
+        .eq("id", active.company_id)
+        .limit(1)
+        .execute()
+    )
+    company = company_resp.data[0] if company_resp.data else None
+    if company is not None:
+        data_resp = (
+            await primary.table("company_data")
+            .select("derived")
+            .eq("company_profile_id", company["id"])
             .limit(1)
             .execute()
         )
-        company = company_resp.data[0] if company_resp.data else None
-        if company is not None:
-            data_resp = (
-                await primary.table("company_data")
-                .select("derived")
-                .eq("company_profile_id", company["id"])
-                .limit(1)
-                .execute()
-            )
-            derived = data_resp.data[0].get("derived") if data_resp.data else None
-            facets = build_company_facets(company, derived, lookups)
+        derived = data_resp.data[0].get("derived") if data_resp.data else None
+        facets = build_company_facets(company, derived, lookups)
 
     if len(_cache) > 512:  # backstop: evita crescita illimitata
         _cache.clear()
-    _cache[owner_id] = (facets, time.monotonic())
+    _cache[cache_key] = (facets, time.monotonic())
     return facets
 
 

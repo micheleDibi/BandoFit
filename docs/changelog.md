@@ -2,6 +2,14 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-15 — Gestione multi-azienda per l'Advisor: fondamenta dello schema (migration 0023, fase 0)
+
+- **Prima fase** della feature che permetterà al piano **Advisor** di gestire N aziende clienti con dati segregati. Questa migration è puramente **additiva e retro-compatibile**: nessun cambiamento di comportamento finché il codice advisor non arriva (fasi successive). `company_profiles.parent_id UNIQUE` NON viene toccato qui (lo rimuove la 0024).
+- **Nuove colonne**: `subscription_plans.max_aziende` (default 1; Advisor 10, asse distinto da `num_account_aziendali` = posti persona della famiglia) + override per utente `profiles.max_aziende_override`; `company_profiles.deleted_at`/`archived_at` (soft-delete + archiviazione da downgrade); overlay **`company_profile_id`** su `saved_bandi`, `calendar_events`, `user_preferences`, `bando_alert_sends`, `notifications` (NULL = riga legacy/non-advisor → scope per `user_id`, identico a oggi).
+- **Unicità**: le chiavi acquisiscono `company_profile_id` via **`UNIQUE NULLS NOT DISTINCT`** (PG15+), così le righe legacy (company NULL) restano deduplicate e il vincolo resta inferibile dagli upsert PostgREST. Aggiornato l'unico `on_conflict` interessato (ledger `bando_alert_sends` → `user_id,company_profile_id,bando_id`): comportamento identico (company NULL in questa fase).
+- **RPC**: `fn_effective_max_aziende` (override > piano > 1), `fn_create_company` (limite race-free, P.IVA/ragione obbligatorie), `fn_soft_delete_company`. **Backfill idempotente solo Advisor** (dati esistenti → «prima azienda»; non-Advisor lasciati NULL).
+- 23 test funzionali della migration (`tests/db/test_migration_0023.py`) verificati contro un Postgres reale (harness usa-e-getta). ⚠️ Migration **0023** da eseguire dallo SQL Editor del DB primario **prima** del deploy del backend della fase 1.
+
 ## 2026-07-15 — I link a obiettivoeuropa.com (concorrente) non escono più dall'API
 
 - Nel catalogo secondario ~1.040 bandi pubblicabili hanno `link_bando` (e in parte `link_candidatura` o segmenti «link» nel `contenuto`) che puntano a **obiettivoeuropa.com**, un aggregatore concorrente: quei rimandi vengono ora rimossi server-side **alla frontiera del catalogo** (`services/link_policy.py`, applicato in `fetch_bando_by_slug` e `fetch_bando_for_ai`) — link diretti → `null`, allegati bloccati rimossi (oggi nessuno: filtro difensivo); dentro `contenuto`, qualunque segmento col dominio nel testo visibile cade per intero, un segmento «link» bloccato senza menzione visibile perde solo il link (degrada a testo), e le menzioni testuali vengono rimosse anche dai testi fuori dai segmenti (titoli, voci di elenco, risposte FAQ). Il confronto è sull'host (dominio esatto o sottodominio, mai substring sull'URL intero), robusto alle forme che i browser normalizzano (backslash, schemi degradati, URL schemeless); lista in `BLOCKED_LINK_HOSTS`.

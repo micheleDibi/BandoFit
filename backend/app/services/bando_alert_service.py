@@ -408,8 +408,11 @@ async def claim_ledger(
             if upd.data:
                 claimed[candidato.id] = row["id"]
     if nuove:
+        # Il vincolo di idempotenza include company_profile_id (0023): oggi il
+        # ledger è ancora legacy (company NULL, deduplicata da NULLS NOT
+        # DISTINCT); la dimensione azienda entra con la fase alert multi-cliente.
         ins = await primary.table("bando_alert_sends").upsert(
-            nuove, on_conflict="user_id,bando_id", ignore_duplicates=True
+            nuove, on_conflict="user_id,company_profile_id,bando_id", ignore_duplicates=True
         ).execute()
         for r in ins.data or []:
             claimed[r["bando_id"]] = r["id"]

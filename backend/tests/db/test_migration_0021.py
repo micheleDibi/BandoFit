@@ -81,9 +81,12 @@ class TestLedgerInvii:
                 (UTENTE,),
             )
         # L'arbiter dell'upsert PostgREST: on conflict do nothing non duplica.
+        # Dal 0023 il vincolo include company_profile_id (NULLS NOT DISTINCT):
+        # per il ledger legacy la company è NULL e continua a deduplicare.
         db.execute(
             """insert into public.bando_alert_sends (user_id, bando_id)
-               values (%s, 42) on conflict (user_id, bando_id) do nothing""",
+               values (%s, 42)
+               on conflict (user_id, company_profile_id, bando_id) do nothing""",
             (UTENTE,),
         )
         conteggio = db.execute(

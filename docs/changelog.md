@@ -2,6 +2,13 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-15 — Gestione multi-azienda per l'Advisor: azienda attiva lato server (fase 1)
+
+- **Plumbing dell'azienda attiva**, senza ancora switch né UI: nuovo resolver `deps.active_company` → `ActiveCompany{company_id, owner_id, editable}`. Risolve chi possiede i dati (riusa `family_service.owner_and_editable`: un figlio attivo resta in sola lettura) e su **quale azienda** operare. Header opzionale **`X-Active-Company`**, ri-autorizzato a ogni richiesta (l'azienda deve appartenere all'owner ed essere viva: `deleted_at`/`archived_at` nulli), altrimenti `404`; un valore non-UUID è `404`. Senza header il default è l'azienda viva più vecchia dell'owner.
+- **Invariante di non-regressione**: un non-Advisor ha esattamente una azienda e il frontend non invia ancora l'header → tutte le risposte restano **identiche** a prima. È l'oggetto dei test (`tests/test_active_company.py`, 9 casi: default/header valido/altro owner/cancellata/malformato/vuoto/figlio attivo/senza azienda).
+- **Letture Gruppo B ricablate sul resolver**: `GET /me/company`, `GET /me/company/facets`, `GET /me/company/dossier`, storico e dettaglio AI-check (`GET /me/ai-checks`, `GET /me/ai-checks/{id}`, filtrati per `company_profile_id`), e il badge di compatibilità su `GET /bandi`. La **quota AI-check resta un pool unico** per `family_parent_id` (non cambia con l'azienda attiva): varia solo lo storico mostrato. I flussi owner-scoped senza azienda attiva (import da P.IVA che crea il primo profilo) usano varianti `*_for_owner` che bypassano il resolver.
+- Solo letture: scritture Gruppo B e creazione/switch di N aziende arrivano nella fase 2. Nessuna migration nuova (usa le colonne della 0023). Suite: 558 unit + 213 DB verdi, ruff invariato.
+
 ## 2026-07-15 — Gestione multi-azienda per l'Advisor: fondamenta dello schema (migration 0023, fase 0)
 
 - **Prima fase** della feature che permetterà al piano **Advisor** di gestire N aziende clienti con dati segregati. Questa migration è puramente **additiva e retro-compatibile**: nessun cambiamento di comportamento finché il codice advisor non arriva (fasi successive). `company_profiles.parent_id UNIQUE` NON viene toccato qui (lo rimuove la 0024).

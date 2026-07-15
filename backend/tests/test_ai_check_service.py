@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.api.deps import ActiveCompany
 from app.clients.anthropic_ai import AiUsage
 from app.core.errors import (
     AiNotConfiguredError,
@@ -31,6 +32,10 @@ USER = {"id": "a0000000-0000-0000-0000-000000000001", "nome": "Michele",
         "role": "cliente", "is_active": True}
 OWNER = USER["id"]
 COMPANY_ID = "c0000000-0000-0000-0000-000000000001"
+
+
+def _active(company_id: str | None = COMPANY_ID, editable: bool = True) -> ActiveCompany:
+    return ActiveCompany(company_id=company_id, owner_id=OWNER, editable=editable)
 
 
 def load_bando() -> dict:
@@ -293,35 +298,32 @@ class TestRequestCheck:
     async def test_non_configurato(self, spawned):
         with pytest.raises(AiNotConfiguredError):
             await ai_check_service.request_check(
-                FakePrimary(), None, FakeAi(enabled=False), USER, SLUG
+                FakePrimary(), None, FakeAi(enabled=False), USER, _active(), SLUG
             )
 
-    async def test_figlio_attivo_bloccato(self, monkeypatch, spawned):
-        async def membership(primary, user_id):
-            return {"status": "active", "parent_id": "p0000000-0000-0000-0000-000000000009"}
-
-        monkeypatch.setattr("app.services.family_service.get_membership", membership)
+    async def test_figlio_attivo_bloccato(self, spawned):
+        # Un figlio attivo arriva dal resolver con editable=False.
         with pytest.raises(ForbiddenError):
             await ai_check_service.request_check(
-                FakePrimary(base_selects()), None, FakeAi(), USER, SLUG
+                FakePrimary(base_selects()), None, FakeAi(), USER, _active(editable=False), SLUG
             )
 
     async def test_senza_dati_aziendali(self, spawned):
         primary = FakePrimary(base_selects(company_profiles=[]))
         with pytest.raises(BadRequestError):
-            await ai_check_service.request_check(primary, None, FakeAi(), USER, SLUG)
+            await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
 
     async def test_dati_aziendali_insufficienti(self, spawned):
         spoglio = {**COMPANY_ROW, "ateco_codice": None, "ateco_id": None,
                    "settore_id": None, "regione_id": None}
         primary = FakePrimary(base_selects(company_profiles=[spoglio]))
         with pytest.raises(BadRequestError):
-            await ai_check_service.request_check(primary, None, FakeAi(), USER, SLUG)
+            await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
 
     async def test_bando_inesistente(self, spawned):
         with pytest.raises(NotFoundError):
             await ai_check_service.request_check(
-                FakePrimary(base_selects()), None, FakeAi(), USER, "slug-inesistente"
+                FakePrimary(base_selects()), None, FakeAi(), USER, _active(), "slug-inesistente"
             )
 
     async def test_cooldown(self, spawned):
@@ -334,7 +336,7 @@ class TestRequestCheck:
 
         primary = FakePrimary(base_selects(ai_checks=ai_checks))
         with pytest.raises(AppError) as err:
-            await ai_check_service.request_check(primary, None, FakeAi(), USER, SLUG)
+            await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
         assert err.value.code == "ai_check_cooldown"
 
     async def test_analisi_pending_recente_da_409_non_cooldown(self, spawned):
@@ -349,7 +351,7 @@ class TestRequestCheck:
 
         primary = FakePrimary(base_selects(ai_checks=ai_checks))
         with pytest.raises(AppError) as err:
-            await ai_check_service.request_check(primary, None, FakeAi(), USER, SLUG)
+            await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
         assert err.value.code == "ai_check_in_progress"
 
     async def test_quota_esaurita(self, spawned):
@@ -365,7 +367,7 @@ class TestRequestCheck:
             ai_checks=ai_checks,
         ))
         with pytest.raises(AiQuotaExceededError):
-            await ai_check_service.request_check(primary, None, FakeAi(), USER, SLUG)
+            await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
         # il lock è stato comunque rilasciato
         assert ("fn_release_import_lock", {"p_parent_id": OWNER}) in primary.rpcs
 
@@ -374,26 +376,26 @@ class TestRequestCheck:
             user_subscriptions=[{**SUBSCRIPTION, "subscription_plans": {"ai_check": 0}}],
         ))
         with pytest.raises(AiQuotaExceededError) as err:
-            await ai_check_service.request_check(primary, None, FakeAi(), USER, SLUG)
+            await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
         assert "piano" in err.value.message
 
     async def test_lock_occupato(self, spawned):
         primary = FakePrimary(base_selects(), lock=False)
         with pytest.raises(AppError) as err:
-            await ai_check_service.request_check(primary, None, FakeAi(), USER, SLUG)
+            await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
         assert err.value.code == "ai_check_in_progress"
 
     async def test_doppia_analisi_respinta_dall_indice_unico(self, spawned):
         primary = FakePrimary(base_selects())
         primary.insert_fail.add("ai_checks")
         with pytest.raises(AppError) as err:
-            await ai_check_service.request_check(primary, None, FakeAi(), USER, SLUG)
+            await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
         assert err.value.code == "ai_check_in_progress"
         assert ("fn_release_import_lock", {"p_parent_id": OWNER}) in primary.rpcs
 
     async def test_happy_path(self, spawned, fake_bando):
         primary = FakePrimary(base_selects())
-        out = await ai_check_service.request_check(primary, None, FakeAi(), USER, SLUG)
+        out = await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
 
         assert out.status == "pending"
         assert out.bando_slug == SLUG
@@ -417,12 +419,12 @@ class TestRequestCheck:
         primary = FakePrimary(base_selects())
         primary.insert_fail_generic.add("ai_checks")
         with pytest.raises(PgError):
-            await ai_check_service.request_check(primary, None, FakeAi(), USER, SLUG)
+            await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
         assert ("fn_release_import_lock", {"p_parent_id": OWNER}) in primary.rpcs
 
     async def test_failsafe_anche_sulla_post(self, spawned):
         primary = FakePrimary(base_selects())
-        await ai_check_service.request_check(primary, None, FakeAi(), USER, SLUG)
+        await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
         stale_updates = [
             (payload, filters)
             for payload, filters in primary.ops_for("ai_checks", "update")
@@ -569,19 +571,19 @@ READY_ROW = {
 class TestLettura:
     async def test_lista_globale_senza_report(self):
         primary = FakePrimary(base_selects(ai_checks=[READY_ROW]))
-        resp = await ai_check_service.list_checks(primary, USER)
+        resp = await ai_check_service.list_checks(primary, _active())
         assert resp.total == 1
         assert resp.items[0].report is None
         assert resp.quota.totale == 5
 
     async def test_lista_per_bando_include_report(self):
         primary = FakePrimary(base_selects(ai_checks=[READY_ROW]))
-        resp = await ai_check_service.list_checks(primary, USER, bando_slug=SLUG)
+        resp = await ai_check_service.list_checks(primary, _active(), bando_slug=SLUG)
         assert resp.items[0].report == {"schema_version": 1}
 
     async def test_failsafe_chiude_le_analisi_stale(self):
         primary = FakePrimary(base_selects())
-        await ai_check_service.list_checks(primary, USER)
+        await ai_check_service.list_checks(primary, _active())
         [(update, filters)] = primary.ops_for("ai_checks", "update")
         assert update["status"] == "error"
         assert filters["status"] == "pending"
@@ -589,7 +591,7 @@ class TestLettura:
 
     async def test_get_check(self):
         primary = FakePrimary(base_selects(ai_checks=[READY_ROW]))
-        out = await ai_check_service.get_check(primary, USER, CHECK_ID)
+        out = await ai_check_service.get_check(primary, _active(), CHECK_ID)
         assert out.report == {"schema_version": 1}
         # il filtro di tenancy c'è DAVVERO: mai report di altre aziende
         [(_, filters)] = primary.ops_for("ai_checks", "select")
@@ -600,25 +602,25 @@ class TestLettura:
         primary = FakePrimary(base_selects())
         with pytest.raises(NotFoundError):
             await ai_check_service.get_check(
-                primary, USER, "e0000000-0000-0000-0000-000000000bad"
+                primary, _active(), "e0000000-0000-0000-0000-000000000bad"
             )
 
     async def test_get_check_id_malformato_e_un_404(self):
         # Un id non-UUID manderebbe PostgREST in 22P02 (→ 502): deve essere 404.
         primary = FakePrimary(base_selects())
         with pytest.raises(NotFoundError):
-            await ai_check_service.get_check(primary, USER, "non-un-uuid")
+            await ai_check_service.get_check(primary, _active(), "non-un-uuid")
         assert not primary.ops_for("ai_checks", "select")
 
     async def test_lista_applica_il_filtro_di_tenancy(self):
         primary = FakePrimary(base_selects(ai_checks=[READY_ROW]))
-        await ai_check_service.list_checks(primary, USER)
+        await ai_check_service.list_checks(primary, _active())
         selects = primary.ops_for("ai_checks", "select")
         assert all(f["family_parent_id"] == OWNER for _, f in selects)
 
     async def test_bando_slug_vuoto_equivale_alla_lista_globale(self):
         primary = FakePrimary(base_selects(ai_checks=[READY_ROW]))
-        resp = await ai_check_service.list_checks(primary, USER, bando_slug="  ")
+        resp = await ai_check_service.list_checks(primary, _active(), bando_slug="  ")
         assert resp.items[0].report is None  # sintetica, come senza filtro
 
     async def test_quota_senza_abbonamento_attivo(self):

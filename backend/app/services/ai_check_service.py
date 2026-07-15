@@ -195,8 +195,13 @@ async def get_quota(primary, owner_id: str) -> AiQuotaOut:
 
 # ----------------------------------------------------------------- richiesta
 
-async def _company_context(primary, owner_id: str) -> tuple[dict, dict | None, list[dict]]:
-    """Profilo aziendale + dati certificati + persone."""
+async def _company_context(primary, company_id: str | None) -> tuple[dict, dict | None, list[dict]]:
+    """Profilo aziendale + dati certificati + persone dell'azienda attiva."""
+    _no_company = BadRequestError(
+        "Compila prima i dati aziendali (o usa «Importa da P.IVA» dalla pagina Azienda)"
+    )
+    if not company_id:
+        raise _no_company
     company_resp = (
         await primary.table("company_profiles")
         .select("id,ragione_sociale,forma_giuridica,partita_iva,codice_fiscale,"
@@ -204,15 +209,13 @@ async def _company_context(primary, owner_id: str) -> tuple[dict, dict | None, l
                 "regione_id,regione_nome,beneficiari,anno_fondazione,indirizzo,comune,"
                 "provincia,cap,classe_dimensionale,numero_dipendenti,fascia_fatturato,"
                 "pec,telefono,sito_web")
-        .eq("parent_id", str(owner_id))
+        .eq("id", str(company_id))
         .limit(1)
         .execute()
     )
     company = company_resp.data[0] if company_resp.data else None
     if company is None:
-        raise BadRequestError(
-            "Compila prima i dati aziendali (o usa «Importa da P.IVA» dalla pagina Azienda)"
-        )
+        raise _no_company
 
     data_resp = (
         await primary.table("company_data")
@@ -235,21 +238,21 @@ async def _company_context(primary, owner_id: str) -> tuple[dict, dict | None, l
 
 
 async def request_check(
-    primary, secondary, ai: AiCheckClient, user: dict, bando_slug: str
+    primary, secondary, ai: AiCheckClient, user: dict, active, bando_slug: str
 ) -> AiCheckOut:
     """Avvia un AI-check (consuma 1 quota del piano; costo API ~0,10 $)."""
     if not ai.enabled:
         raise AiNotConfiguredError()
 
-    owner_id, editable = await owner_and_editable(primary, user)
-    if not editable:
+    if not active.editable:
         raise ForbiddenError("L'AI-check lo avvia il titolare dell'azienda")
+    owner_id = active.owner_id
 
     # Failsafe anche qui: un'analisi zombie (riavvio del container) non deve
     # bloccare il bando né gonfiare la quota fino alla prossima GET.
     await _close_stale(primary, owner_id)
 
-    company, company_data, people = await _company_context(primary, owner_id)
+    company, company_data, people = await _company_context(primary, active.company_id)
     if not any(company.get(f) for f in ("ateco_id", "settore_id", "regione_id")) and not company_data:
         raise BadRequestError(
             "Servono più dati aziendali per un'analisi utile: compila ATECO, settore o "
@@ -580,17 +583,17 @@ async def _close_stale(primary, owner_id: str) -> None:
 
 async def list_checks(
     primary,
-    user: dict,
+    active,
     bando_slug: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> AiChecksResponse:
-    """Storico AI-check (visibile a tutta l'azienda). Con `bando_slug` include
-    i report completi (storico per bando, il primo è il più recente)."""
+    """Storico AI-check dell'azienda attiva. Con `bando_slug` include i report
+    completi (storico per bando, il primo è il più recente)."""
     # Parametro vuoto = nessun filtro: va normalizzato PRIMA, così filtro e
     # inclusione dei report restano coerenti (la lista globale è sintetica).
     bando_slug = (bando_slug or "").strip() or None
-    owner_id, editable = await owner_and_editable(primary, user)
+    owner_id, editable = active.owner_id, active.editable
     await _close_stale(primary, owner_id)
 
     query = (
@@ -598,6 +601,10 @@ async def list_checks(
         .select(CHECK_SELECT, count="exact")
         .eq("family_parent_id", str(owner_id))
     )
+    # La quota resta condivisa dall'azienda (family_parent_id); lo STORICO è
+    # però dell'azienda attiva (per l'Advisor multi-azienda).
+    if active.company_id is not None:
+        query = query.eq("company_profile_id", active.company_id)
     if bando_slug:
         query = query.eq("bando_slug", bando_slug)
     offset = (page - 1) * page_size
@@ -616,8 +623,8 @@ async def list_checks(
     )
 
 
-async def get_check(primary, user: dict, check_id: str) -> AiCheckOut:
-    """Singolo report, completo (anche per i figli attivi)."""
+async def get_check(primary, active, check_id: str) -> AiCheckOut:
+    """Singolo report dell'azienda attiva, completo (anche per i figli attivi)."""
     try:
         # Forma CANONICA: Python accetta anche urn:uuid:/graffe che Postgres
         # rifiuterebbe con 22P02 (→ 502) — la query usa l'UUID normalizzato.
@@ -625,16 +632,17 @@ async def get_check(primary, user: dict, check_id: str) -> AiCheckOut:
     except ValueError:
         # Un id malformato è, per il chiamante, un report inesistente.
         raise NotFoundError("Report non trovato") from None
-    owner_id, _ = await owner_and_editable(primary, user)
+    owner_id = active.owner_id
     await _close_stale(primary, owner_id)
-    resp = (
-        await primary.table("ai_checks")
+    query = (
+        primary.table("ai_checks")
         .select(CHECK_SELECT)
         .eq("id", normalized)
         .eq("family_parent_id", str(owner_id))  # mai report di altre aziende
-        .limit(1)
-        .execute()
     )
+    if active.company_id is not None:
+        query = query.eq("company_profile_id", active.company_id)
+    resp = await query.limit(1).execute()
     if not resp.data:
         raise NotFoundError("Report non trovato")
     return _to_out(resp.data[0], include_report=True)

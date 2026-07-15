@@ -1,6 +1,12 @@
 from fastapi import APIRouter
 
-from app.api.deps import CurrentUser, OpenapiDep, PrimaryClient, SecondaryClient
+from app.api.deps import (
+    ActiveCompanyDep,
+    CurrentUser,
+    OpenapiDep,
+    PrimaryClient,
+    SecondaryClient,
+)
 from app.schemas.company import CompanyFacetsOut, CompanyIn, CompanyResponse
 from app.schemas.openapi_data import (
     DossierResponse,
@@ -15,10 +21,10 @@ router = APIRouter(prefix="/me/company", tags=["company"])
 
 
 @router.get("", response_model=CompanyResponse)
-async def get_company(user: CurrentUser, primary: PrimaryClient) -> CompanyResponse:
-    """Dati aziendali: propri per il titolare, della famiglia (sola lettura)
-    per un figlio attivo."""
-    return await company_service.get_company(primary, user)
+async def get_company(active: ActiveCompanyDep, primary: PrimaryClient) -> CompanyResponse:
+    """Dati dell'azienda attiva: propri per il titolare, della famiglia (sola
+    lettura) per un figlio attivo."""
+    return await company_service.get_company(primary, active)
 
 
 @router.put("", response_model=CompanyResponse)
@@ -36,7 +42,7 @@ async def save_company(
 
 @router.get("/facets", response_model=CompanyFacetsOut)
 async def company_facets(
-    user: CurrentUser,
+    active: ActiveCompanyDep,
     primary: PrimaryClient,
     secondary: SecondaryClient,
 ) -> CompanyFacetsOut:
@@ -46,7 +52,7 @@ async def company_facets(
 
     Un figlio attivo vede i facet della famiglia, come per i dati aziendali."""
     lookups = await lookup_service.get_lookups(secondary)
-    facets = await compatibility.load_company_facets(primary, user, lookups)
+    facets = await compatibility.load_company_facets(primary, active, lookups)
     if facets is None:
         return CompanyFacetsOut()
     return CompanyFacetsOut(
@@ -87,7 +93,7 @@ async def confirm_import(
 
 
 @router.get("/dossier", response_model=DossierResponse)
-async def get_dossier(user: CurrentUser, primary: PrimaryClient) -> DossierResponse:
+async def get_dossier(active: ActiveCompanyDep, primary: PrimaryClient) -> DossierResponse:
     """Dossier certificato importato da openapi.it: proprio per il titolare,
     in sola lettura per un figlio attivo."""
-    return await openapi_service.get_dossier(primary, user)
+    return await openapi_service.get_dossier(primary, active)

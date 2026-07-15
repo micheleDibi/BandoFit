@@ -116,6 +116,17 @@ async def _fetch_company_row(primary, parent_id: str) -> dict | None:
     return resp.data[0] if resp.data else None
 
 
+async def _fetch_company_row_by_id(primary, company_id: str) -> dict | None:
+    resp = (
+        await primary.table("company_profiles")
+        .select("id," + company_service.COMPANY_SELECT)
+        .eq("id", str(company_id))
+        .limit(1)
+        .execute()
+    )
+    return resp.data[0] if resp.data else None
+
+
 async def _fetch_company_data(primary, company_profile_id: str) -> dict | None:
     resp = (
         await primary.table("company_data")
@@ -533,7 +544,7 @@ async def _persist_import(
         }
     ).execute()
 
-    company = await company_service.get_company(primary, user)
+    company = await company_service.company_response_for_owner(primary, parent_id)
     return ImportResult(
         company=company,
         dossier=build_dossier(payload),
@@ -662,24 +673,9 @@ async def verify_cf(primary, openapi: OpenapiClient, user: dict, codice_fiscale:
         await _release_lock(primary, user_id)
 
 
-async def get_dossier(primary, user: dict) -> DossierResponse:
-    """Dossier certificato: proprio per il titolare, della famiglia (sola
-    lettura) per un figlio attivo — stessa regola dei dati aziendali."""
-    membership = await family_service.get_membership(primary, user["id"])
-    if membership and membership["status"] == "active":
-        owner_id, editable = str(membership["parent_id"]), False
-    else:
-        owner_id, editable = str(user["id"]), True
-    return await get_dossier_for_owner(primary, owner_id, editable=editable)
-
-
-async def get_dossier_for_owner(
-    primary, owner_id: str, *, editable: bool = False
+async def _dossier_from_company_row(
+    primary, company_row: dict | None, editable: bool
 ) -> DossierResponse:
-    """Dossier del titolare indicato, SENZA regole di visibilità: il chiamante
-    ha già autorizzato l'accesso (famiglia in get_dossier; assegnazione, con
-    audit, nel flusso consulenze)."""
-    company_row = await _fetch_company_row(primary, owner_id)
     if company_row is None:
         return DossierResponse(editable=editable, imported=False)
 
@@ -702,4 +698,26 @@ async def get_dossier_for_owner(
         dossier=build_dossier(data.get("raw") or {}),
         people=[PersonOut(**p) for p in (people_resp.data or [])],
         derived=data.get("derived") or {},
+    )
+
+
+async def get_dossier(primary, active) -> DossierResponse:
+    """Dossier certificato dell'azienda attiva: proprio per il titolare, della
+    famiglia (sola lettura) per un figlio attivo — `editable` dal resolver."""
+    company_row = (
+        await _fetch_company_row_by_id(primary, active.company_id)
+        if active.company_id
+        else None
+    )
+    return await _dossier_from_company_row(primary, company_row, active.editable)
+
+
+async def get_dossier_for_owner(
+    primary, owner_id: str, *, editable: bool = False
+) -> DossierResponse:
+    """Dossier del titolare indicato, SENZA regole di visibilità: il chiamante
+    ha già autorizzato l'accesso (assegnazione, con audit, nel flusso
+    consulenze)."""
+    return await _dossier_from_company_row(
+        primary, await _fetch_company_row(primary, owner_id), editable
     )

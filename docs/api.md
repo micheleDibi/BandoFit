@@ -4,6 +4,8 @@ Base URL: `http://localhost:8000/api/v1` (sviluppo). Documentazione interattiva:
 
 **Autenticazione**: header `Authorization: Bearer <access_token>` (JWT emesso da Supabase Auth del progetto primario). Il backend verifica firma (ES256/RS256 via JWKS, fallback HS256 legacy), `aud` e `iss`, poi carica il profilo: un account con `is_active=false` riceve `403`. Gli endpoint `/admin/*` richiedono `role='admin'`.
 
+**Azienda attiva** (header opzionale `X-Active-Company: <uuid>`): seleziona su quale azienda operano gli endpoint sui dati aziendali (`GET /me/company`, `GET /me/company/facets`, `GET /me/company/dossier`, `GET /me/ai-checks` e `GET /me/ai-checks/{id}`, badge di compatibilità su `GET /bandi`). È ri-autorizzato a ogni richiesta: l'azienda deve appartenere all'utente ed essere viva (non cancellata né archiviata), altrimenti `404 not_found`; un valore non-UUID è anch'esso `404`. **Senza l'header** si usa l'azienda viva più vecchia dell'utente — che per gli abbonamenti non-Advisor è l'unica, quindi il comportamento è identico a quando l'header non esisteva. La quota AI-check resta un **pool unico** condiviso (non cambia con l'azienda attiva): cambia solo lo storico mostrato.
+
 **Formato errori** (uniforme):
 ```json
 { "error": { "code": "not_found", "message": "Bando non trovato" } }
@@ -122,7 +124,7 @@ Rifiuta l'invito. → elenco inviti aggiornato.
 ## Dati aziendali
 
 ### `GET /me/company`
-`{ "editable": true|false, "company": {...} | null }` — il titolare (o un utente singolo) vede e modifica i propri; un **figlio attivo** vede quelli della famiglia in sola lettura (`editable: false`).
+`{ "editable": true|false, "company": {...} | null }` — dell'**azienda attiva** (header `X-Active-Company`; senza header è l'unica/più vecchia). Il titolare (o un utente singolo) vede e modifica i propri; un **figlio attivo** vede quelli della famiglia in sola lettura (`editable: false`). `company: null` se il titolare non ha ancora alcuna azienda.
 
 ### `PUT /me/company`
 Upsert dei dati aziendali. Bloccato (`403`) SOLO per i **figli attivi**, che ereditano i dati della famiglia; titolari, utenti singoli, pending e retrocessi scrivono i propri. Campi: `ragione_sociale`*, `forma_giuridica`, `partita_iva`* (11 cifre, prefisso IT tollerato), `codice_fiscale`, `ateco_id`/`settore_id`/`regione_id` (id delle lookup del DB secondario → il backend denormalizza `ateco_codice`, `settore_nome`, `regione_nome`; `400` se sconosciuti), **`beneficiari_ids`** (lista di id della lookup `beneficiari`, max 50, deduplicata → in risposta arriva `beneficiari: [{id, nome}]`; `400` se un id è sconosciuto), `anno_fondazione` (1800-2100), `indirizzo`, `comune`, `provincia`, `cap` (5 cifre), `classe_dimensionale` (`micro|piccola|media|grande`), `numero_dipendenti`, `fascia_fatturato` (`fino_100k|100k_500k|500k_2m|2m_10m|10m_50m|oltre_50m`), `pec`, `telefono`, `sito_web`.
@@ -155,7 +157,7 @@ Body `{ "bando_slug": "..." }`. Avvia l'analisi (solo titolare) e risponde subit
 Errori: `503 ai_not_configured`, `403 forbidden` (figlio attivo), `400 bad_request` (dati aziendali insufficienti), `404 not_found` (bando), `409 ai_check_in_progress` (analisi già in corso o altra operazione sull'azienda), `429 ai_quota_exceeded`, `429 ai_check_cooldown` (5 min per coppia azienda×bando).
 
 ### `GET /me/ai-checks?bando_slug=&page=&page_size=`
-Storico (tutta l'azienda, più recenti prima): `{ editable, quota: {totale, usati, rimanenti, periodo_inizio, periodo_fine}, items, total }`. Con `bando_slug` gli item includono il **`report` completo** (storico versionato del bando, il primo è l'ultima analisi); senza, la lista è sintetica (esito/punteggio come colonne). Item: `{id, bando_id, bando_slug, bando_titolo, status: pending|ready|error, error_detail, esito: ammissibile|non_ammissibile|da_verificare, punteggio (0-100), tipo_punteggio: stima|euristico, model, extraction_cached, created_at, ready_at, report?}`.
+Storico dell'**azienda attiva** (vedi header `X-Active-Company`; più recenti prima): `{ editable, quota: {totale, usati, rimanenti, periodo_inizio, periodo_fine}, items, total }`. La `quota` resta quella del pool condiviso, non dipende dall'azienda attiva. Con `bando_slug` gli item includono il **`report` completo** (storico versionato del bando, il primo è l'ultima analisi); senza, la lista è sintetica (esito/punteggio come colonne). Item: `{id, bando_id, bando_slug, bando_titolo, status: pending|ready|error, error_detail, esito: ammissibile|non_ammissibile|da_verificare, punteggio (0-100), tipo_punteggio: stima|euristico, model, extraction_cached, created_at, ready_at, report?}`.
 
 Il `report` (jsonb, `schema_version: 1`) è verificabile punto-punto: `requisiti[]` e `criteri[]` con verdetto (`soddisfatto|parzialmente_soddisfatto|non_soddisfatto|dato_mancante`), **`riferimento_bando`** (sezione + testo citato alla lettera, con flag `verificata`), **`dato_azienda`** (campo esatto + valore usato) e motivazione; `verifiche_strutturate` (pre-check esatti su regione/ATECO/settore/beneficiari/stato); `griglia` (presente/fonte/soglia, punti stimati); `punti_di_forza`/`punti_di_debolezza`/`dati_mancanti`; `disclaimer`.
 
@@ -163,7 +165,7 @@ Il `report` (jsonb, `schema_version: 1`) è verificabile punto-punto: `requisiti
 `{ totale, usati, rimanenti, periodo_inizio, periodo_fine }` — quota del periodo di abbonamento attivo, contata dalle righe di `ai_checks` (`pending` + `ready`) nella finestra `data_inizio..data_scadenza`: le analisi fallite non consumano. Nota: la finestra segue l'abbonamento attivo — un cambio piano la fa ripartire (accettato in fase 1, senza pagamenti).
 
 ### `GET /me/ai-checks/{id}`
-Singolo report completo (anche per i figli attivi). `404` se non appartiene all'azienda.
+Singolo report completo (anche per i figli attivi). `404` se non appartiene all'azienda attiva.
 
 ## Preferenze
 

@@ -1,3 +1,5 @@
+import uuid
+from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -6,7 +8,7 @@ from supabase import AsyncClient
 
 from app.clients.anthropic_ai import AiCheckClient as _AiCheckClient
 from app.clients.openapi import OpenapiClient as _OpenapiClient
-from app.core.errors import ForbiddenError, UnauthorizedError
+from app.core.errors import ForbiddenError, NotFoundError, UnauthorizedError
 from app.core.security import decode_supabase_jwt
 from app.services.user_service import PROFILE_SELECT, ensure_profile
 
@@ -70,6 +72,73 @@ async def get_current_user(
 
 
 CurrentUser = Annotated[dict, Depends(get_current_user)]
+
+
+@dataclass
+class ActiveCompany:
+    """L'azienda su cui opera la richiesta corrente.
+
+    Per il piano Advisor (multi-azienda) l'azienda attiva arriva dall'header
+    `X-Active-Company`; per tutti gli altri (una sola azienda) è quella del
+    titolare. `owner_id`/`editable` vengono da `owner_and_editable` (un figlio
+    attivo legge i dati della famiglia in sola lettura). `company_id` è None se
+    il titolare non ha ancora alcuna azienda.
+    """
+
+    company_id: str | None
+    owner_id: str
+    editable: bool
+
+
+async def active_company(
+    request: Request, user: CurrentUser, primary: PrimaryClient
+) -> ActiveCompany:
+    """Risolve l'azienda attiva della richiesta, ri-autorizzandola sempre:
+    l'header `X-Active-Company` è onorato solo se punta a un'azienda VIVA del
+    titolare corrente (mai di un altro owner, mai cancellata/archiviata).
+    Senza header si usa l'azienda viva più vecchia del titolare (l'unica, per i
+    non-Advisor): comportamento identico a prima della multi-azienda."""
+    from app.services import family_service  # import locale: evita cicli
+
+    owner_id, editable = await family_service.owner_and_editable(primary, user)
+
+    header = (request.headers.get("X-Active-Company") or "").strip()
+    if header:
+        try:
+            header = str(uuid.UUID(header))
+        except ValueError:
+            # id malformato = azienda inesistente per il chiamante (evita il
+            # 22P02 → 502 di Postgres su un uuid non valido).
+            raise NotFoundError("Azienda non disponibile") from None
+        resp = (
+            await primary.table("company_profiles")
+            .select("id")
+            .eq("id", header)
+            .eq("parent_id", owner_id)
+            .is_("deleted_at", "null")
+            .is_("archived_at", "null")
+            .limit(1)
+            .execute()
+        )
+        if not resp.data:
+            raise NotFoundError("Azienda non disponibile")
+        return ActiveCompany(company_id=str(resp.data[0]["id"]), owner_id=owner_id, editable=editable)
+
+    resp = (
+        await primary.table("company_profiles")
+        .select("id")
+        .eq("parent_id", owner_id)
+        .is_("deleted_at", "null")
+        .is_("archived_at", "null")
+        .order("created_at")
+        .limit(1)
+        .execute()
+    )
+    company_id = str(resp.data[0]["id"]) if resp.data else None
+    return ActiveCompany(company_id=company_id, owner_id=owner_id, editable=editable)
+
+
+ActiveCompanyDep = Annotated[ActiveCompany, Depends(active_company)]
 
 
 async def require_admin(user: CurrentUser) -> dict:

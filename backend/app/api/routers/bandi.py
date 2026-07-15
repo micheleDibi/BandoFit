@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import CurrentUser, PrimaryClient, SecondaryClient
+from app.api.deps import ActiveCompanyDep, PrimaryClient, SecondaryClient
 from app.core.errors import BadRequestError
 from app.schemas.bando import BandoDetail, BandoListItem
 from app.schemas.common import Page
@@ -71,7 +71,7 @@ def parse_filters(
 
 @router.get("", response_model=Page[BandoListItem])
 async def list_bandi(
-    user: CurrentUser,
+    active: ActiveCompanyDep,
     primary: PrimaryClient,
     secondary: SecondaryClient,
     filters: Annotated[BandiFilters, Depends(parse_filters)],
@@ -82,7 +82,7 @@ async def list_bandi(
     if sort not in SORT_OPTIONS:
         raise BadRequestError(f"Ordinamento non valido: {sort}")
     lookups = await get_lookups(secondary)
-    facets = await get_company_facets(primary, user, lookups)
+    facets = await get_company_facets(primary, active, lookups)
     return await bandi_service.fetch_bandi(
         secondary,
         filters,
@@ -96,10 +96,10 @@ async def list_bandi(
 
 @router.get("/{slug}", response_model=BandoDetail)
 async def get_bando(
-    user: CurrentUser, primary: PrimaryClient, secondary: SecondaryClient, slug: str
+    active: ActiveCompanyDep, primary: PrimaryClient, secondary: SecondaryClient, slug: str
 ) -> BandoDetail:
     lookups = await get_lookups(secondary)
-    facets = await get_company_facets(primary, user, lookups)
+    facets = await get_company_facets(primary, active, lookups)
     return await bandi_service.fetch_bando_by_slug(
         secondary, slug, company_facets=facets, totale_regioni=len(lookups.regioni)
     )

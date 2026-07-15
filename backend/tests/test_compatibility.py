@@ -3,6 +3,7 @@
 import time
 from types import SimpleNamespace
 
+from app.api.deps import ActiveCompany
 from app.services import compatibility
 from app.services.bandi_service import BandiFilters, bando_facet_ids, build_list_select
 from app.services.compatibility import (
@@ -91,6 +92,10 @@ class FakePrimary:
 USER = {"id": "a0000000-0000-0000-0000-000000000001"}
 
 
+def _active(company_id: str | None = "c1", editable: bool = True) -> ActiveCompany:
+    return ActiveCompany(company_id=company_id, owner_id=USER["id"], editable=editable)
+
+
 def _primary(company: dict | None, derived: dict | None = None) -> FakePrimary:
     return FakePrimary(
         {
@@ -113,7 +118,7 @@ class TestLoadCompanyFacets:
             {"ateco_id": 620, "regione_id": 12, "settore_id": 7, "beneficiari": []},
             {"ateco_secondari": ["63.01"], "regioni_ids": [12, 15]},
         )
-        facets = await compatibility.load_company_facets(primary, USER, lookups())
+        facets = await compatibility.load_company_facets(primary, _active(), lookups())
         assert facets.regioni_ids == {12, 15}  # sede legale + unità locale
         assert facets.ateco_ids == {620, 630}  # principale + secondario
 
@@ -122,18 +127,21 @@ class TestLoadCompanyFacets:
         # Nessun ATECO, nessuna regione: solo beneficiari dichiarati a mano.
         primary = _primary({"beneficiari": [{"id": 2, "nome": "PMI"}]})
 
-        facets = await compatibility.load_company_facets(primary, USER, lookups())
+        facets = await compatibility.load_company_facets(primary, _active(), lookups())
         assert facets.sufficiente is False
         assert facets.beneficiari_ids == {2}  # il preset può filtrare lo stesso
 
         invalidate_company_facets(USER["id"])
         # Il badge invece non deve comparire.
-        assert await compatibility.get_company_facets(primary, USER, lookups()) is None
+        assert await compatibility.get_company_facets(primary, _active(), lookups()) is None
 
     async def test_senza_azienda_nessun_facet(self):
         invalidate_company_facets(USER["id"])
         primary = _primary(None)
-        assert await compatibility.load_company_facets(primary, USER, lookups()) is None
+        # Nessuna azienda attiva → il resolver darebbe company_id None.
+        assert await compatibility.load_company_facets(
+            primary, _active(company_id=None), lookups()
+        ) is None
 
 
 def _facets(**over):
@@ -308,4 +316,4 @@ async def test_get_company_facets_degrada_a_none_su_errore(monkeypatch):
         raise RuntimeError("primary irraggiungibile")
 
     monkeypatch.setattr(compatibility, "load_company_facets", boom)
-    assert await compatibility.get_company_facets(object(), {"id": "u1"}, lookups()) is None
+    assert await compatibility.get_company_facets(object(), _active(), lookups()) is None

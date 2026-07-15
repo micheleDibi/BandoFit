@@ -21,12 +21,17 @@ from app.core.errors import (
     OpenapiTimeoutError,
     OpenapiUpstreamError,
 )
+from app.api.deps import ActiveCompany
 from app.clients.openapi import OpenapiInvalidIdError
 from app.services import openapi_service
 
 FIXTURES = Path(__file__).parent / "fixtures" / "openapi"
 USER = {"id": "a0000000-0000-0000-0000-000000000001", "role": "cliente", "is_active": True}
 PIVA = "14061981008"
+
+
+def _active(company_id: str | None = "c-openapi", editable: bool = True) -> ActiveCompany:
+    return ActiveCompany(company_id=company_id, owner_id=USER["id"], editable=editable)
 
 
 ALTRA_PIVA = "00000000000"  # checksum valido, azienda diversa
@@ -214,12 +219,15 @@ def fake_lookups(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def fake_company_response(monkeypatch):
-    async def get_company(primary, user):
+    async def _stub(*_args, **_kwargs):
         from app.schemas.company import CompanyResponse
 
         return CompanyResponse(editable=True, company=None)
 
-    monkeypatch.setattr("app.services.company_service.get_company", get_company)
+    # L'import (`_persist_import`) legge i dati dell'azienda con la variante
+    # owner-scoped; il GET pubblico passa dal resolver dell'azienda attiva.
+    monkeypatch.setattr("app.services.company_service.get_company", _stub)
+    monkeypatch.setattr("app.services.company_service.company_response_for_owner", _stub)
 
 
 COMPANY_ROW = {
@@ -583,7 +591,7 @@ class TestConferma:
 class TestDossier:
     async def test_mai_importato(self):
         primary = FakePrimary(selects={"company_profiles": [COMPANY_ROW]})
-        resp = await openapi_service.get_dossier(primary, USER)
+        resp = await openapi_service.get_dossier(primary, _active())
         assert resp.imported is False and resp.editable is True
 
     async def test_dossier_del_titolare(self):
@@ -608,17 +616,17 @@ class TestDossier:
                 ],
             }
         )
-        resp = await openapi_service.get_dossier(primary, USER)
+        resp = await openapi_service.get_dossier(primary, _active())
         assert resp.imported is True and resp.editable is True
         assert resp.dossier["anagrafica"]["denominazione"].startswith("ENTE")
         assert resp.people[0].nome == "MICHELE"
         assert resp.derived["classe_dimensionale"] == "micro"
 
-    async def test_figlio_attivo_legge_la_famiglia(self, monkeypatch):
-        async def membership(primary, user_id):
-            return {"status": "active", "parent_id": "p0000000-0000-0000-0000-000000000001"}
-
-        monkeypatch.setattr("app.services.family_service.get_membership", membership)
+    async def test_figlio_attivo_legge_la_famiglia(self):
+        # Il resolver dà editable=False (figlio attivo); qui il titolare non ha
+        # ancora importato → company_id None → imported=False.
         primary = FakePrimary(selects={"company_profiles": []})
-        resp = await openapi_service.get_dossier(primary, USER)
+        resp = await openapi_service.get_dossier(
+            primary, _active(company_id=None, editable=False)
+        )
         assert resp.editable is False and resp.imported is False

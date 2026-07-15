@@ -17,6 +17,15 @@ COMPANY_SELECT = (
 )
 
 
+def _map_company(row: dict | None) -> CompanyOut | None:
+    if not row:
+        return None
+    row = dict(row)
+    # In colonna c'è solo [{id, nome}]: gli id per il form si ricavano da lì.
+    row["beneficiari_ids"] = [b["id"] for b in (row.get("beneficiari") or [])]
+    return CompanyOut(**row)
+
+
 async def _fetch_company(primary, parent_id: str) -> CompanyOut | None:
     resp = (
         await primary.table("company_profiles")
@@ -25,12 +34,18 @@ async def _fetch_company(primary, parent_id: str) -> CompanyOut | None:
         .limit(1)
         .execute()
     )
-    if not resp.data:
-        return None
-    row = dict(resp.data[0])
-    # In colonna c'è solo [{id, nome}]: gli id per il form si ricavano da lì.
-    row["beneficiari_ids"] = [b["id"] for b in (row.get("beneficiari") or [])]
-    return CompanyOut(**row)
+    return _map_company(resp.data[0] if resp.data else None)
+
+
+async def _fetch_company_by_id(primary, company_id: str) -> CompanyOut | None:
+    resp = (
+        await primary.table("company_profiles")
+        .select(COMPANY_SELECT)
+        .eq("id", str(company_id))
+        .limit(1)
+        .execute()
+    )
+    return _map_company(resp.data[0] if resp.data else None)
 
 
 async def get_company_for_owner(primary, owner_id: str) -> CompanyOut | None:
@@ -40,23 +55,25 @@ async def get_company_for_owner(primary, owner_id: str) -> CompanyOut | None:
     return await _fetch_company(primary, owner_id)
 
 
-async def get_company(primary, requester: dict) -> CompanyResponse:
-    """Il padre (o un utente singolo) vede e modifica i propri dati; un figlio
-    ATTIVO vede in sola lettura quelli della famiglia."""
-    membership = await family_service.get_membership(primary, requester["id"])
-    if membership and membership["status"] == "active":
-        return CompanyResponse(
-            editable=False,
-            company=await _fetch_company(primary, membership["parent_id"]),
-        )
-    if membership:
-        # pending/demoted: account (ancora/di nuovo) indipendente, dati propri.
-        return CompanyResponse(
-            editable=True, company=await _fetch_company(primary, requester["id"])
-        )
-    return CompanyResponse(
-        editable=True, company=await _fetch_company(primary, requester["id"])
+async def get_company(primary, active) -> CompanyResponse:
+    """Dati dell'azienda attiva. `editable` viene dal resolver (un figlio
+    attivo legge in sola lettura i dati della famiglia); `company_id` è None
+    se il titolare non ha ancora alcuna azienda."""
+    company = (
+        await _fetch_company_by_id(primary, active.company_id)
+        if active.company_id
+        else None
     )
+    return CompanyResponse(editable=active.editable, company=company)
+
+
+async def company_response_for_owner(
+    primary, owner_id: str, *, editable: bool = True
+) -> CompanyResponse:
+    """CompanyResponse dei dati del titolare indicato, per i flussi
+    owner-scoped (es. l'import da P.IVA), senza passare dal resolver
+    dell'azienda attiva."""
+    return CompanyResponse(editable=editable, company=await _fetch_company(primary, owner_id))
 
 
 def resolve_lookups(data: CompanyIn, lookups) -> dict:

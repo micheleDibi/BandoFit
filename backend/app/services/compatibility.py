@@ -32,7 +32,6 @@ import time
 from dataclasses import dataclass, field
 
 from app.schemas.bando import LookupsOut
-from app.services.family_service import owner_and_editable
 from app.services.openapi_mapping import ateco_division, company_regioni_ids
 
 logger = logging.getLogger("bandofit.compatibility")
@@ -150,42 +149,45 @@ def invalidate_company_facets(owner_id: str) -> None:
     _cache.pop(str(owner_id), None)
 
 
-async def load_company_facets(primary, user: dict, lookups: LookupsOut) -> CompanyFacets | None:
-    """Facet dell'azienda della famiglia (i figli ereditano dal titolare), SENZA
-    il gate `sufficiente`: None solo se l'azienda non esiste.
+async def load_company_facets(primary, active, lookups: LookupsOut) -> CompanyFacets | None:
+    """Facet dell'azienda ATTIVA (i figli ereditano dal titolare), SENZA il
+    gate `sufficiente`: None solo se l'azienda non esiste.
 
     È la fonte unica dei «dati reali dell'azienda»: il badge di compatibilità e
     l'AI-check li vogliono filtrati (vedi `get_company_facets`), il preset
     «Bandi per te» no — lì anche il solo settore, o i soli beneficiari
     dichiarati a mano, sono un filtro utile.
 
-    Cache in-memory a TTL breve per owner (invalidata dalle scritture)."""
-    owner_id, _editable = await owner_and_editable(primary, user)
+    Cache in-memory a TTL breve per owner (invalidata dalle scritture). NB:
+    con l'Advisor multi-azienda la chiave della cache dovrà passare a
+    `company_id`; oggi owner↔azienda è 1:1, quindi la chiave owner resta
+    corretta."""
+    owner_id = active.owner_id
 
     cached = _cache.get(owner_id)
     if cached is not None and (time.monotonic() - cached[1]) < _CACHE_TTL_SECONDS:
         return cached[0]
 
-    company_resp = (
-        await primary.table("company_profiles")
-        .select("id,ateco_id,settore_id,regione_id,beneficiari")
-        .eq("parent_id", owner_id)
-        .limit(1)
-        .execute()
-    )
-    company = company_resp.data[0] if company_resp.data else None
-
     facets: CompanyFacets | None = None
-    if company is not None:
-        data_resp = (
-            await primary.table("company_data")
-            .select("derived")
-            .eq("company_profile_id", company["id"])
+    if active.company_id is not None:
+        company_resp = (
+            await primary.table("company_profiles")
+            .select("id,ateco_id,settore_id,regione_id,beneficiari")
+            .eq("id", active.company_id)
             .limit(1)
             .execute()
         )
-        derived = data_resp.data[0].get("derived") if data_resp.data else None
-        facets = build_company_facets(company, derived, lookups)
+        company = company_resp.data[0] if company_resp.data else None
+        if company is not None:
+            data_resp = (
+                await primary.table("company_data")
+                .select("derived")
+                .eq("company_profile_id", company["id"])
+                .limit(1)
+                .execute()
+            )
+            derived = data_resp.data[0].get("derived") if data_resp.data else None
+            facets = build_company_facets(company, derived, lookups)
 
     if len(_cache) > 512:  # backstop: evita crescita illimitata
         _cache.clear()
@@ -193,7 +195,7 @@ async def load_company_facets(primary, user: dict, lookups: LookupsOut) -> Compa
     return facets
 
 
-async def get_company_facets(primary, user: dict, lookups: LookupsOut) -> CompanyFacets | None:
+async def get_company_facets(primary, active, lookups: LookupsOut) -> CompanyFacets | None:
     """Facet per il PUNTEGGIO: None anche quando l'azienda non è sufficiente
     (P.IVA non importata), perché senza ATECO e regione il badge mentirebbe.
 
@@ -201,7 +203,7 @@ async def get_company_facets(primary, user: dict, lookups: LookupsOut) -> Compan
     aziendali degrada a None (nessun badge) e non deve mai far fallire
     l'elenco o il dettaglio di un bando, che vivono sul DB secondario."""
     try:
-        facets = await load_company_facets(primary, user, lookups)
+        facets = await load_company_facets(primary, active, lookups)
     except Exception:
         logger.warning("compatibilità non calcolabile: dati aziendali illeggibili", exc_info=True)
         return None

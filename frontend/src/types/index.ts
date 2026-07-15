@@ -128,6 +128,8 @@ export interface Plan {
   /** Alert nuovi-bandi: giorni di ritardo dalla pubblicazione (null = esclusi). */
   alert_ritardo_giorni: number | null;
   num_account_aziendali: number;
+  /** Numero di aziende gestibili col piano (Advisor: >1). */
+  max_aziende: number;
   ordering: number;
   is_active: boolean;
   updated_at: string | null;
@@ -361,7 +363,25 @@ export interface Me {
   family: MeFamily | null;
   /** Valorizzato solo per gli utenti con ruolo progettista. */
   progettista?: Progettista | null;
+  /** Limite EFFETTIVO di aziende gestibili (override > piano > 1): >1 = Advisor. */
+  max_aziende: number;
   plan_switch_adjustment?: PlanSwitchAdjustment | null;
+}
+
+/** Voce dell'elenco aziende gestite (Advisor multi-azienda). */
+export interface CompanySummary {
+  id: string;
+  ragione_sociale: string;
+  partita_iva: string;
+  created_at: string;
+  /** L'azienda attiva di default (la più vecchia viva). */
+  attiva: boolean;
+}
+
+export interface Companies {
+  aziende: CompanySummary[];
+  max_aziende: number;
+  usate: number;
 }
 
 export interface AdminFamilyInfo {

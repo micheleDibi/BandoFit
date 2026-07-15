@@ -10,7 +10,7 @@ import logging
 
 from app.core.errors import BadRequestError
 from app.schemas.preferences import FACETS, PreferencesPayload
-from app.services import lookup_service
+from app.services import company_scope, lookup_service
 
 logger = logging.getLogger("bandofit.preferences")
 
@@ -36,12 +36,14 @@ _FACET_LABELS = {
 }
 
 
-async def get_preferences(primary, user_id: str) -> PreferencesPayload:
+async def get_preferences(primary, user_id: str, active) -> PreferencesPayload:
     resp = (
-        await primary.table("user_preferences")
-        .select("facet,ref_id")
-        .eq("user_id", str(user_id))
-        .execute()
+        await company_scope.filter_read(
+            primary.table("user_preferences")
+            .select("facet,ref_id")
+            .eq("user_id", str(user_id)),
+            active,
+        ).execute()
     )
     result: dict[str, list[int]] = {facet: [] for facet in FACETS}
     for row in resp.data or []:
@@ -53,10 +55,12 @@ async def get_preferences(primary, user_id: str) -> PreferencesPayload:
 
 
 async def save_preferences(
-    primary, secondary, user_id: str, data: PreferencesPayload
+    primary, secondary, user_id: str, active, data: PreferencesPayload
 ) -> PreferencesPayload:
-    """Sostituisce il set completo delle preferenze dell'utente (a diff)."""
+    """Sostituisce il set completo delle preferenze dell'utente (a diff),
+    scopate sull'azienda attiva per un Advisor."""
     lookups = await lookup_service.get_lookups(secondary)
+    company_id = company_scope.scope_value(active)
 
     # Validazione + denormalizzazione etichette, faccetta per faccetta.
     desired: dict[tuple[str, int], str] = {}
@@ -72,16 +76,24 @@ async def save_preferences(
             desired[(facet, ref_id)] = label_of(item)
 
     existing_resp = (
-        await primary.table("user_preferences")
-        .select("id,facet,ref_id")
-        .eq("user_id", str(user_id))
-        .execute()
+        await company_scope.filter_read(
+            primary.table("user_preferences")
+            .select("id,facet,ref_id")
+            .eq("user_id", str(user_id)),
+            active,
+        ).execute()
     )
     existing = {(row["facet"], row["ref_id"]): row["id"] for row in existing_resp.data or []}
 
     to_delete = [pref_id for key, pref_id in existing.items() if key not in desired]
     to_insert = [
-        {"user_id": str(user_id), "facet": facet, "ref_id": ref_id, "label": label}
+        {
+            "user_id": str(user_id),
+            "company_profile_id": company_id,
+            "facet": facet,
+            "ref_id": ref_id,
+            "label": label,
+        }
         for (facet, ref_id), label in desired.items()
         if (facet, ref_id) not in existing
     ]
@@ -91,4 +103,4 @@ async def save_preferences(
     if to_insert:
         await primary.table("user_preferences").insert(to_insert).execute()
 
-    return await get_preferences(primary, user_id)
+    return await get_preferences(primary, user_id, active)

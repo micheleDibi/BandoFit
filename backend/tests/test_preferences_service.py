@@ -7,8 +7,13 @@ import pytest
 
 from app.core.errors import BadRequestError
 from app.schemas.preferences import PreferencesPayload
+from app.api.deps import ActiveCompany
 from app.services import preferences_service
 from tests.test_openapi_service import FakePrimary, USER
+
+
+def _active(company_id=None, is_multi=False):
+    return ActiveCompany(company_id=company_id, owner_id=USER["id"], editable=True, is_multi=is_multi)
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +37,7 @@ def fake_lookups(monkeypatch):
 class TestGet:
     async def test_vuote(self):
         primary = FakePrimary(selects={"user_preferences": []})
-        prefs = await preferences_service.get_preferences(primary, USER["id"])
+        prefs = await preferences_service.get_preferences(primary, USER["id"], _active())
         assert prefs == PreferencesPayload()
 
     async def test_raggruppate_e_ordinate(self):
@@ -45,7 +50,7 @@ class TestGet:
                 ]
             }
         )
-        prefs = await preferences_service.get_preferences(primary, USER["id"])
+        prefs = await preferences_service.get_preferences(primary, USER["id"], _active())
         assert prefs.regioni == [9, 16]
         assert prefs.codici_ateco == [45]
         assert prefs.settori == []
@@ -56,7 +61,7 @@ class TestSave:
         primary = FakePrimary(selects={"user_preferences": []})
         with pytest.raises(BadRequestError):
             await preferences_service.save_preferences(
-                primary, None, USER["id"], PreferencesPayload(regioni=[999])
+                primary, None, USER["id"], _active(), PreferencesPayload(regioni=[999])
             )
         assert primary.ops_for("user_preferences", "insert") == []
 
@@ -70,7 +75,7 @@ class TestSave:
             }
         )
         await preferences_service.save_preferences(
-            primary, None, USER["id"],
+            primary, None, USER["id"], _active(),
             PreferencesPayload(regioni=[9, 16], codici_ateco=[45]),  # settori rimossi
         )
         inserts = primary.ops_for("user_preferences", "insert")[0]
@@ -83,7 +88,7 @@ class TestSave:
             selects={"user_preferences": [{"id": "p1", "facet": "regioni", "ref_id": 9}]}
         )
         await preferences_service.save_preferences(
-            primary, None, USER["id"], PreferencesPayload(regioni=[9])
+            primary, None, USER["id"], _active(), PreferencesPayload(regioni=[9])
         )
         assert primary.ops_for("user_preferences", "insert") == []
         assert primary.ops_for("user_preferences", "delete") == []
@@ -91,7 +96,7 @@ class TestSave:
     async def test_etichette_denormalizzate(self):
         primary = FakePrimary(selects={"user_preferences": []})
         await preferences_service.save_preferences(
-            primary, None, USER["id"],
+            primary, None, USER["id"], _active(),
             PreferencesPayload(codici_ateco=[45], tipologie=[1]),
         )
         inserts = primary.ops_for("user_preferences", "insert")[0]
@@ -102,7 +107,7 @@ class TestSave:
     async def test_duplicati_nel_payload_deduplicati(self):
         primary = FakePrimary(selects={"user_preferences": []})
         await preferences_service.save_preferences(
-            primary, None, USER["id"], PreferencesPayload(regioni=[9, 9, 9])
+            primary, None, USER["id"], _active(), PreferencesPayload(regioni=[9, 9, 9])
         )
         inserts = primary.ops_for("user_preferences", "insert")[0]
         assert len(inserts) == 1

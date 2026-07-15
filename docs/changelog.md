@@ -2,6 +2,12 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-15 — Gestione multi-azienda per l'Advisor: context switch + segregazione Gruppo A (fase 3)
+
+- **Switch di contesto azienda** per gli Advisor: un `ActiveCompanyProvider` (frontend) tiene l'azienda attiva in `localStorage` e la inietta come header `X-Active-Company` su ogni richiesta (`lib/api.ts`); al cambio azienda **svuota la cache** delle query (`queryClient.clear()`) — nessun dato dell'azienda precedente sopravvive. Nuovi: **switcher** in top bar e pagina **`/app/aziende`** (crea/rendi attiva/rimuovi), visibili solo quando `me.max_aziende > 1`.
+- **Segregazione del Gruppo A** (tabelle per-utente: **bandi salvati, calendario, preferenze**): overlay `company_profile_id` (colonne già create dalla 0023) applicato via l'helper `company_scope`. Il gate è `active.is_multi` (limite effettivo > 1, aggiunto al resolver): per un Advisor le righe si scrivono/leggono per azienda attiva, per **tutti gli altri** restano a `NULL` — le query non cambiano, quindi le risposte dei non-Advisor sono **identiche** (invariante testato). La garanzia è doppia: filtro server-side + clear della cache allo switch.
+- **Nessuna migration nuova** (usa le colonne overlay della 0023). Suite: 575 unit backend verdi (+ test di segregazione Gruppo A), `tsc`/`build` frontend verdi.
+
 ## 2026-07-15 — Gestione multi-azienda per l'Advisor: N aziende per owner (fase 2, migration 0024)
 
 - **Un Advisor può ora possedere N aziende** con scritture segregate. Nuovi endpoint **owner-only** (`ParentUser`): `GET /me/aziende` (elenco vivo + `max_aziende` effettivo + `usate`), `POST /me/aziende` (crea via `fn_create_company`: ragione sociale + P.IVA obbligatorie, limite race-free → `409 company_limit_reached`), `DELETE /me/aziende/{id}` (soft-delete). `/me` ora espone `max_aziende` (limite effettivo: >1 = Advisor).

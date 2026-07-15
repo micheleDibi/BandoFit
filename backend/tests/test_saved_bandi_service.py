@@ -6,10 +6,18 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.api.deps import ActiveCompany
 from app.core.errors import BadRequestError, NotFoundError
 from app.services import saved_bandi_service
 
 USER_ID = "a0000000-0000-0000-0000-000000000001"
+COMPANY = "c0000000-0000-0000-0000-000000000001"
+
+
+def _active(company_id: str | None = None, is_multi: bool = False) -> ActiveCompany:
+    """Default = non-Advisor (is_multi False): overlay company NULL, comportamento
+    legacy. Con is_multi True le righe sono scopate sulla company attiva."""
+    return ActiveCompany(company_id=company_id, owner_id=USER_ID, editable=True, is_multi=is_multi)
 
 
 # ------------------------------------------------------------------- finti
@@ -169,11 +177,12 @@ class TestSaveBando:
     async def test_inserisce_lo_snapshot_corretto(self):
         primary = FakeDb({"saved_bandi": [], "calendar_events": []})
         secondary = FakeDb({"bando": [BANDO_VIVO]})
-        item = await saved_bandi_service.save_bando(primary, secondary, USER_ID, "bando-x")
+        item = await saved_bandi_service.save_bando(primary, secondary, USER_ID, _active(), "bando-x")
 
         [(inserted, _)] = primary.ops_for("saved_bandi", "insert")
         assert inserted == {
             "user_id": USER_ID,
+            "company_profile_id": None,  # non-Advisor: overlay NULL (legacy)
             "bando_id": 42,
             "bando_slug": "bando-x",
             "bando_titolo": "Bando X",  # titolo_breve preferito
@@ -188,14 +197,14 @@ class TestSaveBando:
         senza_breve = {**BANDO_VIVO, "titolo_breve": None}
         secondary = FakeDb({"bando": [senza_breve]})
         primary = FakeDb({"saved_bandi": [], "calendar_events": []})
-        await saved_bandi_service.save_bando(primary, secondary, USER_ID, "bando-x")
+        await saved_bandi_service.save_bando(primary, secondary, USER_ID, _active(), "bando-x")
         [(inserted, _)] = primary.ops_for("saved_bandi", "insert")
         assert inserted["bando_titolo"] == "Titolo lungo del bando X"
 
         senza_titoli = {**BANDO_VIVO, "titolo_breve": None, "titolo": None}
         secondary = FakeDb({"bando": [senza_titoli]})
         primary = FakeDb({"saved_bandi": [], "calendar_events": []})
-        await saved_bandi_service.save_bando(primary, secondary, USER_ID, "bando-x")
+        await saved_bandi_service.save_bando(primary, secondary, USER_ID, _active(), "bando-x")
         [(inserted, _)] = primary.ops_for("saved_bandi", "insert")
         assert inserted["bando_titolo"] == "bando-x"
 
@@ -203,7 +212,7 @@ class TestSaveBando:
         primary = FakeDb({"saved_bandi": []})
         secondary = FakeDb({"bando": []})
         with pytest.raises(NotFoundError):
-            await saved_bandi_service.save_bando(primary, secondary, USER_ID, "sparito")
+            await saved_bandi_service.save_bando(primary, secondary, USER_ID, _active(), "sparito")
         assert not primary.ops_for("saved_bandi", "insert")
 
     async def test_idempotente_se_gia_salvato(self):
@@ -214,7 +223,7 @@ class TestSaveBando:
 
         primary = FakeDb({"saved_bandi": saved_bandi, "calendar_events": []})
         secondary = FakeDb({"bando": [BANDO_VIVO]})
-        item = await saved_bandi_service.save_bando(primary, secondary, USER_ID, "bando-x")
+        item = await saved_bandi_service.save_bando(primary, secondary, USER_ID, _active(), "bando-x")
         assert not primary.ops_for("saved_bandi", "insert")
         assert item.disponibile is True
 
@@ -227,7 +236,7 @@ class TestSaveBando:
         primary = FakeDb({"saved_bandi": saved_bandi})
         secondary = FakeDb({"bando": [BANDO_VIVO]})
         with pytest.raises(BadRequestError):
-            await saved_bandi_service.save_bando(primary, secondary, USER_ID, "bando-x")
+            await saved_bandi_service.save_bando(primary, secondary, USER_ID, _active(), "bando-x")
         assert not primary.ops_for("saved_bandi", "insert")
 
     async def test_corsa_su_indice_unico_rilegge(self):
@@ -242,14 +251,14 @@ class TestSaveBando:
         primary = FakeDb({"saved_bandi": saved_bandi, "calendar_events": []})
         primary.insert_fail_unique.add("saved_bandi")
         secondary = FakeDb({"bando": [BANDO_VIVO]})
-        item = await saved_bandi_service.save_bando(primary, secondary, USER_ID, "bando-x")
+        item = await saved_bandi_service.save_bando(primary, secondary, USER_ID, _active(), "bando-x")
         assert item.bando.id == 42  # la riga vinta dalla corsa viene ritornata
 
 
 class TestRemoveBando:
     async def test_delete_con_entrambi_i_filtri(self):
         primary = FakeDb()
-        await saved_bandi_service.remove_bando(primary, USER_ID, 42)
+        await saved_bandi_service.remove_bando(primary, USER_ID, _active(), 42)
         [(_, filters)] = primary.ops_for("saved_bandi", "delete")
         assert filters["user_id"] == USER_ID
         assert filters["bando_id"] == 42
@@ -263,7 +272,7 @@ class TestListSaved:
         primary = FakeDb({"saved_bandi": rows, "calendar_events": []})
         secondary = FakeDb({"bando": [BANDO_VIVO]})  # il 99 non c'è più
 
-        page = await saved_bandi_service.list_saved(primary, secondary, USER_ID, 1, 20)
+        page = await saved_bandi_service.list_saved(primary, secondary, USER_ID, _active(), 1, 20)
         assert page.total == 2
         vivo, sparito = page.items
         assert vivo.disponibile is True and vivo.bando.id == 42
@@ -282,7 +291,7 @@ class TestListSaved:
     async def test_pagina_vuota_salta_il_secondario(self):
         primary = FakeDb({"saved_bandi": []})
         secondary = FakeDb({"bando": [BANDO_VIVO]})
-        page = await saved_bandi_service.list_saved(primary, secondary, USER_ID, 1, 20)
+        page = await saved_bandi_service.list_saved(primary, secondary, USER_ID, _active(), 1, 20)
         assert page.items == [] and page.total == 0
         assert not secondary.ops  # mai interrogato
 
@@ -290,8 +299,8 @@ class TestListSaved:
         # Il filtro di tenancy deve esserci DAVVERO: mai i salvati di altri.
         primary = FakeDb({"saved_bandi": [saved_row(42)], "calendar_events": []})
         secondary = FakeDb({"bando": [BANDO_VIVO]})
-        await saved_bandi_service.list_saved(primary, secondary, USER_ID, 1, 20)
-        await saved_bandi_service.saved_ids(primary, USER_ID)
+        await saved_bandi_service.list_saved(primary, secondary, USER_ID, _active(), 1, 20)
+        await saved_bandi_service.saved_ids(primary, USER_ID, _active())
         for _, filters in primary.ops_for("saved_bandi", "select"):
             assert filters["user_id"] == USER_ID
 
@@ -301,7 +310,7 @@ class TestListSaved:
             "calendar_events": [{"bando_id": 42}],
         })
         secondary = FakeDb({"bando": [BANDO_VIVO]})
-        page = await saved_bandi_service.list_saved(primary, secondary, USER_ID, 1, 20)
+        page = await saved_bandi_service.list_saved(primary, secondary, USER_ID, _active(), 1, 20)
         assert page.items[0].in_calendario is True
         # il lookup filtra su tipo='bando' e utente
         [(_, filters)] = primary.ops_for("calendar_events", "select")
@@ -311,7 +320,7 @@ class TestListSaved:
     async def test_paginazione(self):
         primary = FakeDb({"saved_bandi": [saved_row(42)]})
         secondary = FakeDb({"bando": [BANDO_VIVO]})
-        await saved_bandi_service.list_saved(primary, secondary, USER_ID, 3, 10)
+        await saved_bandi_service.list_saved(primary, secondary, USER_ID, _active(), 3, 10)
         [(_, filters)] = primary.ops_for("saved_bandi", "select")
         assert filters["__range"] == (20, 29)
 
@@ -319,5 +328,32 @@ class TestListSaved:
 class TestSavedIds:
     async def test_ordinati(self):
         primary = FakeDb({"saved_bandi": [{"bando_id": 99}, {"bando_id": 7}, {"bando_id": 42}]})
-        out = await saved_bandi_service.saved_ids(primary, USER_ID)
+        out = await saved_bandi_service.saved_ids(primary, USER_ID, _active())
         assert out.bando_ids == [7, 42, 99]
+
+
+class TestOverlayAzienda:
+    """Segregazione Gruppo A: un Advisor scopa i preferiti sulla company attiva;
+    un non-Advisor resta a company_profile_id NULL (legacy)."""
+
+    async def test_advisor_scrive_e_legge_per_company(self):
+        primary = FakeDb({"saved_bandi": [], "calendar_events": []})
+        secondary = FakeDb({"bando": [BANDO_VIVO]})
+        active = _active(company_id=COMPANY, is_multi=True)
+        await saved_bandi_service.save_bando(primary, secondary, USER_ID, active, "bando-x")
+        # scrittura: overlay = company attiva
+        [(inserted, _)] = primary.ops_for("saved_bandi", "insert")
+        assert inserted["company_profile_id"] == COMPANY
+        # letture: filtro eq sulla company (non `is null`)
+        await saved_bandi_service.saved_ids(primary, USER_ID, active)
+        for _, filters in primary.ops_for("saved_bandi", "select"):
+            assert filters.get("company_profile_id") == COMPANY
+            assert "company_profile_id__not_is" not in filters
+
+    async def test_non_advisor_resta_null(self):
+        primary = FakeDb({"saved_bandi": [saved_row(42)], "calendar_events": []})
+        await saved_bandi_service.saved_ids(primary, USER_ID, _active())
+        [(_, filters)] = primary.ops_for("saved_bandi", "select")
+        # legacy: filtro `is null`, mai un eq sulla company
+        assert filters.get("company_profile_id__not_is") == "null"
+        assert "company_profile_id" not in filters

@@ -82,12 +82,16 @@ class ActiveCompany:
     `X-Active-Company`; per tutti gli altri (una sola azienda) è quella del
     titolare. `owner_id`/`editable` vengono da `owner_and_editable` (un figlio
     attivo legge i dati della famiglia in sola lettura). `company_id` è None se
-    il titolare non ha ancora alcuna azienda.
+    il titolare non ha ancora alcuna azienda. `is_multi` = il piano gestisce
+    più aziende (limite effettivo > 1): è il gate dell'overlay del Gruppo A
+    (bandi salvati/calendario/preferenze). Per un non-Advisor è False e quelle
+    righe restano a `company_profile_id NULL`, identiche a prima.
     """
 
     company_id: str | None
     owner_id: str
     editable: bool
+    is_multi: bool = False
 
 
 async def active_company(
@@ -98,9 +102,10 @@ async def active_company(
     titolare corrente (mai di un altro owner, mai cancellata/archiviata).
     Senza header si usa l'azienda viva più vecchia del titolare (l'unica, per i
     non-Advisor): comportamento identico a prima della multi-azienda."""
-    from app.services import family_service  # import locale: evita cicli
+    from app.services import company_service, family_service  # import locale: evita cicli
 
     owner_id, editable = await family_service.owner_and_editable(primary, user)
+    is_multi = await company_service.effective_max_aziende(primary, owner_id) > 1
 
     header = (request.headers.get("X-Active-Company") or "").strip()
     if header:
@@ -122,7 +127,10 @@ async def active_company(
         )
         if not resp.data:
             raise NotFoundError("Azienda non disponibile")
-        return ActiveCompany(company_id=str(resp.data[0]["id"]), owner_id=owner_id, editable=editable)
+        return ActiveCompany(
+            company_id=str(resp.data[0]["id"]), owner_id=owner_id,
+            editable=editable, is_multi=is_multi,
+        )
 
     resp = (
         await primary.table("company_profiles")
@@ -135,7 +143,9 @@ async def active_company(
         .execute()
     )
     company_id = str(resp.data[0]["id"]) if resp.data else None
-    return ActiveCompany(company_id=company_id, owner_id=owner_id, editable=editable)
+    return ActiveCompany(
+        company_id=company_id, owner_id=owner_id, editable=editable, is_multi=is_multi,
+    )
 
 
 ActiveCompanyDep = Annotated[ActiveCompany, Depends(active_company)]

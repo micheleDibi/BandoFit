@@ -4,7 +4,9 @@ Base URL: `http://localhost:8000/api/v1` (sviluppo). Documentazione interattiva:
 
 **Autenticazione**: header `Authorization: Bearer <access_token>` (JWT emesso da Supabase Auth del progetto primario). Il backend verifica firma (ES256/RS256 via JWKS, fallback HS256 legacy), `aud` e `iss`, poi carica il profilo: un account con `is_active=false` riceve `403`. Gli endpoint `/admin/*` richiedono `role='admin'`.
 
-**Azienda attiva** (header opzionale `X-Active-Company: <uuid>`): seleziona su quale azienda operano gli endpoint sui dati aziendali (`GET /me/company`, `GET /me/company/facets`, `GET /me/company/dossier`, `GET /me/ai-checks` e `GET /me/ai-checks/{id}`, badge di compatibilità su `GET /bandi`). È ri-autorizzato a ogni richiesta: l'azienda deve appartenere all'utente ed essere viva (non cancellata né archiviata), altrimenti `404 not_found`; un valore non-UUID è anch'esso `404`. **Senza l'header** si usa l'azienda viva più vecchia dell'utente — che per gli abbonamenti non-Advisor è l'unica, quindi il comportamento è identico a quando l'header non esisteva. La quota AI-check resta un **pool unico** condiviso (non cambia con l'azienda attiva): cambia solo lo storico mostrato.
+**Azienda attiva** (header opzionale `X-Active-Company: <uuid>`): seleziona su quale azienda operano gli endpoint scopati per azienda. **Gruppo B** (dati dell'azienda, 1:1): `GET /me/company`, `GET /me/company/facets`, `GET /me/company/dossier`, `GET /me/ai-checks` e `GET /me/ai-checks/{id}`, badge di compatibilità su `GET /bandi`. **Gruppo A** (dati per-utente, solo per gli **Advisor** multi-azienda): `/me/saved-bandi`, `/me/calendar`, `/me/preferences` — per un Advisor le righe sono segregate per azienda, per tutti gli altri restano legate al solo utente (`company_profile_id NULL`), **comportamento identico a prima**. L'header è ri-autorizzato a ogni richiesta: l'azienda deve appartenere all'utente ed essere viva (non cancellata né archiviata), altrimenti `404 not_found`; un valore non-UUID è anch'esso `404`. **Senza l'header** si usa l'azienda viva più vecchia dell'utente — che per gli abbonamenti non-Advisor è l'unica, quindi il comportamento è identico a quando l'header non esisteva. La quota AI-check resta un **pool unico** condiviso (non cambia con l'azienda attiva): cambia solo lo storico mostrato.
+
+Lato **frontend** l'header è iniettato da un `ActiveCompanyProvider` (id in `localStorage`); al cambio azienda la cache delle query viene **svuotata** (`queryClient.clear()`) — nessun dato dell'azienda precedente sopravvive. Lo switcher e la pagina `/app/aziende` compaiono solo per gli Advisor (`me.max_aziende > 1`).
 
 **Formato errori** (uniforme):
 ```json
@@ -235,7 +237,7 @@ Dettaglio completo: campi dell'elenco (`compatibilita` compreso) + `area_geograf
 
 ## Bandi salvati
 
-Preferiti **per utente** sul DB primario: RIFERIMENTI al catalogo (bando_id + snapshot di slug/titolo/scadenza/stato), non copie. Se il bando sparisce dal catalogo la riga resta e viene servita dallo snapshot con `disponibile: false`. Cap: 200 bandi salvati per utente.
+Preferiti **per utente** sul DB primario: RIFERIMENTI al catalogo (bando_id + snapshot di slug/titolo/scadenza/stato), non copie. Se il bando sparisce dal catalogo la riga resta e viene servita dallo snapshot con `disponibile: false`. Cap: 200 bandi salvati per utente. Per un **Advisor** i preferiti sono segregati per **azienda attiva** (header `X-Active-Company`); per gli altri restano legati al solo utente (comportamento invariato).
 
 ### `POST /me/saved-bandi` (201)
 Body `{ "bando_slug": "..." }`. **Idempotente** (è un toggle): già salvato → ritorna la riga esistente. Risposta `SavedBandoItem`: `{ bando: <item della lista bandi>, disponibile, in_calendario, salvato_il }`.

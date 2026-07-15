@@ -5,11 +5,24 @@ export const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1",
 });
 
+// Azienda attiva (Advisor multi-azienda): variabile a modulo aggiornata dal
+// `ActiveCompanyProvider`. Iniettata come header `X-Active-Company` così ogni
+// richiesta opera sull'azienda scelta, senza filtrarne una in ogni hook. Vale
+// solo per gli Advisor; per gli altri resta null (comportamento identico).
+let activeCompanyId: string | null = null;
+
+export function setActiveCompanyHeader(id: string | null): void {
+  activeCompanyId = id;
+}
+
 api.interceptors.request.use(async (config) => {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  if (activeCompanyId) {
+    config.headers["X-Active-Company"] = activeCompanyId;
   }
   return config;
 });

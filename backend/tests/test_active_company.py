@@ -54,12 +54,24 @@ class FakePrimary:
     """`company_rows` = righe company_profiles (con parent_id/deleted_at/
     archived_at); il fake applica i filtri rilevanti del resolver."""
 
-    def __init__(self, company_rows: list[dict], membership: dict | None = None):
+    def __init__(self, company_rows: list[dict], membership: dict | None = None,
+                 max_aziende: int = 1):
         self.company_rows = company_rows
         self.membership = membership
+        self.max_aziende = max_aziende
 
     def table(self, name):
         return FakeQuery(self, name)
+
+    def rpc(self, name, params):
+        primary = self
+
+        class _Rpc:
+            async def execute(self_inner):
+                data = primary.max_aziende if name == "fn_effective_max_aziende" else None
+                return SimpleNamespace(data=data)
+
+        return _Rpc()
 
     def resolve(self, table, filters):
         if table == "family_members":
@@ -124,6 +136,14 @@ class TestDefault:
         ])
         active = await active_company(_request(), USER, primary)
         assert active.company_id is None
+
+    async def test_is_multi_dal_limite_di_piano(self):
+        # limite 1 (default) → non-Advisor, is_multi False
+        base = FakePrimary([_company()])
+        assert (await active_company(_request(), USER, base)).is_multi is False
+        # limite > 1 → Advisor, is_multi True
+        advisor = FakePrimary([_company()], max_aziende=10)
+        assert (await active_company(_request(), USER, advisor)).is_multi is True
 
 
 class TestHeader:

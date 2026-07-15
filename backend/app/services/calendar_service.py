@@ -19,6 +19,7 @@ from app.schemas.calendar import (
     CalendarEventsOut,
     CalendarEventUpdate,
 )
+from app.services import company_scope
 
 logger = logging.getLogger("bandofit.calendar")
 
@@ -55,11 +56,14 @@ def _ensure_uuid(event_id: str) -> str:
         raise NotFoundError("Evento non trovato") from None
 
 
-async def _check_cap(primary, user_id: str) -> None:
+async def _check_cap(primary, user_id: str, active) -> None:
     resp = (
-        await primary.table("calendar_events")
-        .select("id", count="exact")
-        .eq("user_id", str(user_id))
+        await company_scope.filter_read(
+            primary.table("calendar_events")
+            .select("id", count="exact")
+            .eq("user_id", str(user_id)),
+            active,
+        )
         .limit(1)
         .execute()
     )
@@ -70,15 +74,18 @@ async def _check_cap(primary, user_id: str) -> None:
         )
 
 
-async def list_events(primary, user_id: str, anno: int, mese: int) -> CalendarEventsOut:
-    """Eventi del mese richiesto (mai il DB secondario: lettura veloce)."""
+async def list_events(primary, user_id: str, active, anno: int, mese: int) -> CalendarEventsOut:
+    """Eventi del mese richiesto per l'azienda attiva (mai il DB secondario)."""
     start, end = _month_bounds(anno, mese)
     resp = (
-        await primary.table("calendar_events")
-        .select(EVENT_SELECT)
-        .eq("user_id", str(user_id))
-        .gte("data", start)
-        .lt("data", end)
+        await company_scope.filter_read(
+            primary.table("calendar_events")
+            .select(EVENT_SELECT)
+            .eq("user_id", str(user_id))
+            .gte("data", start)
+            .lt("data", end),
+            active,
+        )
         .order("data")
         .order("ora_inizio", nullsfirst=True)  # "tutto il giorno" in testa
         .order("created_at")
@@ -87,11 +94,14 @@ async def list_events(primary, user_id: str, anno: int, mese: int) -> CalendarEv
     return CalendarEventsOut(items=[_to_out(row) for row in (resp.data or [])])
 
 
-async def create_event(primary, user_id: str, payload: CalendarEventIn) -> CalendarEventOut:
+async def create_event(
+    primary, user_id: str, active, payload: CalendarEventIn
+) -> CalendarEventOut:
     """Crea un evento PERSONALE (il tipo non arriva mai dal client)."""
-    await _check_cap(primary, user_id)
+    await _check_cap(primary, user_id, active)
     row = {
         "user_id": str(user_id),
+        "company_profile_id": company_scope.scope_value(active),
         "titolo": payload.titolo.strip(),
         "data": payload.data.isoformat(),
         "tutto_il_giorno": payload.tutto_il_giorno,
@@ -105,11 +115,11 @@ async def create_event(primary, user_id: str, payload: CalendarEventIn) -> Calen
 
 
 async def create_bando_event(
-    primary, secondary, user_id: str, slug: str
+    primary, secondary, user_id: str, active, slug: str
 ) -> CalendarEventOut:
-    """Aggiunge al calendario la SCADENZA di un bando (evento tipo 'bando',
-    data derivata dal catalogo). Idempotente: se l'evento esiste già per
-    questo bando lo ritorna. Non richiede che il bando sia tra i salvati."""
+    """Aggiunge al calendario dell'azienda attiva la SCADENZA di un bando
+    (evento tipo 'bando', data derivata dal catalogo). Idempotente: se l'evento
+    esiste già per questo bando lo ritorna. Non richiede che il bando sia salvato."""
     resp = (
         await secondary.table("bando")
         .select(SNAPSHOT_SELECT)
@@ -125,21 +135,25 @@ async def create_bando_event(
         raise BadRequestError("Questo bando non ha una data di scadenza da aggiungere")
 
     existing = (
-        await primary.table("calendar_events")
-        .select(EVENT_SELECT)
-        .eq("user_id", str(user_id))
-        .eq("tipo", "bando")
-        .eq("bando_id", bando["id"])
+        await company_scope.filter_read(
+            primary.table("calendar_events")
+            .select(EVENT_SELECT)
+            .eq("user_id", str(user_id))
+            .eq("tipo", "bando")
+            .eq("bando_id", bando["id"]),
+            active,
+        )
         .limit(1)
         .execute()
     )
     if existing.data:
         return _to_out(existing.data[0])
 
-    await _check_cap(primary, user_id)
+    await _check_cap(primary, user_id, active)
     titolo = bando.get("titolo_breve") or bando.get("titolo") or bando["slug"]
     row = {
         "user_id": str(user_id),
+        "company_profile_id": company_scope.scope_value(active),
         "titolo": f"Scadenza: {titolo}"[:200],
         "data": bando["data_scadenza"],
         "tutto_il_giorno": True,
@@ -155,11 +169,14 @@ async def create_bando_event(
             raise
         # Corsa tra due click: l'indice unico parziale ha deciso, rileggiamo.
         retry = (
-            await primary.table("calendar_events")
-            .select(EVENT_SELECT)
-            .eq("user_id", str(user_id))
-            .eq("tipo", "bando")
-            .eq("bando_id", bando["id"])
+            await company_scope.filter_read(
+                primary.table("calendar_events")
+                .select(EVENT_SELECT)
+                .eq("user_id", str(user_id))
+                .eq("tipo", "bando")
+                .eq("bando_id", bando["id"]),
+                active,
+            )
             .limit(1)
             .execute()
         )
@@ -168,13 +185,16 @@ async def create_bando_event(
         return _to_out(retry.data[0])
 
 
-async def _fetch_event(primary, user_id: str, event_id: str) -> dict:
+async def _fetch_event(primary, user_id: str, active, event_id: str) -> dict:
     normalized = _ensure_uuid(event_id)
     resp = (
-        await primary.table("calendar_events")
-        .select(EVENT_SELECT)
-        .eq("id", normalized)
-        .eq("user_id", str(user_id))  # mai eventi di altri utenti
+        await company_scope.filter_read(
+            primary.table("calendar_events")
+            .select(EVENT_SELECT)
+            .eq("id", normalized)
+            .eq("user_id", str(user_id)),  # mai eventi di altri utenti
+            active,
+        )
         .limit(1)
         .execute()
     )
@@ -184,9 +204,9 @@ async def _fetch_event(primary, user_id: str, event_id: str) -> dict:
 
 
 async def update_event(
-    primary, user_id: str, event_id: str, patch: CalendarEventUpdate
+    primary, user_id: str, active, event_id: str, patch: CalendarEventUpdate
 ) -> CalendarEventOut:
-    row = await _fetch_event(primary, user_id, event_id)
+    row = await _fetch_event(primary, user_id, active, event_id)
     changes = patch.model_dump(exclude_unset=True)
     if not changes:
         return _to_out(row)
@@ -234,36 +254,40 @@ async def update_event(
         raise BadRequestError(message) from None
 
     update = (
-        await primary.table("calendar_events")
-        .update(
-            {
-                "titolo": valid.titolo.strip(),
-                "data": valid.data.isoformat(),
-                "tutto_il_giorno": valid.tutto_il_giorno,
-                "ora_inizio": valid.ora_inizio.isoformat() if valid.ora_inizio else None,
-                "ora_fine": valid.ora_fine.isoformat() if valid.ora_fine else None,
-                "note": valid.note,
-            }
-        )
-        .eq("id", str(event_id))
-        .eq("user_id", str(user_id))
-        .execute()
+        await company_scope.filter_read(
+            primary.table("calendar_events")
+            .update(
+                {
+                    "titolo": valid.titolo.strip(),
+                    "data": valid.data.isoformat(),
+                    "tutto_il_giorno": valid.tutto_il_giorno,
+                    "ora_inizio": valid.ora_inizio.isoformat() if valid.ora_inizio else None,
+                    "ora_fine": valid.ora_fine.isoformat() if valid.ora_fine else None,
+                    "note": valid.note,
+                }
+            )
+            .eq("id", str(event_id))
+            .eq("user_id", str(user_id)),
+            active,
+        ).execute()
     )
     if update.data:
         return _to_out(update.data[0])
-    return _to_out(await _fetch_event(primary, user_id, event_id))
+    return _to_out(await _fetch_event(primary, user_id, active, event_id))
 
 
-async def delete_event(primary, user_id: str, event_id: str) -> None:
-    """Elimina l'evento. Per gli eventi 'bando' NON tocca il bando salvato
-    (indipendenti)."""
+async def delete_event(primary, user_id: str, active, event_id: str) -> None:
+    """Elimina l'evento dell'azienda attiva. Per gli eventi 'bando' NON tocca
+    il bando salvato (indipendenti)."""
     normalized = _ensure_uuid(event_id)
     resp = (
-        await primary.table("calendar_events")
-        .delete()
-        .eq("id", normalized)
-        .eq("user_id", str(user_id))
-        .execute()
+        await company_scope.filter_read(
+            primary.table("calendar_events")
+            .delete()
+            .eq("id", normalized)
+            .eq("user_id", str(user_id)),
+            active,
+        ).execute()
     )
     if not resp.data:
         raise NotFoundError("Evento non trovato")

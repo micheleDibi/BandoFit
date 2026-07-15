@@ -8,6 +8,7 @@ import AdminPiani from "./pages/AdminPiani";
 import AdminUtenti from "./pages/AdminUtenti";
 import AiCheck from "./pages/AiCheck";
 import Azienda from "./pages/Azienda";
+import Aziende from "./pages/Aziende";
 import BandiList from "./pages/BandiList";
 import BandoDetail from "./pages/BandoDetail";
 import Calendario from "./pages/Calendario";
@@ -50,6 +51,7 @@ export default function App() {
         <Route path="salvati" element={<Salvati />} />
         <Route path="calendario" element={<Calendario />} />
         <Route path="azienda" element={<Azienda />} />
+        <Route path="aziende" element={<Aziende />} />
         <Route path="ai-check" element={<AiCheck />} />
         <Route path="preferenze" element={<Preferenze />} />
         <Route path="abbonamento" element={<Abbonamento />} />

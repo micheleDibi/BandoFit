@@ -1,12 +1,14 @@
 import { LogOut, Menu, ShieldCheck, User, X } from "lucide-react";
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useActiveCompany } from "../../hooks/useActiveCompany";
 import { useAuth } from "../../hooks/useAuth";
 import { useMe } from "../../hooks/useMe";
 import { cn } from "../../lib/cn";
 import { hasAreaProgettista } from "../../lib/roles";
 import { InviteBanner } from "../shared/InviteBanner";
 import { PoweredBy } from "../shared/PoweredBy";
+import { CompanySwitcher } from "./CompanySwitcher";
 import { Logo } from "./Logo";
 import { NavMenu, type NavItem } from "./NavMenu";
 import { NotificationBell } from "./NotificationBell";
@@ -19,8 +21,9 @@ const directLinks: NavItem[] = [
   { to: "/app/ai-check", label: "AI-check" },
 ];
 
-// Raggruppate sotto «Impostazioni»: profilo aziendale e account.
-const impostazioniLinks: NavItem[] = [
+// Raggruppate sotto «Impostazioni»: profilo aziendale e account. La voce
+// «Aziende» (gestione multi-azienda) compare solo per gli Advisor.
+const impostazioniBase: NavItem[] = [
   { to: "/app/azienda", label: "Azienda" },
   { to: "/app/consulenze", label: "Consulenze" },
   { to: "/app/preferenze", label: "Preferenze" },
@@ -51,10 +54,14 @@ const navLinkClasses = ({ isActive }: { isActive: boolean }) =>
 export function AppShell() {
   const { data: me } = useMe();
   const { signOut } = useAuth();
+  const { isMulti } = useActiveCompany();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = me?.profile.role === "admin";
   const isProgettista = hasAreaProgettista(me?.profile.role);
+  const impostazioniLinks: NavItem[] = isMulti
+    ? [{ to: "/app/aziende", label: "Aziende" }, ...impostazioniBase]
+    : impostazioniBase;
 
   const handleSignOut = async () => {
     await signOut();
@@ -112,6 +119,7 @@ export function AppShell() {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
+            <CompanySwitcher />
             <NotificationBell />
             <Link
               to="/app/profilo"

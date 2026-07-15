@@ -16,6 +16,7 @@ from app.core.errors import BadRequestError, NotFoundError
 from app.schemas.bando import BandoListItem
 from app.schemas.common import Page
 from app.schemas.saved_bando import SavedBandoItem, SavedIdsOut
+from app.services import company_scope
 from app.services.bandi_service import LIST_SELECT, map_list_item
 
 logger = logging.getLogger("bandofit.saved_bandi")
@@ -65,29 +66,35 @@ async def _fetch_live_bando(secondary, slug: str) -> dict:
     return resp.data[0]
 
 
-async def _existing_row(primary, user_id: str, bando_id: int) -> dict | None:
+async def _existing_row(primary, user_id: str, active, bando_id: int) -> dict | None:
     resp = (
-        await primary.table("saved_bandi")
-        .select(SAVED_SELECT)
-        .eq("user_id", str(user_id))
-        .eq("bando_id", bando_id)
+        await company_scope.filter_read(
+            primary.table("saved_bandi")
+            .select(SAVED_SELECT)
+            .eq("user_id", str(user_id))
+            .eq("bando_id", bando_id),
+            active,
+        )
         .limit(1)
         .execute()
     )
     return resp.data[0] if resp.data else None
 
 
-async def _in_calendar_ids(primary, user_id: str, bando_ids: list[int]) -> set[int]:
-    """Bandi (tra quelli dati) che hanno già l'evento scadenza in calendario."""
+async def _in_calendar_ids(primary, user_id: str, active, bando_ids: list[int]) -> set[int]:
+    """Bandi (tra quelli dati) che hanno già l'evento scadenza in calendario
+    dell'azienda attiva."""
     if not bando_ids:
         return set()
     resp = (
-        await primary.table("calendar_events")
-        .select("bando_id")
-        .eq("user_id", str(user_id))
-        .eq("tipo", "bando")
-        .in_("bando_id", bando_ids)
-        .execute()
+        await company_scope.filter_read(
+            primary.table("calendar_events")
+            .select("bando_id")
+            .eq("user_id", str(user_id))
+            .eq("tipo", "bando")
+            .in_("bando_id", bando_ids),
+            active,
+        ).execute()
     )
     return {row["bando_id"] for row in (resp.data or [])}
 
@@ -103,18 +110,21 @@ def _to_item(
     )
 
 
-async def save_bando(primary, secondary, user_id: str, slug: str) -> SavedBandoItem:
-    """Salva un bando tra i preferiti. Idempotente: se è già salvato ritorna
-    la riga esistente senza errori (è un toggle)."""
+async def save_bando(primary, secondary, user_id: str, active, slug: str) -> SavedBandoItem:
+    """Salva un bando tra i preferiti dell'azienda attiva. Idempotente: se è
+    già salvato ritorna la riga esistente senza errori (è un toggle)."""
     bando = await _fetch_live_bando(secondary, slug)
     bando_id = bando["id"]
 
-    existing = await _existing_row(primary, user_id, bando_id)
+    existing = await _existing_row(primary, user_id, active, bando_id)
     if existing is None:
         count_resp = (
-            await primary.table("saved_bandi")
-            .select("id", count="exact")
-            .eq("user_id", str(user_id))
+            await company_scope.filter_read(
+                primary.table("saved_bandi")
+                .select("id", count="exact")
+                .eq("user_id", str(user_id)),
+                active,
+            )
             .limit(1)
             .execute()
         )
@@ -125,6 +135,7 @@ async def save_bando(primary, secondary, user_id: str, slug: str) -> SavedBandoI
             )
         row = {
             "user_id": str(user_id),
+            "company_profile_id": company_scope.scope_value(active),
             "bando_id": bando_id,
             "bando_slug": bando["slug"],
             "bando_titolo": _snapshot_titolo(bando),
@@ -138,37 +149,42 @@ async def save_bando(primary, secondary, user_id: str, slug: str) -> SavedBandoI
             if exc.code != "23505":
                 raise
             # Corsa tra due salvataggi: l'indice unico ha deciso, rileggiamo.
-            existing = await _existing_row(primary, user_id, bando_id)
+            existing = await _existing_row(primary, user_id, active, bando_id)
             if existing is None:  # pragma: no cover — solo per robustezza
                 raise
 
-    in_calendar = await _in_calendar_ids(primary, user_id, [bando_id])
+    in_calendar = await _in_calendar_ids(primary, user_id, active, [bando_id])
     return _to_item(existing, bando, in_calendar)
 
 
-async def remove_bando(primary, user_id: str, bando_id: int) -> None:
-    """Rimuove il bando dai preferiti. Idempotente (toggle): nessun errore se
-    non era salvato. L'eventuale evento in calendario resta (indipendenti)."""
+async def remove_bando(primary, user_id: str, active, bando_id: int) -> None:
+    """Rimuove il bando dai preferiti dell'azienda attiva. Idempotente (toggle):
+    nessun errore se non era salvato. L'eventuale evento in calendario resta."""
     await (
-        primary.table("saved_bandi")
-        .delete()
-        .eq("user_id", str(user_id))
-        .eq("bando_id", bando_id)
-        .execute()
+        company_scope.filter_read(
+            primary.table("saved_bandi")
+            .delete()
+            .eq("user_id", str(user_id))
+            .eq("bando_id", bando_id),
+            active,
+        ).execute()
     )
 
 
 async def list_saved(
-    primary, secondary, user_id: str, page: int, page_size: int
+    primary, secondary, user_id: str, active, page: int, page_size: int
 ) -> Page[SavedBandoItem]:
-    """Elenco paginato dei preferiti, dal salvataggio più recente. I dati
-    vivi arrivano dal catalogo; i bandi spariti restano visibili dallo
-    snapshot con disponibile=False."""
+    """Elenco paginato dei preferiti dell'azienda attiva, dal salvataggio più
+    recente. I dati vivi arrivano dal catalogo; i bandi spariti restano
+    visibili dallo snapshot con disponibile=False."""
     offset = (page - 1) * page_size
     resp = (
-        await primary.table("saved_bandi")
-        .select(SAVED_SELECT, count="exact")
-        .eq("user_id", str(user_id))
+        await company_scope.filter_read(
+            primary.table("saved_bandi")
+            .select(SAVED_SELECT, count="exact")
+            .eq("user_id", str(user_id)),
+            active,
+        )
         .order("created_at", desc=True)
         .range(offset, offset + page_size - 1)
         .execute()
@@ -188,17 +204,19 @@ async def list_saved(
         .execute()
     )
     live_by_id = {row["id"]: row for row in (live_resp.data or [])}
-    in_calendar = await _in_calendar_ids(primary, user_id, ids)
+    in_calendar = await _in_calendar_ids(primary, user_id, active, ids)
 
     items = [_to_item(row, live_by_id.get(row["bando_id"]), in_calendar) for row in rows]
     return Page.build(items, total, page, page_size)
 
 
-async def saved_ids(primary, user_id: str) -> SavedIdsOut:
+async def saved_ids(primary, user_id: str, active) -> SavedIdsOut:
     resp = (
-        await primary.table("saved_bandi")
-        .select("bando_id")
-        .eq("user_id", str(user_id))
-        .execute()
+        await company_scope.filter_read(
+            primary.table("saved_bandi")
+            .select("bando_id")
+            .eq("user_id", str(user_id)),
+            active,
+        ).execute()
     )
     return SavedIdsOut(bando_ids=sorted(row["bando_id"] for row in (resp.data or [])))

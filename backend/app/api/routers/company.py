@@ -1,7 +1,8 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from app.api.deps import (
     ActiveCompanyDep,
+    CurrentUser,
     OpenapiDep,
     PrimaryClient,
     SecondaryClient,
@@ -14,7 +15,22 @@ from app.schemas.openapi_data import (
     ImportPreview,
     ImportResult,
 )
-from app.services import company_service, compatibility, lookup_service, openapi_service
+from app.services import (
+    company_pdf_service,
+    company_service,
+    compatibility,
+    lookup_service,
+    openapi_service,
+)
+
+
+def _pdf_response(result) -> Response:
+    """Risposta binaria di download per un PdfResult (filename ASCII slugificato)."""
+    return Response(
+        content=result.content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
+    )
 
 router = APIRouter(prefix="/me/company", tags=["company"])
 
@@ -98,3 +114,22 @@ async def get_dossier(active: ActiveCompanyDep, primary: PrimaryClient) -> Dossi
     """Dossier certificato importato da openapi.it: proprio per il titolare,
     in sola lettura per un figlio attivo."""
     return await openapi_service.get_dossier(primary, active)
+
+
+@router.get("/export/pdf")
+async def export_scheda_pdf(
+    active: ActiveCompanyDep, primary: PrimaryClient, user: CurrentUser
+) -> Response:
+    """PDF della scheda azienda attiva: dati dichiarati + preferenze seguite.
+    Titolare o figlio attivo (sola lettura); 404 se non c'è ancora un'azienda."""
+    result = await company_pdf_service.export_scheda_pdf(primary, user, active)
+    return _pdf_response(result)
+
+
+@router.get("/dossier/pdf")
+async def export_dossier_pdf(active: ActiveCompanyDep, primary: PrimaryClient) -> Response:
+    """PDF del dossier certificato dell'azienda attiva. Il payload grezzo del
+    provider non esce mai (si parte da `get_dossier`, già ripulito). 404 se
+    l'azienda non ha un dossier importato."""
+    result = await company_pdf_service.export_dossier_pdf(primary, active)
+    return _pdf_response(result)

@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     # nel DB; la migration 0017 lo garantisce con un seed idempotente).
     consulting_addon_slug: str = "consulto-esperto"
 
+    # Export PDF (scheda azienda + dossier). "auto" = WeasyPrint se importabile
+    # (HTML+CSS → PDF, motore principale), altrimenti ReportLab (fallback
+    # pure-Python, nessuna libreria di sistema). Forzabile a "weasyprint" o
+    # "reportlab". WeasyPrint richiede pango/cairo/gdk-pixbuf nell'immagine.
+    pdf_engine: str = "auto"  # auto | weasyprint | reportlab
+
     # AI-check (API Anthropic). Chiave vuota = feature disattivata (le rotte
     # rispondono 503 ai_not_configured). Ogni report costa ~0,10 $ di API.
     anthropic_api_key: str = ""

@@ -2,6 +2,13 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-15 — Gestione multi-azienda per l'Advisor: export PDF per azienda (fase 5)
+
+- **Due nuovi export PDF** dell'azienda attiva (scopati da `X-Active-Company`, download `application/pdf`): `GET /me/company/export/pdf` — **scheda** dei dati dichiarati + preferenze di ricerca seguite; `GET /me/company/dossier/pdf` — **dossier certificato** (le 8 sezioni + persone della visura). Bottoni «Esporta scheda PDF» e «Esporta dossier PDF» nella pagina Azienda (download blob autenticato via `lib/download.ts`). `404` se non c'è azienda/dossier, `503 pdf_unavailable` se manca il motore PDF.
+- **Rendering server-side**: il dossier PDF parte da `get_dossier` (`DossierResponse`, già senza il `raw` grezzo), quindi il payload del provider non esce mai verso il client. Architettura: un **modello di documento astratto** (`PdfDoc`) costruito da funzioni pure e testabili, reso da due motori sullo stesso modello — **WeasyPrint** (HTML+CSS via Jinja2, principale) e **ReportLab** (fallback pure-Python). Selezione via `settings.pdf_engine` (`auto`); se WeasyPrint importa ma le librerie native non si caricano, `auto` ripiega su ReportLab (la feature degrada, l'app non cade).
+- **Nuove dipendenze backend**: `weasyprint`, `reportlab`, `jinja2` (in `pyproject.toml`). Il `Dockerfile` installa le librerie di sistema di WeasyPrint (pango/cairo/gdk-pixbuf + font DejaVu). ⚠️ In deploy ricostruire l'immagine backend (nuovi pacchetti apt). Nessuna migration.
+- Suite: 621 unit + 225 DB verdi (nuovi test dei costruttori di documento, degli endpoint incl. 404/503, del fallback fra motori e dell'assenza di dati grezzi anche annidati; rendering reale WeasyPrint/ReportLab verificato dove le librerie sono presenti, altrimenti saltato), `tsc`/`build` frontend verdi, ruff sulla baseline (11 E402).
+
 ## 2026-07-15 — Gestione multi-azienda per l'Advisor: alert per azienda + centro alert (fase 4)
 
 - **Alert nuovi bandi per azienda** (Advisor): il job giornaliero non collassa più le aziende sul titolare. `carica_company_facets` (era `carica_owner_facets`) carica le aziende **vive** raggruppate per owner, ognuna col proprio profilo di compatibilità, e risolve lo scope col solito gate (limite effettivo > 1, calcolato in batch da `carica_limiti_aziende`). Per un Advisor `esegui_run` valuta l'idoneità **per ogni azienda**, il ledger `bando_alert_sends` viene rivendicato su `(user_id, company_profile_id, bando_id)` — **lo stesso bando può andare a più aziende** (righe distinte) — e parte **una sola email con una sezione per azienda** (`send_bandi_digest_email_multi`). Per **tutti gli altri** lo scope resta `NULL` e l'email è il digest classico, **byte-identico** a prima.

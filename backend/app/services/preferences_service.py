@@ -54,6 +54,27 @@ async def get_preferences(primary, user_id: str, active) -> PreferencesPayload:
     return PreferencesPayload(**result)
 
 
+async def get_preferences_labeled(primary, user_id: str, active) -> dict[str, list[str]]:
+    """Preferenze come ETICHETTE leggibili (denormalizzate in colonna alla
+    scrittura), per l'export PDF: `{facet: [label, ...]}`, ordinate, solo le
+    faccette con valori. Evita di risolvere gli id contro le lookup del catalogo."""
+    resp = (
+        await company_scope.filter_read(
+            primary.table("user_preferences")
+            .select("facet,label")
+            .eq("user_id", str(user_id)),
+            active,
+        ).execute()
+    )
+    out: dict[str, list[str]] = {}
+    for row in resp.data or []:
+        if row["facet"] in FACETS and row.get("label"):
+            out.setdefault(row["facet"], []).append(row["label"])
+    for values in out.values():
+        values.sort()
+    return out
+
+
 async def save_preferences(
     primary, secondary, user_id: str, active, data: PreferencesPayload
 ) -> PreferencesPayload:

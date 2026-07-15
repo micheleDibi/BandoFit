@@ -21,6 +21,13 @@ dependencies = [
     "tzdata>=2024.1",
     # AI-check: chiamate all'API Anthropic con output strutturato (messages.parse)
     "anthropic>=0.116",
+    # Export PDF (scheda azienda + dossier). WeasyPrint = motore principale
+    # (HTML+CSS → PDF via Jinja2); richiede pango/cairo/gdk-pixbuf nell'immagine
+    # (vedi Dockerfile). ReportLab = fallback pure-Python senza librerie di
+    # sistema. Jinja2 (autoescape) genera l'HTML per WeasyPrint.
+    "weasyprint>=62",
+    "reportlab>=4.2",
+    "jinja2>=3.1",
 ]
 
 [project.optional-dependencies]

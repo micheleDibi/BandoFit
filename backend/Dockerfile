@@ -6,6 +6,20 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Librerie di sistema per WeasyPrint (HTML→PDF): Pango per il layout del testo,
+# gdk-pixbuf per le immagini, cairo, shared-mime-info e i font DejaVu (senza
+# font il PDF esce senza glifi). Prima di USER appuser (serve root per apt).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpango-1.0-0 \
+        libpangoft2-1.0-0 \
+        libpangocairo-1.0-0 \
+        libgdk-pixbuf-2.0-0 \
+        libcairo2 \
+        libffi-dev \
+        shared-mime-info \
+        fonts-dejavu \
+    && rm -rf /var/lib/apt/lists/*
+
 # Prima i metadati del pacchetto (layer cache-friendly), poi il codice.
 COPY pyproject.toml ./
 COPY app ./app

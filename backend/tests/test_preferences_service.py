@@ -56,6 +56,27 @@ class TestGet:
         assert prefs.settori == []
 
 
+class TestGetLabeled:
+    async def test_vuote(self):
+        primary = FakePrimary(selects={"user_preferences": []})
+        assert await preferences_service.get_preferences_labeled(primary, USER["id"], _active()) == {}
+
+    async def test_raggruppate_ordinate_e_filtrate(self):
+        primary = FakePrimary(
+            selects={
+                "user_preferences": [
+                    {"facet": "regioni", "label": "Puglia"},
+                    {"facet": "regioni", "label": "Lazio"},   # ordine sparso → ordinato
+                    {"facet": "settori", "label": "Agroalimentare"},
+                    {"facet": "regioni", "label": None},        # senza label → scartata
+                    {"facet": "ignoto", "label": "X"},          # facet fuori FACETS → scartata
+                ]
+            }
+        )
+        out = await preferences_service.get_preferences_labeled(primary, USER["id"], _active())
+        assert out == {"regioni": ["Lazio", "Puglia"], "settori": ["Agroalimentare"]}
+
+
 class TestSave:
     async def test_id_sconosciuto_400(self):
         primary = FakePrimary(selects={"user_preferences": []})

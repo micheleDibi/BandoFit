@@ -97,6 +97,14 @@ class AiQuotaExceededError(AppError):
         super().__init__(429, "ai_quota_exceeded", message)
 
 
+class PdfEngineUnavailableError(AppError):
+    """Nessun motore PDF disponibile (WeasyPrint/ReportLab non importabili:
+    librerie di sistema mancanti nell'immagine). La feature degrada, l'app no."""
+
+    def __init__(self, message: str = "Generazione PDF non disponibile su questo ambiente"):
+        super().__init__(503, "pdf_unavailable", message)
+
+
 def _error_body(code: str, message: str) -> dict:
     return {"error": {"code": code, "message": message}}
 

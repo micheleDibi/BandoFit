@@ -74,6 +74,8 @@ curl http://127.0.0.1:3002/api/v1/health   # {"status":"ok"}
 curl -I http://127.0.0.1:3001/             # 200
 ```
 
+> **Export PDF (WeasyPrint).** L'immagine backend installa le librerie di sistema per la generazione PDF (pango/cairo/gdk-pixbuf + font DejaVu, vedi `backend/Dockerfile`): dopo un aggiornamento che le introduce serve `docker compose up -d --build backend`. Il motore si sceglie con `PDF_ENGINE` (default `auto`: WeasyPrint, con fallback a ReportLab che è pure-Python); non è necessario impostarlo. Verifica veloce: da `docker compose exec backend python -c "import weasyprint"` non deve dare errore.
+
 ## 3. Reverse proxy
 
 Esempio di virtual host **nginx** (adattare dominio e porte; per caddy/traefik la logica è identica: `/api/` → backend, tutto il resto → frontend):

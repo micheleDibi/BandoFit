@@ -6,7 +6,11 @@ import httpx
 import pytest
 
 from app.services import email_service
-from app.services.email_service import _format_eur, send_bandi_digest_email
+from app.services.email_service import (
+    _format_eur,
+    send_bandi_digest_email,
+    send_bandi_digest_email_multi,
+)
 
 UNSUB = "https://api.test.it/api/v1/alerts/unsubscribe?token=abc"
 CTA = "https://app.test.it/app/bandi"
@@ -117,6 +121,62 @@ class TestDigestSmtp:
     async def test_oggetto_singolare(self, captured):
         await send_bandi_digest_email("dest@test.it", [bando()], CTA, UNSUB)
         assert captured[0]["Subject"] == "Un nuovo bando per la tua azienda — BandoFit"
+
+
+class TestDigestMulti:
+    @pytest.fixture
+    def captured(self, monkeypatch):
+        import aiosmtplib
+
+        messages = []
+
+        async def fake_send(message, **kwargs):
+            messages.append(message)
+
+        monkeypatch.setattr(aiosmtplib, "send", fake_send)
+        monkeypatch.setenv("SMTP_HOST", "smtp.test.it")
+        monkeypatch.setenv("EMAIL_FROM", "BandoFit <alerts@bandofit.it>")
+        from app.core.config import get_settings
+
+        get_settings.cache_clear()
+        return messages
+
+    async def test_sezioni_per_azienda(self, captured):
+        await send_bandi_digest_email_multi(
+            "dest@test.it",
+            [
+                {"azienda": "Alfa Srl", "bandi": [bando()]},
+                {"azienda": "Beta Spa", "bandi": [bando(titolo="Altro bando")]},
+            ],
+            CTA,
+            UNSUB,
+        )
+        [message] = captured
+        # Oggetto e intestazione parlano di «aziende» (plurale), non «azienda».
+        assert message["Subject"] == "2 nuovi bandi per le tue aziende — BandoFit"
+        html_part = message.get_body(("html",)).get_content()
+        text_part = message.get_body(("plain",)).get_content()
+        assert "Alfa Srl" in html_part
+        assert "Beta Spa" in html_part
+        assert "Bando innovazione PMI" in html_part
+        assert "Altro bando" in html_part
+        # Il testo separa le sezioni con l'intestazione azienda.
+        assert "[Alfa Srl]" in text_part
+        assert "[Beta Spa]" in text_part
+
+    async def test_sezioni_vuote_saltate(self, captured):
+        await send_bandi_digest_email_multi(
+            "dest@test.it",
+            [
+                {"azienda": "Alfa Srl", "bandi": [bando()]},
+                {"azienda": "Beta Spa", "bandi": []},
+            ],
+            CTA,
+            UNSUB,
+        )
+        html_part = captured[0].get_body(("html",)).get_content()
+        assert "Alfa Srl" in html_part
+        assert "Beta Spa" not in html_part  # nessun bando: sezione omessa
 
 
 class TestDigestResend:

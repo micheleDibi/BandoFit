@@ -17,6 +17,8 @@ OGGI = date(2026, 7, 13)
 OWNER = "aaaaaaaa-0000-0000-0000-000000000040"
 FIGLIO = "bbbbbbbb-0000-0000-0000-000000000041"
 COMPANY_ID = "cccccccc-0000-0000-0000-000000000042"
+COMPANY_A = "cccccccc-0000-0000-0000-0000000000a1"
+COMPANY_B = "cccccccc-0000-0000-0000-0000000000b2"
 
 
 def lookups() -> LookupsOut:
@@ -340,6 +342,20 @@ def email_calls(monkeypatch):
 
 
 @pytest.fixture
+def email_multi_calls(monkeypatch):
+    calls: list[dict] = []
+
+    async def fake_send_multi(to_email, sezioni, cta_url, unsubscribe_url):
+        calls.append(
+            {"to": to_email, "sezioni": sezioni, "cta": cta_url, "unsubscribe": unsubscribe_url}
+        )
+        return True
+
+    monkeypatch.setattr(svc.email_service, "send_bandi_digest_email_multi", fake_send_multi)
+    return calls
+
+
+@pytest.fixture
 def notify_calls(monkeypatch):
     calls: list[dict] = []
 
@@ -424,9 +440,36 @@ class TestClaimLedger:
     async def test_nuova_coppia_claimata(self):
         primary = FakeClient(selects={"bando_alert_sends": []})
         claimed = await svc.claim_ledger(
-            primary, OWNER, self.eleggibile(), oggi=OGGI, max_tentativi=3
+            primary, OWNER, None, self.eleggibile(), oggi=OGGI, max_tentativi=3
         )
         assert claimed == {7: 101}
+        # Legacy/non-Advisor: la riga nuova ha company_profile_id NULL e la
+        # lettura filtra su NULL.
+        select_op = next(
+            op for op in primary.ops if op[0] == "bando_alert_sends" and op[1] == "select"
+        )
+        assert ("is", "company_profile_id", "null") in select_op[3]
+        insert_op = next(
+            op for op in primary.ops if op[0] == "bando_alert_sends" and op[1] == "upsert"
+        )
+        assert insert_op[2][0]["company_profile_id"] is None
+
+    async def test_scope_azienda_nella_chiave(self):
+        """Advisor: lettura e scrittura del ledger scopate su company_profile_id
+        (la stessa coppia utente+bando può esistere per un'altra azienda)."""
+        primary = FakeClient(selects={"bando_alert_sends": []})
+        claimed = await svc.claim_ledger(
+            primary, OWNER, COMPANY_ID, self.eleggibile(), oggi=OGGI, max_tentativi=3
+        )
+        assert claimed == {7: 101}
+        select_op = next(
+            op for op in primary.ops if op[0] == "bando_alert_sends" and op[1] == "select"
+        )
+        assert ("eq", "company_profile_id", COMPANY_ID) in select_op[3]
+        insert_op = next(
+            op for op in primary.ops if op[0] == "bando_alert_sends" and op[1] == "upsert"
+        )
+        assert insert_op[2][0]["company_profile_id"] == COMPANY_ID
 
     async def test_inviata_mai_ritentata(self):
         primary = FakeClient(
@@ -437,7 +480,9 @@ class TestClaimLedger:
             }
         )
         assert (
-            await svc.claim_ledger(primary, OWNER, self.eleggibile(), oggi=OGGI, max_tentativi=3)
+            await svc.claim_ledger(
+                primary, OWNER, None, self.eleggibile(), oggi=OGGI, max_tentativi=3
+            )
             == {}
         )
 
@@ -451,7 +496,7 @@ class TestClaimLedger:
         )
         primary.updates["bando_alert_sends"] = [{"id": 1}]
         claimed = await svc.claim_ledger(
-            primary, OWNER, self.eleggibile(), oggi=OGGI, max_tentativi=3
+            primary, OWNER, None, self.eleggibile(), oggi=OGGI, max_tentativi=3
         )
         assert claimed == {7: 1}
         update_op = next(
@@ -470,7 +515,9 @@ class TestClaimLedger:
             }
         )
         assert (
-            await svc.claim_ledger(primary, OWNER, self.eleggibile(), oggi=OGGI, max_tentativi=3)
+            await svc.claim_ledger(
+                primary, OWNER, None, self.eleggibile(), oggi=OGGI, max_tentativi=3
+            )
             == {}
         )
 
@@ -505,6 +552,59 @@ def primary_per_run(*, abilitati: bool = True) -> FakeClient:
             "email_suppressions": [],
             "bando_alert_settings": [
                 {"user_id": OWNER, "abilitati": abilitati, "unsubscribe_token": "tok-1"}
+            ],
+            "bando_alert_sends": [],
+        }
+    )
+    primary.updates["bando_alert_sends"] = []
+    primary.rpc_results["fn_email_verificate"] = [OWNER]
+    return primary
+
+
+def primary_per_run_multi() -> FakeClient:
+    """Advisor (piano max_aziende=10) con DUE aziende vive, entrambe compatibili
+    con il bando di prova: il run fa fan-out per azienda."""
+    primary = FakeClient(
+        selects={
+            "company_profiles": [
+                {
+                    "id": COMPANY_A,
+                    "parent_id": OWNER,
+                    "ragione_sociale": "Alfa Srl",
+                    "ateco_id": 10,
+                    "settore_id": None,
+                    "regione_id": 1,
+                    "beneficiari": [],
+                },
+                {
+                    "id": COMPANY_B,
+                    "parent_id": OWNER,
+                    "ragione_sociale": "Beta Spa",
+                    "ateco_id": 10,
+                    "settore_id": None,
+                    "regione_id": 1,
+                    "beneficiari": [],
+                },
+            ],
+            "company_data": [
+                {"company_profile_id": COMPANY_A, "derived": None},
+                {"company_profile_id": COMPANY_B, "derived": None},
+            ],
+            "user_subscriptions": [
+                {
+                    "user_id": OWNER,
+                    "subscription_plans": {
+                        "alert_attivo": True,
+                        "alert_ritardo_giorni": 1,
+                        "max_aziende": 10,
+                    },
+                }
+            ],
+            "family_members": [],
+            "profiles": [{"id": OWNER, "email": "own@test.it", "is_active": True}],
+            "email_suppressions": [],
+            "bando_alert_settings": [
+                {"user_id": OWNER, "abilitati": True, "unsubscribe_token": "tok-1"}
             ],
             "bando_alert_sends": [],
         }
@@ -586,6 +686,91 @@ class TestEseguiRun:
         riepilogo = await svc.esegui_run(primary, BrokenSecondary(), OGGI)
         assert riepilogo["esito"] == "errore"
         assert "secondario giù" in riepilogo["dettagli"]["errore"]
+
+
+class TestCaricaLimiti:
+    async def test_override_vince_sul_piano(self):
+        primary = FakeClient(
+            selects={
+                "profiles": [{"id": OWNER, "max_aziende_override": 3}],
+                "user_subscriptions": [
+                    {"user_id": OWNER, "subscription_plans": {"max_aziende": 10}}
+                ],
+            }
+        )
+        assert await svc.carica_limiti_aziende(primary, [OWNER]) == {OWNER: 3}
+
+    async def test_piano_quando_niente_override(self):
+        primary = FakeClient(
+            selects={
+                "profiles": [{"id": OWNER, "max_aziende_override": None}],
+                "user_subscriptions": [
+                    {"user_id": OWNER, "subscription_plans": {"max_aziende": 10}}
+                ],
+            }
+        )
+        assert await svc.carica_limiti_aziende(primary, [OWNER]) == {OWNER: 10}
+
+    async def test_default_uno_senza_piano(self):
+        primary = FakeClient(selects={"profiles": [], "user_subscriptions": []})
+        assert await svc.carica_limiti_aziende(primary, [OWNER]) == {OWNER: 1}
+
+
+class TestCaricaCompanyFacets:
+    async def test_non_advisor_scope_nullo(self, stub_lookups):
+        primary = primary_per_run()  # limite effettivo 1
+        per_owner = await svc.carica_company_facets(primary, lookups())
+        [azienda] = per_owner[OWNER]
+        assert azienda.company_id == COMPANY_ID
+        assert azienda.scope_value is None  # non-Advisor: ledger a NULL (parità)
+        # Solo aziende vive: la query filtra deleted_at/archived_at.
+        select_op = next(
+            op for op in primary.ops if op[0] == "company_profiles" and op[1] == "select"
+        )
+        assert ("is", "deleted_at", "null") in select_op[3]
+        assert ("is", "archived_at", "null") in select_op[3]
+
+    async def test_advisor_scope_per_azienda(self, stub_lookups):
+        primary = primary_per_run_multi()
+        per_owner = await svc.carica_company_facets(primary, lookups())
+        aziende = per_owner[OWNER]
+        assert {a.company_id for a in aziende} == {COMPANY_A, COMPANY_B}
+        assert all(a.scope_value == a.company_id for a in aziende)  # Advisor
+        assert {a.ragione_sociale for a in aziende} == {"Alfa Srl", "Beta Spa"}
+
+
+class TestEseguiRunMulti:
+    async def test_fanout_per_azienda(self, email_multi_calls, notify_calls, stub_lookups):
+        primary = primary_per_run_multi()
+        secondary = FakeClient(selects={"bando": [bando_row()]})
+        riepilogo = await svc.esegui_run(primary, secondary, OGGI)
+
+        assert riepilogo["esito"] == "ok"
+        assert riepilogo["destinatari"] == 1
+        assert riepilogo["email_inviate"] == 1
+
+        # Una sola email, con una sezione per azienda.
+        [email] = email_multi_calls
+        assert email["to"] == "own@test.it"
+        assert {s["azienda"] for s in email["sezioni"]} == {"Alfa Srl", "Beta Spa"}
+        assert all(len(s["bandi"]) == 1 for s in email["sezioni"])
+
+        # Due righe di ledger, una per azienda (company_profile_id distinti).
+        insert_ops = [
+            op for op in primary.ops if op[0] == "bando_alert_sends" and op[1] == "upsert"
+        ]
+        companies_inserite = {
+            row["company_profile_id"] for op in insert_ops for row in op[2]
+        }
+        assert companies_inserite == {COMPANY_A, COMPANY_B}
+
+        # Una notifica per azienda, con company_profile_id per il centro alert.
+        assert len(notify_calls) == 2
+        assert {n["company_profile_id"] for n in notify_calls} == {COMPANY_A, COMPANY_B}
+        assert all(n["url"] == "/app/notifiche" for n in notify_calls)
+        assert all(
+            n["dedup_key"].startswith(f"bando-alert:{OGGI.isoformat()}:") for n in notify_calls
+        )
 
 
 class TestImpostazioni:

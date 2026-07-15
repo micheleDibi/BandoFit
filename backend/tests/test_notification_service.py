@@ -116,6 +116,27 @@ class TestNotify:
         assert kwargs["on_conflict"] == "user_id,dedup_key"
         assert kwargs["ignore_duplicates"] is True
 
+    async def test_company_profile_id_nella_riga(self):
+        primary = FakePrimary()
+        await notification_service.notify(
+            primary,
+            [UTENTE],
+            tipo="bando_alert.digest",
+            titolo="Nuovi bandi",
+            dedup_key="bando-alert:2026-07-13:comp-1",
+            company_profile_id="comp-1",
+        )
+        [(_, _, payload, _, _)] = primary.ops
+        assert payload[0]["company_profile_id"] == "comp-1"
+
+    async def test_company_profile_id_default_nullo(self):
+        primary = FakePrimary()
+        await notification_service.notify(
+            primary, [UTENTE], tipo="x", titolo="y", dedup_key="z"
+        )
+        [(_, _, payload, _, _)] = primary.ops
+        assert payload[0]["company_profile_id"] is None
+
     async def test_senza_destinatari_non_tocca_il_db(self):
         primary = FakePrimary()
         await notification_service.notify(
@@ -149,6 +170,27 @@ class TestList:
         await notification_service.list_notifications(primary, UTENTE, 3, 10)
         list_op = primary.ops[0]
         assert list_op[4]["range"] == (20, 29)
+
+    async def test_filtro_azienda_non_tocca_il_badge(self):
+        primary = FakePrimary(rows=[notifica(1)], total=1, unread_count=5)
+        page = await notification_service.list_notifications(
+            primary, UTENTE, 1, 20, "comp-1"
+        )
+        # Gli item filtrano per azienda (centro alert Advisor)...
+        list_op = primary.ops[0]
+        assert ("eq", "company_profile_id", "comp-1") in list_op[3]
+        # ...ma il conteggio non-lette resta aggregato: la campanella non filtra.
+        unread_op = primary.ops[1]
+        assert ("eq", "company_profile_id", "comp-1") not in unread_op[3]
+        assert page.non_lette == 5
+
+    async def test_senza_filtro_azienda_nessuna_eq_company(self):
+        primary = FakePrimary()
+        await notification_service.list_notifications(primary, UTENTE, 1, 20)
+        list_op = primary.ops[0]
+        assert not any(
+            f[:2] == ("eq", "company_profile_id") for f in list_op[3]
+        )
 
 
 class TestMarkRead:

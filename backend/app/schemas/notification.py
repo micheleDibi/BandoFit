@@ -11,6 +11,9 @@ class NotificationOut(BaseModel):
     titolo: str
     corpo: str | None = None
     url: str | None = None
+    # Azienda a cui la notifica si riferisce (Advisor multi-azienda): il centro
+    # alert la usa per il filtro; NULL per le notifiche non legate a un'azienda.
+    company_profile_id: str | None = None
     read_at: datetime | None = None
     created_at: datetime
 

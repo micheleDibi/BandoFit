@@ -278,15 +278,15 @@ Elimina l'evento (`404` se inesistente o di un altro utente). Per gli eventi `ba
 
 Il canale **affidabile** degli eventi (le email sono best-effort). Idempotenti per `(user_id, dedup_key)`: i retry non creano doppioni. I contenuti sono minimizzati (nessun dato personale di terzi, e MAI il link videochiamata — è una credenziale, l'istanza Jitsi è aperta): i dettagli si leggono seguendo `url`, dove vale l'autorizzazione dell'endpoint di destinazione.
 
-### `GET /me/notifications?page=&page_size=`
-Pagina di notifiche (`page_size` max 50) + **`non_lette`** complessive (il numero sul badge): `{ items: [{id, tipo, titolo, corpo, url, read_at, created_at}], total, page, page_size, total_pages, non_lette }`. Il frontend la interroga in polling (60s).
+### `GET /me/notifications?page=&page_size=&company_id=`
+Pagina di notifiche (`page_size` max 50) + **`non_lette`** complessive (il numero sul badge): `{ items: [{id, tipo, titolo, corpo, url, company_profile_id, read_at, created_at}], total, page, page_size, total_pages, non_lette }`. `company_profile_id` è l'azienda cui la notifica si riferisce (Advisor multi-azienda; `null` se generale). Il parametro **`company_id`** (opzionale) filtra gli item per azienda — è il filtro del centro alert `/app/notifiche` per gli Advisor — ma **`non_lette` resta aggregato** su tutte le aziende (il badge della campanella non filtra mai). Il frontend interroga la pagina 1 in polling (60s) per la campanella.
 
 ### `POST /me/notifications/read` (204)
 Body: `{"all": true}` oppure `{"ids": [1, 2]}` (almeno uno dei due). Segna come lette solo le proprie non lette.
 
 ## Alert email sui nuovi bandi
 
-Quando un bando diventa disponibile, gli utenti con azienda **compatibile** (pre-check con punteggio ≥ 60) lo ricevono in un'email **digest** giornaliera, con il ritardo del piano (`alert_ritardo_giorni`: Advisor 1 · Pro 7 · Smart 14 giorni dalla pubblicazione). Nessuna pre-schedulazione: l'idoneità si ricalcola a ogni run (piano corrente, opt-in, email verificata su `auth.users`, account attivo, bando ancora aperto); il ledger `(utente, bando)` garantisce che nessun bando venga inviato due volte. Il digest include per ogni bando: titolo, ente, importo, **scadenza evidenziata**, «perché lo vedi» (le dimensioni di compatibilità con i nomi) e il link; header `List-Unsubscribe` + `List-Unsubscribe-Post` (RFC 8058).
+Quando un bando diventa disponibile, gli utenti con azienda **compatibile** (pre-check con punteggio ≥ 60) lo ricevono in un'email **digest** giornaliera, con il ritardo del piano (`alert_ritardo_giorni`: Advisor 1 · Pro 7 · Smart 14 giorni dalla pubblicazione). Nessuna pre-schedulazione: l'idoneità si ricalcola a ogni run (piano corrente, opt-in, email verificata su `auth.users`, account attivo, bando ancora aperto); il ledger `(utente, azienda, bando)` garantisce che nessun bando venga inviato due volte per azienda. Il digest include per ogni bando: titolo, ente, importo, **scadenza evidenziata**, «perché lo vedi» (le dimensioni di compatibilità con i nomi) e il link; header `List-Unsubscribe` + `List-Unsubscribe-Post` (RFC 8058). Per un **Advisor** con più aziende idonee la run fa **fan-out per azienda**: una sola email con una **sezione per azienda** e una notifica in-app per azienda (con `company_profile_id`, filtrabile nel centro alert `/app/notifiche`); per tutti gli altri l'email e la notifica sono quelle aggregate di sempre.
 
 ### `GET /me/alert-settings` · `PUT /me/alert-settings`
 `{abilitati, piano_include_alert, ritardo_giorni}` — il piano effettivo per i collegati attivi è quello del titolare. Il PUT (`{"abilitati": bool}`) è consentito anche se il piano non include gli alert (il gate vero è alla run). Stessa riga di verità del link di disiscrizione nelle email.

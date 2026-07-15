@@ -67,6 +67,19 @@ class BandoCandidato:
     facets: dict  # id junction per compute_compatibilita
 
 
+@dataclass
+class AziendaAlert:
+    """Un'azienda viva nel run, col suo profilo di compatibilità e lo scope del
+    ledger. `scope_value` = l'id azienda per gli owner multi-azienda (Advisor),
+    None per tutti gli altri — così ledger e notifiche dei non-Advisor restano
+    a company_profile_id NULL, identici a prima."""
+
+    company_id: str
+    ragione_sociale: str | None
+    facets: CompanyFacets
+    scope_value: str | None
+
+
 # ---------------------------------------------------------------------------
 # Funzioni PURE (oggi iniettato, nessun I/O)
 # ---------------------------------------------------------------------------
@@ -233,32 +246,79 @@ async def carica_candidati(
     return candidati
 
 
-async def carica_owner_facets(
+async def carica_limiti_aziende(primary, owner_ids: list[str]) -> dict[str, int]:
+    """Limite effettivo di aziende per owner (override profilo > piano > 1), in
+    batch: replica `fn_effective_max_aziende` senza una RPC per owner. È il gate
+    dello scope — solo gli owner con limite > 1 (Advisor) segregano ledger e
+    notifiche per azienda; tutti gli altri restano a company_profile_id NULL."""
+    if not owner_ids:
+        return {}
+    profs = (
+        await primary.table("profiles")
+        .select("id,max_aziende_override")
+        .in_("id", owner_ids)
+        .execute()
+    )
+    override = {r["id"]: r.get("max_aziende_override") for r in profs.data or []}
+    subs = (
+        await primary.table("user_subscriptions")
+        .select("user_id,subscription_plans(max_aziende)")
+        .in_("user_id", owner_ids)
+        .eq("status", "active")
+        .execute()
+    )
+    piano: dict[str, int] = {}
+    for row in subs.data or []:
+        plan = row.get("subscription_plans") or {}
+        if plan.get("max_aziende") is not None:
+            piano[row["user_id"]] = int(plan["max_aziende"])
+    return {o: int(override.get(o) or piano.get(o) or 1) for o in owner_ids}
+
+
+async def carica_company_facets(
     primary, lookups: LookupsOut
-) -> dict[str, CompanyFacets]:
-    """Facet di TUTTE le aziende sufficienti, in 2 query batch (niente
-    load_company_facets per-owner: il TTL non serve a un job)."""
+) -> dict[str, list[AziendaAlert]]:
+    """Aziende VIVE (non cancellate/archiviate) con facet sufficienti,
+    raggruppate per owner. Sostituisce il vecchio `carica_owner_facets`: NON
+    collassa più su parent_id (un Advisor ha N aziende, ognuna col proprio
+    profilo di compatibilità e la propria sezione nel digest). Lo scope del
+    ledger è l'id azienda per gli owner multi-azienda, NULL per gli altri."""
     companies = (
         await primary.table("company_profiles")
-        .select("id,parent_id,ateco_id,settore_id,regione_id,beneficiari")
+        .select("id,parent_id,ragione_sociale,ateco_id,settore_id,regione_id,beneficiari")
+        .is_("deleted_at", "null")
+        .is_("archived_at", "null")
+        .order("created_at")
         .execute()
     )
     rows = companies.data or []
-    derived_map: dict = {}
-    if rows:
-        data = (
-            await primary.table("company_data")
-            .select("company_profile_id,derived")
-            .in_("company_profile_id", [r["id"] for r in rows])
-            .execute()
-        )
-        derived_map = {r["company_profile_id"]: r.get("derived") for r in data.data or []}
-    facets_per_owner: dict[str, CompanyFacets] = {}
+    if not rows:
+        return {}
+    data = (
+        await primary.table("company_data")
+        .select("company_profile_id,derived")
+        .in_("company_profile_id", [r["id"] for r in rows])
+        .execute()
+    )
+    derived_map = {r["company_profile_id"]: r.get("derived") for r in data.data or []}
+    limiti = await carica_limiti_aziende(primary, list({r["parent_id"] for r in rows}))
+
+    per_owner: dict[str, list[AziendaAlert]] = {}
     for company in rows:
         facets = build_company_facets(company, derived_map.get(company["id"]), lookups)
-        if facets.sufficiente:
-            facets_per_owner[company["parent_id"]] = facets
-    return facets_per_owner
+        if not facets.sufficiente:
+            continue
+        owner = company["parent_id"]
+        multi = limiti.get(owner, 1) > 1
+        per_owner.setdefault(owner, []).append(
+            AziendaAlert(
+                company_id=company["id"],
+                ragione_sociale=company.get("ragione_sociale"),
+                facets=facets,
+                scope_value=company["id"] if multi else None,
+            )
+        )
+    return per_owner
 
 
 async def carica_ritardi_piano(primary, owner_ids: list[str]) -> dict[str, int]:
@@ -355,12 +415,16 @@ async def ensure_settings(primary, user_ids: list[str]) -> dict[str, dict]:
 async def claim_ledger(
     primary,
     user_id: str,
+    scope_value: str | None,
     eleggibili: list[tuple[BandoCandidato, dict]],
     *,
     oggi: date,
     max_tentativi: int,
 ) -> dict[int, int]:
-    """Rivendica le coppie (utente, bando) da inviare in questo run.
+    """Rivendica le coppie (utente, azienda, bando) da inviare in questo run.
+    `scope_value` = l'id azienda (Advisor) o None (legacy/non-Advisor): entra
+    nella chiave di idempotenza, così lo stesso bando può essere inviato a più
+    aziende dello stesso owner (righe di ledger distinte).
     Ritorna {bando_id: id riga ledger} per le sole coppie claimate:
     - mai inviate → insert (l'unique è l'arbiter: chi perde la corsa salta);
     - fallite ritentabili → update condizionale a in_invio (tentativi+1);
@@ -369,13 +433,19 @@ async def claim_ledger(
     bando_ids = [candidato.id for candidato, _ in eleggibili]
     if not bando_ids:
         return {}
-    existing = (
-        await primary.table("bando_alert_sends")
+    existing_q = (
+        primary.table("bando_alert_sends")
         .select("id,bando_id,stato,tentativi")
         .eq("user_id", str(user_id))
         .in_("bando_id", bando_ids)
-        .execute()
     )
+    # Scope azienda nella lettura: la stessa (utente, bando) può esistere per
+    # un'altra azienda (già inviata) ed essere nuova per questa.
+    if scope_value is None:
+        existing_q = existing_q.is_("company_profile_id", "null")
+    else:
+        existing_q = existing_q.eq("company_profile_id", str(scope_value))
+    existing = await existing_q.execute()
     per_bando = {r["bando_id"]: r for r in existing.data or []}
 
     claimed: dict[int, int] = {}
@@ -386,6 +456,7 @@ async def claim_ledger(
             nuove.append(
                 {
                     "user_id": str(user_id),
+                    "company_profile_id": scope_value,
                     "bando_id": candidato.id,
                     "bando_slug": candidato.slug,
                     "run_giorno": oggi.isoformat(),
@@ -408,9 +479,9 @@ async def claim_ledger(
             if upd.data:
                 claimed[candidato.id] = row["id"]
     if nuove:
-        # Il vincolo di idempotenza include company_profile_id (0023): oggi il
-        # ledger è ancora legacy (company NULL, deduplicata da NULLS NOT
-        # DISTINCT); la dimensione azienda entra con la fase alert multi-cliente.
+        # Idempotenza su (user_id, company_profile_id, bando_id) con NULLS NOT
+        # DISTINCT (0023): le righe legacy (company NULL) deduplicano come
+        # prima, quelle per-azienda distinguono per company_profile_id.
         ins = await primary.table("bando_alert_sends").upsert(
             nuove, on_conflict="user_id,company_profile_id,bando_id", ignore_duplicates=True
         ).execute()
@@ -450,50 +521,90 @@ async def marca_in_invio_stantie(primary) -> int:
 async def _invia_digest(
     primary,
     destinatario: dict,
-    eleggibili: list[tuple[BandoCandidato, dict]],
+    sezioni: list[tuple[AziendaAlert, list[tuple[BandoCandidato, dict]]]],
     settings_row: dict,
     *,
     oggi: date,
     lookups: LookupsOut,
 ) -> tuple[int, int]:
-    """Invia il digest a UN destinatario. Ritorna (inviate, fallite) in email.
-    Punto d'innesto della futura coda outbox: payload = questi argomenti."""
+    """Invia il digest a UN destinatario. `sezioni` = una coppia (azienda,
+    eleggibili) per azienda dell'owner. Una sola email; il ledger viene
+    rivendicato per azienda (scope company_profile_id). Ritorna (inviate,
+    fallite) in email. Punto d'innesto della futura coda outbox."""
     settings = get_settings()
-    claimed = await claim_ledger(
-        primary,
-        destinatario["id"],
-        eleggibili,
-        oggi=oggi,
-        max_tentativi=settings.alert_max_tentativi,
-    )
-    if not claimed:
+    # Rivendica per azienda: stessa email, ma righe di ledger distinte per
+    # company. Tengo insieme azienda, item da inviare e id di ledger claimati.
+    inviabili: list[tuple[AziendaAlert, list[dict], list[int]]] = []
+    for azienda, eleggibili in sezioni:
+        claimed = await claim_ledger(
+            primary,
+            destinatario["id"],
+            azienda.scope_value,
+            eleggibili,
+            oggi=oggi,
+            max_tentativi=settings.alert_max_tentativi,
+        )
+        if not claimed:
+            continue
+        items = [
+            _digest_item(c, compat, lookups, oggi, settings.frontend_url)
+            for c, compat in eleggibili
+            if c.id in claimed
+        ]
+        inviabili.append((azienda, items, list(claimed.values())))
+    if not inviabili:
         return (0, 0)
-    da_inviare = [(c, compat) for c, compat in eleggibili if c.id in claimed]
-    items = [
-        _digest_item(c, compat, lookups, oggi, settings.frontend_url)
-        for c, compat in da_inviare
-    ]
+
+    is_multi = any(azienda.scope_value for azienda, _, _ in inviabili)
+    cta_url = f"{settings.frontend_url.rstrip('/')}/app/bandi"
     unsubscribe_url = (
         f"{settings.api_public_url.rstrip('/')}/alerts/unsubscribe"
         f"?token={settings_row['unsubscribe_token']}"
     )
-    ok = await email_service.send_bandi_digest_email(
-        destinatario["email"],
-        items,
-        f"{settings.frontend_url.rstrip('/')}/app/bandi",
-        unsubscribe_url,
-    )
+    if is_multi:
+        ok = await email_service.send_bandi_digest_email_multi(
+            destinatario["email"],
+            [
+                {"azienda": azienda.ragione_sociale, "bandi": items}
+                for azienda, items, _ in inviabili
+            ],
+            cta_url,
+            unsubscribe_url,
+        )
+    else:
+        # Non-Advisor: sezione unica, digest classico (parità byte-identica).
+        [(_, items, _)] = inviabili
+        ok = await email_service.send_bandi_digest_email(
+            destinatario["email"], items, cta_url, unsubscribe_url
+        )
+
     await finalizza_invio(
         primary,
-        list(claimed.values()),
+        [ledger_id for _, _, ledger_ids in inviabili for ledger_id in ledger_ids],
         esito="inviata" if ok else "fallita",
         errore=None if ok else "invio email fallito (vedi log)",
     )
     if ok:
-        quanti = len(items)
+        await _notifica_digest(primary, destinatario["id"], inviabili, is_multi, oggi=oggi)
+    return (1, 0) if ok else (0, 1)
+
+
+async def _notifica_digest(
+    primary,
+    user_id: str,
+    inviabili: list[tuple[AziendaAlert, list[dict], list[int]]],
+    is_multi: bool,
+    *,
+    oggi: date,
+) -> None:
+    """Notifica in-app dell'avvenuto invio. Per i non-Advisor: una notifica
+    aggregata (identica a prima). Per gli Advisor: una notifica per azienda, con
+    `company_profile_id` (il centro alert la filtra) e la company nel dedup_key."""
+    if not is_multi:
+        quanti = sum(len(items) for _, items, _ in inviabili)
         await notification_service.notify(
             primary,
-            [destinatario["id"]],
+            [user_id],
             tipo="bando_alert.digest",
             titolo=(
                 "Un nuovo bando compatibile con la tua azienda"
@@ -504,7 +615,24 @@ async def _invia_digest(
             url="/app/bandi",
             dedup_key=f"bando-alert:{oggi.isoformat()}",
         )
-    return (1, 0) if ok else (0, 1)
+        return
+    for azienda, items, _ in inviabili:
+        quanti = len(items)
+        nome = azienda.ragione_sociale or "la tua azienda"
+        await notification_service.notify(
+            primary,
+            [user_id],
+            tipo="bando_alert.digest",
+            titolo=(
+                f"{nome}: un nuovo bando compatibile"
+                if quanti == 1
+                else f"{nome}: {quanti} nuovi bandi compatibili"
+            ),
+            corpo="Ti abbiamo inviato i dettagli via email.",
+            url="/app/notifiche",
+            dedup_key=f"bando-alert:{oggi.isoformat()}:{azienda.company_id}",
+            company_profile_id=azienda.company_id,
+        )
 
 
 async def esegui_run(primary, secondary, oggi: date) -> dict:
@@ -536,21 +664,28 @@ async def esegui_run(primary, secondary, oggi: date) -> dict:
         riepilogo["bandi_candidati"] = len(candidati)
         if candidati:
             lookups = await lookup_service.get_lookups(secondary)
-            facets_per_owner = await carica_owner_facets(primary, lookups)
-            ritardi = await carica_ritardi_piano(primary, list(facets_per_owner))
-            owner_abilitati = [o for o in facets_per_owner if o in ritardi]
+            aziende_per_owner = await carica_company_facets(primary, lookups)
+            ritardi = await carica_ritardi_piano(primary, list(aziende_per_owner))
+            owner_abilitati = [o for o in aziende_per_owner if o in ritardi]
             destinatari_per_owner = await carica_destinatari(primary, owner_abilitati)
             totale_regioni = len(lookups.regioni)
 
             for owner_id in owner_abilitati:
-                eleggibili = bandi_eleggibili(
-                    candidati,
-                    facets_per_owner[owner_id],
-                    totale_regioni=totale_regioni,
-                    ritardo_giorni=ritardi[owner_id],
-                    oggi=oggi,
-                )
-                if not eleggibili:
+                # Una sezione per azienda dell'owner (per gli Advisor sono N).
+                sezioni = [
+                    (azienda, eleggibili)
+                    for azienda in aziende_per_owner[owner_id]
+                    if (
+                        eleggibili := bandi_eleggibili(
+                            candidati,
+                            azienda.facets,
+                            totale_regioni=totale_regioni,
+                            ritardo_giorni=ritardi[owner_id],
+                            oggi=oggi,
+                        )
+                    )
+                ]
+                if not sezioni:
                     continue
                 recapitabili = await filtra_recapitabili(
                     primary, destinatari_per_owner.get(owner_id, [])
@@ -568,7 +703,7 @@ async def esegui_run(primary, secondary, oggi: date) -> dict:
                     inviate, fallite = await _invia_digest(
                         primary,
                         destinatario,
-                        eleggibili,
+                        sezioni,
                         settings_row,
                         oggi=oggi,
                         lookups=lookups,

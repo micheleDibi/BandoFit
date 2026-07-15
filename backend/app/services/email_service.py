@@ -454,31 +454,68 @@ def _digest_card(bando: dict) -> str:
     )
 
 
-async def send_bandi_digest_email(
-    to_email: str,
-    bandi: list[dict],
-    cta_url: str,
-    unsubscribe_url: str,
-) -> bool:
-    """Digest giornaliero dei nuovi bandi compatibili. `bandi` = dict con
-    titolo, ente_erogatore, importo_eur, importo_max_eur, scadenza_label,
-    giorni_alla_scadenza, motivo, url — già risolti dal chiamante.
-    Include il link di disiscrizione a un clic e gli header RFC 8058."""
-    quanti = len(bandi)
-    heading = (
-        "C'è un nuovo bando per la tua azienda"
-        if quanti == 1
-        else f"Ci sono {quanti} nuovi bandi per la tua azienda"
+def _section_header(azienda: str) -> str:
+    """Intestazione di sezione (ragione sociale) nel digest multi-azienda."""
+    nome = html.escape(azienda)
+    return (
+        '<span style="display:block;margin:18px 0 6px;font-size:15px;'
+        "font-weight:700;color:#0f172a;border-bottom:2px solid #e2e8f0;"
+        f'padding-bottom:4px">{nome}</span>'
     )
+
+
+def _render_digest(
+    sezioni: list[dict], *, cta_url: str, unsubscribe_url: str, multi: bool
+) -> tuple[str, str, str]:
+    """Costruisce (subject, html, text) del digest. `sezioni` = lista di
+    `{"azienda": str | None, "bandi": [...]}`. Con `multi=False` (una sola
+    sezione senza azienda: utenti non-Advisor) il testo è identico al digest
+    classico; con `multi=True` ogni sezione porta l'intestazione con la
+    ragione sociale."""
+    tutti = [b for s in sezioni for b in s["bandi"]]
+    quanti = len(tutti)
     unsubscribe_href = html.escape(unsubscribe_url, quote=True)
-    intro = (
-        "In base al profilo della tua azienda, questo bando sembra compatibile con te:"
-        if quanti == 1
-        else "In base al profilo della tua azienda, questi bandi sembrano compatibili con te:"
-    )
+
+    if multi:
+        heading = (
+            "C'è un nuovo bando per le tue aziende"
+            if quanti == 1
+            else f"Ci sono {quanti} nuovi bandi per le tue aziende"
+        )
+        intro = "Ecco i nuovi bandi compatibili, raggruppati per azienda:"
+        subject = (
+            "Un nuovo bando per le tue aziende — BandoFit"
+            if quanti == 1
+            else f"{quanti} nuovi bandi per le tue aziende — BandoFit"
+        )
+        corpo: list[str] = []
+        for sezione in sezioni:
+            if not sezione["bandi"]:
+                continue
+            if sezione.get("azienda"):
+                corpo.append(_section_header(sezione["azienda"]))
+            corpo.extend(_digest_card(bando) for bando in sezione["bandi"])
+    else:
+        heading = (
+            "C'è un nuovo bando per la tua azienda"
+            if quanti == 1
+            else f"Ci sono {quanti} nuovi bandi per la tua azienda"
+        )
+        intro = (
+            "In base al profilo della tua azienda, questo bando sembra compatibile con te:"
+            if quanti == 1
+            else "In base al profilo della tua azienda, questi bandi sembrano compatibili con te:"
+        )
+        subject = (
+            "Un nuovo bando per la tua azienda — BandoFit"
+            if quanti == 1
+            else f"{quanti} nuovi bandi per la tua azienda — BandoFit"
+        )
+        corpo = [_digest_card(bando) for bando in tutti]
+
     paragraphs = [
         intro,
-        *[_digest_card(bando) for bando in bandi],
+        *corpo,
         f'<span style="font-size:12px;color:#94a3b8">Non vuoi più ricevere questi avvisi? '
         f'<a href="{unsubscribe_href}" style="color:#64748b">Disattivali con un clic</a> '
         "o dalle Preferenze della piattaforma.</span>",
@@ -490,25 +527,73 @@ async def send_bandi_digest_email(
         cta_url,
         "Ricevi questa email perché il tuo piano include gli avvisi sui nuovi bandi.",
     )
+
     righe_testo = []
-    for bando in bandi:
-        riga = f"- {bando.get('titolo') or 'Bando'}"
-        if bando.get("scadenza_label"):
-            riga += f" (scadenza {bando['scadenza_label']})"
-        riga += f"\n  {bando['url']}"
-        if bando.get("motivo"):
-            riga += f"\n  Perché lo vedi: {bando['motivo']}"
-        righe_testo.append(riga)
+    for sezione in sezioni:
+        if not sezione["bandi"]:
+            continue
+        if multi and sezione.get("azienda"):
+            righe_testo.append(f"[{sezione['azienda']}]")
+        for bando in sezione["bandi"]:
+            riga = f"- {bando.get('titolo') or 'Bando'}"
+            if bando.get("scadenza_label"):
+                riga += f" (scadenza {bando['scadenza_label']})"
+            riga += f"\n  {bando['url']}"
+            if bando.get("motivo"):
+                riga += f"\n  Perché lo vedi: {bando['motivo']}"
+            righe_testo.append(riga)
     text = (
         f"{heading}.\n\n"
         + "\n\n".join(righe_testo)
         + f"\n\nTutti i bandi: {cta_url}"
         + f"\n\nPer non ricevere più questi avvisi: {unsubscribe_url}"
     )
-    subject = (
-        "Un nuovo bando per la tua azienda — BandoFit"
-        if quanti == 1
-        else f"{quanti} nuovi bandi per la tua azienda — BandoFit"
+    return subject, html_body, text
+
+
+async def send_bandi_digest_email(
+    to_email: str,
+    bandi: list[dict],
+    cta_url: str,
+    unsubscribe_url: str,
+) -> bool:
+    """Digest giornaliero dei nuovi bandi compatibili di UNA azienda. `bandi` =
+    dict con titolo, ente_erogatore, importo_eur, importo_max_eur,
+    scadenza_label, giorni_alla_scadenza, motivo, url — già risolti dal
+    chiamante. Include il link di disiscrizione a un clic e gli header RFC
+    8058. È la forma per i non-Advisor (digest classico)."""
+    subject, html_body, text = _render_digest(
+        [{"azienda": None, "bandi": bandi}],
+        cta_url=cta_url,
+        unsubscribe_url=unsubscribe_url,
+        multi=False,
+    )
+    return await _dispatch(
+        to_email,
+        subject,
+        html_body,
+        text,
+        headers={
+            "List-Unsubscribe": f"<{unsubscribe_url}>",
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
+    )
+
+
+async def send_bandi_digest_email_multi(
+    to_email: str,
+    sezioni: list[dict],
+    cta_url: str,
+    unsubscribe_url: str,
+) -> bool:
+    """Digest multi-azienda (Advisor): una sola email con una sezione per
+    azienda. `sezioni` = lista di `{"azienda": str, "bandi": [...]}` (già
+    risolte). Stessi header RFC 8058 del digest classico."""
+    subject, html_body, text = _render_digest(
+        sezioni,
+        cta_url=cta_url,
+        unsubscribe_url=unsubscribe_url,
+        multi=True,
     )
     return await _dispatch(
         to_email,

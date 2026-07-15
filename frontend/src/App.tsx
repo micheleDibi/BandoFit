@@ -20,6 +20,7 @@ import Richieste from "./pages/progettista/Richieste";
 import RichiestaDetail from "./pages/progettista/RichiestaDetail";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
+import Notifiche from "./pages/Notifiche";
 import Preferenze from "./pages/Preferenze";
 import Profilo from "./pages/Profilo";
 import RecuperaPassword from "./pages/RecuperaPassword";
@@ -50,6 +51,7 @@ export default function App() {
         <Route path="bandi/:slug" element={<BandoDetail />} />
         <Route path="salvati" element={<Salvati />} />
         <Route path="calendario" element={<Calendario />} />
+        <Route path="notifiche" element={<Notifiche />} />
         <Route path="azienda" element={<Azienda />} />
         <Route path="aziende" element={<Aziende />} />
         <Route path="ai-check" element={<AiCheck />} />

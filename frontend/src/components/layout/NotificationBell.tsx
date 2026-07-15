@@ -131,6 +131,20 @@ export function NotificationBell() {
               ))
             )}
           </div>
+
+          <div className="border-t border-slate-100 p-1">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                navigate("/app/notifiche");
+              }}
+              className="w-full cursor-pointer rounded-lg px-3 py-2 text-center text-sm font-medium text-brand-600 transition-colors hover:bg-slate-100 hover:text-brand-700"
+            >
+              {NOTIFICHE_COPY.vediTutte}
+            </button>
+          </div>
         </div>
       )}
     </div>

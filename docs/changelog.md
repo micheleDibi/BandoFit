@@ -2,6 +2,13 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-15 — Gestione multi-azienda per l'Advisor: alert per azienda + centro alert (fase 4)
+
+- **Alert nuovi bandi per azienda** (Advisor): il job giornaliero non collassa più le aziende sul titolare. `carica_company_facets` (era `carica_owner_facets`) carica le aziende **vive** raggruppate per owner, ognuna col proprio profilo di compatibilità, e risolve lo scope col solito gate (limite effettivo > 1, calcolato in batch da `carica_limiti_aziende`). Per un Advisor `esegui_run` valuta l'idoneità **per ogni azienda**, il ledger `bando_alert_sends` viene rivendicato su `(user_id, company_profile_id, bando_id)` — **lo stesso bando può andare a più aziende** (righe distinte) — e parte **una sola email con una sezione per azienda** (`send_bandi_digest_email_multi`). Per **tutti gli altri** lo scope resta `NULL` e l'email è il digest classico, **byte-identico** a prima.
+- **Notifiche in-app per azienda**: `notification_service.notify` accetta ora `company_profile_id` (con la company nel `dedup_key`). Un Advisor riceve una notifica per azienda, gli altri quella aggregata di sempre. `GET /me/notifications` espone `company_profile_id` e accetta `?company_id=` per **filtrare gli item per azienda**; il conteggio **`non_lette` resta aggregato** (il badge della campanella non filtra mai).
+- **Centro alert** `/app/notifiche` (frontend): pagina paginata di tutte le notifiche, con **filtro per azienda** per gli Advisor; si raggiunge dal footer «Vedi tutte» della campanella (che resta aggregata). Nuovo hook `useNotificationsPage`.
+- **Nessuna migration nuova** (colonne overlay `bando_alert_sends.company_profile_id` e `notifications.company_profile_id` già create dalla 0023). Suite: 588 unit + 225 DB verdi, `tsc`/`build` frontend verdi, ruff sulla baseline (11 E402).
+
 ## 2026-07-15 — Gestione multi-azienda per l'Advisor: context switch + segregazione Gruppo A (fase 3)
 
 - **Switch di contesto azienda** per gli Advisor: un `ActiveCompanyProvider` (frontend) tiene l'azienda attiva in `localStorage` e la inietta come header `X-Active-Company` su ogni richiesta (`lib/api.ts`); al cambio azienda **svuota la cache** delle query (`queryClient.clear()`) — nessun dato dell'azienda precedente sopravvive. Nuovi: **switcher** in top bar e pagina **`/app/aziende`** (crea/rendi attiva/rimuovi), visibili solo quando `me.max_aziende > 1`.

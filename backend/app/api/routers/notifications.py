@@ -13,8 +13,15 @@ async def list_notifications(
     primary: PrimaryClient,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=50),
+    company_id: str | None = Query(
+        default=None,
+        description="Filtra le notifiche per azienda (centro alert Advisor). "
+        "Il conteggio non-lette resta aggregato.",
+    ),
 ) -> NotificationsPage:
-    return await notification_service.list_notifications(primary, user["id"], page, page_size)
+    return await notification_service.list_notifications(
+        primary, user["id"], page, page_size, company_id
+    )
 
 
 @router.post("/read", status_code=204)

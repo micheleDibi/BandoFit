@@ -58,6 +58,13 @@ export const NOTIFICHE_COPY = {
   vuoto: "Nessuna notifica.",
   erroreCaricamento: "Impossibile caricare le notifiche.",
   segnaTutteLette: "Segna tutte come lette",
+  // Centro alert (pagina /app/notifiche).
+  vediTutte: "Vedi tutte",
+  titoloPagina: "Notifiche",
+  sottotitoloPagina: "Tutti gli avvisi della piattaforma, dai bandi compatibili agli aggiornamenti.",
+  filtroTutte: "Tutte le aziende",
+  filtroAria: "Filtra le notifiche per azienda",
+  vuotoAzienda: "Nessuna notifica per questa azienda.",
 } as const;
 
 /** Note del dialog di conferma cambio ruolo: cosa comporta la transizione.

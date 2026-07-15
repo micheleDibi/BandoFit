@@ -16,7 +16,7 @@ from app.schemas.notification import MarkReadIn, NotificationOut, NotificationsP
 
 logger = logging.getLogger("bandofit.notifications")
 
-NOTIFICATION_SELECT = "id,tipo,titolo,corpo,url,read_at,created_at"
+NOTIFICATION_SELECT = "id,tipo,titolo,corpo,url,company_profile_id,read_at,created_at"
 
 
 async def notify(
@@ -28,10 +28,15 @@ async def notify(
     corpo: str | None = None,
     url: str | None = None,
     dedup_key: str,
+    company_profile_id: str | None = None,
 ) -> None:
     """Recapita la stessa notifica a più destinatari. MAI solleva: un guasto
     sulle notifiche non deve far fallire la transizione che le origina
-    (stesso patto dell'audit_log best-effort)."""
+    (stesso patto dell'audit_log best-effort).
+
+    `company_profile_id` scopa la notifica su un'azienda (Advisor multi-azienda:
+    il centro alert la filtra); resta NULL per tutto il resto — e la company va
+    già codificata nel `dedup_key` a monte (l'unicità è su user_id+dedup_key)."""
     if not user_ids:
         return
     rows = [
@@ -41,6 +46,7 @@ async def notify(
             "titolo": titolo,
             "corpo": corpo,
             "url": url,
+            "company_profile_id": company_profile_id,
             "dedup_key": dedup_key,
         }
         for user_id in user_ids
@@ -59,14 +65,21 @@ async def notify(
 
 
 async def list_notifications(
-    primary, user_id: str, page: int, page_size: int
+    primary, user_id: str, page: int, page_size: int, company_id: str | None = None
 ) -> NotificationsPage:
     offset = (page - 1) * page_size
-    resp = (
-        await primary.table("notifications")
+    query = (
+        primary.table("notifications")
         .select(NOTIFICATION_SELECT, count="exact")
         .eq("user_id", user_id)
-        .order("created_at", desc=True)
+    )
+    # Filtro per azienda del centro alert (Advisor): tocca SOLO gli item della
+    # pagina, non il conteggio non-lette — il badge della campanella resta
+    # aggregato su tutte le aziende.
+    if company_id is not None:
+        query = query.eq("company_profile_id", company_id)
+    resp = (
+        await query.order("created_at", desc=True)
         .range(offset, offset + page_size - 1)
         .execute()
     )

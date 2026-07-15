@@ -348,6 +348,8 @@ export interface Notifica {
   titolo: string;
   corpo: string | null;
   url: string | null;
+  /** Azienda a cui la notifica si riferisce (Advisor); null se generale. */
+  company_profile_id: string | null;
   read_at: string | null;
   created_at: string;
 }

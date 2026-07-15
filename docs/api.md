@@ -213,6 +213,8 @@ Item della risposta: `id`, `slug`, `titolo`, `titolo_breve`, `descrizione_breve`
 ### `GET /bandi/{slug}`
 Dettaglio completo: campi dell'elenco (`compatibilita` compreso) + `area_geografica`, `tematica[]`, `link_bando`, `link_candidatura`, `contenuto` (JSON strutturato a sezioni/segmenti, renderizzato dal frontend), `allegati[]`, `programma`, `settori[]`, `beneficiari[]`, `codici_ateco[]`. `404` se lo slug non esiste o il bando non è pubblicabile.
 
+**Filtro domini esclusi** (`services/link_policy.py`): i rimandi a domini di aggregatori concorrenti (oggi `obiettivoeuropa.com`, sottodomini compresi) non escono mai dall'API — `link_bando`/`link_candidatura` diventano `null`, gli allegati bloccati vengono rimossi, e dentro `contenuto` qualunque segmento col dominio nel testo visibile cade per intero, un segmento «link» bloccato senza menzione visibile perde solo il link (degrada a testo) e le menzioni testuali spariscono anche dai testi fuori dai segmenti. Lo stesso filtro si applica alla riga passata all'AI-check (il modello non deve citare quei link nel report) e, in lettura, ai report AI-check storici — su ogni via: cliente e dettaglio richiesta dei progettisti. Vedi docs/architecture.md, decisione 11.
+
 ## Bandi salvati
 
 Preferiti **per utente** sul DB primario: RIFERIMENTI al catalogo (bando_id + snapshot di slug/titolo/scadenza/stato), non copie. Se il bando sparisce dal catalogo la riga resta e viene servita dallo snapshot con `disponibile: false`. Cap: 200 bandi salvati per utente.

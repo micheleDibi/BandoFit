@@ -198,8 +198,9 @@ export default function BandoDetail() {
               <ContenutoRenderer sections={bando.contenuto.sections} />
             ) : (
               <p className="text-slate-500">
-                La scheda dettagliata non è ancora disponibile: consulta il bando ufficiale dal
-                link a fianco.
+                {linkPrincipale
+                  ? "La scheda dettagliata non è ancora disponibile: consulta il bando ufficiale dal link a fianco."
+                  : "La scheda dettagliata non è ancora disponibile."}
               </p>
             )}
           </div>

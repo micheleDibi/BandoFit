@@ -807,6 +807,57 @@ class TestPool:
         with pytest.raises(NotFoundError):
             await consulting_service.get_pool_request(primary, PROG_USER, REQUEST_ID)
 
+    async def test_report_storico_ripulito_anche_per_il_progettista(self):
+        # Il dettaglio pool serve il report AI-check con la stessa
+        # serializzazione del percorso cliente (_to_out): un report
+        # persistito PRIMA del filtro dei domini esclusi non deve mostrare
+        # il concorrente nemmeno al progettista.
+        primary = FakePrimary(
+            selects={
+                "consultation_requests": [request_row()],
+                "company_profiles": [
+                    {"id": COMPANY_ID, "ragione_sociale": "ACME Srl", "partita_iva": "01234567890"}
+                ],
+                "profiles": [
+                    {
+                        "id": TITOLARE,
+                        "nome": "Paola",
+                        "cognome": "Bianchi",
+                        "email": "paola@acme.it",
+                        "azienda": None,
+                    }
+                ],
+                "ai_checks": [
+                    {
+                        "id": AI_CHECK_ID,
+                        "bando_id": 1,
+                        "bando_slug": "bando-di-prova",
+                        "bando_titolo": "Bando di prova",
+                        "status": "ready",
+                        "esito": "ammissibile",
+                        "punteggio": 82,
+                        "tipo_punteggio": "stima",
+                        "created_at": tra(0).isoformat(),
+                        "report": {
+                            "requisiti": [
+                                {
+                                    "riferimento_bando": {
+                                        "testo": "obiettivoeuropa.com - Bando di prova"
+                                    }
+                                }
+                            ]
+                        },
+                    }
+                ],
+                "consultation_proposals": [],
+                "consultation_bookings": [],
+            }
+        )
+        detail = await consulting_service.get_pool_request(primary, PROG_USER, REQUEST_ID)
+        assert detail.ai_check is not None
+        assert detail.ai_check.report is not None
+        assert "obiettivoeuropa" not in detail.ai_check.model_dump_json()
+
 
 class TestProposte:
     async def test_invio_con_evento_al_titolare(self, notify_calls, spawn_calls, monkeypatch):

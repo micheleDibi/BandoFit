@@ -37,7 +37,7 @@ from app.schemas.ai_check import (
     AiQuotaOut,
     ExtractionResult,
 )
-from app.services import bandi_service
+from app.services import bandi_service, link_policy
 from app.services.ai_check_prompts import (
     PROMPT_VERSION,
     SYSTEM_EXTRACT,
@@ -99,6 +99,12 @@ def cost_cents(input_tokens: int, output_tokens: int) -> int:
 
 
 def _to_out(row: dict, include_report: bool = False) -> AiCheckOut:
+    # Scrub in lettura per i report STORICI: quelli generati prima del
+    # filtro dei domini esclusi possono citare il concorrente nel testo
+    # (i nuovi nascono puliti: il testo del bando è filtrato a monte).
+    report = row.get("report") if include_report else None
+    if report is not None:
+        report = link_policy.scrub_text_mentions(report)
     return AiCheckOut(
         id=str(row["id"]),
         bando_id=row["bando_id"],
@@ -113,7 +119,7 @@ def _to_out(row: dict, include_report: bool = False) -> AiCheckOut:
         extraction_cached=bool(row.get("extraction_cached")),
         created_at=str(row.get("created_at")),
         ready_at=str(row["ready_at"]) if row.get("ready_at") else None,
-        report=row.get("report") if include_report else None,
+        report=report,
     )
 
 

@@ -29,7 +29,6 @@ from app.core.errors import (
     NotFoundError,
     UpstreamError,
 )
-from app.schemas.ai_check import AiCheckOut
 from app.schemas.consulting import (
     AppuntamentoOut,
     BookingOut,
@@ -47,6 +46,7 @@ from app.schemas.consulting import (
     SlotOut,
 )
 from app.services import (
+    ai_check_service,
     company_service,
     email_service,
     family_service,
@@ -1199,7 +1199,9 @@ async def get_pool_request(
             .execute()
         )
         if check_resp.data:
-            ai_check = AiCheckOut(**check_resp.data[0])
+            # Stessa serializzazione del percorso cliente (_to_out): applica
+            # lo scrub in lettura dei report storici (domini esclusi).
+            ai_check = ai_check_service._to_out(check_resp.data[0], include_report=True)
 
     proposte_resp = (
         await primary.table("consultation_proposals")

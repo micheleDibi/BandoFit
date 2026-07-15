@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 from app.core.errors import NotFoundError
 from app.schemas.bando import BandoDetail, BandoListItem, Compatibilita
 from app.services.compatibility import CompanyFacets, compute_compatibilita
+from app.services.link_policy import scrub_bando_row
 from app.schemas.common import Page
 
 # Campi mostrati nelle card dell'elenco + embed di visualizzazione.
@@ -357,12 +358,13 @@ async def fetch_bandi(
 
 
 async def fetch_bando_for_ai(secondary, slug: str) -> dict:
-    """Riga grezza del bando per la pipeline AI-check: tutti i campi del
-    dettaglio più hash_bando/updated_at (chiave della cache estrazioni).
-    `contenuto` è già normalizzato (gestione del doppio-encoding)."""
+    """Riga grezza del bando per la pipeline AI-check (la chiave della
+    cache estrazioni è l'hash del testo serializzato, vedi
+    `compute_content_hash`). `contenuto` è già normalizzato (gestione
+    del doppio-encoding)."""
     resp = (
         await secondary.table("bando")
-        .select(DETAIL_SELECT + ",hash_bando,updated_at")
+        .select(DETAIL_SELECT)
         .eq("slug", slug)
         .eq("stato_processing", "completed")
         .limit(1)
@@ -372,7 +374,9 @@ async def fetch_bando_for_ai(secondary, slug: str) -> dict:
         raise NotFoundError("Bando non trovato")
     row = dict(resp.data[0])
     row["contenuto"] = normalize_contenuto(row.get("contenuto"))
-    return row
+    # I link ai domini esclusi (concorrenti) non devono arrivare nemmeno
+    # al testo del prompt: il modello li citerebbe nel report.
+    return scrub_bando_row(row)
 
 
 async def fetch_bando_by_slug(
@@ -392,7 +396,11 @@ async def fetch_bando_by_slug(
     )
     if not resp.data:
         raise NotFoundError("Bando non trovato")
-    row = resp.data[0]
+    row = dict(resp.data[0])
+    # Normalizzare PRIMA di filtrare: un `contenuto` doppio-encodato non
+    # verrebbe attraversato dal filtro dei link (map_detail è idempotente).
+    row["contenuto"] = normalize_contenuto(row.get("contenuto"))
+    row = scrub_bando_row(row)
     detail = map_detail(row)
     detail.compatibilita = _compat_for_row(row, company_facets, totale_regioni)
     return detail

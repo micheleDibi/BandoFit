@@ -70,7 +70,7 @@ function CreateCompanyDialog({ open, onClose }: { open: boolean; onClose: () => 
       <div className="space-y-4">
         <p>
           Ragione sociale e partita IVA sono obbligatorie. Gli altri dati (import da
-          P.IVA compreso) si aggiungono dopo, dalla pagina Azienda.
+          P.IVA compreso) si aggiungono dopo, da «Dati azienda».
         </p>
         <TextField
           label="Ragione sociale"

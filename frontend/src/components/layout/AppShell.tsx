@@ -1,4 +1,4 @@
-import { LogOut, Menu, ShieldCheck, User, X } from "lucide-react";
+import { Menu, ShieldCheck, X } from "lucide-react";
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useActiveCompany } from "../../hooks/useActiveCompany";
@@ -8,24 +8,26 @@ import { cn } from "../../lib/cn";
 import { hasAreaProgettista } from "../../lib/roles";
 import { InviteBanner } from "../shared/InviteBanner";
 import { PoweredBy } from "../shared/PoweredBy";
-import { CompanySwitcher } from "./CompanySwitcher";
+import { CompanyMenu } from "./CompanyMenu";
 import { Logo } from "./Logo";
 import { NavMenu, type NavItem } from "./NavMenu";
 import { NotificationBell } from "./NotificationBell";
+import { UserMenu } from "./UserMenu";
 
-// Voci sempre dirette (le azioni più frequenti sui bandi).
+// Link di navigazione principali (uso frequente): i bandi e le Consulenze,
+// che è una feature a sé (aiuto umano sui bandi) e merita di essere in vista.
 const directLinks: NavItem[] = [
   { to: "/app/bandi", label: "Bandi" },
   { to: "/app/salvati", label: "Salvati" },
   { to: "/app/calendario", label: "Calendario" },
   { to: "/app/ai-check", label: "AI-check" },
+  { to: "/app/consulenze", label: "Consulenze" },
 ];
 
-// Raggruppate sotto «Impostazioni»: profilo aziendale e account. La voce
-// «Aziende» (gestione multi-azienda) compare solo per gli Advisor.
-const impostazioniBase: NavItem[] = [
-  { to: "/app/azienda", label: "Azienda" },
-  { to: "/app/consulenze", label: "Consulenze" },
+// Voci di ACCOUNT (te + fatturazione): vivono nel menu avatar (UserMenu). I dati
+// azienda e la gestione portafoglio stanno nel CompanyMenu, non qui. La voce
+// «Account collegati» (famiglia) è aggiunta condizionatamente in AppShell.
+const accountBase: NavItem[] = [
   { to: "/app/preferenze", label: "Preferenze" },
   { to: "/app/abbonamento", label: "Abbonamento" },
 ];
@@ -45,7 +47,7 @@ const adminLinks: NavItem[] = [
 
 const navLinkClasses = ({ isActive }: { isActive: boolean }) =>
   cn(
-    "rounded-lg px-2.5 py-2 text-sm font-medium transition-colors duration-150",
+    "whitespace-nowrap rounded-lg px-2.5 py-2 text-sm font-medium transition-colors duration-150",
     isActive
       ? "bg-brand-50 text-brand-700"
       : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
@@ -59,9 +61,13 @@ export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = me?.profile.role === "admin";
   const isProgettista = hasAreaProgettista(me?.profile.role);
-  const impostazioniLinks: NavItem[] = isMulti
-    ? [{ to: "/app/aziende", label: "Aziende" }, ...impostazioniBase]
-    : impostazioniBase;
+  // «Account collegati» (gestione famiglia) solo al titolare con posti collegati
+  // e NON Advisor: in v1 Advisor e famiglia sono mutuamente esclusivi.
+  const isParent = me?.family?.role === "parent";
+  const accountLinks: NavItem[] =
+    isParent && !isMulti
+      ? [...accountBase, { to: "/app/profilo#collegati", label: "Account collegati" }]
+      : accountBase;
 
   const handleSignOut = async () => {
     await signOut();
@@ -94,8 +100,10 @@ export function AppShell() {
             <Logo />
           </Link>
 
-          {/* 4 link diretti + 2 menu raggruppati: la nav per esteso entra da
-              lg, sotto resta il menu hamburger. */}
+          {/* Solo navigazione: 5 link diretti + i menu dei ruoli. L'azienda vive
+              nel CompanyMenu e l'account (profilo/preferenze/abbonamento/uscita)
+              nell'UserMenu, a destra. La nav per esteso entra da lg, sotto
+              resta l'hamburger. */}
           <nav
             className="ml-3 hidden items-center gap-0.5 lg:flex"
             aria-label="Navigazione principale"
@@ -105,7 +113,6 @@ export function AppShell() {
                 {item.label}
               </NavLink>
             ))}
-            <NavMenu label="Impostazioni" items={impostazioniLinks} />
             {isProgettista && (
               <NavMenu label="Progettista" items={progettistaLinks} />
             )}
@@ -119,27 +126,14 @@ export function AppShell() {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
-            <CompanySwitcher />
+            <CompanyMenu />
             <NotificationBell />
-            <Link
-              to="/app/profilo"
-              aria-label="Vai al tuo profilo"
-              className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg px-3 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-500"
-            >
-              <User className="size-4" aria-hidden />
-              <span className="hidden sm:inline">
-                {me?.profile.nome ?? me?.profile.email ?? "Profilo"}
-              </span>
-            </Link>
-            <button
-              type="button"
-              onClick={handleSignOut}
-              aria-label="Esci dall'account"
-              className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg px-3 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-500"
-            >
-              <LogOut className="size-4" aria-hidden />
-              <span className="hidden sm:inline">Esci</span>
-            </button>
+            <UserMenu
+              nome={me?.profile.nome}
+              email={me?.profile.email}
+              items={accountLinks}
+              onSignOut={handleSignOut}
+            />
             <button
               type="button"
               className="inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500 lg:hidden"
@@ -157,8 +151,6 @@ export function AppShell() {
             aria-label="Navigazione mobile"
           >
             {directLinks.map(mobileLink)}
-            <p className={mobileSectionLabel}>Impostazioni</p>
-            {impostazioniLinks.map(mobileLink)}
             {isProgettista && (
               <>
                 <p className={mobileSectionLabel}>Progettista</p>

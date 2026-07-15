@@ -336,7 +336,7 @@ export default function Preferenze() {
                 </p>
               )}
               <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-slate-100 pt-3 text-sm">
-                {/* Dati aziendali e dossier vivono entrambi nella pagina Azienda */}
+                {/* Dati aziendali e dossier vivono entrambi in «Dati azienda» */}
                 <Link to="/app/azienda" className="font-medium text-brand-600 hover:text-brand-700">
                   Dati aziendali →
                 </Link>

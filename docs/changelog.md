@@ -2,6 +2,13 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-15 — Header ridisegnato: IA per famiglie, label non ambigue
+
+- **Riorganizzazione per famiglie di destinazioni**, per rendere l'header leggibile a ogni ruolo e ogni piano. **Barra a sinistra = sola navigazione**: **Bandi · Salvati · Calendario · AI-check · Consulenze** (le Consulenze diventano un link diretto, non più sepolte in un menu) + i menu di ruolo **«Progettista»**/**«Admin»**. **A destra tre elementi**: menu **Azienda**, campanella, menu **Account** (avatar). Sparisce il menu **«Impostazioni»**, che non conteneva impostazioni.
+- **Fine dell'ambiguità «Azienda» vs «Aziende»**: nuovo **menu Azienda** (`components/layout/CompanyMenu.tsx`, assorbe il vecchio `CompanySwitcher`) unifica tutto ciò che riguarda l'azienda su cui operi. Per i **non‑Advisor** è un link diretto **«Dati azienda»** (`/app/azienda`); per gli **Advisor** è un dropdown col nome dell'azienda attiva che contiene lo **switch** tra aziende + le scorciatoie **«Dati azienda»** e **«Gestisci aziende»** (`/app/aziende`, il portafoglio). I due nomi sono ora distinti (un dato vs un'azione); le rotte non cambiano.
+- **Menu Account (avatar) = solo account**: profilo (nome + email), **Preferenze**, **Abbonamento**, **«Esci»**, e — solo per il **titolare** con posti collegati e **non Advisor** — **«Account collegati»**, che ora ha una voce dedicata (deep-link alla `FamilyCard` via `/app/profilo#collegati`, con scroll in vista) invece di restare nascosta dentro Profilo.
+- **Layout**: i due menu del cluster destro restano a ogni breakpoint (icona sola su schermo stretto); il nome nell'avatar compare da `xl` e i link diretti hanno `whitespace-nowrap` — l'header non va a capo nemmeno per un admin + progettista + Advisor. Nessuna modifica a backend/API, nessuna migration; `tsc`/`build` frontend verdi.
+
 ## 2026-07-15 — Gestione multi-azienda per l'Advisor: export PDF per azienda (fase 5)
 
 - **Due nuovi export PDF** dell'azienda attiva (scopati da `X-Active-Company`, download `application/pdf`): `GET /me/company/export/pdf` — **scheda** dei dati dichiarati + preferenze di ricerca seguite; `GET /me/company/dossier/pdf` — **dossier certificato** (le 8 sezioni + persone della visura). Bottoni «Esporta scheda PDF» e «Esporta dossier PDF» nella pagina Azienda (download blob autenticato via `lib/download.ts`). `404` se non c'è azienda/dossier, `503 pdf_unavailable` se manca il motore PDF.

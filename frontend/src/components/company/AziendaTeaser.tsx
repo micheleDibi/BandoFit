@@ -3,7 +3,7 @@ import { useCompany } from "../../hooks/useCompany";
 import { Card } from "../ui/Card";
 import { LinkButton } from "../ui/Button";
 
-/** Rimando compatto alla pagina Azienda: dati, dossier certificato e
+/** Rimando compatto a «Dati azienda»: dati, dossier certificato e
  *  documenti ufficiali vivono tutti lì. */
 export function AziendaTeaser() {
   const { data } = useCompany();
@@ -18,12 +18,12 @@ export function AziendaTeaser() {
         </h2>
         <p className="mt-1 text-sm text-slate-500">
           {ragione
-            ? `${ragione} — dati, dossier certificato e documenti ufficiali si gestiscono nella pagina Azienda.`
-            : "Compila i dati della tua azienda nella pagina Azienda: alimentano l'AI-check e «Bandi per te»."}
+            ? `${ragione} — dati, dossier certificato e documenti ufficiali si gestiscono in «Dati azienda».`
+            : "Compila i dati della tua azienda in «Dati azienda»: alimentano l'AI-check e «Bandi per te»."}
         </p>
       </div>
       <LinkButton to="/app/azienda" variant="secondary" size="sm">
-        Vai all'azienda
+        Vai ai dati azienda
         <ArrowRight className="size-3.5" aria-hidden />
       </LinkButton>
     </Card>

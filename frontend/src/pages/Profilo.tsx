@@ -1,5 +1,6 @@
 import { BadgeCheck, ShieldCheck } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
+import { useLocation } from "react-router-dom";
 import { AziendaTeaser } from "../components/company/AziendaTeaser";
 import { FamilyCard } from "../components/family/FamilyCard";
 import { PreferenzeTeaser } from "../components/preferences/PreferenzeTeaser";
@@ -24,6 +25,14 @@ export default function Profilo() {
   } = useJobPositions();
   const updateProfile = useUpdateProfile();
   const verifyCf = useVerifyCf();
+  const location = useLocation();
+
+  // Deep-link «Account collegati» (voce del menu Account): una volta caricato il
+  // profilo, se l'hash è #collegati porta in vista la gestione dei collegati.
+  useEffect(() => {
+    if (location.hash !== "#collegati") return;
+    document.getElementById("collegati")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [location.hash, me]);
 
   const [form, setForm] = useState({
     nome: "",
@@ -274,7 +283,7 @@ export default function Profilo() {
         </form>
       </Card>
 
-      {/* Dati aziendali: si gestiscono nella pagina Azienda */}
+      {/* Dati aziendali: si gestiscono in «Dati azienda» */}
       <div className="mt-6">
         <AziendaTeaser />
       </div>
@@ -289,9 +298,10 @@ export default function Profilo() {
         <AbbonamentoTeaser />
       </div>
 
-      {/* Gestione account collegati: solo per il titolare con piano multi-account */}
+      {/* Gestione account collegati: solo per il titolare con piano multi-account.
+          id="collegati": bersaglio del deep-link dalla voce «Account collegati». */}
       {me.family?.role === "parent" && (
-        <div className="mt-6">
+        <div id="collegati" className="mt-6 scroll-mt-24">
           <FamilyCard />
         </div>
       )}

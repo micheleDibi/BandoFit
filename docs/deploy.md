@@ -40,6 +40,8 @@ Compila `.env`:
 | `SMTP_HOST/PORT/USER/PASSWORD` + `EMAIL_FROM` | casella SMTP per le email di invito (es. OVH, vedi sotto); in alternativa `RESEND_API_KEY`; senza nessuno dei due le email vengono solo loggate |
 | `OPENAPI_EMAIL` + `OPENAPI_API_KEY` + `OPENAPI_ENV` | credenziali openapi.it per l'import dei dati aziendali e la verifica CF (da console.openapi.com; le API "Company" e "Risk" vanno attivate una tantum dalla Libreria API). `OPENAPI_ENV=production` in deploy; le chiavi sandbox/produzione sono diverse. Vuote = importazione disattivata, il resto dell'app funziona. **Ogni import consuma credito** (IT-full ~0,30 € + IVA) |
 | `ANTHROPIC_API_KEY` + `AI_CHECK_MODEL` | chiave API Anthropic per l'AI-check (da console.anthropic.com); modello default `claude-sonnet-5`. Vuota = AI-check disattivato, il resto dell'app funziona. **Ogni report consuma credito API** (~0,10–0,20 $; meno con l'estrazione del bando in cache). Le quote per gli utenti si impostano dai piani (campo AI-check) |
+| `RATE_LIMIT_PEPPER` | **obbligatoria in deploy**: con `ENV=production` il backend si rifiuta di partire senza. Generarla con `openssl rand -hex 32`. Sceglierla **una volta sola** — cambiarla azzera i contatori anti-enumerazione in corso, perché i bucket derivano da lei |
+| `TRUSTED_PROXY_HOPS` | quanti proxy fidati stanno davanti al backend, default **2** (Cloudflare + reverse proxy). Vedi «IP del client» sotto: da regolare solo se la catena è diversa |
 
 ### Deliverability degli alert (SPF/DKIM/DMARC) — azione DNS a tuo carico
 
@@ -78,7 +80,7 @@ curl -I http://127.0.0.1:3001/             # 200
 
 ## 3. Reverse proxy
 
-Esempio di virtual host **nginx** (adattare dominio e porte; per caddy/traefik la logica è identica: `/api/` → backend, tutto il resto → frontend):
+Esempio di virtual host **nginx** (adattare dominio e porte; per caddy/traefik la logica è identica: `/api/` → backend, tutto il resto → frontend). Chi usa **Nginx Proxy Manager** legga anche la variante in fondo alla sezione: l'UI genera un nginx che da questo differisce nei punti che contano.
 
 ```nginx
 server {
@@ -86,6 +88,10 @@ server {
 
     # API: il backend serve già i percorsi /api/v1/*, nessuna riscrittura
     location /api/ {
+        # Dietro Cloudflare: solo l'edge può parlare all'API. Senza questo,
+        # CF-Connecting-IP è un campo libero — vedi «IP del client» sotto.
+        include /etc/nginx/cloudflare-ips.conf;   # allow <rete>; ... deny all;
+
         proxy_pass http://127.0.0.1:3002;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -104,18 +110,46 @@ server {
 
 Con questo schema frontend e API stanno sulla **stessa origine** (`https://bandofit.example.com`), quindi CORS non entra mai in gioco lato browser.
 
+`cloudflare-ips.conf` è un `allow` per ogni rete pubblicata su [cloudflare.com/ips](https://www.cloudflare.com/ips/) (una quindicina IPv4 più una manciata IPv6) seguito da `deny all;`. La lista cambia di rado ma cambia: quando succede il sintomo è un 403 per gli utenti dietro le reti nuove, quindi vale un promemoria periodico o un cron che la riscarichi.
+
 ### IP del client (rate limiting di `/auth/register`)
 
 Il rate limit anti-enumerazione conta per IP, quindi l'IP dev'essere quello vero. **`request.client.host` non lo è**: il backend gira in Docker con il mapping `127.0.0.1:3002 → 8000`, quindi il peer che uvicorn vede è il gateway della bridge — **identico per ogni utente del pianeta**. Usarlo significherebbe un unico contatore condiviso, e il primo abusatore bloccherebbe tutti gli altri.
 
-L'IP si ricava quindi dagli header (`app/core/net.py`), in ordine: **`CF-Connecting-IP`**, altrimenti `X-Forwarded-For` contato **da destra** per `TRUSTED_PROXY_HOPS` posizioni (default **2** = Cloudflare + nginx). Contare da destra è ciò che rende l'header non falsificabile: ogni hop **appende** (`$proxy_add_x_forwarded_for`), quindi quello che inietta il client resta in testa, dove non lo guardiamo.
+L'IP si ricava quindi dagli header (`app/core/net.py`), in ordine: **`CF-Connecting-IP`**, altrimenti `X-Forwarded-For` contato **da destra** per `TRUSTED_PROXY_HOPS` posizioni (default **2** = Cloudflare + reverse proxy). Contare da destra è ciò che rende l'header non falsificabile — ma **solo se ogni hop appende** (`$proxy_add_x_forwarded_for`, come nel vhost sopra): quello che inietta il client resta allora in testa, dove non lo guardiamo. Un proxy che invece **sovrascrive** l'header accorcia la catena e il conteggio va rifatto: è il caso di Nginx Proxy Manager, sotto.
 
-Due cose da sapere:
+Tre cose da sapere:
 
 - **`FORWARDED_ALLOW_IPS=*` non è la scorciatoia: è un peggioramento.** Con `*`, uvicorn (`ProxyHeadersMiddleware`, ramo `always_trust`) prende il **primo** elemento di `X-Forwarded-For` — cioè proprio quello iniettabile dal client. Meglio un IP ignoto che uno falsificabile. Non impostarla.
-- **`CF-Connecting-IP` vale quanto vale nginx.** Se nginx accetta connessioni da chiunque, chi scopre l'IP origin del server può inviare quell'header a mano e falsificare il proprio IP. Vanno accettati solo gli [IP di Cloudflare](https://www.cloudflare.com/ips/) (`allow`/`deny`, o `set_real_ip_from` + `real_ip_header CF-Connecting-IP`).
+- **`CF-Connecting-IP` vale quanto vale il reverse proxy.** Se accetta connessioni da chiunque, chi scopre l'IP origin lo raggiunge scavalcando Cloudflare e scrive quell'header a mano: il limite per IP diventa un ornamento, perché ogni richiesta cade in un bucket nuovo. Vanno accettati solo gli [IP di Cloudflare](https://www.cloudflare.com/ips/), come nel vhost sopra.
+- **`allow`/`deny` e `set_real_ip_from` sono alternative, non complementi.** Il modulo realip gira nella fase POST_READ, `allow`/`deny` nella fase ACCESS, che viene dopo: con entrambi attivi il confronto cade su un `$remote_addr` **già riscritto all'IP del visitatore**, che un IP Cloudflare non è — quindi `deny all` e 403 a ogni utente vero. Col solo `allow`/`deny`, `$remote_addr` resta l'edge, il confronto è quello giusto e il backend si legge `CF-Connecting-IP` da sé: non serve altro.
 
 Se l'IP non è determinabile (nessun proxy davanti, o catena diversa da quella dichiarata) il limite per IP semplicemente **non si applica** e resta un warning nei log: è deliberato, perché contare tutti su una chiave sbagliata è peggio che non contare. In sviluppo è il caso normale; per usare il peer come IP (localhost, senza proxy) si mette `TRUSTED_PROXY_HOPS=0`.
+
+Per verificare che la chiusura tenga, dal proprio computer:
+
+```bash
+# Attraverso Cloudflare: deve rispondere
+curl -s https://bandofit.example.com/api/v1/health                 # {"status":"ok"}
+
+# Dritti all'origin, scavalcando Cloudflare: deve essere respinto
+curl -sk -o /dev/null -w '%{http_code}\n' \
+  --resolve bandofit.example.com:443:203.0.113.5 \
+  https://bandofit.example.com/api/v1/health                       # 403
+```
+
+`--resolve` fa collegare curl all'IP indicato presentando però dominio, SNI e `Host` corretti: è la simulazione più fedele di chi scavalca il CDN. (`-H "Host: ..."` darebbe lo stesso esito — nginx instrada sull'header **`Host`**, non sull'SNI, che sceglie solo il certificato — ma è una prova che vale meno, perché non esercita la selezione del vhost per come la esercita un browser vero.) Il `-k` serve se l'origin monta un certificato Cloudflare Origin CA, che pubblicamente attendibile non è.
+
+### Variante: Nginx Proxy Manager
+
+NPM genera il vhost da sé, quindi il blocco di sopra non si incolla da nessuna parte. Due differenze cambiano la sostanza:
+
+- **L'`allow`/`deny` va nella custom location `/api`**, dietro l'**ingranaggio** accanto al percorso, che apre la config avanzata di *quella* location (nel template `_location.conf` è la prima riga dentro il `location`). Non nell'**Access List** dell'UI: `_access.conf` finisce anche in `location /`, quindi si porterebbe dietro la SPA. E non nella tab **Advanced** del proxy host, che è a livello server e non è scopata su `/api`.
+- **`X-Forwarded-For` viene sovrascritto, non appeso.** NPM emette `proxy_set_header X-Forwarded-For $remote_addr;`, quindi al backend l'header arriva con **un solo elemento**, l'edge Cloudflare. Il fallback XFF di `net.py` non può restituire l'IP vero e tutto poggia su `CF-Connecting-IP` — cioè sull'`allow`/`deny` del punto precedente, che qui non è una misura in più: è l'unica. In compenso l'`X-Forwarded-For` iniettato dal client viene buttato via a prescindere.
+
+`TRUSTED_PROXY_HOPS` resta comunque a **2**: `CF-Connecting-IP` si legge per primo e il conteggio degli hop non entra mai in gioco. Se Cloudflare sparisse, con `2` il limite per IP si spegne lasciando un warning; con `1` conterebbe tutti gli utenti di uno stesso edge sullo stesso bucket. Il default sbaglia dalla parte giusta.
+
+Se NPM gira su una macchina diversa dal backend serve `BIND_ADDRESS=0.0.0.0`, e con quello il backend ascolta sulla rete privata: l'`allow`/`deny` difende la 443 di NPM, non la porta del backend. Su una rete non fidata va chiusa a parte, col firewall, lasciando passare il solo IP di NPM.
 
 ### Supabase Auth: hardening obbligatorio
 

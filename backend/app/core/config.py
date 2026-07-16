@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +20,10 @@ class Settings(BaseSettings):
     secondary_supabase_anon_key: str
 
     cors_origins: str = "http://localhost:5173"
+    # «production» accende i controlli d'avvio in fondo alla classe. Lo imposta
+    # docker-compose.yml; chi avvia uvicorn a mano eredita «development», quindi
+    # quei controlli non scattano — vale come rete di sicurezza del deploy
+    # standard, non come garanzia universale.
     env: str = "development"
 
     # URL pubblico del frontend (redirect degli inviti, link nelle email).
@@ -94,7 +99,8 @@ class Settings(BaseSettings):
     # l'IP resta semplicemente ignoto e il limite per IP non si applica.
     trusted_proxy_hops: int = 2
     # Pepper dell'HMAC con cui si costruiscono i bucket: a DB non finiscono mai
-    # IP o email in chiaro. Vuoto = si ripiega su un hash non peppato (sviluppo).
+    # IP o email in chiaro. Vuoto = hash non peppato, tollerato solo in
+    # sviluppo: con ENV=production il backend si rifiuta di partire (sotto).
     rate_limit_pepper: str = ""
     # Soglie di POST /auth/register. Le PMI stanno dietro NAT aziendale: il
     # burst è tarato su quello, non sul singolo utente domestico.
@@ -119,6 +125,33 @@ class Settings(BaseSettings):
     # Minuti minimi tra due generazioni per la stessa coppia azienda × bando.
     ai_check_cooldown_minutes: int = 5
 
+    @model_validator(mode="after")
+    def _segreti_obbligatori_in_produzione(self) -> "Settings":
+        """Impedisce l'avvio in produzione senza i segreti che degradano in muto.
+
+        Il criterio per stare qui è preciso: una configurazione mancante che
+        SPEGNE una feature non serve (openapi e anthropic hanno già `enabled` e
+        rispondono 503: si vede). Serve per ciò che non si spegne affatto.
+        rate_limit_pepper vuoto è l'unico caso: rate_limit_service continua a
+        contare, e a cadere è solo la segretezza dei bucket — la tabella
+        auth_rate_limits torna un dizionario di email e IP attaccabile offline
+        da chi ne ottenga un dump, cioè esattamente ciò che l'HMAC deve
+        impedire. L'unico segnale odierno è un logger.debug, invisibile al
+        livello INFO di produzione.
+
+        Fallire all'avvio non introduce un meccanismo nuovo: è già ciò che
+        succede alle chiavi Supabase, che non hanno default e fanno morire
+        Settings() all'import di app.main. Meglio un container che non parte di
+        uno che parte e mente.
+        """
+        if self.env.strip().lower() == "production" and not self.rate_limit_pepper.strip():
+            raise ValueError(
+                "RATE_LIMIT_PEPPER è obbligatorio con ENV=production: generane uno "
+                "con `openssl rand -hex 32` e mettilo nel .env (docs/deploy.md). "
+                "Sceglilo una volta sola: cambiarlo azzera i contatori in corso."
+            )
+        return self
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
@@ -134,4 +167,26 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    """Le Settings del processo, costruite una volta sola.
+
+    Il try/except non è cerimonia: il messaggio di una ValidationError di
+    pydantic include `input_value`, un estratto del dict di tutte le variabili
+    lette. Pydantic lo tronca a testa e coda, quindi non trapela tutto — ma
+    trapela, e COSA trapeli dipende dall'ordine dei campi, cioè dal caso: basta
+    che in coda finisca una chiave API viva. Siccome Settings si costruisce
+    all'import di app.main, un container mal configurato la stamperebbe nel
+    traceback, e i log di produzione si conservano. Si tengono i motivi
+    («primary_supabase_url: Field required»), si buttano i valori.
+
+    `from None` è portante quanto la redazione: senza, il traceback aggiunge
+    «The above exception was the direct cause» e sotto ristampa la
+    ValidationError originale, dump al seguito.
+    """
+    try:
+        return Settings()
+    except ValidationError as exc:
+        motivi = "; ".join(
+            f"{'.'.join(str(p) for p in e['loc']) or '(configurazione)'}: {e['msg']}"
+            for e in exc.errors()
+        )
+        raise RuntimeError(f"Configurazione non valida — {motivi}") from None

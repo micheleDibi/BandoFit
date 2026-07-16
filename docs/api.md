@@ -12,7 +12,7 @@ Lato **frontend** l'header è iniettato da un `ActiveCompanyProvider` (id in `lo
 ```json
 { "error": { "code": "not_found", "message": "Bando non trovato" } }
 ```
-Codici: `unauthorized` (401), `forbidden` (403), `not_found` (404), `bad_request` (400), `conflict` (409), `validation_error` (422), `auth_unavailable` (503, verifica token temporaneamente impossibile — es. JWKS irraggiungibile: è un errore transitorio, **non** una sessione scaduta), `search_timeout` (504), `upstream_error` (502), `upstream_timeout` (504).
+Codici: `unauthorized` (401), `forbidden` (403), `not_found` (404), `bad_request` (400), `conflict` (409), `rate_limited` (429, troppe richieste su un endpoint auth pubblico), `validation_error` (422), `auth_unavailable` (503, verifica token temporaneamente impossibile — es. JWKS irraggiungibile: è un errore transitorio, **non** una sessione scaduta), `search_timeout` (504), `upstream_error` (502), `upstream_timeout` (504).
 
 Nota: se un utente autenticato risulta privo di profilo (provisioning fallito a monte), il backend lo crea al volo alla prima richiesta (con abbonamento Gratuito), evitando che l'account resti bloccato.
 
@@ -28,20 +28,32 @@ Stato del servizio. → `{"status": "ok"}`
 
 > **Link di dominio**: tutti i link nelle email (conferma, recovery, inviti) sono token **propri** di BandoFit (256 bit, salvati solo come SHA-256 in `auth_tokens`, monouso, con scadenza) e puntano al dominio dell'app. GoTrue non genera MAI link né invia email: Supabase è solo il deposito di utenti e dati (Admin API `create_user`/`update_user_by_id`).
 
-### `POST /auth/register` (201)
-Registrazione. Body: `email`, `password` (≥8), `nome`, `cognome`, `azienda?`, `telefono` (obbligatorio; normalizzato e validato in **E.164** dal validator Pydantic — «347 1234567» → `+393471234567`, prefisso `+39` di default, lo zero dei fissi si conserva), `job_position_slug` (obbligatorio, dalla lookup `GET /job-positions`), `job_position_altro?` (testo libero, tenuto solo se la posizione è «Altro»), `plan_slug`. Crea l'utente via Admin API (non confermato) e invia l'email di conferma col link `/conferma-email?token=...`. → `{"confirmation_required": true}`. Errori: `409` email già registrata o cooldown 60s, `400` password non valida (rifiuto di GoTrue, a valle del cooldown), `400` se `plan_slug` punta a un piano `su_richiesta`, `400` se `job_position_slug` è ignoto o disattivato, `422` telefono non valido — questi ultimi tre avvengono PRIMA del cooldown e non lo consumano. Telefono e posizione viaggiano nello `user_metadata` e li scrive il trigger `handle_new_user` (0022).
+### `POST /auth/register` (202)
+Avvia la registrazione. Body: `email`, `nome`, `cognome`, `azienda?`, `telefono` (obbligatorio; normalizzato e validato in **E.164** dal validator Pydantic — «347 1234567» → `+393471234567`, prefisso `+39` di default, lo zero dei fissi si conserva), `job_position_slug` (obbligatorio, dalla lookup `GET /job-positions`), `job_position_altro?` (testo libero, tenuto solo se la posizione è «Altro»), `plan_slug`. Telefono e posizione viaggiano nello `user_metadata` e li scrive il trigger `handle_new_user` (0022).
+
+Risposta **sempre neutra** `{"ok": true}` (anti-enumerazione, CWE-204): identica per un indirizzo libero e per uno già registrato. Se l'indirizzo è libero, l'utente viene creato via Admin API (non confermato, **senza password**) e parte l'email con `/conferma-email?token=...`; se è già registrato non si crea nulla e all'indirizzo parte un avviso fuori banda («hai già un account» se confermato, «completa la registrazione» se in attesa). L'esistenza dell'account la scopre solo chi possiede la casella.
+
+> **Niente password nel body.** La password si sceglie confermando l'indirizzo (`POST /auth/confirm`), come nel flusso invito. **Non è una scelta di UX ma il fulcro della difesa**: creando l'utente con la password fornita da chi registra, lo stato dell'account diventerebbe osservabile dall'esterno anche a risposta neutra — Supabase Auth è raggiungibile dal browser con la anon key. Creare l'utente **senza password** rende i due casi indistinguibili anche da lì. Non reintrodurre il campo.
+
+Errori (nessuno dipende dall'esistenza dell'indirizzo): `429` rate limit per IP (5/15min, 50/24h — vedi sotto), `400` se `plan_slug` punta a un piano `su_richiesta`, `400` se `job_position_slug` è ignoto o disattivato, `422` telefono/email non validi. Il **cooldown 60s non è più un `409`**: sopprime l'invio e risponde `202` come sempre, altrimenti reintrodurrebbe una risposta distinguibile. **Nessun `502`**, nemmeno con Supabase Auth irraggiungibile: solo uno dei due rami chiama `create_user`, quindi un errore upstream sarebbe di per sé un segnale. Il prezzo è che durante un guasto la registrazione fallisce in silenzio: il segnale operativo è un `logger.error`, che va monitorato.
+
+**Rate limiting** (migration 0025, tabella `auth_rate_limits` + `fn_consume_auth_rate_limit`): contatori a finestra nel DB — durable e condivisi, a differenza del cooldown in-process che si azzera a ogni deploy. Chiavi HMAC (`rate_limit_pepper`): a DB non finiscono mai IP o email in chiaro. Per IP **5/15min** e **50/24h** (`429`); per email **5/h**, che sopprime solo l'invio e **mai** la creazione dell'account (bloccarla permetterebbe a un anonimo di impedire l'iscrizione a una persona precisa, in silenzio) — con un'eccezione: **l'unica email di un account appena creato parte sempre**, budget o no, altrimenti un paio di fallimenti transitori di `create_user` basterebbero a lasciare l'account senza password, senza token e senza email. Cap globale **200/h di solo allarme**: se rifiutasse, un singolo IP spegnerebbe la registrazione a tutti. Se l'RPC non risponde si passa comunque (fail-open) e resta un log di errore. L'IP arriva da `CF-Connecting-IP`, o da `X-Forwarded-For` contato **da destra** per `trusted_proxy_hops` (default 2: Cloudflare + nginx) — vedi `docs/deploy.md`.
+
+La risposta dura almeno `register_latency_target_seconds` (1,5s): senza, il tempo direbbe ciò che il corpo tace. Il `429` è escluso dal livellamento, altrimenti chi martella terrebbe aperte le connessioni.
 
 ### `POST /auth/confirm`
-Body: `{"token": "..."}` (dal link email, monouso, TTL 48h). Conferma l'indirizzo e sblocca il login. → `{"email": "..."}` (per il prefill di `/login?email=`). `404` se non valido/scaduto/già usato.
+Body: `{"token": "...", "password": "..."}` (token dal link email, monouso, TTL 48h). Conferma l'indirizzo **e imposta la password scelta ora**, poi sblocca il login. → `{"email": "..."}` (per il prefill di `/login?email=`). `404` se non valido/scaduto/già usato, `400` password rifiutata. Il token si consuma **solo a conferma riuscita**: una password rifiutata non brucia il link.
 
 ### `POST /auth/recover` (202)
-Richiesta reimpostazione password. Body: `{"email": "..."}`. Risposta **sempre neutra** `{"ok": true}` (anti-enumerazione); se l'account esiste parte l'email con `/reimposta-password?token=...` (TTL 1h). `409` cooldown 60s.
+Richiesta reimpostazione password. Body: `{"email": "..."}`. Risposta **sempre neutra** `{"ok": true}` (anti-enumerazione); se l'account esiste parte l'email con `/reimposta-password?token=...` (TTL 1h). `409` cooldown 60s (non correla con l'esistenza: il contatore si arma prima di sapere se l'indirizzo è registrato), `429` rate limit per IP.
+
+Ha le **stesse difese di `/auth/register`**, e non per simmetria estetica: il corpo era già neutro, ma il ramo «l'account esiste» emetteva un token e aspettava l'SMTP in linea, mentre quello «non esiste» tornava subito — il cronometro rivelava tutto, ed era l'oracolo più comodo dei due perché qui non serve nemmeno creare niente. Quindi: invio in **background**, **pavimento di latenza**, **rate limit per IP** (contatori in comune con register: chi alterna gli endpoint non trova budget fresco) e **budget per casella**, che è anche l'argine alle molestie — senza, chiunque poteva far piovere email di recupero su una vittima.
 
 ### `POST /auth/reset`
 Body: `{"token": "...", "password": "..."}`. Consuma il token di recovery e imposta la nuova password via Admin API. → `{"email"}` (il frontend fa auto-login). `404` token non valido.
 
 ### `POST /auth/resend-confirmation` (202)
-Nuovo token + email di conferma per un utente non ancora confermato. Risposta sempre neutra; cooldown 60s.
+Nuovo token + email di conferma per un utente non ancora confermato. Risposta sempre neutra; cooldown 60s; stesse difese di `/auth/recover` (background, pavimento, rate limit per IP e per casella).
 
 ### `GET /auth/invite-info?token=...`
 Contesto dell'invito azienda per la pagina di accettazione (**non consuma** il token): `{email, denominazione, parent_display_name}`. `404` se non valido.

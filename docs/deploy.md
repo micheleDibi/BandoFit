@@ -104,6 +104,29 @@ server {
 
 Con questo schema frontend e API stanno sulla **stessa origine** (`https://bandofit.example.com`), quindi CORS non entra mai in gioco lato browser.
 
+### IP del client (rate limiting di `/auth/register`)
+
+Il rate limit anti-enumerazione conta per IP, quindi l'IP dev'essere quello vero. **`request.client.host` non lo è**: il backend gira in Docker con il mapping `127.0.0.1:3002 → 8000`, quindi il peer che uvicorn vede è il gateway della bridge — **identico per ogni utente del pianeta**. Usarlo significherebbe un unico contatore condiviso, e il primo abusatore bloccherebbe tutti gli altri.
+
+L'IP si ricava quindi dagli header (`app/core/net.py`), in ordine: **`CF-Connecting-IP`**, altrimenti `X-Forwarded-For` contato **da destra** per `TRUSTED_PROXY_HOPS` posizioni (default **2** = Cloudflare + nginx). Contare da destra è ciò che rende l'header non falsificabile: ogni hop **appende** (`$proxy_add_x_forwarded_for`), quindi quello che inietta il client resta in testa, dove non lo guardiamo.
+
+Due cose da sapere:
+
+- **`FORWARDED_ALLOW_IPS=*` non è la scorciatoia: è un peggioramento.** Con `*`, uvicorn (`ProxyHeadersMiddleware`, ramo `always_trust`) prende il **primo** elemento di `X-Forwarded-For` — cioè proprio quello iniettabile dal client. Meglio un IP ignoto che uno falsificabile. Non impostarla.
+- **`CF-Connecting-IP` vale quanto vale nginx.** Se nginx accetta connessioni da chiunque, chi scopre l'IP origin del server può inviare quell'header a mano e falsificare il proprio IP. Vanno accettati solo gli [IP di Cloudflare](https://www.cloudflare.com/ips/) (`allow`/`deny`, o `set_real_ip_from` + `real_ip_header CF-Connecting-IP`).
+
+Se l'IP non è determinabile (nessun proxy davanti, o catena diversa da quella dichiarata) il limite per IP semplicemente **non si applica** e resta un warning nei log: è deliberato, perché contare tutti su una chiave sbagliata è peggio che non contare. In sviluppo è il caso normale; per usare il peer come IP (localhost, senza proxy) si mette `TRUSTED_PROXY_HOPS=0`.
+
+### Supabase Auth: hardening obbligatorio
+
+Nella dashboard, **Authentication → General Configuration → «Allow new users to sign up»: OFF**. L'app non ne ha bisogno — registrazione e inviti passano dall'**Admin API** (`create_user`), che ignora quel flag, e il login non è un signup — mentre lasciarlo attivo tiene aperta una via d'ingresso parallela che non passa dalle difese di `POST /api/v1/auth/register`. Va verificato dopo ogni intervento sulla configurazione del progetto.
+
+**Da non fare**: disattivare il provider Email per spegnere magic-link/OTP. Non esiste un toggle separato — magic link e OTP condividono l'implementazione con il provider Email, quindi spegnerlo spegnerebbe anche `signInWithPassword`, cioè il login di tutti.
+
+**Limiti residui.** Le difese descritte sopra coprono gli endpoint di *questa* API. Finché `supabase-js` e la anon key vivono nel browser (`frontend/src/lib/supabase.ts`, iniettata a build time da `frontend/Dockerfile`), gli endpoint di Supabase Auth restano raggiungibili direttamente e conservano caratteristiche che non dipendono dal nostro codice: sono limiti noti della piattaforma, censiti nel **piano di sicurezza interno** insieme alle mitigazioni disponibili. La chiusura completa richiederebbe di spostare tutta l'autenticazione dietro il backend e smettere di spedire la anon key — una riscrittura del modello di sessione, fuori dallo scope di questo intervento.
+
+Tenere quindi aggiornate le impostazioni di Authentication → Rate Limits, e rivalutare il tema se l'esposizione del prodotto cresce.
+
 ## 4. Supabase: URL pubblici
 
 I link nelle email sono **token di dominio** gestiti interamente dal backend: su Supabase **non servono Redirect URLs** né configurazioni email. L'unica impostazione che conta è **Authentication → Sign In / Providers → Email → "Confirm email" = attivo** in produzione: è l'enforcement che impedisce il login agli utenti non confermati (la conferma la applica il backend via Admin API quando l'utente clicca il link di dominio).

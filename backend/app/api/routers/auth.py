@@ -1,15 +1,18 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.api.deps import PrimaryClient
+from app.core.net import client_ip
 from app.services import auth_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class RegisterIn(BaseModel):
+    # Nessuna password: si sceglie confermando l'indirizzo (POST /auth/confirm).
+    # È il fulcro dell'anti-enumerazione, non una preferenza di UX — vedi la
+    # docstring di app/services/auth_service.
     email: EmailStr
-    password: str = Field(min_length=8, max_length=200)
     nome: str = Field(min_length=1, max_length=100)
     cognome: str = Field(min_length=1, max_length=100)
     azienda: str | None = Field(default=None, max_length=200)
@@ -28,10 +31,6 @@ class RegisterIn(BaseModel):
         if not is_valid_telefono(normalized):
             raise ValueError("Il numero di telefono non è valido")
         return normalized
-
-
-class RegisterOut(BaseModel):
-    confirmation_required: bool
 
 
 class EmailIn(BaseModel):
@@ -56,14 +55,18 @@ class InviteInfoOut(BaseModel):
     parent_display_name: str
 
 
-@router.post("/register", response_model=RegisterOut, status_code=201)
-async def register(data: RegisterIn, primary: PrimaryClient) -> RegisterOut:
-    """Registrazione: utente creato via Admin API, email di conferma con
-    token e link di dominio inviata dal NOSTRO provider."""
-    result = await auth_service.register(
+@router.post("/register", status_code=202)
+async def register(data: RegisterIn, request: Request, primary: PrimaryClient) -> dict:
+    """Avvia la registrazione. Risposta **sempre neutra** `{"ok": true}`: non
+    riveliamo se l'indirizzo è già registrato (anti-enumerazione), come
+    /auth/recover e /auth/resend-confirmation.
+
+    Nessun `response_model`, come gli altri due endpoint neutri: la risposta è
+    una costante, non la proiezione di un risultato.
+    """
+    return await auth_service.register(
         primary,
         email=str(data.email),
-        password=data.password,
         nome=data.nome.strip(),
         cognome=data.cognome.strip(),
         azienda=(data.azienda or "").strip() or None,
@@ -71,20 +74,21 @@ async def register(data: RegisterIn, primary: PrimaryClient) -> RegisterOut:
         job_position_slug=data.job_position_slug.strip(),
         job_position_altro=(data.job_position_altro or "").strip() or None,
         plan_slug=data.plan_slug,
+        client_ip=client_ip(request),
     )
-    return RegisterOut(**result)
 
 
 @router.post("/confirm", response_model=EmailOut)
-async def confirm_email(data: TokenIn, primary: PrimaryClient) -> EmailOut:
-    """Conferma dell'indirizzo email (consuma il token del link)."""
-    return EmailOut(**await auth_service.confirm_email(primary, data.token))
+async def confirm_email(data: TokenPasswordIn, primary: PrimaryClient) -> EmailOut:
+    """Completa la registrazione: consuma il token del link, imposta la
+    password scelta ora e conferma l'indirizzo."""
+    return EmailOut(**await auth_service.confirm_email(primary, data.token, data.password))
 
 
 @router.post("/recover", status_code=202)
-async def recover(data: EmailIn, primary: PrimaryClient) -> dict:
+async def recover(data: EmailIn, request: Request, primary: PrimaryClient) -> dict:
     """Richiesta di reimpostazione password. Risposta sempre neutra."""
-    await auth_service.recover_password(primary, str(data.email))
+    await auth_service.recover_password(primary, str(data.email), client_ip=client_ip(request))
     return {"ok": True}
 
 
@@ -95,9 +99,9 @@ async def reset_password(data: TokenPasswordIn, primary: PrimaryClient) -> Email
 
 
 @router.post("/resend-confirmation", status_code=202)
-async def resend_confirmation(data: EmailIn, primary: PrimaryClient) -> dict:
+async def resend_confirmation(data: EmailIn, request: Request, primary: PrimaryClient) -> dict:
     """Reinvio del link di conferma email. Risposta sempre neutra."""
-    await auth_service.resend_confirmation(primary, str(data.email))
+    await auth_service.resend_confirmation(primary, str(data.email), client_ip=client_ip(request))
     return {"ok": True}
 
 

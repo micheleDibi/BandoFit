@@ -1,29 +1,28 @@
-import { ArrowLeft, Eye, EyeOff } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
 import { PlanCard } from "../components/shared/PlanCard";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Combobox } from "../components/ui/Combobox";
 import { TextField } from "../components/ui/Field";
-import { PasswordStrengthMeter } from "../components/ui/PasswordStrengthMeter";
 import { ErrorState, Skeleton } from "../components/ui/states";
 import { useJobPositions } from "../hooks/useJobPositions";
 import { usePlans } from "../hooks/usePlans";
 import { api, apiErrorMessage } from "../lib/api";
 import { cn } from "../lib/cn";
-import { supabase } from "../lib/supabase";
 import { isValidTelefono, normalizeTelefono } from "../lib/telefono";
 
+// Niente password qui: si sceglie aprendo il link di conferma (/conferma-email).
+// Non è una scelta di UX — è ciò che impedisce di scoprire se un indirizzo è
+// registrato, vedi la docstring di backend/app/services/auth_service.
 interface FormData {
   nome: string;
   cognome: string;
   azienda: string;
   telefono: string;
   email: string;
-  password: string;
-  confirm: string;
 }
 
 const EMPTY_FORM: FormData = {
@@ -32,8 +31,6 @@ const EMPTY_FORM: FormData = {
   azienda: "",
   telefono: "",
   email: "",
-  password: "",
-  confirm: "",
 };
 
 type FieldErrors = Partial<Record<keyof FormData | "posizione", string>>;
@@ -60,7 +57,6 @@ function StepIndicator({ step }: { step: 1 | 2 }) {
 }
 
 export default function Register() {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { data: plans, isPending: plansLoading, isError: plansError, refetch } = usePlans();
   const {
@@ -74,10 +70,11 @@ export default function Register() {
   const [positionId, setPositionId] = useState<number | null>(null);
   const [posizioneAltro, setPosizioneAltro] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [showPassword, setShowPassword] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<string>(searchParams.get("piano") ?? "gratuito");
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
+  // ReactNode e non string: il pannello di esito evidenzia l'indirizzo e offre
+  // le vie d'uscita (reinvio, correzione), che sono elementi, non testo.
+  const [info, setInfo] = useState<ReactNode>(null);
   const [loading, setLoading] = useState(false);
 
   // Se lo slug ?piano non corrisponde ad alcun piano attivo selezionabile
@@ -109,16 +106,49 @@ export default function Register() {
     }
     if (positionId === null) errors.posizione = "Seleziona la tua posizione in azienda.";
     if (!/^\S+@\S+\.\S+$/.test(form.email)) errors.email = "Inserisci un indirizzo email valido.";
-    if (form.password.length < 8) errors.password = "La password deve avere almeno 8 caratteri.";
-    if (form.confirm !== form.password) errors.confirm = "Le password non coincidono.";
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
   };
 
   const handleStep1 = (e: FormEvent) => {
     e.preventDefault();
+    // L'esito precedente va ripulito: il submit si disabilita finché `info` è
+    // valorizzato, quindi senza questo chi corregge un indirizzo sbagliato
+    // resterebbe bloccato sullo step 2 fino a un ricaricamento della pagina.
+    setInfo(null);
+    setError(null);
     if (validateStep1()) setStep(2);
   };
+
+  const handleTornaAiDati = () => {
+    setInfo(null);
+    setError(null);
+    setStep(1);
+  };
+
+  const handleReinvia = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      // Endpoint già neutro, e con un cooldown suo: chi non ha ricevuto nulla
+      // ritenta da qui senza consumare il budget della registrazione.
+      await api.post("/auth/resend-confirmation", { email: form.email.trim() });
+    } catch {
+      // Risposta neutra per definizione: non c'è nulla di utile da mostrare.
+    }
+    setLoading(false);
+    setInfo(esitoRegistrazione());
+  };
+
+  // Neutro di proposito: non dice se l'account è stato creato o esisteva già —
+  // quella risposta sta nell'email, che raggiunge solo chi possiede la casella.
+  // Modello: RecuperaPassword.
+  const esitoRegistrazione = (): ReactNode => (
+    <>
+      Ti abbiamo scritto a <strong className="text-slate-900">{form.email.trim()}</strong>: apri il
+      messaggio per completare la registrazione e scegliere la password. Controlla anche lo spam.
+    </>
+  );
 
   const handleSubmit = async () => {
     // La posizione può sparire dal catalogo tra lo step 1 e il submit (voce
@@ -137,10 +167,11 @@ export default function Register() {
     setLoading(true);
     try {
       // La registrazione passa dal backend: l'email di conferma parte dal
-      // NOSTRO provider (SMTP/OVH), mai dal mailer di Supabase.
-      const { data } = await api.post<{ confirmation_required: boolean }>("/auth/register", {
+      // NOSTRO provider (SMTP/OVH), mai dal mailer di Supabase. La risposta è
+      // sempre 202 {"ok": true}, identica per un indirizzo nuovo e per uno già
+      // registrato: qui non c'è nulla da ispezionare, e non deve essercene.
+      await api.post("/auth/register", {
         email: form.email.trim(),
-        password: form.password,
         nome: form.nome.trim(),
         cognome: form.cognome.trim(),
         azienda: form.azienda.trim() || null,
@@ -150,24 +181,8 @@ export default function Register() {
           selectedPosition.slug === "altro" ? posizioneAltro.trim() || null : null,
         plan_slug: selectedPlan,
       });
-      if (data.confirmation_required) {
-        setLoading(false);
-        setInfo(
-          "Ti abbiamo inviato una email di conferma: aprila per attivare l'account, poi accedi.",
-        );
-        return;
-      }
-      // Conferma email disattivata sul progetto: accesso immediato.
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: form.email.trim(),
-        password: form.password,
-      });
       setLoading(false);
-      if (signInError) {
-        navigate("/login", { replace: true });
-        return;
-      }
-      navigate("/app/bandi", { replace: true });
+      setInfo(esitoRegistrazione());
     } catch (err) {
       setLoading(false);
       setError(apiErrorMessage(err, "Registrazione non riuscita. Riprova tra qualche istante."));
@@ -272,39 +287,9 @@ export default function Register() {
                 maxLength={100}
               />
             )}
-            <div className="relative">
-              <TextField
-                label="Password"
-                type={showPassword ? "text" : "password"}
-                required
-                autoComplete="new-password"
-                value={form.password}
-                onChange={set("password")}
-                error={fieldErrors.password}
-                helper={!fieldErrors.password ? "Almeno 8 caratteri" : undefined}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                aria-label={showPassword ? "Nascondi password" : "Mostra password"}
-                className="absolute right-2 top-9 cursor-pointer rounded-md p-1.5 text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-brand-500"
-              >
-                {showPassword ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
-              </button>
-            </div>
-            <PasswordStrengthMeter
-              password={form.password}
-              userInputs={[form.email, form.nome, form.cognome, form.azienda, "bandofit"]}
-            />
-            <TextField
-              label="Conferma password"
-              type={showPassword ? "text" : "password"}
-              required
-              autoComplete="new-password"
-              value={form.confirm}
-              onChange={set("confirm")}
-              error={fieldErrors.confirm}
-            />
+            <p className="text-xs text-slate-400">
+              La password la scegli tra un momento, aprendo l'email di conferma.
+            </p>
 
             <Button type="submit" className="w-full" size="lg">
               Continua
@@ -381,15 +366,36 @@ export default function Register() {
           )}
           {info && (
             <div className="mt-5 rounded-lg bg-brand-50 px-4 py-3 text-sm text-brand-800" role="status">
-              {info}{" "}
-              <Link to="/login" className="font-medium underline underline-offset-2">
-                Vai al login
-              </Link>
+              {info}
+              {/* Le vie d'uscita: senza, chi sbaglia l'indirizzo o non riceve
+                  nulla resta fermo qui — il submit è disabilitato finché c'è
+                  un esito, e «Vai al login» non serve a chi un account non ce
+                  l'ha ancora. */}
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 font-medium">
+                <button
+                  type="button"
+                  onClick={handleReinvia}
+                  disabled={loading}
+                  className="cursor-pointer underline underline-offset-2 disabled:opacity-50"
+                >
+                  Non è arrivata? Reinvia
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTornaAiDati}
+                  className="cursor-pointer underline underline-offset-2"
+                >
+                  Ho sbagliato indirizzo
+                </button>
+                <Link to="/login" className="underline underline-offset-2">
+                  Vai al login
+                </Link>
+              </div>
             </div>
           )}
 
           <div className="mt-8 flex items-center justify-between">
-            <Button variant="ghost" onClick={() => setStep(1)}>
+            <Button variant="ghost" onClick={handleTornaAiDati}>
               <ArrowLeft className="size-4" aria-hidden />
               Indietro
             </Button>

@@ -125,7 +125,6 @@ class TestRegisterGuard:
             await auth_service.register(
                 primary,
                 email="Mario@Example.it",
-                password="password-123",
                 nome="Mario",
                 cognome="Rossi",
                 azienda=None,

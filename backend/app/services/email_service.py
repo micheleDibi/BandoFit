@@ -187,22 +187,94 @@ async def _dispatch(
 
 
 async def send_confirmation_email(to_email: str, cta_url: str) -> bool:
-    """Email di conferma indirizzo dopo la registrazione."""
+    """Email di conferma indirizzo dopo la registrazione.
+
+    Il link porta alla pagina dove si sceglie ANCHE la password: la
+    registrazione non la raccoglie più (anti-enumerazione — vedi
+    auth_service.register), quindi l'account resta inutilizzabile finché chi
+    possiede davvero la casella non completa da qui.
+    """
     html_body = _branded_html(
-        "Conferma il tuo indirizzo email",
+        "Completa la tua registrazione",
         [
             "Benvenuto su BandoFit! Per attivare il tuo account conferma il tuo "
-            "indirizzo email con il pulsante qui sotto.",
+            "indirizzo email e scegli la password con il pulsante qui sotto.",
         ],
-        "Conferma la mia email",
+        "Completa la registrazione",
         cta_url,
         "Se non ti sei registrato tu su BandoFit puoi ignorare questa email.",
     )
     text = (
-        "Benvenuto su BandoFit! Conferma il tuo indirizzo email aprendo questo link:\n\n"
-        f"{cta_url}\n\nSe non ti sei registrato tu, ignora questa email."
+        "Benvenuto su BandoFit! Completa la registrazione (conferma dell'indirizzo e "
+        f"scelta della password) aprendo questo link:\n\n{cta_url}\n\n"
+        "Se non ti sei registrato tu, ignora questa email."
     )
-    return await _dispatch(to_email, "Conferma il tuo indirizzo email — BandoFit", html_body, text)
+    return await _dispatch(to_email, "Completa la tua registrazione — BandoFit", html_body, text)
+
+
+async def send_account_exists_email(to_email: str, login_url: str, recovery_url: str) -> bool:
+    """Tentativo di registrazione su un indirizzo GIÀ registrato e confermato.
+
+    È il canale che sostituisce il vecchio 409: l'esistenza dell'account non può
+    più trapelare nella risposta HTTP, quindi la diciamo a chi possiede la
+    casella — l'unico che ha diritto di saperlo.
+    """
+    html_body = _branded_html(
+        "Hai già un account BandoFit",
+        [
+            "Qualcuno — probabilmente tu — ha appena provato a creare un account con "
+            "questo indirizzo. Non ne abbiamo creato uno nuovo: ne hai già uno.",
+            "Se sei stato tu, accedi pure dal pulsante qui sotto. Non ricordi la "
+            f'password? <a href="{recovery_url}" style="color:#1E5EFF">Puoi reimpostarla</a>.',
+        ],
+        "Vai al login",
+        login_url,
+        "Se non sei stato tu, puoi ignorare questa email: il tuo account e la tua "
+        "password non sono stati toccati.",
+    )
+    text = (
+        "Hai provato a registrarti su BandoFit, ma esiste già un account con questo "
+        f"indirizzo. Accedi qui:\n\n{login_url}\n\n"
+        f"Non ricordi la password? Reimpostala qui:\n\n{recovery_url}\n\n"
+        "Se non sei stato tu, ignora questa email: nulla è stato modificato."
+    )
+    return await _dispatch(to_email, "Hai già un account — BandoFit", html_body, text)
+
+
+async def send_account_pending_email(to_email: str, cta_url: str) -> bool:
+    """Tentativo di registrazione su un indirizzo già registrato ma NON confermato.
+
+    La CTA porta al form di richiesta di un nuovo link, non a un link pronto:
+    emettere qui un token invaliderebbe quello che la persona ha già in casella
+    (token_service.issue tiene valido un solo link per volta), e siccome questa
+    email parte su richiesta di un anonimo, sarebbe un modo per sabotare la
+    conferma altrui.
+    """
+    html_body = _branded_html(
+        "Il tuo account è in attesa di conferma",
+        [
+            "Hai già iniziato la registrazione su BandoFit con questo indirizzo, ma "
+            "non l'hai ancora confermata.",
+            "Richiedi un nuovo link dal pulsante qui sotto: confermerai l'indirizzo e "
+            "sceglierai la password per accedere.",
+        ],
+        "Completa la registrazione",
+        cta_url,
+        "Se non sei stato tu, puoi ignorare questa email: non è stato creato nessun "
+        "nuovo account.",
+    )
+    text = (
+        "Hai già una registrazione in attesa di conferma su BandoFit. Richiedi un "
+        f"nuovo link di conferma qui:\n\n{cta_url}\n\n"
+        "Se non sei stato tu, ignora questa email."
+    )
+    # Subject diverso da send_confirmation_email di proposito: con lo stesso
+    # mittente e lo stesso oggetto, Gmail le raggrupperebbe nella stessa
+    # conversazione — e chi si re-registra si troverebbe due messaggi
+    # indistinguibili, uno col link buono e uno che rimanda al form.
+    return await _dispatch(
+        to_email, "Hai una registrazione da completare — BandoFit", html_body, text
+    )
 
 
 async def send_recovery_email(to_email: str, cta_url: str) -> bool:

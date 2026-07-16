@@ -33,6 +33,10 @@ services:
       OPENAPI_ENV: ${OPENAPI_ENV:-production}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AI_CHECK_MODEL: ${AI_CHECK_MODEL:-claude-sonnet-5}
+      # Anti-enumerazione auth (0025). Il default di TRUSTED_PROXY_HOPS è quello
+      # di produzione: Cloudflare + nginx. Vedi docs/deploy.md.
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-2}
+      RATE_LIMIT_PEPPER: ${RATE_LIMIT_PEPPER:-}
       ENV: production
 
   frontend:

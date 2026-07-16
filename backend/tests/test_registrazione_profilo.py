@@ -13,7 +13,6 @@ from tests.test_openapi_service import USER, FakePrimary
 
 REGISTER_BASE = {
     "email": "mario@test.it",
-    "password": "password-lunga",
     "nome": "Mario",
     "cognome": "Rossi",
     "telefono": "347 1234567",
@@ -58,7 +57,6 @@ class TestRegisterGatePosizione:
             await auth_service.register(
                 primary,
                 email="mario@test.it",
-                password="password-lunga",
                 nome="Mario",
                 cognome="Rossi",
                 azienda=None,

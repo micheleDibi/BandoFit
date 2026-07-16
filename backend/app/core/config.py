@@ -82,6 +82,35 @@ class Settings(BaseSettings):
     # "reportlab". WeasyPrint richiede pango/cairo/gdk-pixbuf nell'immagine.
     pdf_engine: str = "auto"  # auto | weasyprint | reportlab
 
+    # Anti-enumerazione degli endpoint auth pubblici (migration 0025).
+    #
+    # trusted_proxy_hops: quanti proxy fidati stanno davanti (Cloudflare + nginx
+    # = 2, cfr. docs/deploy.md). L'IP del client è l'elemento a -hops di
+    # X-Forwarded-For: contare da DESTRA è ciò che rende l'header non
+    # spoofabile, visto che ogni hop appende in coda. Il default è quello di
+    # produzione di proposito: con 0 il peer verrebbe preso per il client, e in
+    # Docker il peer è il gateway della bridge — uguale per tutti, quindi il
+    # primo abusatore bloccherebbe l'intero pianeta. In sviluppo (senza proxy)
+    # l'IP resta semplicemente ignoto e il limite per IP non si applica.
+    trusted_proxy_hops: int = 2
+    # Pepper dell'HMAC con cui si costruiscono i bucket: a DB non finiscono mai
+    # IP o email in chiaro. Vuoto = si ripiega su un hash non peppato (sviluppo).
+    rate_limit_pepper: str = ""
+    # Soglie di POST /auth/register. Le PMI stanno dietro NAT aziendale: il
+    # burst è tarato su quello, non sul singolo utente domestico.
+    register_ip_burst_limit: int = 5
+    register_ip_burst_window_seconds: int = 900
+    register_ip_daily_limit: int = 50
+    register_email_hourly_limit: int = 5
+    # Cap globale di SOLO ALLARME: oltre soglia logga e basta, non rifiuta. Se
+    # rifiutasse, un solo IP con poche centinaia di richieste spegnerebbe la
+    # registrazione a tutti — un DoS creato dalla difesa stessa.
+    register_global_hourly_alert: int = 200
+    # Durata minima della risposta di /auth/register: livella il ramo «email
+    # esistente» (che non crea nulla) e il ramo «email nuova» (create_user +
+    # token), altrimenti il tempo di risposta rivela ciò che il body nasconde.
+    register_latency_target_seconds: float = 1.5
+
     # AI-check (API Anthropic). Chiave vuota = feature disattivata (le rotte
     # rispondono 503 ai_not_configured). Ogni report costa ~0,10 $ di API.
     anthropic_api_key: str = ""

@@ -39,6 +39,19 @@ class BadRequestError(AppError):
         super().__init__(400, "bad_request", message)
 
 
+class RateLimitedError(AppError):
+    """Troppe richieste su un endpoint auth pubblico (migration 0025).
+
+    Il messaggio è a carico del chiamante e deve dire il vero: le finestre sono
+    diverse (minuti per il burst, un giorno per il cap giornaliero) e «riprova
+    tra qualche minuto» su un limite da 24 ore è una bugia che lascia l'utente
+    a sbattere contro il muro.
+    """
+
+    def __init__(self, message: str = "Troppi tentativi: riprova più tardi"):
+        super().__init__(429, "rate_limited", message)
+
+
 class UpstreamError(AppError):
     """Errore dei servizi Supabase a monte (timeout, indisponibilità)."""
 

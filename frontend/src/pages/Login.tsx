@@ -34,12 +34,19 @@ export default function Login() {
       if (authError.message.toLowerCase().includes("not confirmed")) {
         setNotConfirmed(true);
         setError("Devi prima confermare la tua email: controlla la casella (e lo spam).");
-      } else {
+      } else if (authError.message === "Invalid login credentials") {
+        // Chi si è registrato e non ha ancora confermato NON ha una password
+        // (si sceglie confermando), quindi finisce qui e non nel ramo «not
+        // confirmed»: senza offrire anche qui il reinvio, il caso più frequente
+        // resterebbe senza via d'uscita. L'endpoint di reinvio è neutro, quindi
+        // mostrarlo non rivela se l'account esiste.
+        setNotConfirmed(true);
         setError(
-          authError.message === "Invalid login credentials"
-            ? "Email o password non corretti."
-            : "Accesso non riuscito. Riprova tra qualche istante.",
+          "Email o password non corretti. Se non hai ancora confermato il tuo " +
+            "indirizzo, richiedi un nuovo link.",
         );
+      } else {
+        setError("Accesso non riuscito. Riprova tra qualche istante.");
       }
       return;
     }
@@ -121,7 +128,7 @@ export default function Login() {
                       disabled={resendState === "sending"}
                       className="cursor-pointer font-medium underline underline-offset-2 disabled:opacity-50"
                     >
-                      {resendState === "sending" ? "Invio in corso…" : "Reinvia email di conferma"}
+                      {resendState === "sending" ? "Invio in corso…" : "Inviami il link di conferma"}
                     </button>
                   )}
                 </div>

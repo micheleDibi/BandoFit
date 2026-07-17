@@ -81,6 +81,35 @@ class OpenapiTimeoutError(AppError):
         super().__init__(504, "openapi_timeout", message)
 
 
+class PaymentRequiredError(AppError):
+    """Il cambio richiesto passa dal checkout: il FE reindirizza all'acquisto."""
+
+    def __init__(self, message: str = "Questo piano si attiva con un acquisto"):
+        super().__init__(409, "payment_required", message)
+
+
+class PaymentsNotConfiguredError(AppError):
+    """Chiave Revolut assente: modulo pagamenti disattivato su questo ambiente."""
+
+    def __init__(self, message: str = "I pagamenti non sono configurati su questo ambiente"):
+        super().__init__(503, "payments_not_configured", message)
+
+
+class RevolutUpstreamError(AppError):
+    """Errore del provider di pagamento (indisponibilità, risposta malformata)."""
+
+    def __init__(self, message: str = "Il servizio di pagamento non è al momento disponibile, riprova più tardi"):
+        super().__init__(502, "payment_provider_error", message)
+
+
+class RevolutTimeoutError(AppError):
+    """Timeout verso Revolut: l'esito (e l'eventuale ADDEBITO) è ignoto —
+    MAI retry automatico; si riconcilia rileggendo l'ordine dal provider."""
+
+    def __init__(self, message: str = "Non siamo riusciti a confermare l'operazione col servizio di pagamento. Lo stato verrà riconciliato a breve: non ripetere il pagamento"):
+        super().__init__(504, "payment_provider_timeout", message)
+
+
 class AiNotConfiguredError(AppError):
     """Chiave API Anthropic assente: AI-check disattivato su questo ambiente."""
 

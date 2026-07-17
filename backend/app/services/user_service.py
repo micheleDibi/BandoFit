@@ -2,11 +2,19 @@
 
 import logging
 import re
+from datetime import date
+from decimal import Decimal
 from uuid import UUID
 
 from postgrest.exceptions import APIError
 
-from app.core.errors import BadRequestError, ForbiddenError, NotFoundError, UnauthorizedError
+from app.core.errors import (
+    BadRequestError,
+    ForbiddenError,
+    NotFoundError,
+    PaymentRequiredError,
+    UnauthorizedError,
+)
 from app.schemas.common import Page
 from app.schemas.family import PlanSwitchAdjustment
 from app.schemas.plan import PlanOut
@@ -237,15 +245,69 @@ async def switch_plan(primary, user_id: str, plan_id: int, *, self_serve: bool =
     if self_serve:
         plan_resp = (
             await primary.table("subscription_plans")
-            .select("tipo_prezzo")
+            .select("id,nome,tipo_prezzo,prezzo_annuale")
             .eq("id", plan_id)
             .limit(1)
             .execute()
         )
-        if plan_resp.data and plan_resp.data[0]["tipo_prezzo"] == "su_richiesta":
+        target = plan_resp.data[0] if plan_resp.data else None
+        if target and target["tipo_prezzo"] == "su_richiesta":
             raise BadRequestError(
                 "Questo piano è disponibile solo su richiesta: contattaci per attivarlo"
             )
+        # Dal modulo pagamenti (0026) i piani a pagamento NON si attivano più
+        # gratis da qui: si passa dal checkout. Il FE intercetta il 409.
+        if (
+            target
+            and target["tipo_prezzo"] == "importo"
+            and Decimal(str(target["prezzo_annuale"])) > 0
+        ):
+            raise PaymentRequiredError(
+                f"Il piano {target['nome']} si attiva con un acquisto: "
+                "passa dal checkout per completarlo"
+            )
+        # Target gratuito: chi OGGI è su un piano a pagamento non scaduto non
+        # perde ciò che ha pagato — il cambio diventa un DOWNGRADE PROGRAMMATO
+        # alla scadenza (disdetta). Sostituisce un eventuale programmato
+        # precedente. Il cambio immediato resta solo per chi è già su un piano
+        # gratuito (o scaduto): lì non c'è nulla da conservare.
+        if target:
+            sub_resp = (
+                await primary.table("user_subscriptions")
+                .select("plan_id,data_scadenza,subscription_plans(tipo_prezzo,prezzo_annuale)")
+                .eq("user_id", str(user_id))
+                .eq("status", "active")
+                .limit(1)
+                .execute()
+            )
+            sub = sub_resp.data[0] if sub_resp.data else None
+            corrente = (sub or {}).get("subscription_plans") or {}
+            corrente_pagato = (
+                corrente.get("tipo_prezzo") == "importo"
+                and Decimal(str(corrente.get("prezzo_annuale") or "0")) > 0
+            )
+            scadenza = (
+                date.fromisoformat(sub["data_scadenza"])
+                if sub and sub.get("data_scadenza")
+                else None
+            )
+            if corrente_pagato and scadenza and scadenza > date.today():
+                await (
+                    primary.table("scheduled_plan_changes")
+                    .update({"status": "annullato", "cancelled_at": "now()"})
+                    .eq("user_id", str(user_id))
+                    .eq("status", "programmato")
+                    .execute()
+                )
+                await primary.table("scheduled_plan_changes").insert({
+                    "user_id": str(user_id),
+                    "from_plan_id": sub["plan_id"],
+                    "to_plan_id": plan_id,
+                    "effective_date": scadenza.isoformat(),
+                    "motivo": "disdetta",
+                    "created_by": str(user_id),
+                }).execute()
+                return await get_me(primary, user_id)
         # Piano inesistente: si prosegue, la RPC mantiene la sua mappatura errori.
     try:
         resp = await primary.rpc(
@@ -483,25 +545,55 @@ async def admin_update_user(
     )
 
 
-async def admin_switch_user_plan(primary, target_user_id: UUID, plan_id: int) -> AdminUserOut:
+async def admin_switch_user_plan(
+    primary, target_user_id: UUID, plan_id: int, *,
+    admin_id: str, motivazione: str, revolut=None,
+) -> AdminUserOut:
+    """Cambio piano GRATUITO da admin (nessun pagamento), registrato nello
+    storico con l'attore vero e la motivazione (audit). Se l'utente ha un
+    checkout in corso, l'ordine sul provider viene cancellato PRIMA della RPC
+    (così un pagamento tardivo su un purchase annullato non lascia soldi
+    orfani); solo poi la fn_registra_cambio_admin annulla il purchase."""
     exists = (
         await primary.table("profiles").select("id").eq("id", str(target_user_id)).limit(1).execute()
     )
     if not exists.data:
         raise NotFoundError("Utente non trovato")
 
-    # I piani sono a livello famiglia: per un figlio ATTIVO si agisce sul
-    # titolare. Un invitato pending è ancora un account indipendente con un
-    # piano proprio, e un retrocesso ha il suo piano Gratuito: entrambi
-    # restano gestibili singolarmente.
     membership = await family_service.get_membership(primary, str(target_user_id))
     if membership and membership["status"] == "active":
         raise ForbiddenError(
             "Il piano si gestisce sull'account titolare dell'azienda"
         )
 
-    # self_serve=False: l'admin può assegnare anche i piani «su richiesta».
-    me = await switch_plan(primary, str(target_user_id), plan_id, self_serve=False)
+    # Cancella su Revolut l'ordine di un eventuale checkout in corso, prima di
+    # annullarlo a DB (finestra "l'utente paga un purchase annullato").
+    if revolut is not None and revolut.enabled:
+        pending = (
+            await primary.table("purchases")
+            .select("revolut_order_id")
+            .eq("user_id", str(target_user_id)).eq("status", "in_attesa")
+            .execute()
+        )
+        for row in pending.data or []:
+            if row.get("revolut_order_id"):
+                try:
+                    await revolut.cancel_order(row["revolut_order_id"])
+                except Exception:
+                    logger.warning(
+                        "cancel ordine Revolut fallita per %s: si prosegue con l'annullo a DB",
+                        row["revolut_order_id"],
+                    )
+
+    try:
+        await primary.rpc("fn_registra_cambio_admin", {
+            "p_admin_id": str(admin_id), "p_user_id": str(target_user_id),
+            "p_plan_id": plan_id, "p_motivazione": motivazione,
+        }).execute()
+    except APIError as exc:
+        family_service.raise_from_rpc(exc)
+
+    me = await get_me(primary, str(target_user_id))
     return AdminUserOut(
         profile=me.profile,
         subscription=me.subscription,

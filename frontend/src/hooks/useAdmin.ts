@@ -1,6 +1,16 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import type { Addon, AdminUser, Page, Plan, TipoPrezzo, UserRole } from "../types";
+import type {
+  Addon,
+  AdminInvoicesPage,
+  AdminUser,
+  Page,
+  PaymentAnomaly,
+  Plan,
+  Purchase,
+  TipoPrezzo,
+  UserRole,
+} from "../types";
 
 export interface AdminUsersParams {
   q: string;
@@ -36,9 +46,27 @@ export function useAdminUpdateUser() {
 export function useAdminSwitchUserPlan() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ userId, planId }: { userId: string; planId: number }) =>
-      (await api.post<AdminUser>(`/admin/users/${userId}/subscription`, { plan_id: planId })).data,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-users"] }),
+    // Cambio GRATUITO con motivazione obbligatoria: finisce nello storico
+    // acquisti come kind=cambio_admin, con l'admin come attore.
+    mutationFn: async ({
+      userId,
+      planId,
+      motivazione,
+    }: {
+      userId: string;
+      planId: number;
+      motivazione: string;
+    }) =>
+      (
+        await api.post<AdminUser>(`/admin/users/${userId}/subscription`, {
+          plan_id: planId,
+          motivazione,
+        })
+      ).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-purchases"] });
+    },
   });
 }
 
@@ -128,5 +156,70 @@ export function useAdminCreateAddon() {
       queryClient.invalidateQueries({ queryKey: ["admin-addons"] });
       queryClient.invalidateQueries({ queryKey: ["addons"] });
     },
+  });
+}
+
+// ---- Pagamenti (storico acquisti, fatture SDI, anomalie) --------------------
+
+export interface AdminPurchasesParams {
+  status: string;
+  kind: string;
+  page: number;
+}
+
+export function useAdminPurchases(params: AdminPurchasesParams) {
+  const query: Record<string, string | number> = { page: params.page, page_size: 20 };
+  if (params.status) query.status = params.status;
+  if (params.kind) query.kind = params.kind;
+  return useQuery({
+    queryKey: ["admin-purchases", query],
+    queryFn: async () =>
+      (await api.get<Page<Purchase>>("/admin/purchases", { params: query })).data,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useAdminInvoices(params: { stato: string; page: number }) {
+  const query: Record<string, string | number> = { page: params.page, page_size: 20 };
+  if (params.stato) query.stato = params.stato;
+  return useQuery({
+    queryKey: ["admin-invoices", query],
+    queryFn: async () =>
+      (await api.get<AdminInvoicesPage>("/admin/invoices", { params: query })).data,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** Ritrasmette una fattura in errore/scartata (stesso numero e stessa data).
+ *  Per gli altri stati il backend risponde {stato, note} senza fare nulla. */
+export function useRetryInvoice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (invoiceId: string) =>
+      (await api.post<{ stato: string; note?: string }>(`/admin/invoices/${invoiceId}/retry`))
+        .data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-invoices"] }),
+  });
+}
+
+export function useAdminAnomalies(stato: "aperta" | "risolta") {
+  return useQuery({
+    queryKey: ["admin-anomalies", stato],
+    queryFn: async () =>
+      (
+        await api.get<{ items: PaymentAnomaly[] }>("/admin/payment-anomalies", {
+          params: { stato },
+        })
+      ).data,
+  });
+}
+
+export function useResolveAnomaly() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (auditId: number) => {
+      await api.post(`/admin/payment-anomalies/${auditId}/resolve`);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-anomalies"] }),
   });
 }

@@ -1,7 +1,9 @@
 import { CalendarDays, Check, Puzzle, Users } from "lucide-react";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { AddonCard } from "../components/shared/AddonCard";
 import { PlanCard, planFeatures } from "../components/shared/PlanCard";
+import { SubscriptionManagement } from "../components/shared/SubscriptionManagement";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Dialog } from "../components/ui/Dialog";
@@ -9,14 +11,21 @@ import { ErrorState, Skeleton } from "../components/ui/states";
 import { useAddons } from "../hooks/useAddons";
 import { useMe, useSwitchPlan } from "../hooks/useMe";
 import { usePlans } from "../hooks/usePlans";
-import { apiErrorMessage } from "../lib/api";
+import { useScheduleDowngrade } from "../hooks/useSubscriptionManagement";
+import { apiErrorCode, apiErrorMessage } from "../lib/api";
 import { purchaseAddon } from "../lib/addons";
 import { requestConsultation } from "../lib/consulenza";
-import { formatDate } from "../lib/format";
+import { formatDate, formatDateNumeric } from "../lib/format";
 import { prezzoDisplay } from "../lib/prezzo";
 import type { Addon, Plan } from "../types";
 
+/** A pagamento = si passa dal checkout; gratis (o importo zero) = switch
+ *  diretto via POST /me/subscription, come prima del modulo pagamenti. */
+const aPagamento = (p: { tipo_prezzo: string; prezzo_annuale?: string | number; prezzo?: string | number }) =>
+  p.tipo_prezzo === "importo" && Number(p.prezzo_annuale ?? p.prezzo ?? 0) > 0;
+
 export default function Abbonamento() {
+  const navigate = useNavigate();
   const { data: me, isPending, isError, error, refetch } = useMe();
   const { data: plans, isPending: plansLoading, isError: plansError, refetch: refetchPlans } =
     usePlans();
@@ -27,6 +36,7 @@ export default function Abbonamento() {
     refetch: refetchAddons,
   } = useAddons();
   const switchPlan = useSwitchPlan();
+  const scheduleDowngrade = useScheduleDowngrade();
 
   const [planToConfirm, setPlanToConfirm] = useState<Plan | null>(null);
   const [switchNotice, setSwitchNotice] = useState<string | null>(null);
@@ -56,9 +66,31 @@ export default function Abbonamento() {
   const isActiveChild = me.family?.role === "child" && me.family.status === "active";
   const activeAddons = addons ?? [];
 
+  // Da un piano a pagamento verso uno gratuito si passa dall'endpoint di
+  // downgrade programmato (fase 3): il cambio avviene alla scadenza e lo
+  // stato vive nel backend — il banner compare in «Pagamento e rinnovo».
+  const currentPaid = !!me.subscription && aPagamento(me.subscription.plan);
+  const isDisdetta = (plan: Plan) => !aPagamento(plan) && currentPaid;
+
   const handleSwitch = async () => {
     if (!planToConfirm) return;
     setSwitchNotice(null);
+    if (isDisdetta(planToConfirm)) {
+      try {
+        const stato = await scheduleDowngrade.mutateAsync(planToConfirm.slug);
+        setPlanToConfirm(null);
+        const cambio = stato.cambio_programmato;
+        setSwitchNotice(
+          cambio
+            ? `Disdetta programmata: resterai su ${me.subscription?.plan.nome} fino al ` +
+              `${formatDateNumeric(cambio.effective_date)}, poi passerai a ${cambio.to_plan_nome}.`
+            : "Disdetta programmata.",
+        );
+      } catch {
+        // errore mostrato nel dialog
+      }
+      return;
+    }
     try {
       const result = await switchPlan.mutateAsync(planToConfirm.id);
       setPlanToConfirm(null);
@@ -77,15 +109,25 @@ export default function Abbonamento() {
         }
         setSwitchNotice(`Piano aggiornato. ${parts.join(" e ")}.`);
       }
-    } catch {
-      // l'errore è mostrato nel dialog
+    } catch (err) {
+      // Piano a pagamento: 409 payment_required — la strada è il checkout
+      // (fallback: la CTA delle card a pagamento ci porta già direttamente).
+      if (planToConfirm && apiErrorCode(err) === "payment_required") {
+        navigate(`/app/checkout?piano=${planToConfirm.slug}`);
+        return;
+      }
+      // altri errori: mostrati nel dialog
     }
   };
 
-  // Punto di estensione dell'acquisto: la UI passa SEMPRE da purchaseAddon
-  // (lib/addons.ts); finché lo stub risponde available=false si apre il
-  // dialog «In arrivo». Collegare il flusso reale = riempire quella funzione.
+  // Add-on a pagamento: si comprano dal checkout (modulo pagamenti). Il caso
+  // gratis resta sul punto di estensione purchaseAddon (lib/addons.ts): finché
+  // lo stub risponde available=false si apre il dialog «In arrivo».
   const handleAcquista = async (addon: Addon) => {
+    if (aPagamento(addon)) {
+      navigate(`/app/checkout?addon=${addon.slug}`);
+      return;
+    }
     if (addonLoading.has(addon.slug)) return;
     setAddonLoading((prev) => new Set(prev).add(addon.slug));
     try {
@@ -225,6 +267,16 @@ export default function Abbonamento() {
                       >
                         Richiedi una consulenza
                       </Button>
+                    ) : aPagamento(plan) ? (
+                      // A pagamento: si passa dal checkout, che mostra
+                      // differenza per l'anno, credito residuo e IVA.
+                      <Button
+                        variant={plan.slug === "pro" ? "primary" : "secondary"}
+                        className="w-full"
+                        onClick={() => navigate(`/app/checkout?piano=${plan.slug}`)}
+                      >
+                        Passa a {plan.nome}
+                      </Button>
                     ) : (
                       <Button
                         variant={plan.slug === "pro" ? "primary" : "secondary"}
@@ -241,10 +293,20 @@ export default function Abbonamento() {
           </div>
         )}
         <p className="mt-4 text-xs text-slate-400">
-          Il cambio piano è immediato e la durata riparte da oggi per un anno. In questa fase non è
-          previsto alcun pagamento.
+          Passando a un piano superiore paghi al checkout la differenza per l'anno: il credito del
+          periodo residuo viene scalato dal totale. Il passaggio a Gratuito diventa effettivo alla
+          scadenza del piano attuale.
         </p>
       </section>
+      )}
+
+      {/* Rinnovo, disdetta e metodo di pagamento: solo per chi gestisce un
+          piano a pagamento (i collegati attivi ereditano dal titolare) */}
+      {!isActiveChild && (
+        <SubscriptionManagement
+          pianoAPagamento={currentPaid}
+          pianoNome={me.subscription?.plan.nome ?? null}
+        />
       )}
 
       {/* Add-on: catalogo gestito dagli admin. Nascosto solo se DAVVERO
@@ -298,7 +360,10 @@ export default function Abbonamento() {
             <Button variant="ghost" onClick={() => setPlanToConfirm(null)}>
               Annulla
             </Button>
-            <Button onClick={handleSwitch} loading={switchPlan.isPending}>
+            <Button
+              onClick={handleSwitch}
+              loading={switchPlan.isPending || scheduleDowngrade.isPending}
+            >
               Conferma
             </Button>
           </>
@@ -306,12 +371,27 @@ export default function Abbonamento() {
       >
         {planToConfirm && (
           <>
-            <p>
-              Stai per passare da{" "}
-              <strong className="text-slate-900">{me.subscription?.plan.nome ?? "—"}</strong> a{" "}
-              <strong className="text-slate-900">{planToConfirm.nome}</strong>. Il nuovo
-              abbonamento annuale parte da oggi.
-            </p>
+            {isDisdetta(planToConfirm) ? (
+              // Disdetta programmata: niente effetto immediato, il piano
+              // pagato resta fino alla scadenza.
+              <p>
+                Resterai su{" "}
+                <strong className="text-slate-900">{me.subscription?.plan.nome}</strong> fino al{" "}
+                <strong className="text-slate-900">
+                  {formatDateNumeric(me.subscription?.data_scadenza)}
+                </strong>
+                , poi passerai a{" "}
+                <strong className="text-slate-900">{planToConfirm.nome}</strong>. Non perdi nulla
+                del periodo già pagato e puoi annullare la disdetta fino a quel giorno.
+              </p>
+            ) : (
+              <p>
+                Stai per passare da{" "}
+                <strong className="text-slate-900">{me.subscription?.plan.nome ?? "—"}</strong> a{" "}
+                <strong className="text-slate-900">{planToConfirm.nome}</strong>. Il nuovo
+                abbonamento annuale parte da oggi.
+              </p>
+            )}
             {me.family?.role === "parent" &&
               (me.family.used ?? 1) > (planToConfirm.num_account_aziendali ?? 1) && (
                 <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-amber-800">
@@ -320,9 +400,9 @@ export default function Abbonamento() {
                   recenti oltre il limite verranno retrocessi al piano Gratuito.
                 </p>
               )}
-            {switchPlan.isError && (
+            {(switchPlan.isError || scheduleDowngrade.isError) && (
               <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-red-700" role="alert">
-                {apiErrorMessage(switchPlan.error)}
+                {apiErrorMessage(switchPlan.isError ? switchPlan.error : scheduleDowngrade.error)}
               </p>
             )}
           </>

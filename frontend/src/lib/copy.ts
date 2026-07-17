@@ -90,6 +90,17 @@ export const CONSULENZA_STATO_LABELS: Record<
   annullata: "Annullata",
 };
 
+/** Etichette degli stati di un acquisto: badge dello storico utente
+ *  (/app/acquisti) e della vista admin pagamenti. */
+export const PURCHASE_STATO_LABELS: Record<import("../types").PurchaseStatus, string> = {
+  in_attesa: "In attesa",
+  pagato: "Pagato",
+  fallito: "Fallito",
+  scaduto: "Scaduto",
+  annullato: "Annullato",
+  gratuito: "Gratuito",
+};
+
 export const PROPOSTA_STATO_LABELS: Record<import("../types").PropostaStato, string> = {
   inviata: "Inviata",
   accettata: "Accettata",

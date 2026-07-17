@@ -3,7 +3,9 @@ import { AdminRoute, ProgettistaRoute, ProtectedRoute } from "./components/layou
 import { AppShell } from "./components/layout/AppShell";
 import Abbonamento from "./pages/Abbonamento";
 import AccettaInvito from "./pages/AccettaInvito";
+import Acquisti from "./pages/Acquisti";
 import AdminAddon from "./pages/AdminAddon";
+import AdminPagamenti from "./pages/AdminPagamenti";
 import AdminPiani from "./pages/AdminPiani";
 import AdminUtenti from "./pages/AdminUtenti";
 import AiCheck from "./pages/AiCheck";
@@ -12,9 +14,12 @@ import Aziende from "./pages/Aziende";
 import BandiList from "./pages/BandiList";
 import BandoDetail from "./pages/BandoDetail";
 import Calendario from "./pages/Calendario";
+import Checkout from "./pages/Checkout";
+import CheckoutEsito from "./pages/CheckoutEsito";
 import ConfermaEmail from "./pages/ConfermaEmail";
 import Consulenze from "./pages/Consulenze";
 import ConsulenzaDetail from "./pages/ConsulenzaDetail";
+import Fatturazione from "./pages/Fatturazione";
 import Landing from "./pages/Landing";
 import Richieste from "./pages/progettista/Richieste";
 import RichiestaDetail from "./pages/progettista/RichiestaDetail";
@@ -57,6 +62,10 @@ export default function App() {
         <Route path="ai-check" element={<AiCheck />} />
         <Route path="preferenze" element={<Preferenze />} />
         <Route path="abbonamento" element={<Abbonamento />} />
+        <Route path="fatturazione" element={<Fatturazione />} />
+        <Route path="checkout" element={<Checkout />} />
+        <Route path="checkout/esito/:purchaseId" element={<CheckoutEsito />} />
+        <Route path="acquisti" element={<Acquisti />} />
         <Route path="profilo" element={<Profilo />} />
         <Route path="consulenze" element={<Consulenze />} />
         <Route path="consulenze/:id" element={<ConsulenzaDetail />} />
@@ -103,6 +112,14 @@ export default function App() {
           element={
             <AdminRoute>
               <AdminAddon />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="admin/pagamenti"
+          element={
+            <AdminRoute>
+              <AdminPagamenti />
             </AdminRoute>
           }
         />

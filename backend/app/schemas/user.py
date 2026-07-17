@@ -108,6 +108,12 @@ class SwitchPlanIn(BaseModel):
     plan_id: int
 
 
+class AdminSwitchPlanIn(BaseModel):
+    plan_id: int
+    # Obbligatoria: il cambio piano gratuito da admin va motivato nell'audit.
+    motivazione: str = Field(min_length=1, max_length=500)
+
+
 class VerifyCfIn(BaseModel):
     codice_fiscale: str = Field(min_length=16, max_length=16)
 

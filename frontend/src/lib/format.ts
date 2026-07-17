@@ -31,6 +31,20 @@ const dateTimeFormatter = new Intl.DateTimeFormat("it-IT", {
   minute: "2-digit",
 });
 
+// Gli importi del checkout viaggiano in centesimi interi: qui sempre due
+// decimali ("119,56 €"), come su una fattura — non è il prezzo di listino.
+const eurCentsFormatter = new Intl.NumberFormat("it-IT", {
+  style: "currency",
+  currency: "EUR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+export function eurFromCents(cents: number | null | undefined): string {
+  if (cents === null || cents === undefined || !Number.isFinite(cents)) return "—";
+  return eurCentsFormatter.format(cents / 100);
+}
+
 export function formatEur(value: number | string | null | undefined): string {
   if (value === null || value === undefined || value === "") return "—";
   const num = typeof value === "string" ? Number(value) : value;

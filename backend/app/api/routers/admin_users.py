@@ -3,9 +3,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query
 
-from app.api.deps import AdminUser, PrimaryClient
+from app.api.deps import AdminUser, PrimaryClient, RevolutDep
 from app.schemas.common import Page
-from app.schemas.user import AdminUserOut, AdminUserUpdate, SwitchPlanIn
+from app.schemas.user import AdminSwitchPlanIn, AdminUserOut, AdminUserUpdate
 from app.services import user_service
 
 router = APIRouter(prefix="/admin/users", tags=["admin"])
@@ -36,8 +36,14 @@ async def update_user(
 @router.post("/{user_id}/subscription", response_model=AdminUserOut)
 async def switch_user_plan(
     user_id: UUID,
-    data: SwitchPlanIn,
-    _admin: AdminUser,
+    data: AdminSwitchPlanIn,
+    admin: AdminUser,
     primary: PrimaryClient,
+    revolut: RevolutDep,
 ) -> AdminUserOut:
-    return await user_service.admin_switch_user_plan(primary, user_id, data.plan_id)
+    """Cambio piano GRATUITO (nessun pagamento), con motivazione registrata
+    nello storico e attore = admin."""
+    return await user_service.admin_switch_user_plan(
+        primary, user_id, data.plan_id,
+        admin_id=admin["id"], motivazione=data.motivazione, revolut=revolut,
+    )

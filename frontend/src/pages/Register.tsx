@@ -95,6 +95,15 @@ export default function Register() {
 
   const selectedPosition = positions?.find((p) => p.id === positionId) ?? null;
 
+  // Un piano a pagamento non si attiva alla registrazione (il server assegna
+  // comunque Gratuito): l'acquisto si completa dal checkout dopo il primo
+  // accesso — la riga sotto le card lo dice prima del submit.
+  const selectedPlanObj = plans?.find((p) => p.slug === selectedPlan) ?? null;
+  const pianoAPagamento =
+    !!selectedPlanObj &&
+    selectedPlanObj.tipo_prezzo === "importo" &&
+    Number(selectedPlanObj.prezzo_annuale) > 0;
+
   const validateStep1 = (): boolean => {
     const errors: FieldErrors = {};
     if (!form.nome.trim()) errors.nome = "Il nome è obbligatorio.";
@@ -357,6 +366,13 @@ export default function Register() {
                 ),
               )}
             </div>
+          )}
+
+          {pianoAPagamento && selectedPlanObj && (
+            <p className="mt-5 rounded-lg bg-brand-50 px-4 py-3 text-sm text-brand-800" role="note">
+              Il piano {selectedPlanObj.nome} si attiva con l'acquisto dopo il primo accesso:
+              parti da Gratuito e completi in un minuto.
+            </p>
           )}
 
           {error && (

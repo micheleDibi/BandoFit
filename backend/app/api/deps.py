@@ -8,6 +8,7 @@ from supabase import AsyncClient
 
 from app.clients.anthropic_ai import AiCheckClient as _AiCheckClient
 from app.clients.openapi import OpenapiClient as _OpenapiClient
+from app.clients.revolut import RevolutClient as _RevolutClient
 from app.core.errors import ForbiddenError, NotFoundError, UnauthorizedError
 from app.core.security import decode_supabase_jwt
 from app.services.user_service import PROFILE_SELECT, ensure_profile
@@ -31,10 +32,15 @@ def get_ai(request: Request) -> _AiCheckClient:
     return request.app.state.ai
 
 
+def get_revolut(request: Request) -> _RevolutClient:
+    return request.app.state.revolut
+
+
 PrimaryClient = Annotated[AsyncClient, Depends(get_primary)]
 SecondaryClient = Annotated[AsyncClient, Depends(get_secondary)]
 OpenapiDep = Annotated[_OpenapiClient, Depends(get_openapi)]
 AiDep = Annotated[_AiCheckClient, Depends(get_ai)]
+RevolutDep = Annotated[_RevolutClient, Depends(get_revolut)]
 
 
 async def get_current_user(
@@ -185,3 +191,22 @@ async def require_parent(user: CurrentUser, primary: PrimaryClient) -> dict:
 
 
 ParentUser = Annotated[dict, Depends(require_parent)]
+
+
+async def require_billing_account(user: CurrentUser, primary: PrimaryClient) -> dict:
+    """Gate degli endpoint di acquisto/fatturazione: bloccati SOLO i figli
+    ATTIVI di una famiglia (ereditano il piano del titolare — è la stessa
+    regola di child_plan_locked in fn_apply_plan_change). I membri `pending` e
+    `demoted` sono account indipendenti con piano proprio e POSSONO comprare:
+    require_parent li escluderebbe a torto."""
+    from app.services import family_service  # import locale: evita cicli
+
+    membership = await family_service.get_membership(primary, user["id"])
+    if membership is not None and membership.get("status") == "active":
+        raise ForbiddenError(
+            "Il piano e i pagamenti si gestiscono sull'account titolare"
+        )
+    return user
+
+
+BillingAccount = Annotated[dict, Depends(require_billing_account)]

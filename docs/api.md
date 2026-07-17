@@ -12,7 +12,7 @@ Lato **frontend** l'header è iniettato da un `ActiveCompanyProvider` (id in `lo
 ```json
 { "error": { "code": "not_found", "message": "Bando non trovato" } }
 ```
-Codici: `unauthorized` (401), `forbidden` (403), `not_found` (404), `bad_request` (400), `conflict` (409), `rate_limited` (429, troppe richieste su un endpoint auth pubblico), `validation_error` (422), `auth_unavailable` (503, verifica token temporaneamente impossibile — es. JWKS irraggiungibile: è un errore transitorio, **non** una sessione scaduta), `search_timeout` (504), `upstream_error` (502), `upstream_timeout` (504).
+Codici: `unauthorized` (401), `forbidden` (403), `not_found` (404), `bad_request` (400), `conflict` (409), `rate_limited` (429, troppe richieste su un endpoint auth pubblico), `validation_error` (422), `auth_unavailable` (503, verifica token temporaneamente impossibile — es. JWKS irraggiungibile: è un errore transitorio, **non** una sessione scaduta), `search_timeout` (504), `upstream_error` (502), `upstream_timeout` (504). Modulo pagamenti: `payment_required` (409, il cambio richiesto passa dal checkout), `payments_not_configured` (503, chiave Revolut assente), `payment_provider_error` (502), `payment_provider_timeout` (504, esito ignoto: **mai** ripetere il pagamento, lo stato viene riconciliato).
 
 Nota: se un utente autenticato risulta privo di profilo (provisioning fallito a monte), il backend lo crea al volo alla prima richiesta (con abbonamento Gratuito), evitando che l'account resti bloccato.
 
@@ -80,7 +80,7 @@ Posizioni aziendali **attive**, ordinate per `ordering`: `[{id, nome, slug}]`. P
 ## Endpoint autenticati
 
 ### `GET /addons`
-Catalogo **add-on attivi**, ordinati per `ordering`: `[{id, nome, slug, descrizione, prezzo, tipo_prezzo, etichetta_prezzo, ordering, is_active, updated_at}]`. Lo `slug` è l'identificativo STABILE a cui verranno agganciate le funzionalità future. A differenza di `GET /plans` (pubblico perché serve alla registrazione) la rotta è **autenticata**: il catalogo si vede solo dentro l'app. Il flusso di acquisto non esiste ancora (il bottone «Acquista» — «Attiva» per gli add-on `gratis` — mostra l'avviso «In arrivo» tramite lo stub `purchaseAddon`); per gli add-on `su_richiesta` la CTA è «Richiedi una consulenza» e passa dallo stub `requestConsultation` (il futuro endpoint di acquisto dovrà rifiutarli lato server). **Eccezione: `consulto-esperto`** — è l'aggancio del flusso consulenze (`POST /me/consulenze`, senza pagamento in questa fase) e si attiva dalla pagina del bando dopo un AI-check, non dalla card in Abbonamento.
+Catalogo **add-on attivi**, ordinati per `ordering`: `[{id, nome, slug, descrizione, prezzo, tipo_prezzo, etichetta_prezzo, ordering, is_active, updated_at}]`. Lo `slug` è l'identificativo STABILE a cui sono agganciate le funzionalità. A differenza di `GET /plans` (pubblico perché serve alla registrazione) la rotta è **autenticata**: il catalogo si vede solo dentro l'app. Gli add-on **a pagamento** (`tipo_prezzo='importo'`, prezzo > 0) si comprano dal **checkout** (`POST /me/checkout` con `addon_slug`; il bottone «Acquista» porta a `/app/checkout?addon=`): l'acquisto pagato crea un **credito** in `user_addons` (una riga per acquisto, consumabile). Per gli add-on `gratis` la CTA «Attiva» resta sullo stub `purchaseAddon` (dialog «In arrivo»); per i `su_richiesta` la CTA è «Richiedi una consulenza» via lo stub `requestConsultation` — il checkout li rifiuta comunque lato server (`400`). **Eccezione: `consulto-esperto`** — è l'aggancio del flusso consulenze (`POST /me/consulenze`) e si attiva dalla pagina del bando dopo un AI-check, non dalla card in Abbonamento; se a listino è a pagamento, la richiesta consuma un credito acquistato (vedi `POST /me/consulenze`).
 
 ### `GET /me`
 Profilo dell'utente corrente + abbonamento attivo con il piano.
@@ -106,7 +106,76 @@ Verifica il **codice fiscale personale** all'Anagrafe Tributaria via openapi.it 
 Esiti: `200 {codice_fiscale, cf_verified_at}`; `400 cf_invalid` (malformato) / `400 cf_not_valid` (formalmente corretto ma non registrato — salvato non verificato SOLO se non c'è già un CF verificato: una verifica fallita non cancella mai un dato buono); `409 verify_in_progress`; `429 verify_cooldown`; `502 openapi_error`; `503 openapi_not_configured`; `504 openapi_timeout` (esito ignoto, nessun retry automatico). Il profilo (`GET /me`, `PATCH /me`) espone/accetta anche `codice_fiscale` (il cambio del CF azzera la verifica).
 
 ### `POST /me/subscription`
-Cambio piano (senza pagamento in questa fase). Body: `{"plan_id": 3}`. L'abbonamento attivo passa a `cancelled` e ne viene creato uno nuovo annuale. → come `GET /me`; se il downgrade ha retrocesso membri della famiglia, la risposta include `plan_switch_adjustment: {demoted, revoked_pending}`. **Downgrade da Advisor**: le aziende oltre il nuovo `max_aziende` (le più recenti) vengono **archiviate** (sola lettura, escluse da switch/alert/export; i dati restano) e riattivate risalendo di piano — nessuna cancellazione. Errori: `400` piano inesistente/non attivo; `400` piano `su_richiesta` («disponibile solo su richiesta», il guard scatta PRIMA della RPC — l'assegnazione resta possibile via `POST /admin/users/{id}/subscription`); `403 child_plan_locked` se l'utente è un figlio attivo (il piano si gestisce sul titolare).
+Cambio piano **self-serve verso piani gratuiti**: dal modulo pagamenti i piani a pagamento non si attivano più da qui. Body: `{"plan_id": 3}`. Tre esiti a seconda della destinazione:
+- **piano a pagamento** (`tipo_prezzo='importo'`, prezzo > 0) → **`409 payment_required`**: il piano si attiva solo con un acquisto — il frontend intercetta il codice e porta al checkout (`/app/checkout?piano=<slug>`, vedi `POST /me/checkout`);
+- **piano gratuito, ma il piano corrente è A PAGAMENTO e non scaduto** → il cambio **non è immediato**: diventa un **downgrade programmato alla scadenza** (riga in `scheduled_plan_changes`, motivo `disdetta`, sostituisce un eventuale cambio già programmato) — chi ha pagato non perde il periodo residuo. Risposta come `GET /me` col piano ancora invariato: il cambio è un'intenzione, la applica lo scheduler a scadenza;
+- **piano gratuito da piano gratuito (o scaduto)** → cambio immediato come sempre: l'abbonamento attivo passa a `cancelled` e ne viene creato uno nuovo annuale.
+
+→ come `GET /me`; se il downgrade ha retrocesso membri della famiglia, la risposta include `plan_switch_adjustment: {demoted, revoked_pending}`. **Downgrade da Advisor**: le aziende oltre il nuovo `max_aziende` (le più recenti) vengono **archiviate** (sola lettura, escluse da switch/alert/export; i dati restano) e riattivate risalendo di piano — nessuna cancellazione. Errori: `409 payment_required` (sopra); `400` piano inesistente/non attivo; `400` piano `su_richiesta` («disponibile solo su richiesta», il guard scatta PRIMA della RPC — l'assegnazione resta possibile via `POST /admin/users/{id}/subscription`); `403 child_plan_locked` se l'utente è un figlio attivo (il piano si gestisce sul titolare).
+
+## Anagrafica di fatturazione (modulo pagamenti)
+
+Anagrafica del soggetto a cui sono intestate le fatture (migration 0026). È lo stato **corrente editabile**: le fatture citano sempre lo snapshot congelato in `purchases.billing_snapshot` al momento dell'acquisto, mai questa anagrafica. Il gate è **`require_billing_account`** (vale per TUTTI gli endpoint di pagamento sotto `/me/checkout*`, `/me/purchases*`, `/me/subscription/*`, `/me/payment-method`): `403 forbidden` SOLO per i **collegati attivi** di una famiglia (ereditano il piano — il piano e i pagamenti si gestiscono sull'account titolare, stessa regola di `child_plan_locked`); i membri `pending` e `demoted` sono account indipendenti con piano proprio e possono operare (`require_parent` li escluderebbe a torto).
+
+### `GET /me/billing-profile`
+L'anagrafica corrente, o `null` se mai compilata: `{tipo_soggetto, denominazione, nome, cognome, partita_iva, codice_fiscale, paese, indirizzo, comune, provincia, cap, codice_destinatario, pec, vies_valid, vies_checked_at, completo}`.
+
+### `GET /me/billing-profile/prefill`
+Proposta di **precompilazione** dai dati dell'azienda (la più vecchia non cancellata, come `GET /me/company`): `{tipo_soggetto, denominazione, partita_iva, codice_fiscale, indirizzo, comune, provincia, cap, pec}` — tutti opzionali; `tipo_soggetto` proposto `azienda_it` se l'azienda ha la P.IVA. **Mai persistita da sola**: nulla viene salvato finché l'utente non conferma col PUT. Senza aziende → tutti i campi `null`.
+
+### `PUT /me/billing-profile`
+Upsert dell'anagrafica (risposta come la GET). Body: `tipo_soggetto` (`azienda_it`/`privato_it`/`azienda_ue`) + i campi sopra. La validazione **dipende dal tipo di soggetto** (i vincoli di forma rispondono `422 validation_error`):
+- **`azienda_it`** — paese `IT`, `denominazione` obbligatoria, P.IVA italiana di 11 cifre, CAP di 5 cifre, provincia obbligatoria; recapito SDI = `codice_destinatario` (7 caratteri) **oppure** `pec` (senza codice si usa il default `'0000000'`).
+- **`privato_it`** — paese `IT`, `nome`+`cognome`, codice fiscale di 16 caratteri, CAP di 5 cifre. B2C: la fattura viaggia sempre con destinatario `'0000000'` (un `codice_destinatario` inviato viene ignorato).
+- **`azienda_ue`** — paese UE ≠ IT, `denominazione`, P.IVA locale. La P.IVA passa dal **VIES** (openapi.it, scope EU-start; il prefisso della Grecia è `EL`, a DB resta il codice ISO `GR`), **obbligatorio e bloccante**: senza prova di validità niente reverse charge, quindi niente salvataggio. L'esito positivo è persistito come prova (`vies_valid` + `vies_checked_at`).
+
+Ogni salvataggio azzera i campi VIES (ricalcolati solo per `azienda_ue`). Errori: `403 forbidden` (collegato attivo), `400 bad_request` (P.IVA non valida nel VIES), `422 validation_error` (vincoli di forma per tipo), `503 openapi_not_configured` (serve il VIES ma openapi.it non è configurato), `502 openapi_error` / `504 openapi_timeout` (VIES irraggiungibile / esito ignoto).
+
+## Checkout e acquisti (modulo pagamenti)
+
+Acquisto self-serve di piani (upgrade) e add-on via **Revolut Merchant API**: il backend crea un **purchase immutabile** + un **ordine** sul provider, il frontend apre il widget Revolut col token dell'ordine (i dati carta vivono SOLO nel popup del provider), l'esito arriva dal **webhook** (o dal `/sync` di fallback) e viene applicato **rileggendo sempre l'ordine dal provider** con le RPC atomiche della 0026. Tutti gli endpoint: gate `require_billing_account` (403 per i collegati attivi) e `503 payments_not_configured` se la chiave Revolut manca.
+
+### `POST /me/checkout/preview`
+Preventivo **puro** (nessun effetto). Body: `{"plan_slug": "..."}` **oppure** `{"addon_slug": "..."}` (uno e uno solo, `422` altrimenti). → `{kind, oggetto_slug, oggetto_nome, listino_cents, credito_cents, imponibile_cents, iva_cents, iva_aliquota, natura_iva, totale_cents, valuta, scadenza_risultante, dettaglio}` — importi in **centesimi**. Regole (in `services/pricing.py`, solo `Decimal` con `ROUND_HALF_UP`): i piani si comprano **solo in upgrade** (ordering superiore al corrente; per scendere c'è il downgrade programmato) e l'imponibile è `prezzo_nuovo − credito_residuo` con credito `min(prezzo_vecchio × giorni_residui/365, prezzo_vecchio)` (formula congelata in `dettaglio`); listino **IVA esclusa**, IVA 22% aggiunta sull'imponibile — per il tipo soggetto `azienda_ue` reverse charge art. 7-ter: IVA 0, `natura_iva = "N2.1"`. Gli addon si comprano a listino pieno (solo `tipo_prezzo='importo'` con prezzo > 0). Errori: `404` piano/addon non a catalogo; `400` non acquistabile online (gratuito o `su_richiesta`), piano non superiore al corrente, importo dell'upgrade nullo.
+
+### `POST /me/checkout`
+Crea il purchase e l'ordine di pagamento. Body: come la preview + `auto_renew` (bool, default `true`; solo per i piani, ignorato sugli addon — la scelta viene congelata sul purchase e applicata a pagamento riuscito). Richiede l'**anagrafica di fatturazione compilata** (`400` altrimenti: viene congelata in `billing_snapshot`). Crea la riga `purchases` `in_attesa` (importi e calcolo immutabili) e l'ordine Revolut (scadenza 1h; se la creazione dell'ordine fallisce il purchase viene annullato, non resta a bloccare l'utente). → `{purchase_id, revolut_order_token, checkout_url, totale_cents, valuta}`: il frontend apre il widget col `revolut_order_token`. Un ordine declinato riaccetta tentativi con lo **stesso token**; un ordine pagato rifiuta altri pagamenti (guardia anti doppio addebito del provider). Errori: `409 conflict` se esiste già un purchase `in_attesa` (uno solo per utente); `400`/`404` come la preview; `502`/`504` provider irraggiungibile / esito ignoto (**mai ripetere il pagamento**: si riconcilia).
+
+### `GET /me/purchases?page=&page_size=`
+Storico acquisti dell'utente, più recenti prima (`page_size` max 100). Item `PurchaseOut`: `{id, kind: piano|rinnovo|addon|cambio_admin, status: in_attesa|pagato|fallito|scaduto|annullato|gratuito, oggetto_slug, oggetto_nome, descrizione, imponibile_cents, iva_cents, totale_cents, iva_aliquota, natura_iva, valuta, decline_reason, motivazione (solo cambio_admin), created_at, paid_at}`.
+
+### `GET /me/purchases/{id}`
+Singolo acquisto (`404` se non dell'utente).
+
+### `GET /me/purchases/{id}/documento.pdf`
+**PDF di cortesia** dell'acquisto (`application/pdf`, download): se la fattura esiste ne riporta numero/serie/data, altrimenti è una ricevuta costruita dal purchase — l'originale fiscale è sempre la fattura elettronica trasmessa a SDI. `404` se l'acquisto non è dell'utente o non è `pagato`; `503 pdf_unavailable` senza motore PDF.
+
+### `POST /me/purchases/{id}/sync`
+**Riconciliazione on-demand** (usata dalla pagina esito del checkout quando il webhook tarda o si perde): se il purchase è `in_attesa` con un ordine, rilegge l'ordine dal provider e fa avanzare lo stato con le stesse RPC idempotenti del webhook — chiamarla più volte è sicuro. → `PurchaseOut` aggiornato. `404` se non dell'utente.
+
+## Gestione abbonamento (rinnovo, disdetta, metodo di pagamento)
+
+Le **intenzioni** sull'abbonamento (cambio programmato, rinnovo automatico) e il metodo di pagamento salvato nel vault del provider (a DB solo l'id del metodo, mai dati carta). Stesso gate `require_billing_account`.
+
+### `GET /me/subscription/management`
+→ `{auto_renew, data_scadenza, metodo: {presente, label}, cambio_programmato: {to_plan_slug, to_plan_nome, effective_date, motivo} | null}` — `label` è il solo suffisso mascherato della carta (es. `•••• 4242`).
+
+### `POST /me/subscription/downgrade`
+Programma il passaggio a un piano **inferiore** alla scadenza (verso `gratuito` = **disdetta**): l'utente resta sul piano attuale fino a quel giorno. Body: `{"plan_slug": "..."}`. Sostituisce un eventuale cambio già programmato (uno solo per utente). → come la GET. Errori: `400` se la destinazione non è inferiore per `ordering` («per salire usa l'acquisto»); `404` piano non disponibile / nessun abbonamento attivo; `409` abbonamento già scaduto.
+
+### `DELETE /me/subscription/scheduled-change`
+Annulla il cambio programmato. → come la GET. `404` se non c'è nulla da annullare.
+
+### `POST /me/subscription/auto-renew`
+Body: `{"enabled": bool}`. Attivarlo richiede un metodo di pagamento salvato → `409 conflict` altrimenti (il frontend apre il flusso di aggiunta e riprova). Spegnerlo **non** tocca `grace_until`: chi è in grazia ci resta fino alla fine. `404` senza abbonamento attivo.
+
+### `POST /me/payment-method` · `DELETE /me/payment-method`
+Il POST avvia il salvataggio di un metodo **senza acquisto**: ordine a 0 € con scopo `add_method` → `{revolut_order_token}` per il widget; il metodo viene persistito alla riconciliazione dell'ordine completato (webhook/sync), non alla risposta. Il DELETE revoca il metodo salvato **e spegne il rinnovo automatico** (senza toccare `grace_until`). → come la GET di management.
+
+## Webhook di pagamento
+
+### `POST /webhooks/revolut` *(pubblico, nessuna auth utente)*
+Riceve gli eventi del provider (`ORDER_COMPLETED`/`ORDER_FAILED`/`ORDER_CANCELLED`/`ORDER_PAYMENT_DECLINED`/`ORDER_PAYMENT_FAILED`). La prova di autenticità è la **firma HMAC verificata** (header di firma + timestamp con tolleranza anti-replay di 5 minuti; firme multiple accettate durante la rotazione del secret). Risponde **subito `204`** e elabora in background: il payload è thin (`{event, order_id}`) e vale come *suggerimento* — lo stato vero si rilegge sempre dal provider (`elabora_ordine`, la stessa strada del `/sync`). Dedup su `webhook_events` (order-level: un evento per ordine, i retry si scartano; payment-level: sempre riprocessabili — le RPC a valle sono idempotenti). Risposte: `204` (anche per eventi non pertinenti), `401` firma/timestamp non validi, `400` payload non JSON, `503` se `REVOLUT_WEBHOOK_SECRET` non è configurato (il provider ritenterà), `500` registrazione evento fallita (idem).
 
 ## Azienda (gruppo di account)
 
@@ -320,7 +389,7 @@ Flusso: AI-check completato → attivazione dell'addon `consulto-esperto` → ri
 Richieste dell'Azienda (visibilità per `family_parent_id`). Item: `{id, stato, bando_id, bando_slug, bando_titolo, esito, punteggio, created_at, assigned_at, editable, progettista, proposte_aperte, proposte, appuntamento}` — `stato` ∈ `nuova`/`assegnata`/`annullata`; `progettista = {codice, nome}` (assegnato; la UI mostra **nome e cognome** — più umano — e il codice resta nel payload per usi interni); `proposte` (solo nel dettaglio): `[{id, codice_progettista, nome_progettista, messaggio, stato, created_at}]` — anche qui il cliente vede l'autore per `nome_progettista`; `appuntamento = {id, inizio, fine, stato, videocall_url}` in UTC — `videocall_url` è la stanza Jitsi dedicata (`{JITSI_BASE_URL}/bandofit-{token}`, derivata dal token a DB; solo prenotazioni confermate). La notifica in-app dell'evento 2 resta minimizzata (solo il bando); il nome dell'autore compare nell'email, effimera.
 
 ### `POST /me/consulenze` (201) *(solo titolare)*
-Body: `{"ai_check_id": "uuid"}` (un AI-check `ready` della propria Azienda). Crea la richiesta con gli snapshot (esito/punteggio, bando, addon+prezzo) e avvisa **tutti i progettisti e gli admin attivi** (evento 1; parità admin). Il pagamento dell'addon è fuori scope: l'innesto del checkout è in `consulting_service.create_request`. Errori: `403` account collegato; `404` AI-check non trovato / addon non a catalogo; `409` AI-check non completato / **richiesta già aperta per questo bando** (una sola `nuova` per bando per Azienda).
+Body: `{"ai_check_id": "uuid"}` (un AI-check `ready` della propria Azienda). Crea la richiesta con gli snapshot (esito/punteggio, bando, addon+prezzo) e avvisa **tutti i progettisti e gli admin attivi** (evento 1; parità admin). **Innesto pagamenti (0026)**: se l'addon `consulto-esperto` è **a pagamento** (`tipo_prezzo='importo'`, prezzo > 0) la richiesta **consuma un credito acquistato** (`user_addons` `disponibile` — comprato via `POST /me/checkout` con `addon_slug`); il credito viene marcato `consumato` solo DOPO la creazione riuscita (un conflitto non lo brucia) con `consumed_ref` = id della richiesta. Con l'addon `gratis` (seed attuale) il flusso resta identico a prima, senza pagamento. Errori: `403` account collegato; `404` AI-check non trovato / addon non a catalogo; `409` AI-check non completato / **richiesta già aperta per questo bando** (una sola `nuova` per bando per Azienda); `409 payment_required` se l'addon è a pagamento e non c'è un credito disponibile (si passa dal checkout).
 
 ### `POST /me/consulenze/{id}/proposte/{pid}/accetta` *(solo titolare)*
 Body: `{"slot_id": "uuid" | null}`. Accetta la proposta = assegna la consulenza in via definitiva (RPC atomica: le altre proposte diventano `superate`); con `slot_id` prenota nella stessa transazione (**all-or-nothing**: `409 slot_taken` ⇒ non resta nemmeno l'assegnazione, si riprova). Eventi 4 (+3 se prenota) al progettista. Errori: `409` richiesta non più aperta / proposta non più disponibile / progettista non più disponibile / slot preso.
@@ -374,7 +443,7 @@ Elenco utenti con abbonamento attivo. Parametri: `q` (cerca in email/nome/cognom
 Body (opzionali): `role` (`admin`|`cliente`|`progettista`), `is_active` (bool), `max_aziende_override` (intero ≥1, oppure `null` esplicito per rimuovere l'override e tornare al default di piano). La promozione a progettista passa da `fn_promote_progettista` (assegna il codice `PRG-…`, riusandolo alla ri-promozione, e finisce in audit_log); la demozione cambia solo il ruolo (la riga `progettisti` e il codice restano). Cambiare `max_aziende_override` **riconcilia** subito le aziende dell'utente (archivia le eccedenti se il limite scende, riattiva se risale). Protezioni: un admin non può togliersi il ruolo (verso **qualunque** ruolo) né disattivarsi da solo (`400`).
 
 ### `POST /admin/users/{user_id}/subscription`
-Cambio piano forzato per un utente. Body: `{"plan_id": 2}`. `403` sui figli di famiglia (pending/attivi): il piano si gestisce sull'account titolare; forzare il piano di un titolare applica le stesse retrocessioni automatiche del cambio normale. **Scavalca il guard `su_richiesta`** (`self_serve=False`): assegnare da qui un piano su richiesta è il completamento manuale di quel flusso.
+Cambio piano **gratuito** forzato per un utente (nessun pagamento). Body: `{"plan_id": 2, "motivazione": "..."}` — la motivazione è **obbligatoria** (1–500 caratteri) e finisce nello storico: il cambio passa da `fn_registra_cambio_admin`, che registra in audit l'**attore vero** (l'admin) e crea un purchase `kind='cambio_admin'` / `status='gratuito'` a totale 0. Se l'utente ha un checkout in corso, l'**ordine sul provider viene cancellato PRIMA** dell'annullo a DB (così un pagamento tardivo su un purchase annullato non lascia soldi orfani); vengono annullati anche i cambi programmati. `403` sui figli attivi di famiglia: il piano si gestisce sull'account titolare; forzare il piano di un titolare applica le stesse retrocessioni automatiche del cambio normale. **Scavalca il guard `su_richiesta`** (`self_serve=False`): assegnare da qui un piano su richiesta è il completamento manuale di quel flusso. `404` utente inesistente.
 
 ### `GET /admin/plans`
 Tutti i piani, inclusi i disattivati.
@@ -387,6 +456,21 @@ Aggiornamento parziale (stessi campi, tranne `slug`). I piani **non si eliminano
 
 ### `GET /admin/addons` · `POST /admin/addons` (201) · `PATCH /admin/addons/{addon_id}`
 Gestione del catalogo add-on, gemella di `/admin/plans` (stessi permessi admin): GET tutti (anche disattivati), POST crea (`nome`, `slug` — unico, immutabile, `[a-z0-9-]+` → `409` se duplicato —, `descrizione?`, `prezzo ≥ 0` in €, `tipo_prezzo?`/`etichetta_prezzo?` come per i piani, `ordering`, `is_active`), PATCH aggiorna i campi passati (slug escluso) o disattiva. Gli add-on **non si eliminano**: si disattivano.
+
+### `GET /admin/purchases?status=&kind=&page=&page_size=`
+Storico acquisti di **tutti** gli utenti (più recenti prima, `page_size` max 100), filtrabile per `status` e `kind`. Item come `PurchaseOut` di `GET /me/purchases`.
+
+### `GET /admin/invoices?stato=&page=&page_size=`
+Fatture elettroniche con lo stato SDI (migration 0027): `{items: [{id, purchase_id, anno, serie, numero, data_documento, stato, provider_id, totale_cents, tentativi, created_at, emessa_at}], total, page, page_size}`. Stati: `da_emettere`/`in_invio`/`inviata`/`consegnata`/`non_consegnata`/`scartata`/`errore`.
+
+### `POST /admin/invoices/{invoice_id}/retry`
+Ritrasmette una fattura in `errore`/`scartata` (dopo la correzione dei dati) con lo **stesso numero e la stessa data** — mai una fattura nuova. → `{stato}`; su una fattura in altro stato non fa nulla e risponde `{stato, note}`. `404` fattura inesistente.
+
+### `GET /admin/payment-anomalies?stato=aperta|risolta`
+**Incassi orfani** da riconciliare (default `aperta`): pagamenti incassati dal provider che non corrispondono a un purchase applicabile (annullato/scaduto/già coperto, o purchase inesistente) — in v1 la risoluzione è manuale (verifica + eventuale rimborso). Le anomalie vivono in `audit_log` (`payments.orphan`; la risoluzione aggiunge `payments.orphan_resolved`): `{items: [{audit_id, payload, created_at, risolta}]}`.
+
+### `POST /admin/payment-anomalies/{audit_id}/resolve`
+Marca l'anomalia come risolta (scrive `payments.orphan_resolved` con l'admin come attore). → `{ok: true}`.
 
 ### `POST /admin/alerts/run` · `GET /admin/alerts/runs?limit=`
 Esegue subito la run giornaliera degli alert (senza `ripeti`: `409` se quella di oggi è già stata eseguita; `ripeti=true` riesegue — il ledger impedisce comunque i doppi invii) e ritorna i contatori `{giorno, esito, bandi_candidati, destinatari, email_inviate, email_fallite, dettagli}`. `GET /runs` = registro delle esecuzioni (osservabilità).

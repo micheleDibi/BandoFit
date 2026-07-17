@@ -4,6 +4,7 @@ import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Dialog } from "../components/ui/Dialog";
+import { TextareaField } from "../components/ui/Field";
 import { Pagination } from "../components/ui/Pagination";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
 import {
@@ -69,6 +70,9 @@ export default function AdminUtenti() {
 
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Motivazione del cambio piano: obbligatoria (finisce nello storico acquisti
+  // come kind=cambio_admin, con l'admin come attore).
+  const [motivazione, setMotivazione] = useState("");
 
   const confirmAction = async () => {
     if (!pending) return;
@@ -85,7 +89,11 @@ export default function AdminUtenti() {
           data: { is_active: pending.is_active },
         });
       } else {
-        await switchPlan.mutateAsync({ userId: pending.user.profile.id, planId: pending.planId });
+        await switchPlan.mutateAsync({
+          userId: pending.user.profile.id,
+          planId: pending.planId,
+          motivazione: motivazione.trim(),
+        });
       }
       setPending(null);
     } catch (err) {
@@ -247,6 +255,7 @@ export default function AdminUtenti() {
                             const plan = plans?.find((p) => p.id === planId);
                             if (plan) {
                               setActionError(null);
+                              setMotivazione("");
                               setPending({ kind: "plan", user, planId, planName: plan.nome });
                             }
                           }}
@@ -346,6 +355,7 @@ export default function AdminUtenti() {
               variant={pending?.kind === "active" && !pending.is_active ? "danger" : "primary"}
               onClick={confirmAction}
               loading={actionBusy}
+              disabled={pending?.kind === "plan" && !motivazione.trim()}
             >
               Conferma
             </Button>
@@ -380,11 +390,28 @@ export default function AdminUtenti() {
           </p>
         )}
         {pending?.kind === "plan" && (
-          <p>
-            Assegnare il piano <strong className="text-slate-900">{pending.planName}</strong> a{" "}
-            <strong className="text-slate-900">{pending.user.profile.email}</strong>? L'abbonamento
-            annuale riparte da oggi.
-          </p>
+          <>
+            <p>
+              Assegnare il piano <strong className="text-slate-900">{pending.planName}</strong> a{" "}
+              <strong className="text-slate-900">{pending.user.profile.email}</strong>? L'abbonamento
+              annuale riparte da oggi.
+            </p>
+            <div className="mt-3">
+              <TextareaField
+                label="Motivazione"
+                required
+                value={motivazione}
+                onChange={(e) => setMotivazione(e.target.value)}
+                placeholder="Es. Cliente convenzionato, correzione, cortesia…"
+                maxLength={500}
+                rows={2}
+              />
+            </div>
+            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Il cambio è gratuito e verrà registrato nello storico con il tuo nome. Un eventuale
+              pagamento in corso dell'utente verrà annullato.
+            </p>
+          </>
         )}
         {actionError && (
           <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-red-700" role="alert">

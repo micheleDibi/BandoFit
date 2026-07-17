@@ -30,6 +30,8 @@ const directLinks: NavItem[] = [
 const accountBase: NavItem[] = [
   { to: "/app/preferenze", label: "Preferenze" },
   { to: "/app/abbonamento", label: "Abbonamento" },
+  { to: "/app/fatturazione", label: "Dati di fatturazione" },
+  { to: "/app/acquisti", label: "I tuoi acquisti" },
 ];
 
 // Raggruppate sotto «Progettista» (per progettisti e admin: parità completa).
@@ -43,6 +45,7 @@ const adminLinks: NavItem[] = [
   { to: "/app/admin/utenti", label: "Utenti" },
   { to: "/app/admin/piani", label: "Piani" },
   { to: "/app/admin/addon", label: "Add-on" },
+  { to: "/app/admin/pagamenti", label: "Pagamenti" },
 ];
 
 const navLinkClasses = ({ isActive }: { isActive: boolean }) =>

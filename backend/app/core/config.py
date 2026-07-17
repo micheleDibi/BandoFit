@@ -117,6 +117,39 @@ class Settings(BaseSettings):
     # token), altrimenti il tempo di risposta rivela ciò che il body nasconde.
     register_latency_target_seconds: float = 1.5
 
+    # Pagamenti (Revolut Merchant API, migration 0026). Chiave vuota = modulo
+    # disattivato (le rotte rispondono 503 payments_not_configured).
+    # ATTENZIONE: le chiavi di sandbox e produzione sono DIVERSE e devono
+    # corrispondere a revolut_env; la sandbox è un account Business separato
+    # (sandbox-business.revolut.com). Il webhook_secret (wsk_...) nasce alla
+    # registrazione del webhook via API e serve a verificare la firma HMAC:
+    # senza, l'endpoint webhook risponde 503.
+    revolut_secret_key: str = ""
+    revolut_env: str = "sandbox"  # sandbox | production
+    revolut_webhook_secret: str = ""
+    revolut_timeout_seconds: float = 30.0
+
+    # Dati dell'emittente per la fattura elettronica (cedente/prestatore).
+    # Vuoti = fatturazione SDI disattivata (i purchase pagati restano senza
+    # fattura, il worker non parte). Il regime è RF01 (ordinario) di default.
+    # ATTENZIONE: dati fiscali reali, mai nel repo — solo in .env di produzione.
+    fattura_denominazione: str = ""
+    fattura_partita_iva: str = ""
+    fattura_codice_fiscale: str = ""
+    fattura_regime: str = "RF01"
+    fattura_sede_indirizzo: str = ""
+    fattura_sede_comune: str = ""
+    fattura_sede_provincia: str = ""
+    fattura_sede_cap: str = ""
+    fattura_serie: str = ""
+
+    # Scheduler dei pagamenti (rinnovi, dunning, cambi differiti — fase 3).
+    # Stesso stampo dell'alert scheduler: task in-process, claim giornaliero su
+    # payment_runs. L'ora è quella locale (alert_fuso). Spento = nessun
+    # rinnovo/downgrade automatico (utile in sviluppo).
+    payment_scheduler_attivo: bool = True
+    payment_ora_esecuzione: str = "06:00"
+
     # AI-check (API Anthropic). Chiave vuota = feature disattivata (le rotte
     # rispondono 503 ai_not_configured). Ogni report costa ~0,10 $ di API.
     anthropic_api_key: str = ""

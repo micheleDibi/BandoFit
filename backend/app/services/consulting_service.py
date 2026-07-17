@@ -18,6 +18,8 @@ from functools import partial
 from typing import NoReturn
 from zoneinfo import ZoneInfo
 
+from decimal import Decimal
+
 from postgrest.exceptions import APIError
 
 from app.core.config import get_settings
@@ -27,6 +29,7 @@ from app.core.errors import (
     ConflictError,
     ForbiddenError,
     NotFoundError,
+    PaymentRequiredError,
     UpstreamError,
 )
 from app.schemas.consulting import (
@@ -659,7 +662,7 @@ async def create_request(primary, user: dict, ai_check_id: str) -> ConsulenzaOut
 
     addon_resp = (
         await primary.table("addons")
-        .select("id,slug,prezzo,is_active")
+        .select("id,slug,prezzo,tipo_prezzo,is_active")
         .eq("slug", get_settings().consulting_addon_slug)
         .eq("is_active", True)
         .limit(1)
@@ -669,7 +672,27 @@ async def create_request(primary, user: dict, ai_check_id: str) -> ConsulenzaOut
         raise NotFoundError("Il consulto esperto non è al momento disponibile")
     addon = addon_resp.data[0]
 
-    # ---- innesto pagamento: il checkout dell'addon andrà eseguito QUI ----
+    # ---- innesto pagamento (modulo 0026) ----
+    # Se l'addon è a pagamento, la richiesta CONSUMA un credito acquistato
+    # (user_addons 'disponibile'); senza credito si passa dal checkout. Il
+    # flusso con tipo_prezzo='gratis' (seed attuale) resta byte-identico.
+    if addon.get("tipo_prezzo") == "importo" and Decimal(str(addon.get("prezzo") or "0")) > 0:
+        crediti = (
+            await primary.table("user_addons")
+            .select("id")
+            .eq("user_id", str(user["id"]))
+            .eq("addon_id", addon["id"])
+            .eq("stato", "disponibile")
+            .limit(1)
+            .execute()
+        )
+        if not crediti.data:
+            raise PaymentRequiredError(
+                "Il consulto esperto si attiva con un acquisto: passa dal checkout"
+            )
+        credito_id = crediti.data[0]["id"]
+    else:
+        credito_id = None
 
     try:
         resp = (
@@ -699,6 +722,19 @@ async def create_request(primary, user: dict, ai_check_id: str) -> ConsulenzaOut
             ) from exc
         raise
     request = resp.data[0]
+
+    if credito_id is not None:
+        # Consumo DOPO l'insert riuscito: se la richiesta non nasce (conflitto,
+        # errore) il credito resta disponibile. Il consumed_ref lega il credito
+        # alla richiesta per lo storico.
+        await (
+            primary.table("user_addons")
+            .update({"stato": "consumato", "consumed_at": "now()",
+                     "consumed_ref": str(request["id"])})
+            .eq("id", credito_id)
+            .eq("stato", "disponibile")
+            .execute()
+        )
 
     await _audit(
         primary,

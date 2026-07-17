@@ -473,6 +473,115 @@ def _format_eur(value: int | None) -> str | None:
     return f"{value:,.0f}".replace(",", ".") + " €"
 
 
+def _euro_da_cents(cents: int) -> str:
+    """Importo transazionale (centesimi) → «1.234,56 €» stile italiano."""
+    intero, resto = divmod(cents, 100)
+    return f"{intero:,.0f}".replace(",", ".") + f",{resto:02d} €"
+
+
+async def send_promemoria_rinnovo_email(
+    to_email: str, piano: str, importo_cents: int, scadenza: str,
+    auto: bool, cta_url: str,
+) -> bool:
+    """Preavviso di rinnovo. Con addebito automatico (auto=True) è l'avviso
+    contrattuale ≥7 giorni; senza, è il promemoria di ri-acquisto."""
+    importo = _euro_da_cents(importo_cents)
+    if auto:
+        heading = "Il tuo abbonamento si rinnova a breve"
+        paragrafi = [
+            f"Il <strong>{html.escape(piano)}</strong> si rinnoverà automaticamente "
+            f"il <strong>{html.escape(scadenza)}</strong>.",
+            f"Addebiteremo <strong>{importo}</strong> (IVA inclusa dove prevista) sul "
+            "metodo di pagamento che hai salvato.",
+            "Se non vuoi rinnovare puoi disdire quando vuoi dalla tua area "
+            "abbonamento: nessun addebito verrà effettuato.",
+        ]
+        cta = "Gestisci l'abbonamento"
+        footer = "Ti scriviamo con almeno 7 giorni di anticipo, come da nostri termini."
+    else:
+        heading = "Il tuo abbonamento sta per scadere"
+        paragrafi = [
+            f"Il <strong>{html.escape(piano)}</strong> scadrà il "
+            f"<strong>{html.escape(scadenza)}</strong>.",
+            f"Per continuare senza interruzioni rinnova ora ({importo}, IVA inclusa "
+            "dove prevista): alla scadenza, senza rinnovo, tornerai al piano Gratuito.",
+        ]
+        cta = "Rinnova ora"
+        footer = "Puoi rinnovare anche più avanti, ma dopo la scadenza il piano tornerà Gratuito."
+    html_body = _branded_html(heading, paragrafi, cta, cta_url, footer)
+    text = f"{heading}. {piano}, {importo}, scadenza {scadenza}. {cta_url}"
+    return await _dispatch(to_email, f"{heading} — BandoFit", html_body, text)
+
+
+async def send_pagamento_fallito_email(
+    to_email: str, piano: str, motivo: str | None, scadenza_grazia: str, cta_url: str,
+) -> bool:
+    """Addebito di rinnovo non riuscito: invito a pagare/cambiare carta entro
+    la grazia."""
+    dettaglio = {
+        "insufficient_funds": "Fondi insufficienti sulla carta.",
+        "expired_card": "La carta risulta scaduta.",
+        "do_not_honour": "La banca ha rifiutato l'addebito.",
+    }.get(motivo or "", "L'addebito non è andato a buon fine.")
+    html_body = _branded_html(
+        "Non siamo riusciti a rinnovare il tuo abbonamento",
+        [
+            f"{html.escape(dettaglio)} Il tuo <strong>{html.escape(piano)}</strong> resta "
+            f"attivo fino al <strong>{html.escape(scadenza_grazia)}</strong>.",
+            "Aggiorna il metodo di pagamento o completa l'addebito manualmente entro "
+            "quella data per non perdere il piano.",
+        ],
+        "Paga ora o cambia carta",
+        cta_url,
+        "Dopo questa data, senza pagamento, l'abbonamento tornerà al piano Gratuito.",
+    )
+    text = (
+        f"Rinnovo non riuscito per {piano}. {dettaglio} Attivo fino al "
+        f"{scadenza_grazia}. Paga o cambia carta: {cta_url}"
+    )
+    return await _dispatch(to_email, "Rinnovo non riuscito — BandoFit", html_body, text)
+
+
+async def send_downgrade_email(to_email: str, cta_url: str) -> bool:
+    """Il piano è tornato Gratuito (grazia scaduta o mancato rinnovo)."""
+    html_body = _branded_html(
+        "Il tuo abbonamento è tornato Gratuito",
+        [
+            "Non avendo ricevuto il rinnovo, il tuo abbonamento è tornato al piano "
+            "Gratuito. I tuoi dati restano al loro posto.",
+            "Puoi riattivare un piano superiore quando vuoi.",
+        ],
+        "Scegli un piano",
+        cta_url,
+        "Se pensi si tratti di un errore, contattaci: siamo qui per aiutarti.",
+    )
+    text = f"Il tuo abbonamento è tornato Gratuito. Riattiva quando vuoi: {cta_url}"
+    return await _dispatch(to_email, "Abbonamento tornato Gratuito — BandoFit", html_body, text)
+
+
+async def send_ricevuta_pagamento_email(
+    to_email: str, descrizione: str, totale_cents: int, cta_url: str,
+) -> bool:
+    """Conferma di pagamento riuscito (la fattura vera arriva via SDI)."""
+    html_body = _branded_html(
+        "Pagamento ricevuto, grazie!",
+        [
+            f"Abbiamo registrato il tuo pagamento di <strong>{_euro_da_cents(totale_cents)}</strong> "
+            f"per <strong>{html.escape(descrizione)}</strong>.",
+            "Trovi il dettaglio nella sezione «I tuoi acquisti». La fattura elettronica "
+            "verrà emessa e ti sarà recapitata a breve.",
+        ],
+        "Vedi i tuoi acquisti",
+        cta_url,
+        "Conserva questa email come promemoria: il documento fiscale è la fattura elettronica.",
+    )
+    text = (
+        f"Pagamento ricevuto: {_euro_da_cents(totale_cents)} per {descrizione}. "
+        f"Dettaglio: {cta_url}"
+    )
+    return await _dispatch(to_email, "Pagamento ricevuto — BandoFit", html_body, text)
+
+
 def _digest_card(bando: dict) -> str:
     """Card HTML di un bando nel digest. Tutti i dati catalogo sono escapati
     qui (il template li tratta come HTML già pronto)."""

@@ -22,6 +22,14 @@ def signup(db, user_id: str, email: str, plan_slug: str | None = None) -> None:
         "insert into auth.users (id, email, raw_user_meta_data) values (%s, %s, %s)",
         (user_id, email, json.dumps(meta)),
     )
+    # Dalla 0026 il trigger non assegna piani a pagamento: il piano richiesto
+    # si applica via fn_switch_plan (percorso server legittimo).
+    if plan_slug:
+        db.execute(
+            "select public.fn_switch_plan(%s, "
+            "(select id from public.subscription_plans where slug = %s))",
+            (user_id, plan_slug),
+        )
 
 
 def new_user(db, plan_slug: str | None = None) -> str:

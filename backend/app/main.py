@@ -17,12 +17,14 @@ from app.api.routers import (
     addons,
     admin_addons,
     admin_alerts,
+    admin_payments,
     admin_plans,
     admin_users,
     ai_check,
     alerts,
     auth,
     bandi,
+    billing,
     calendar,
     companies,
     company,
@@ -33,10 +35,12 @@ from app.api.routers import (
     lookups,
     me,
     notifications,
+    payments,
     plans,
     preferences,
     progettista,
     saved_bandi,
+    webhooks,
 )
 from app.clients.anthropic_ai import AiCheckClient
 from app.clients.openapi import OpenapiClient
@@ -60,6 +64,16 @@ async def lifespan(app: FastAPI):
     app.state.ai = AiCheckClient(settings)
     if not app.state.ai.enabled:
         logger.warning("API Anthropic non configurata: AI-check disattivato")
+    # Import locale come alert_scheduler: un import top-level qui sarebbe un
+    # nuovo E402 sulla baseline ruff (11, congelata).
+    from app.clients.revolut import RevolutClient
+
+    app.state.revolut = RevolutClient(settings)
+    if not app.state.revolut.enabled:
+        logger.warning("Revolut non configurato: modulo pagamenti disattivato")
+    elif app.state.revolut.sandbox and settings.env.strip().lower() == "production":
+        # Rete di sicurezza del deploy: incassare in sandbox = non incassare.
+        logger.error("ATTENZIONE: ENV=production ma Revolut è in SANDBOX")
     # Scheduler degli alert nuovi-bandi: task in-process (uvicorn è un solo
     # processo); il claim a DB protegge comunque da esecuzioni concorrenti.
     # Import locale: in questo modulo ogni import top-level dopo basicConfig
@@ -71,13 +85,27 @@ async def lifespan(app: FastAPI):
         app.state.alert_task = asyncio.create_task(
             alert_scheduler.run_forever(app.state.primary, app.state.secondary)
         )
+    # Scheduler pagamenti (rinnovi, dunning, cambi differiti): parte solo se il
+    # provider è configurato — senza, non c'è nulla da addebitare.
+    from app.services import payment_scheduler
+
+    app.state.payment_task = None
+    if settings.payment_scheduler_attivo and app.state.revolut.enabled:
+        # Il worker fatture (passo 6) usa lo stesso client openapi dell'app.
+        payment_scheduler.imposta_openapi(app.state.openapi)
+        app.state.payment_task = asyncio.create_task(
+            payment_scheduler.run_forever(app.state.primary, app.state.revolut)
+        )
     yield
-    if app.state.alert_task is not None:
-        app.state.alert_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await app.state.alert_task
+    for task_attr in ("alert_task", "payment_task"):
+        task = getattr(app.state, task_attr, None)
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
     await app.state.openapi.aclose()
     await app.state.ai.aclose()
+    await app.state.revolut.aclose()
 
 
 app = FastAPI(
@@ -158,9 +186,13 @@ for router in (
     calendar.router,
     lookups.router,
     bandi.router,
+    billing.router,
+    payments.router,
+    webhooks.router,
     admin_users.router,
     admin_plans.router,
     admin_addons.router,
     admin_alerts.router,
+    admin_payments.router,
 ):
     app.include_router(router, prefix=API_PREFIX)

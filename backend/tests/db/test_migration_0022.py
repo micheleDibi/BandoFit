@@ -104,6 +104,9 @@ class TestTriggerRegistrazione:
         assert abbonamenti == 0
 
     def test_non_regressione_assegnazione_piano(self, db):
+        # Dalla 0026 un piano A PAGAMENTO nei metadata ripiega su 'gratuito'
+        # (l'endpoint di registrazione è pubblico): qui si verifica che i
+        # metadata job_position non interferiscano con quel fallback.
         signup(db, UTENTE, "u22@test.it", {
             "plan_slug": "pro", "job_position_slug": "titolare",
         })
@@ -113,7 +116,7 @@ class TestTriggerRegistrazione:
                where s.user_id = %s""",
             (UTENTE,),
         ).fetchone()[0]
-        assert slug == "pro"
+        assert slug == "gratuito"
 
 
 class TestCoerenzaAltro:

@@ -40,6 +40,14 @@ Compila `.env`:
 | `SMTP_HOST/PORT/USER/PASSWORD` + `EMAIL_FROM` | casella SMTP per le email di invito (es. OVH, vedi sotto); in alternativa `RESEND_API_KEY`; senza nessuno dei due le email vengono solo loggate |
 | `OPENAPI_EMAIL` + `OPENAPI_API_KEY` + `OPENAPI_ENV` | credenziali openapi.it per l'import dei dati aziendali e la verifica CF (da console.openapi.com; le API "Company" e "Risk" vanno attivate una tantum dalla Libreria API). `OPENAPI_ENV=production` in deploy; le chiavi sandbox/produzione sono diverse. Vuote = importazione disattivata, il resto dell'app funziona. **Ogni import consuma credito** (IT-full ~0,30 € + IVA) |
 | `ANTHROPIC_API_KEY` + `AI_CHECK_MODEL` | chiave API Anthropic per l'AI-check (da console.anthropic.com); modello default `claude-sonnet-5`. Vuota = AI-check disattivato, il resto dell'app funziona. **Ogni report consuma credito API** (~0,10–0,20 $; meno con l'estrazione del bando in cache). Le quote per gli utenti si impostano dai piani (campo AI-check) |
+| `REVOLUT_SECRET_KEY` + `REVOLUT_ENV` + `REVOLUT_WEBHOOK_SECRET` | pagamenti (Revolut Merchant API, migration 0026): chiave segreta del Merchant account (Revolut Business → APIs → Merchant API), ambiente (`production` in deploy: la **sandbox è un account Business separato** — sandbox-business.revolut.com — con chiavi **diverse**, da far corrispondere all'ambiente) e signing secret `wsk_...` restituito alla registrazione del webhook via API (verifica della firma HMAC — vedi «Pagamenti» sotto). Chiave vuota = modulo pagamenti disattivato (503), il resto dell'app funziona |
+| `FATTURA_DENOMINAZIONE` + `FATTURA_PARTITA_IVA` | emittente (cedente) delle fatture elettroniche SDI (migration 0027): denominazione e P.IVA. **Vuote = fatturazione disattivata** (i pagamenti funzionano ma i purchase pagati restano senza fattura). Dati fiscali reali: solo nel `.env`, mai nel repo |
+| `FATTURA_CODICE_FISCALE` | codice fiscale del cedente (facoltativo) |
+| `FATTURA_REGIME` | regime fiscale FatturaPA del cedente, default `RF01` (ordinario) |
+| `FATTURA_SEDE_INDIRIZZO` / `FATTURA_SEDE_COMUNE` / `FATTURA_SEDE_PROVINCIA` / `FATTURA_SEDE_CAP` | sede del cedente riportata in fattura |
+| `FATTURA_SERIE` | serie della numerazione fatture (default vuota: numerazione unica per anno) — sceglierla una volta e non cambiarla in corso d'anno |
+| `PAYMENT_SCHEDULER_ATTIVO` / `PAYMENT_ORA_ESECUZIONE` | scheduler dei pagamenti (preavvisi, rinnovi automatici, retry, fine grazia, fatture): attivo di default, run giornaliera alle `06:00` locali (Europe/Rome). `false` = nessun rinnovo/downgrade automatico (utile in sviluppo) |
+| `VITE_REVOLUT_MODE` | modalità del widget Revolut nel **browser**: `prod` in produzione — il default è `sandbox`, che non muove denaro vero e in produzione non funzionerebbe. Variabile `VITE_*`: cotta nel bundle, rebuild del frontend dopo la modifica |
 | `RATE_LIMIT_PEPPER` | **obbligatoria in deploy**: con `ENV=production` il backend si rifiuta di partire senza. Generarla con `openssl rand -hex 32`. Sceglierla **una volta sola** — cambiarla azzera i contatori anti-enumerazione in corso, perché i bucket derivano da lei |
 | `TRUSTED_PROXY_HOPS` | quanti proxy fidati stanno davanti al backend, default **2** (Cloudflare + reverse proxy). Vedi «IP del client» sotto: da regolare solo se la catena è diversa |
 
@@ -64,6 +72,30 @@ EMAIL_FROM=BandoFit <noreply@tuodominio.it>
 ```
 
 > **TUTTE le email della piattaforma escono da qui**: conferma registrazione, recupero password, inviti famiglia. Il mailer di Supabase non viene mai usato — i link firmati vengono generati via Admin API (`generate_link`) e spediti dal backend col provider configurato. Non serve configurare nulla nelle SMTP Settings di Supabase.
+
+### Pagamenti Revolut: registrazione del webhook e fatturazione (una tantum)
+
+Prerequisiti: migration **0026 e 0027** eseguite sul DB primario **prima** del deploy di questo backend (checkout e fatture leggono `purchases`/`invoices`). In produzione `REVOLUT_ENV=production` con la chiave del **Merchant account reale**; la sandbox è un account Business **separato** (sandbox-business.revolut.com) con chiavi proprie — webhook e secret vanno registrati **per ciascun ambiente**.
+
+Il backend riceve gli esiti su `POST /api/v1/webhooks/revolut`, ma il provider non lo sa finché il webhook non viene **registrato via API** (non c'è UI):
+
+```bash
+curl -X POST https://merchant.revolut.com/api/webhooks \
+  -H "Authorization: Bearer $REVOLUT_SECRET_KEY" \
+  -H "Revolut-Api-Version: 2024-09-01" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://bandofit.example.com/api/v1/webhooks/revolut",
+       "events": ["ORDER_COMPLETED", "ORDER_FAILED", "ORDER_CANCELLED",
+                  "ORDER_PAYMENT_DECLINED", "ORDER_PAYMENT_FAILED"]}'
+```
+
+- L'`url` deve essere **pubblico e HTTPS**: niente `localhost` né IP nudi (il provider li rifiuta). In sandbox l'host è `sandbox-merchant.revolut.com`.
+- La risposta contiene il **`signing_secret` (`wsk_...`)**: va copiato in `REVOLUT_WEBHOOK_SECRET` — viene mostrato **solo alla registrazione** (o alla rotazione). Senza, l'endpoint webhook risponde `503` e Revolut ritenta: il deploy va corretto, non ignorato.
+- Se l'API dell'endpoint `/api/` è chiusa agli IP di Cloudflare (vhost sopra), il webhook passa comunque dall'edge come ogni altra richiesta: nessuna eccezione da aprire.
+
+Per la **fatturazione SDI** compilare i `FATTURA_*` (tabella sopra): senza, i pagamenti funzionano ma le fatture non partono. L'invio usa le **stesse credenziali openapi.it** dell'import dati — il backend richiede anche gli scope SDI (`sdi.openapi.it`: invio con conservazione a norma + ricerca fatture; in sandbox `test.sdi.openapi.it`), quindi come per Company e Risk l'API **SDI** va attivata una tantum dalla Libreria API di console.openapi.com, o il token non viene emesso.
+
+> ⚠️ **`docker-compose.yml` non inoltra ancora le variabili dei pagamenti al container**: `REVOLUT_*`, `FATTURA_*` e `PAYMENT_*` non compaiono nell'`environment` del servizio backend (né `VITE_REVOLUT_MODE` negli `args` di build del frontend), e il `.env` alla radice non è montato nel container. Finché non vengono aggiunte lì, valorizzarle nel `.env` non basta: il modulo resta spento (503) e il widget resta in sandbox.
 
 > Le variabili `VITE_*` vengono **cotte nel bundle** alla build del frontend: se le cambi, serve `docker compose up -d --build frontend`.
 

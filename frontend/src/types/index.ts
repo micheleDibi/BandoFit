@@ -755,6 +755,199 @@ export interface CalendarEvent {
   updated_at: string;
 }
 
+// ---- Dati di fatturazione ---------------------------------------------------
+
+export type TipoSoggetto = "azienda_it" | "privato_it" | "azienda_ue";
+
+/** Anagrafica di fatturazione (GET/PUT /me/billing-profile). È lo stato
+ *  CORRENTE editabile: ogni fattura fotografa i dati al momento dell'acquisto. */
+export interface BillingProfile {
+  tipo_soggetto: TipoSoggetto;
+  denominazione: string | null;
+  nome: string | null;
+  cognome: string | null;
+  partita_iva: string | null;
+  codice_fiscale: string | null;
+  /** ISO 3166-1 alpha-2 ("IT" per i soggetti italiani). */
+  paese: string;
+  indirizzo: string;
+  comune: string;
+  provincia: string | null;
+  cap: string;
+  /** Recapito SDI (7 caratteri); null per privati e aziende UE. */
+  codice_destinatario: string | null;
+  pec: string | null;
+  /** Esito della verifica VIES (solo azienda_ue: prova del reverse charge). */
+  vies_valid: boolean | null;
+  vies_checked_at: string | null;
+  completo: boolean;
+}
+
+/** Proposta di precompilazione dai dati aziendali: mai persistita da sola. */
+export interface BillingPrefill {
+  tipo_soggetto: TipoSoggetto | null;
+  denominazione: string | null;
+  partita_iva: string | null;
+  codice_fiscale: string | null;
+  indirizzo: string | null;
+  comune: string | null;
+  provincia: string | null;
+  cap: string | null;
+  pec: string | null;
+}
+
+/** Corpo del PUT: solo i campi pertinenti al tipo di soggetto (il backend
+ *  valida la coerenza in schemas/billing.py). */
+export interface BillingProfileInput {
+  tipo_soggetto: TipoSoggetto;
+  denominazione?: string | null;
+  nome?: string | null;
+  cognome?: string | null;
+  partita_iva?: string | null;
+  codice_fiscale?: string | null;
+  paese: string;
+  indirizzo: string;
+  comune: string;
+  provincia?: string | null;
+  cap: string;
+  codice_destinatario?: string | null;
+  pec?: string | null;
+}
+
+// ---- Checkout e acquisti ----------------------------------------------------
+
+/** Preventivo del checkout (POST /me/checkout/preview): importi in CENTESIMI,
+ *  nessun effetto sul server. */
+export interface CheckoutPreview {
+  kind: "piano" | "addon";
+  oggetto_slug: string;
+  oggetto_nome: string;
+  listino_cents: number;
+  /** Credito per il periodo residuo del piano attuale (0 per gli addon). */
+  credito_cents: number;
+  imponibile_cents: number;
+  iva_cents: number;
+  /** Aliquota come stringa decimale ("22.00"; "0.00" col reverse charge). */
+  iva_aliquota: string;
+  /** Natura IVA ("N2.1" = reverse charge art. 7-ter); null con IVA ordinaria. */
+  natura_iva: string | null;
+  totale_cents: number;
+  valuta: string;
+  /** Solo per i piani: la scadenza dell'abbonamento dopo l'acquisto. */
+  scadenza_risultante: string | null;
+  dettaglio: Record<string, unknown>;
+}
+
+/** Esito del POST /me/checkout: il token apre il widget Revolut. */
+export interface CheckoutResult {
+  purchase_id: string;
+  revolut_order_token: string;
+  checkout_url: string | null;
+  totale_cents: number;
+  valuta: string;
+}
+
+export type PurchaseKind = "piano" | "rinnovo" | "addon" | "cambio_admin";
+export type PurchaseStatus =
+  | "in_attesa"
+  | "pagato"
+  | "fallito"
+  | "scaduto"
+  | "annullato"
+  | "gratuito";
+
+export interface Purchase {
+  id: string;
+  kind: PurchaseKind;
+  status: PurchaseStatus;
+  oggetto_slug: string;
+  oggetto_nome: string;
+  descrizione: string;
+  imponibile_cents: number;
+  iva_cents: number;
+  totale_cents: number;
+  iva_aliquota: string;
+  natura_iva: string | null;
+  valuta: string;
+  decline_reason: string | null;
+  /** Solo kind=cambio_admin: la ragione del cambio decisa dall'admin. */
+  motivazione: string | null;
+  created_at: string;
+  paid_at: string | null;
+}
+
+// ---- Admin pagamenti (fatture SDI, anomalie) --------------------------------
+
+export type InvoiceStato =
+  | "da_emettere"
+  | "in_invio"
+  | "inviata"
+  | "consegnata"
+  | "non_consegnata"
+  | "scartata"
+  | "errore";
+
+export interface AdminInvoice {
+  id: string;
+  purchase_id: string;
+  anno: number;
+  serie: string;
+  /** Assegnato al primo invio (null finché da_emettere). */
+  numero: number | null;
+  data_documento: string;
+  stato: InvoiceStato;
+  provider_id: string | null;
+  totale_cents: number;
+  tentativi: number;
+  created_at: string;
+  emessa_at: string | null;
+}
+
+/** GET /admin/invoices: paginata ma senza total_pages (si calcola qui). */
+export interface AdminInvoicesPage {
+  items: AdminInvoice[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/** Incasso orfano da riconciliare (rimborso manuale in v1). */
+export interface PaymentAnomaly {
+  audit_id: number;
+  payload: {
+    revolut_order_id?: string;
+    motivo?: string;
+    purchase_id?: string;
+    [key: string]: unknown;
+  } | null;
+  created_at: string;
+  risolta: boolean;
+}
+
+// ---- Gestione abbonamento (rinnovo, disdetta, metodo di pagamento) ---------
+
+export interface SavedMethod {
+  presente: boolean;
+  /** Es. «Carta •••• 4242»; null se nessun metodo salvato. */
+  label: string | null;
+}
+
+/** Cambio piano programmato alla scadenza (motivo: disdetta | downgrade). */
+export interface ScheduledChange {
+  to_plan_slug: string;
+  to_plan_nome: string;
+  effective_date: string;
+  motivo: string;
+}
+
+/** Stato della gestione abbonamento (GET /me/subscription/management). */
+export interface SubscriptionManagement {
+  auto_renew: boolean;
+  data_scadenza: string | null;
+  metodo: SavedMethod;
+  cambio_programmato: ScheduledChange | null;
+}
+
 // ---- Add-on ----------------------------------------------------------------
 
 export interface Addon {

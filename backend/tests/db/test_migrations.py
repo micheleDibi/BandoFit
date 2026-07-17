@@ -19,6 +19,17 @@ def signup(db, user_id: str, email: str, metadata: str = "{}") -> None:
         "insert into auth.users (id, email, raw_user_meta_data) values (%s, %s, %s::jsonb)",
         (user_id, email, metadata),
     )
+    # Dalla 0026 la registrazione non assegna più i piani a pagamento (il
+    # trigger ripiega su gratuito): i test che partono con un piano pagato lo
+    # ottengono qui via fn_switch_plan, il percorso server rimasto legittimo.
+    # I metadata malformati (plan_slug non-stringa) non matchano nulla: no-op.
+    db.execute(
+        """select public.fn_switch_plan(%s, sp.id)
+           from public.subscription_plans sp
+           where sp.slug = (%s::jsonb ->> 'plan_slug')
+             and sp.is_active and sp.tipo_prezzo = 'importo' and sp.prezzo_annuale > 0""",
+        (user_id, metadata),
+    )
 
 
 def invite(db, user_id: str, email: str, denominazione: str = "Invitato") -> None:

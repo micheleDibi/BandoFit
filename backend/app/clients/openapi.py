@@ -39,11 +39,13 @@ _HOSTS = {
         "oauth": "https://oauth.openapi.it",
         "company": "https://company.openapi.com",
         "risk": "https://risk.openapi.com",
+        "sdi": "https://sdi.openapi.it",
     },
     "sandbox": {
         "oauth": "https://test.oauth.openapi.it",
         "company": "https://test.company.openapi.com",
         "risk": "https://test.risk.openapi.com",
+        "sdi": "https://test.sdi.openapi.it",
     },
 }
 
@@ -101,10 +103,14 @@ class OpenapiClient:
     def _scopes(self) -> list[str]:
         company = self._hosts["company"].removeprefix("https://")
         risk = self._hosts["risk"].removeprefix("https://")
+        sdi = self._hosts["sdi"].removeprefix("https://")
         return [
             f"GET:{company}/IT-full",
             f"GET:{company}/IT-check_id",
+            f"GET:{company}/EU-start",
             f"GET:{risk}/IT-verifica_cf",
+            f"POST:{sdi}/invoices_legal_storage",
+            f"GET:{sdi}/invoices",
         ]
 
     async def _mint_token(self) -> None:
@@ -238,6 +244,55 @@ class OpenapiClient:
             logger.error("openapi: payload IT-full inatteso (%r)", type(data).__name__)
             raise OpenapiUpstreamError()
         return data
+
+    async def verifica_piva_ue(self, paese: str, partita_iva: str) -> bool:
+        """Verifica di una P.IVA UE (scope EU-start): prova VIES per il
+        reverse charge art. 7-ter. Il prefisso VIES della Grecia è EL, non GR.
+
+        Il formato del payload è difensivo (flag di validità se presente,
+        altrimenti anagrafica restituita = P.IVA esistente): va CONFERMATO
+        in sandbox alla prima esecuzione con la chiave di test."""
+        prefisso = "EL" if paese.upper() == "GR" else paese.upper()
+        url = f"{self._hosts['company']}/EU-start/{prefisso}{partita_iva}"
+        try:
+            status, body = await self._get(url)
+            data = self._check_envelope(status, body, url)
+        except OpenapiInvalidIdError:
+            return False  # identificativo rifiutato dal provider = non valido
+        if isinstance(data, list):
+            data = data[0] if data else None
+        if isinstance(data, dict):
+            for chiave in ("valid", "isValid", "vies_valid", "validity"):
+                if chiave in data:
+                    return bool(data[chiave])
+            return True  # anagrafica restituita senza flag: la P.IVA esiste
+        return False
+
+    async def invia_fattura(self, fattura: dict) -> dict:
+        """Trasmette una fattura a SDI (variante con conservazione a norma).
+        Payload JSON FatturaPA. Ritorna il data dell'envelope (contiene l'uuid
+        del provider per il tracking degli esiti). NESSUN retry automatico su
+        esito ignoto: una fattura può essere già stata trasmessa a SDI."""
+        url = f"{self._hosts['sdi']}/invoices_legal_storage"
+        status, body = await self._request("POST", url, json=fattura)
+        data = self._check_envelope(status, body, url)
+        if not isinstance(data, dict):
+            logger.error("openapi: risposta invio fattura inattesa: %r", data)
+            raise OpenapiUpstreamError()
+        return data
+
+    async def cerca_fattura(self, riferimento: str) -> dict | None:
+        """Cerca una fattura per riferimento esterno (per riconciliare un invio
+        con esito ignoto PRIMA di ritrasmettere ed evitare la doppia
+        trasmissione a SDI). Ritorna la prima corrispondenza o None."""
+        url = f"{self._hosts['sdi']}/invoices?external_reference={riferimento}"
+        status, body = await self._get(url)
+        data = self._check_envelope(status, body, url)
+        if isinstance(data, list):
+            return data[0] if data else None
+        if isinstance(data, dict) and data.get("id"):
+            return data
+        return None
 
     async def verifica_cf(self, codice_fiscale: str) -> bool:
         """Verifica del codice fiscale all'Anagrafe Tributaria (sincrona)."""

@@ -277,6 +277,12 @@ class TestElaboraOrdine:
                                    "payments": payments or []}
         return primary, revolut
 
+    def test_select_include_user_id(self):
+        # Regressione: _invia_ricevuta legge purchase["user_id"]; senza questo
+        # campo nella query il completamento sollevava KeyError e mandava in
+        # 500 il /sync (e in 'errore' il webhook).
+        assert "user_id" in payment_service._PURCHASE_SELECT.split(",")
+
     async def test_completed_completa_con_il_payment_id(self):
         primary, revolut = self._con_ordine(
             "completed", [{"id": "pay-9", "state": "captured"}])
@@ -285,6 +291,19 @@ class TestElaboraOrdine:
         fn, params = primary.rpc_calls[0]
         assert fn == "fn_complete_purchase"
         assert params == {"p_purchase_id": "p1", "p_revolut_payment_id": "pay-9"}
+
+    async def test_side_effect_che_esplode_non_propaga(self, monkeypatch):
+        # Il pagamento è già applicato dalla RPC: una ricevuta/fattura che
+        # fallisce non deve far fallire la chiamata (né marcare il webhook
+        # 'errore').
+        async def esplode(*_a, **_k):
+            raise RuntimeError("smtp giù")
+
+        monkeypatch.setattr(payment_service, "_invia_ricevuta", esplode)
+        primary, revolut = self._con_ordine(
+            "completed", [{"id": "pay-9", "state": "captured"}])
+        esito = await payment_service.elabora_ordine(primary, revolut, "ord-1")
+        assert esito == {"esito": "applicato"}  # completato lo stesso
 
     async def test_orfano_segnalato_agli_admin(self, _niente_notifiche):
         primary, revolut = self._con_ordine(

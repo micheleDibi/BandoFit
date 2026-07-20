@@ -1,4 +1,4 @@
-import { ShieldCheck, ShoppingBag } from "lucide-react";
+import { FileDown, ShieldCheck, ShoppingBag } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge, type BadgeProps } from "../components/ui/Badge";
@@ -9,8 +9,47 @@ import { usePurchases } from "../hooks/useCheckout";
 import { apiErrorMessage } from "../lib/api";
 import { cn } from "../lib/cn";
 import { PURCHASE_STATO_LABELS } from "../lib/copy";
+import { downloadFile } from "../lib/download";
 import { eurFromCents, formatDateTime } from "../lib/format";
 import type { PurchaseStatus } from "../types";
+
+/** Scarica il documento (copia di cortesia; l'originale fiscale è la fattura
+ *  elettronica trasmessa a SDI). Disponibile solo sugli acquisti pagati. */
+function ScaricaDocumento({ purchaseId }: { purchaseId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="mt-1">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          setError(null);
+          setBusy(true);
+          try {
+            await downloadFile(
+              `/me/purchases/${purchaseId}/documento.pdf`,
+              `documento-${purchaseId.slice(0, 8)}.pdf`,
+            );
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "Download non riuscito. Riprova.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700 disabled:opacity-60"
+      >
+        <FileDown className="size-3.5" aria-hidden />
+        {busy ? "Preparazione…" : "Scarica documento"}
+      </button>
+      {error && (
+        <span className="ml-2 text-xs text-red-600" role="alert">
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
 
 const STATO_TONI: Record<PurchaseStatus, BadgeProps["tone"]> = {
   in_attesa: "amber",
@@ -91,6 +130,7 @@ export default function Acquisti() {
                           Verifica lo stato →
                         </Link>
                       )}
+                      {p.status === "pagato" && <ScaricaDocumento purchaseId={p.id} />}
                     </div>
                     <p className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">
                       {eurFromCents(p.totale_cents)}

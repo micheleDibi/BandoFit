@@ -33,8 +33,11 @@ from app.services.family_service import raise_from_rpc
 
 logger = logging.getLogger("bandofit.payments")
 
+# user_id serve alle side-effect post-pagamento (ricevuta): la sua assenza qui
+# causava un KeyError sul ramo 'applicato'. Non viene esposto al client:
+# _map_purchase costruisce PurchaseOut dai soli campi dichiarati.
 _PURCHASE_SELECT = (
-    "id,kind,status,oggetto_slug,oggetto_nome,descrizione,imponibile_cents,"
+    "id,user_id,kind,status,oggetto_slug,oggetto_nome,descrizione,imponibile_cents,"
     "iva_cents,totale_cents,iva_aliquota,natura_iva,valuta,decline_reason,"
     "motivazione,created_at,paid_at,revolut_order_id,plan_id,addon_id"
 )
@@ -432,9 +435,19 @@ async def elabora_ordine(primary, revolut, order_id: str) -> dict:
             # Metodo salvato al primo acquisto con auto_renew: persisti per i
             # rinnovi. Ricevuta di cortesia + riga fattura 'da_emettere' (il
             # worker la trasmette a SDI). La data fattura = data dell'incasso.
-            await _salva_metodo(primary, revolut, ordine)
-            await _invia_ricevuta(primary, purchase)
-            await _crea_fattura(primary, purchase["id"])
+            # Queste side-effect sono TUTTE best-effort: il pagamento è già
+            # applicato dalla RPC, un loro guasto non deve far fallire /sync né
+            # marcare il webhook 'errore' (il metodo e la fattura hanno comunque
+            # reti di recupero nello scheduler).
+            try:
+                await _salva_metodo(primary, revolut, ordine)
+                await _invia_ricevuta(primary, purchase)
+                await _crea_fattura(primary, purchase["id"])
+            except Exception:
+                logger.warning(
+                    "side-effect post-pagamento fallita per purchase %s "
+                    "(pagamento comunque applicato)", purchase["id"], exc_info=True
+                )
         return esito
 
     if stato in _STATI_FINALI_KO:

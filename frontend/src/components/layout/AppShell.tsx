@@ -8,6 +8,7 @@ import { cn } from "../../lib/cn";
 import { hasAreaProgettista } from "../../lib/roles";
 import { InviteBanner } from "../shared/InviteBanner";
 import { PoweredBy } from "../shared/PoweredBy";
+import { UpgradeBanner } from "../shared/UpgradeBanner";
 import { CompanyMenu } from "./CompanyMenu";
 import { Logo } from "./Logo";
 import { NavMenu, type NavItem } from "./NavMenu";
@@ -171,6 +172,7 @@ export function AppShell() {
       </header>
 
       <InviteBanner />
+      <UpgradeBanner />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
         <Outlet />

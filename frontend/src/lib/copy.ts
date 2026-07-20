@@ -101,6 +101,16 @@ export const PURCHASE_STATO_LABELS: Record<import("../types").PurchaseStatus, st
   gratuito: "Gratuito",
 };
 
+/** Etichette dei tipi di acquisto: filtro della vista admin pagamenti e badge
+ *  degli acquisti d'origine amministrativa (cambio piano, accredito addon). */
+export const PURCHASE_KIND_LABELS: Record<import("../types").PurchaseKind, string> = {
+  piano: "Piano",
+  rinnovo: "Rinnovo",
+  addon: "Add-on",
+  cambio_admin: "Cambio amministratore",
+  addon_admin: "Accredito addon",
+};
+
 export const PROPOSTA_STATO_LABELS: Record<import("../types").PropostaStato, string> = {
   inviata: "Inviata",
   accettata: "Accettata",

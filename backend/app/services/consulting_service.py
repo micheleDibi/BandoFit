@@ -110,6 +110,19 @@ _RPC_ERRORS: dict[str, tuple[type[AppError], str]] = {
     ),
     "serie_not_found": (NotFoundError, "Serie non trovata"),
     "user_not_found": (NotFoundError, "Utente non trovato"),
+    # Creazione richiesta consulto (fn_create_consultation_request, 0028):
+    "request_gia_aperta": (
+        ConflictError,
+        "C'è già una richiesta di consulto aperta per questo bando",
+    ),
+    "addon_credit_esaurito": (
+        PaymentRequiredError,
+        "Il consulto esperto si attiva con un acquisto: passa dal checkout",
+    ),
+    "addon_not_available": (
+        NotFoundError,
+        "Il consulto esperto non è al momento disponibile",
+    ),
 }
 
 
@@ -662,7 +675,7 @@ async def create_request(primary, user: dict, ai_check_id: str) -> ConsulenzaOut
 
     addon_resp = (
         await primary.table("addons")
-        .select("id,slug,prezzo,tipo_prezzo,is_active")
+        .select("id,slug,prezzo,tipo_prezzo,tipo_fruizione,is_active")
         .eq("slug", get_settings().consulting_addon_slug)
         .eq("is_active", True)
         .limit(1)
@@ -672,69 +685,53 @@ async def create_request(primary, user: dict, ai_check_id: str) -> ConsulenzaOut
         raise NotFoundError("Il consulto esperto non è al momento disponibile")
     addon = addon_resp.data[0]
 
-    # ---- innesto pagamento (modulo 0026) ----
-    # Se l'addon è a pagamento, la richiesta CONSUMA un credito acquistato
-    # (user_addons 'disponibile'); senza credito si passa dal checkout. Il
-    # flusso con tipo_prezzo='gratis' (seed attuale) resta byte-identico.
-    if addon.get("tipo_prezzo") == "importo" and Decimal(str(addon.get("prezzo") or "0")) > 0:
-        crediti = (
-            await primary.table("user_addons")
-            .select("id")
+    # ---- gating consumabile a pagamento (modulo 0028) ----
+    # Pre-check di CORTESIA: dà un 402 chiaro senza toccare il DB quando il
+    # saldo è a zero. L'arbitro vero è la RPC (consumo atomico all'insert):
+    # senza credito la fn_create_consultation_request solleva addon_credit_esaurito
+    # annullando anche la richiesta. Il flusso gratis non è gatato.
+    consumabile_a_pagamento = (
+        addon.get("tipo_fruizione") == "consumabile"
+        and addon.get("tipo_prezzo") == "importo"
+        and Decimal(str(addon.get("prezzo") or "0")) > 0
+    )
+    if consumabile_a_pagamento:
+        inv = (
+            await primary.table("user_addon_inventory")
+            .select("quantita")
             .eq("user_id", str(user["id"]))
             .eq("addon_id", addon["id"])
-            .eq("stato", "disponibile")
+            .gt("quantita", 0)
             .limit(1)
             .execute()
         )
-        if not crediti.data:
+        if not inv.data:
             raise PaymentRequiredError(
                 "Il consulto esperto si attiva con un acquisto: passa dal checkout"
             )
-        credito_id = crediti.data[0]["id"]
-    else:
-        credito_id = None
 
+    # Insert richiesta + consumo di 1 unità in un'unica transazione (RPC 0028).
     try:
-        resp = (
-            await primary.table("consultation_requests")
-            .insert(
-                {
-                    "cliente_id": str(user["id"]),
-                    "family_parent_id": owner_id,
-                    "company_profile_id": check["company_profile_id"],
-                    "ai_check_id": check["id"],
-                    "esito": check.get("esito"),
-                    "punteggio": check.get("punteggio"),
-                    "bando_id": check["bando_id"],
-                    "bando_slug": check["bando_slug"],
-                    "bando_titolo": check["bando_titolo"],
-                    "addon_id": addon["id"],
-                    "addon_slug": addon["slug"],
-                    "addon_prezzo": addon["prezzo"],
-                }
-            )
-            .execute()
-        )
+        resp = await primary.rpc(
+            "fn_create_consultation_request",
+            {"p_payload": {
+                "cliente_id": str(user["id"]),
+                "family_parent_id": owner_id,
+                "company_profile_id": check["company_profile_id"],
+                "ai_check_id": check["id"],
+                "esito": check.get("esito"),
+                "punteggio": check.get("punteggio"),
+                "bando_id": check["bando_id"],
+                "bando_slug": check["bando_slug"],
+                "bando_titolo": check["bando_titolo"],
+                "addon_id": addon["id"],
+            }},
+        ).execute()
     except APIError as exc:
-        if exc.code == _UNIQUE_VIOLATION:
-            raise ConflictError(
-                "C'è già una richiesta di consulto aperta per questo bando"
-            ) from exc
-        raise
-    request = resp.data[0]
-
-    if credito_id is not None:
-        # Consumo DOPO l'insert riuscito: se la richiesta non nasce (conflitto,
-        # errore) il credito resta disponibile. Il consumed_ref lega il credito
-        # alla richiesta per lo storico.
-        await (
-            primary.table("user_addons")
-            .update({"stato": "consumato", "consumed_at": "now()",
-                     "consumed_ref": str(request["id"])})
-            .eq("id", credito_id)
-            .eq("stato", "disponibile")
-            .execute()
-        )
+        raise_from_rpc(exc)
+    request = (resp.data or {}).get("request")
+    if not request:
+        raise UpstreamError()
 
     await _audit(
         primary,

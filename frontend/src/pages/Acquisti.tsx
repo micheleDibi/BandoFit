@@ -8,7 +8,7 @@ import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
 import { usePurchases } from "../hooks/useCheckout";
 import { apiErrorMessage } from "../lib/api";
 import { cn } from "../lib/cn";
-import { PURCHASE_STATO_LABELS } from "../lib/copy";
+import { PURCHASE_KIND_LABELS, PURCHASE_STATO_LABELS } from "../lib/copy";
 import { downloadFile } from "../lib/download";
 import { eurFromCents, formatDateTime } from "../lib/format";
 import type { PurchaseStatus } from "../types";
@@ -109,16 +109,17 @@ export default function Acquisti() {
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-medium text-slate-900">{p.descrizione}</p>
                         <Badge tone={STATO_TONI[p.status]}>{PURCHASE_STATO_LABELS[p.status]}</Badge>
-                        {p.kind === "cambio_admin" && (
+                        {(p.kind === "cambio_admin" || p.kind === "addon_admin") && (
                           <Badge tone="brand">
                             <ShieldCheck className="size-3" aria-hidden />
-                            Cambio amministratore
+                            {PURCHASE_KIND_LABELS[p.kind]}
                           </Badge>
                         )}
                       </div>
-                      {p.kind === "cambio_admin" && p.motivazione && (
-                        <p className="mt-1 text-sm text-slate-500">{p.motivazione}</p>
-                      )}
+                      {(p.kind === "cambio_admin" || p.kind === "addon_admin") &&
+                        p.motivazione && (
+                          <p className="mt-1 text-sm text-slate-500">{p.motivazione}</p>
+                        )}
                       <p className="mt-1 text-xs text-slate-400">
                         {formatDateTime(p.created_at)}
                       </p>

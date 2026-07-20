@@ -4,9 +4,15 @@ from uuid import UUID
 from fastapi import APIRouter, Query
 
 from app.api.deps import AdminUser, PrimaryClient, RevolutDep
+from app.schemas.addon import (
+    AdminAddonMovementOut,
+    AdminGrantAddonIn,
+    AdminRevokeAddonIn,
+    MyAddonOut,
+)
 from app.schemas.common import Page
 from app.schemas.user import AdminSwitchPlanIn, AdminUserOut, AdminUserUpdate
-from app.services import user_service
+from app.services import addon_inventory_service, user_service
 
 router = APIRouter(prefix="/admin/users", tags=["admin"])
 
@@ -46,4 +52,31 @@ async def switch_user_plan(
     return await user_service.admin_switch_user_plan(
         primary, user_id, data.plan_id,
         admin_id=admin["id"], motivazione=data.motivazione, revolut=revolut,
+    )
+
+
+@router.get("/{user_id}/addons", response_model=list[MyAddonOut])
+async def list_user_addons(
+    user_id: UUID, _admin: AdminUser, primary: PrimaryClient
+) -> list[MyAddonOut]:
+    return await addon_inventory_service.get_inventory(primary, str(user_id))
+
+
+@router.post("/{user_id}/addons", response_model=AdminAddonMovementOut)
+async def grant_user_addon(
+    user_id: UUID, data: AdminGrantAddonIn, admin: AdminUser, primary: PrimaryClient
+) -> AdminAddonMovementOut:
+    """Accredita N unità di un addon a un utente (gratuito, con motivazione e
+    audit; compare nello storico acquisti dell'utente come riga a 0 €)."""
+    return await addon_inventory_service.grant(primary, admin["id"], str(user_id), data)
+
+
+@router.post("/{user_id}/addons/{addon_id}/revoke", response_model=AdminAddonMovementOut)
+async def revoke_user_addon(
+    user_id: UUID, addon_id: int, data: AdminRevokeAddonIn,
+    admin: AdminUser, primary: PrimaryClient,
+) -> AdminAddonMovementOut:
+    """Revoca unità addon (clampate al residuo, mai quelle già consumate)."""
+    return await addon_inventory_service.revoke(
+        primary, admin["id"], str(user_id), addon_id, data
     )

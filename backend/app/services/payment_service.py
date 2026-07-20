@@ -100,7 +100,7 @@ async def _piano_per_slug(primary, slug: str) -> dict | None:
 async def _addon_per_slug(primary, slug: str) -> dict | None:
     resp = (
         await primary.table("addons")
-        .select("id,slug,nome,prezzo,tipo_prezzo,is_active")
+        .select("id,slug,nome,prezzo,tipo_prezzo,tipo_fruizione,is_active")
         .eq("slug", slug)
         .eq("is_active", True)
         .limit(1)
@@ -129,6 +129,18 @@ async def _calcola(primary, user_id: str, target: CheckoutTargetIn,
             raise NotFoundError("Addon non disponibile")
         if addon.get("tipo_prezzo") != "importo" or Decimal(str(addon["prezzo"])) <= 0:
             raise BadRequestError("Questo addon non è acquistabile online")
+        # Un addon PERMANENTE già posseduto non si ricompra (rete di sicurezza:
+        # la RPC di completamento lo intercetta comunque come pagamento_orfano).
+        if addon.get("tipo_fruizione") == "permanente":
+            inv = (
+                await primary.table("user_addon_inventory")
+                .select("quantita")
+                .eq("user_id", str(user_id)).eq("addon_id", addon["id"])
+                .gt("quantita", 0).limit(1)
+                .execute()
+            )
+            if inv.data:
+                raise ConflictError("Possiedi già questo add-on")
         imponibile_cents = pricing.in_cents(Decimal(str(addon["prezzo"])))
         iva_cents, aliquota, natura = pricing.iva_per_soggetto(imponibile_cents, tipo_soggetto)
         return CheckoutPreviewOut(

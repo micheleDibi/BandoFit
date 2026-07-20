@@ -847,7 +847,7 @@ export interface CheckoutResult {
   valuta: string;
 }
 
-export type PurchaseKind = "piano" | "rinnovo" | "addon" | "cambio_admin";
+export type PurchaseKind = "piano" | "rinnovo" | "addon" | "cambio_admin" | "addon_admin";
 export type PurchaseStatus =
   | "in_attesa"
   | "pagato"
@@ -870,7 +870,7 @@ export interface Purchase {
   natura_iva: string | null;
   valuta: string;
   decline_reason: string | null;
-  /** Solo kind=cambio_admin: la ragione del cambio decisa dall'admin. */
+  /** Solo kind=cambio_admin/addon_admin: la ragione decisa dall'admin. */
   motivazione: string | null;
   created_at: string;
   paid_at: string | null;
@@ -950,6 +950,10 @@ export interface SubscriptionManagement {
 
 // ---- Add-on ----------------------------------------------------------------
 
+/** consumabile = unità a quantità (si compra N volte, si consuma);
+ *  permanente = possesso binario (0 o 1). Immutabile come lo slug. */
+export type TipoFruizione = "consumabile" | "permanente";
+
 export interface Addon {
   id: number;
   nome: string;
@@ -958,8 +962,35 @@ export interface Addon {
   descrizione: string | null;
   prezzo: string | number;
   tipo_prezzo: TipoPrezzo;
+  tipo_fruizione: TipoFruizione;
   etichetta_prezzo: string | null;
   ordering: number;
   is_active: boolean;
   updated_at: string | null;
+}
+
+/** Voce dell'inventario addon (GET /me/addons e /admin/users/{id}/addons):
+ *  il backend ritorna solo le voci con quantità > 0. */
+export interface MyAddon {
+  addon_id: number;
+  slug: string;
+  nome: string;
+  tipo_fruizione: TipoFruizione;
+  quantita: number;
+  updated_at: string | null;
+}
+
+export type AddonMovimentoTipo =
+  | "purchase"
+  | "admin_grant"
+  | "consume"
+  | "refund"
+  | "admin_revoke";
+
+/** Movimento dello storico addon (GET /me/addons/ledger, più recenti prima). */
+export interface AddonLedgerEntry {
+  tipo: AddonMovimentoTipo;
+  delta: number;
+  note: string | null;
+  created_at: string;
 }

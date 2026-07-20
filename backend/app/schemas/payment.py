@@ -53,7 +53,7 @@ class CheckoutOut(BaseModel):
 
 class PurchaseOut(BaseModel):
     id: str
-    kind: Literal["piano", "rinnovo", "addon", "cambio_admin"]
+    kind: Literal["piano", "rinnovo", "addon", "cambio_admin", "addon_admin"]
     status: Literal["in_attesa", "pagato", "fallito", "scaduto", "annullato", "gratuito"]
     oggetto_slug: str
     oggetto_nome: str

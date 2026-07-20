@@ -4,12 +4,15 @@ import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Dialog } from "../components/ui/Dialog";
-import { TextareaField } from "../components/ui/Field";
+import { SelectField, TextareaField, TextField } from "../components/ui/Field";
 import { Pagination } from "../components/ui/Pagination";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
+import { useAddons } from "../hooks/useAddons";
 import {
+  useAdminGrantAddon,
   useAdminSwitchUserPlan,
   useAdminUpdateUser,
+  useAdminUserAddons,
   useAdminUsers,
 } from "../hooks/useAdmin";
 import { useDebounce } from "../hooks/useDebounce";
@@ -24,7 +27,8 @@ import type { AdminUser, UserRole } from "../types";
 type PendingAction =
   | { kind: "role"; user: AdminUser; role: UserRole }
   | { kind: "active"; user: AdminUser; is_active: boolean }
-  | { kind: "plan"; user: AdminUser; planId: number; planName: string };
+  | { kind: "plan"; user: AdminUser; planId: number; planName: string }
+  | { kind: "addon"; user: AdminUser };
 
 /** Ordine di presentazione nei select (dal ruolo base al più privilegiato). */
 const RUOLI: UserRole[] = ["cliente", "progettista", "admin"];
@@ -67,12 +71,34 @@ export default function AdminUtenti() {
   const { data, isPending, isError, error, refetch } = useAdminUsers({ q, role, page });
   const updateUser = useAdminUpdateUser();
   const switchPlan = useAdminSwitchUserPlan();
+  const grantAddon = useAdminGrantAddon();
+  // Catalogo addon attivi (stesso hook del cliente): opzioni del grant.
+  const { data: catalogoAddons } = useAddons();
 
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  // Motivazione del cambio piano: obbligatoria (finisce nello storico acquisti
-  // come kind=cambio_admin, con l'admin come attore).
+  // Motivazione di cambio piano e grant addon: obbligatoria (finisce nello
+  // storico acquisti come kind=cambio_admin/addon_admin, con l'admin attore).
   const [motivazione, setMotivazione] = useState("");
+  // Form del grant addon ("" = nessun addon scelto; quantità come stringa
+  // per non combattere con l'input number mentre si digita).
+  const [grantAddonId, setGrantAddonId] = useState<number | "">("");
+  const [grantQuantita, setGrantQuantita] = useState("1");
+
+  // Inventario dell'utente del dialog di grant: mostra cosa possiede già.
+  const { data: inventarioUtente } = useAdminUserAddons(
+    pending?.kind === "addon" ? pending.user.profile.id : undefined,
+  );
+
+  const addonSelezionato =
+    grantAddonId === "" ? undefined : catalogoAddons?.find((a) => a.id === grantAddonId);
+  // I permanenti si possiedono una volta sola: quantità bloccata a 1.
+  const addonPermanente = addonSelezionato?.tipo_fruizione === "permanente";
+  const grantQuantitaNum = addonPermanente ? 1 : Number(grantQuantita);
+  const grantQuantitaValida =
+    Number.isInteger(grantQuantitaNum) && grantQuantitaNum >= 1 && grantQuantitaNum <= 100;
+  const grantIncompleto =
+    grantAddonId === "" || !grantQuantitaValida || !motivazione.trim();
 
   const confirmAction = async () => {
     if (!pending) return;
@@ -88,6 +114,14 @@ export default function AdminUtenti() {
           userId: pending.user.profile.id,
           data: { is_active: pending.is_active },
         });
+      } else if (pending.kind === "addon") {
+        if (grantAddonId === "" || !grantQuantitaValida) return;
+        await grantAddon.mutateAsync({
+          userId: pending.user.profile.id,
+          addonId: grantAddonId,
+          quantita: grantQuantitaNum,
+          motivazione: motivazione.trim(),
+        });
       } else {
         await switchPlan.mutateAsync({
           userId: pending.user.profile.id,
@@ -101,7 +135,7 @@ export default function AdminUtenti() {
     }
   };
 
-  const actionBusy = updateUser.isPending || switchPlan.isPending;
+  const actionBusy = updateUser.isPending || switchPlan.isPending || grantAddon.isPending;
 
   return (
     <div>
@@ -313,6 +347,19 @@ export default function AdminUtenti() {
                           <Button
                             variant="ghost"
                             size="sm"
+                            onClick={() => {
+                              setActionError(null);
+                              setMotivazione("");
+                              setGrantAddonId("");
+                              setGrantQuantita("1");
+                              setPending({ kind: "addon", user });
+                            }}
+                          >
+                            Assegna addon
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             disabled={isSelf}
                             title={isSelf ? "Non puoi disattivare il tuo account" : undefined}
                             className={user.profile.is_active ? "text-red-600 hover:bg-red-50 hover:text-red-700" : "text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700"}
@@ -355,7 +402,10 @@ export default function AdminUtenti() {
               variant={pending?.kind === "active" && !pending.is_active ? "danger" : "primary"}
               onClick={confirmAction}
               loading={actionBusy}
-              disabled={pending?.kind === "plan" && !motivazione.trim()}
+              disabled={
+                (pending?.kind === "plan" && !motivazione.trim()) ||
+                (pending?.kind === "addon" && grantIncompleto)
+              }
             >
               Conferma
             </Button>
@@ -388,6 +438,68 @@ export default function AdminUtenti() {
             <strong className="text-slate-900">{pending.user.profile.email}</strong>?
             {!pending.is_active && " L'utente non potrà più accedere alla piattaforma."}
           </p>
+        )}
+        {pending?.kind === "addon" && (
+          <>
+            <p>
+              Assegna un add-on a{" "}
+              <strong className="text-slate-900">{pending.user.profile.email}</strong>.
+            </p>
+            {(inventarioUtente?.length ?? 0) > 0 && (
+              <p className="mt-2 text-sm text-slate-500">
+                Possiede già:{" "}
+                {inventarioUtente!.map((m) => `${m.quantita} × ${m.nome}`).join(", ")}.
+              </p>
+            )}
+            <div className="mt-3 space-y-3">
+              <SelectField
+                label="Add-on"
+                required
+                value={grantAddonId}
+                onChange={(e) =>
+                  setGrantAddonId(e.target.value === "" ? "" : Number(e.target.value))
+                }
+              >
+                <option value="">Seleziona un add-on…</option>
+                {(catalogoAddons ?? []).map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.nome}
+                  </option>
+                ))}
+              </SelectField>
+              <TextField
+                label="Quantità"
+                type="number"
+                min={1}
+                max={100}
+                required
+                value={addonPermanente ? "1" : grantQuantita}
+                disabled={addonPermanente}
+                helper={
+                  addonPermanente ? "Add-on permanente: si possiede una volta sola." : undefined
+                }
+                error={
+                  !addonPermanente && grantQuantita !== "" && !grantQuantitaValida
+                    ? "Indica un numero intero da 1 a 100."
+                    : undefined
+                }
+                onChange={(e) => setGrantQuantita(e.target.value)}
+              />
+              <TextareaField
+                label="Motivazione"
+                required
+                value={motivazione}
+                onChange={(e) => setMotivazione(e.target.value)}
+                placeholder="Es. Cortesia, rimborso, accordo commerciale…"
+                maxLength={500}
+                rows={2}
+              />
+            </div>
+            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              L'accredito è gratuito e verrà registrato nello storico dell'utente con il tuo
+              nome.
+            </p>
+          </>
         )}
         {pending?.kind === "plan" && (
           <>

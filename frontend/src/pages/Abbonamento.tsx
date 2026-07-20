@@ -1,28 +1,117 @@
-import { CalendarDays, Check, Puzzle, Users } from "lucide-react";
+import { BadgeCheck, CalendarDays, Check, ChevronDown, Puzzle, Users, X } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AddonCard } from "../components/shared/AddonCard";
 import { PlanCard, planFeatures } from "../components/shared/PlanCard";
 import { SubscriptionManagement } from "../components/shared/SubscriptionManagement";
-import { Button } from "../components/ui/Button";
+import { Badge } from "../components/ui/Badge";
+import { Button, LinkButton } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Dialog } from "../components/ui/Dialog";
 import { ErrorState, Skeleton } from "../components/ui/states";
 import { useAddons } from "../hooks/useAddons";
+import { useAuth } from "../hooks/useAuth";
 import { useMe, useSwitchPlan } from "../hooks/useMe";
+import { useMyAddonLedger, useMyAddons } from "../hooks/useMyAddons";
 import { usePlans } from "../hooks/usePlans";
+import { useSessionDismissible } from "../hooks/useSessionDismissible";
 import { useScheduleDowngrade } from "../hooks/useSubscriptionManagement";
 import { apiErrorCode, apiErrorMessage } from "../lib/api";
 import { purchaseAddon } from "../lib/addons";
+import { cn } from "../lib/cn";
 import { requestConsultation } from "../lib/consulenza";
-import { formatDate, formatDateNumeric } from "../lib/format";
+import { formatDate, formatDateNumeric, formatDateTime } from "../lib/format";
 import { prezzoDisplay } from "../lib/prezzo";
-import type { Addon, Plan } from "../types";
+import type { Addon, AddonMovimentoTipo, MyAddon, Plan } from "../types";
 
 /** A pagamento = si passa dal checkout; gratis (o importo zero) = switch
  *  diretto via POST /me/subscription, come prima del modulo pagamenti. */
 const aPagamento = (p: { tipo_prezzo: string; prezzo_annuale?: string | number; prezzo?: string | number }) =>
   p.tipo_prezzo === "importo" && Number(p.prezzo_annuale ?? p.prezzo ?? 0) > 0;
+
+/** Etichette dei movimenti del ledger addon in italiano. Compaiono solo qui
+ *  (l'admin non mostra lo storico): restano inline per la policy di copy.ts. */
+const MOVIMENTO_LABELS: Record<AddonMovimentoTipo, string> = {
+  purchase: "Acquisto",
+  admin_grant: "Accredito dall'assistenza",
+  consume: "Consulenza richiesta",
+  refund: "Rimborso",
+  admin_revoke: "Rettifica",
+};
+
+/** Delta con segno esplicito: «+2» / «−1» (segno meno tipografico). */
+const deltaConSegno = (delta: number) => (delta > 0 ? `+${delta}` : `−${Math.abs(delta)}`);
+
+/** Inventario di un addon posseduto, dentro la card del catalogo: badge
+ *  «Hai N …» e storico movimenti a scomparsa. Il ledger (ultimi 20) si
+ *  carica on-demand alla prima apertura, via useMyAddonLedger. */
+function InventarioAddon({ posseduto }: { posseduto: MyAddon }) {
+  const [aperto, setAperto] = useState(false);
+  const {
+    data: movimenti,
+    isPending,
+    isError,
+  } = useMyAddonLedger(aperto ? posseduto.addon_id : undefined);
+
+  return (
+    <div className="mt-3 border-t border-slate-100 pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Badge tone="emerald">
+          <BadgeCheck className="size-3" aria-hidden />
+          Hai {posseduto.quantita} {posseduto.nome}
+        </Badge>
+        <button
+          type="button"
+          aria-expanded={aperto}
+          onClick={() => setAperto((v) => !v)}
+          className="inline-flex cursor-pointer items-center gap-0.5 text-xs font-medium text-brand-600 hover:text-brand-700"
+        >
+          {aperto ? "Nascondi movimenti" : "Vedi movimenti"}
+          <ChevronDown
+            className={cn("size-3.5 transition-transform", aperto && "rotate-180")}
+            aria-hidden
+          />
+        </button>
+      </div>
+      {aperto && (
+        <div className="mt-2">
+          {isPending ? (
+            <Skeleton className="h-16 w-full" />
+          ) : isError ? (
+            <p className="text-xs text-red-600" role="alert">
+              Impossibile caricare i movimenti. Riapri per riprovare.
+            </p>
+          ) : (movimenti?.length ?? 0) === 0 ? (
+            <p className="text-xs text-slate-400">Nessun movimento registrato.</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {movimenti?.map((m, i) => (
+                <li
+                  key={i}
+                  title={m.note ?? undefined}
+                  className="flex items-baseline justify-between gap-2 text-xs"
+                >
+                  <div className="min-w-0">
+                    <span className="font-medium text-slate-700">{MOVIMENTO_LABELS[m.tipo]}</span>
+                    <span className="ml-1.5 text-slate-400">{formatDateTime(m.created_at)}</span>
+                  </div>
+                  <span
+                    className={cn(
+                      "shrink-0 font-semibold tabular-nums",
+                      m.delta > 0 ? "text-emerald-600" : "text-slate-500",
+                    )}
+                  >
+                    {deltaConSegno(m.delta)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Abbonamento() {
   const navigate = useNavigate();
@@ -35,8 +124,17 @@ export default function Abbonamento() {
     isError: addonsError,
     refetch: refetchAddons,
   } = useAddons();
+  // Inventario addon: se una voce fallisse o fosse vuota, il catalogo resta
+  // intatto — l'inventario è un arricchimento, non un requisito.
+  const { data: mieiAddon } = useMyAddons();
   const switchPlan = useSwitchPlan();
   const scheduleDowngrade = useScheduleDowngrade();
+  // Intento d'acquisto dalla registrazione: il ?piano= scelto sulla landing
+  // viaggia come plan_slug nello user_metadata di Supabase (lo scrive
+  // auth_service alla creazione dell'utente) — da qui lo si rilegge senza
+  // toccare il backend.
+  const { session } = useAuth();
+  const intento = useSessionDismissible("intento-piano");
 
   const [planToConfirm, setPlanToConfirm] = useState<Plan | null>(null);
   const [switchNotice, setSwitchNotice] = useState<string | null>(null);
@@ -65,6 +163,20 @@ export default function Abbonamento() {
   const currentPlanId = me.subscription?.plan.id;
   const isActiveChild = me.family?.role === "child" && me.family.status === "active";
   const activeAddons = addons ?? [];
+
+  // Callout «volevi il piano X»: solo se il piano desiderato in registrazione
+  // esiste ancora, è a pagamento acquistabile, e l'utente NON è già su un
+  // piano pagato — a quel punto l'intento è soddisfatto (o superato) e
+  // l'avviso sparisce da solo.
+  const metaSlug: unknown = session?.user?.user_metadata?.plan_slug;
+  const pianoIntento =
+    typeof metaSlug === "string" ? plans?.find((p) => p.slug === metaSlug) ?? null : null;
+  const mostraIntento =
+    !intento.dismissed &&
+    !!pianoIntento &&
+    pianoIntento.is_active &&
+    aPagamento(pianoIntento) &&
+    me.subscription?.plan.tipo_prezzo !== "importo";
 
   // Da un piano a pagamento verso uno gratuito si passa dall'endpoint di
   // downgrade programmato (fase 3): il cambio avviene alla scadenza e lo
@@ -158,6 +270,31 @@ export default function Abbonamento() {
       <p className="mt-1 text-sm text-slate-500">
         Il tuo piano, i piani disponibili e gli add-on per estendere BandoFit.
       </p>
+
+      {mostraIntento && pianoIntento && (
+        <div
+          role="status"
+          className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3"
+        >
+          <p className="min-w-0 flex-1 text-sm text-brand-900">
+            Volevi il piano <strong>{pianoIntento.nome}</strong>: completa l'acquisto quando vuoi.
+          </p>
+          <div className="flex shrink-0 items-center gap-1">
+            <LinkButton to={`/app/checkout?piano=${pianoIntento.slug}`} size="sm">
+              Completa l'acquisto
+            </LinkButton>
+            <button
+              type="button"
+              onClick={intento.dismiss}
+              title="Nascondi questo avviso"
+              aria-label="Nascondi questo avviso"
+              className="rounded-lg p-1.5 text-brand-400 transition-colors hover:bg-brand-100 hover:text-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
+            >
+              <X className="size-4" aria-hidden />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Abbonamento: un figlio ATTIVO eredita il piano della famiglia */}
       {isActiveChild ? (
@@ -336,15 +473,23 @@ export default function Abbonamento() {
             </div>
           ) : (
             <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-              {activeAddons.map((addon) => (
-                <AddonCard
-                  key={addon.id}
-                  addon={addon}
-                  onAcquista={handleAcquista}
-                  onRichiedi={(a) => handleRichiedi("addon", a)}
-                  loading={addonLoading.has(addon.slug)}
-                />
-              ))}
+              {activeAddons.map((addon) => {
+                const posseduto = mieiAddon?.find((m) => m.addon_id === addon.id);
+                return (
+                  <AddonCard
+                    key={addon.id}
+                    addon={addon}
+                    onAcquista={handleAcquista}
+                    onRichiedi={(a) => handleRichiedi("addon", a)}
+                    loading={addonLoading.has(addon.slug)}
+                    inventario={
+                      posseduto && posseduto.quantita > 0 ? (
+                        <InventarioAddon posseduto={posseduto} />
+                      ) : undefined
+                    }
+                  />
+                );
+              })}
             </div>
           )}
         </section>

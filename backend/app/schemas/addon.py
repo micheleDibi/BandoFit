@@ -1,9 +1,14 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from app.schemas.plan import TipoPrezzo
+
+# consumabile = unità a quantità (si compra N volte, si consuma);
+# permanente = possesso binario (0 o 1). Immutabile come lo slug (migration 0028).
+TipoFruizione = Literal["consumabile", "permanente"]
 
 
 class AddonOut(BaseModel):
@@ -13,6 +18,7 @@ class AddonOut(BaseModel):
     descrizione: str | None = None
     prezzo: Decimal
     tipo_prezzo: TipoPrezzo = "importo"
+    tipo_fruizione: TipoFruizione = "consumabile"
     etichetta_prezzo: str | None = None
     ordering: int
     is_active: bool
@@ -26,9 +32,48 @@ class AddonCreate(BaseModel):
     descrizione: str | None = None
     prezzo: Decimal = Field(ge=0)
     tipo_prezzo: TipoPrezzo = "importo"
+    # Come lo slug, il tipo di fruizione è fissato alla creazione (non in Update).
+    tipo_fruizione: TipoFruizione = "consumabile"
     etichetta_prezzo: str | None = Field(default=None, max_length=100)
     ordering: int = 0
     is_active: bool = True
+
+
+class MyAddonOut(BaseModel):
+    """Una voce dell'inventario addon dell'utente."""
+
+    addon_id: int
+    slug: str
+    nome: str
+    tipo_fruizione: TipoFruizione
+    quantita: int
+    updated_at: datetime | None = None
+
+
+class AddonLedgerEntryOut(BaseModel):
+    tipo: Literal["purchase", "admin_grant", "consume", "refund", "admin_revoke"]
+    delta: int
+    note: str | None = None
+    created_at: datetime
+
+
+class AdminGrantAddonIn(BaseModel):
+    addon_id: int
+    quantita: int = Field(default=1, ge=1, le=100)
+    motivazione: str = Field(min_length=1, max_length=500)
+
+
+class AdminRevokeAddonIn(BaseModel):
+    quantita: int = Field(default=1, ge=1, le=100)
+    motivazione: str = Field(min_length=1, max_length=500)
+
+
+class AdminAddonMovementOut(BaseModel):
+    """Esito di un grant/revoca admin."""
+
+    purchase_id: str | None = None
+    quantita_residua: int
+    quantita_revocata: int | None = None
 
 
 class AddonUpdate(BaseModel):

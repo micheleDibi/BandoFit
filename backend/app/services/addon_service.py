@@ -10,7 +10,7 @@ from app.core.errors import BadRequestError, ConflictError, NotFoundError
 from app.schemas.addon import AddonCreate, AddonOut, AddonUpdate
 
 ADDON_SELECT = (
-    "id,nome,slug,descrizione,prezzo,tipo_prezzo,etichetta_prezzo,"
+    "id,nome,slug,descrizione,prezzo,tipo_prezzo,tipo_fruizione,etichetta_prezzo,"
     "ordering,is_active,updated_at"
 )
 

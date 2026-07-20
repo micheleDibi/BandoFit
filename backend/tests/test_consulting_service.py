@@ -9,7 +9,13 @@ import pytest
 from postgrest.exceptions import APIError
 from pydantic import ValidationError
 
-from app.core.errors import BadRequestError, ConflictError, ForbiddenError, NotFoundError
+from app.core.errors import (
+    BadRequestError,
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+    PaymentRequiredError,
+)
 from app.schemas.consulting import MAX_OCCORRENZE_SERIE, SerieIn, SlotIn
 from app.schemas.openapi_data import DossierResponse
 from app.services import consulting_service
@@ -433,8 +439,15 @@ class TestSerieSlot:
 # ---------------------------------------------------------------------------
 
 
-def create_selects(check_status: str = "ready", addon: bool = True) -> dict:
-    return {
+def create_selects(check_status: str = "ready", addon: bool = True,
+                   addon_overrides: dict | None = None, inventario: int | None = None) -> dict:
+    addon_row = {
+        "id": 1, "slug": "consulto-esperto", "prezzo": 0,
+        "tipo_prezzo": "gratis", "tipo_fruizione": "consumabile", "is_active": True,
+    }
+    if addon_overrides:
+        addon_row.update(addon_overrides)
+    sel = {
         "ai_checks": [
             {
                 "id": AI_CHECK_ID,
@@ -448,16 +461,15 @@ def create_selects(check_status: str = "ready", addon: bool = True) -> dict:
                 "family_parent_id": TITOLARE,
             }
         ],
-        "addons": (
-            [{"id": 1, "slug": "consulto-esperto", "prezzo": 0, "is_active": True}]
-            if addon
-            else []
-        ),
+        "addons": [addon_row] if addon else [],
         "profiles": [
             {"id": PROGETTISTA, "email": "prog@test.it"},
             {"id": "11111111-0000-0000-0000-000000000030", "email": "prog2@test.it"},
         ],
     }
+    if inventario is not None:
+        sel["user_addon_inventory"] = [{"quantita": inventario}] if inventario > 0 else []
+    return sel
 
 
 class TestCreateRequest:
@@ -483,25 +495,42 @@ class TestCreateRequest:
             await consulting_service.create_request(primary, USER, AI_CHECK_ID)
 
     async def test_richiesta_duplicata(self, as_titolare):
+        # Dalla 0028 l'insert+consumo è nella RPC: il conflitto one_open torna
+        # come detail 'request_gia_aperta'.
         primary = FakePrimary(selects=create_selects())
-        primary.errors[("consultation_requests", "insert")] = api_error(code="23505")
+        primary.rpc_errors["fn_create_consultation_request"] = api_error(
+            details="request_gia_aperta"
+        )
         with pytest.raises(ConflictError):
             await consulting_service.create_request(primary, USER, AI_CHECK_ID)
+
+    async def test_credito_esaurito_da_402(self, as_titolare):
+        # Addon consumabile a pagamento con inventario a zero: pre-check 402.
+        primary = FakePrimary(selects=create_selects(
+            addon_overrides={"tipo_prezzo": "importo", "prezzo": 49,
+                             "tipo_fruizione": "consumabile"},
+            inventario=0,
+        ))
+        with pytest.raises(PaymentRequiredError):
+            await consulting_service.create_request(primary, USER, AI_CHECK_ID)
+        # non arriva alla RPC
+        assert "fn_create_consultation_request" not in [c[0] for c in primary.rpc_calls]
 
     async def test_creazione_con_eventi(
         self, as_titolare, notify_calls, spawn_calls, detail_stub
     ):
         primary = FakePrimary(selects=create_selects())
-        primary.insert_id = REQUEST_ID
+        primary.rpc_results["fn_create_consultation_request"] = {"request": request_row()}
         out = await consulting_service.create_request(primary, USER, AI_CHECK_ID)
         assert out is detail_stub
 
-        [(_, _, payload, _)] = [
-            op for op in primary.ops if op[0] == "consultation_requests"
-        ]
+        # L'insert+consumo passa dalla RPC atomica (non più un insert diretto).
+        [(fn, params)] = [c for c in primary.rpc_calls
+                          if c[0] == "fn_create_consultation_request"]
+        payload = params["p_payload"]
         assert payload["cliente_id"] == TITOLARE
         assert payload["esito"] == "ammissibile"
-        assert payload["addon_slug"] == "consulto-esperto"
+        assert payload["addon_id"] == 1
 
         [audit] = [op for op in primary.ops if op[0] == "audit_log"]
         assert audit[2]["action"] == "consulenza.created"

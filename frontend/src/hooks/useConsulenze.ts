@@ -58,11 +58,20 @@ function useConsulenzaMutation<TVariables>(
   });
 }
 
-/** Attivazione dell'addon «Consulto esperto» su un AI-check completato. */
+/** Attivazione dell'addon «Consulto esperto» su un AI-check completato.
+ *  Il backend scala un'unità dall'inventario alla creazione: oltre al pattern
+ *  standard si invalida anche ["my-addons"] (badge in Abbonamento e gating). */
 export function useCreateConsulenza() {
-  return useConsulenzaMutation(async (aiCheckId: string) =>
-    (await api.post<Consulenza>("/me/consulenze", { ai_check_id: aiCheckId })).data,
-  );
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (aiCheckId: string) =>
+      (await api.post<Consulenza>("/me/consulenze", { ai_check_id: aiCheckId })).data,
+    onSuccess: (data) => {
+      queryClient.setQueryData(["consulenze", data.id], data);
+      queryClient.invalidateQueries({ queryKey: ["consulenze"], exact: true });
+      queryClient.invalidateQueries({ queryKey: ["my-addons"] });
+    },
+  });
 }
 
 export function useAccettaProposta(requestId: string) {

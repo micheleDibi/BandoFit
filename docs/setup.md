@@ -55,11 +55,11 @@ npm run dev
 
 ## 5. Test end-to-end (smoke test)
 
-1. `/registrati` con il piano Smart → atterraggio su `/app/bandi` con la lista popolata.
+1. `/registrati` (solo dati anagrafici: il piano non si sceglie più qui, si parte da Gratuito) → atterraggio su `/app/bandi` con la lista popolata.
 2. Cerca "PNRR", filtra per regione e attiva "solo aperti" → apri un dettaglio (il contenuto viene renderizzato, i link esterni funzionano).
 3. `/app/abbonamento` → passa al piano Pro (la card si aggiorna).
 4. Promuovi il tuo utente ad admin (passo 3) → ricarica → compaiono `Utenti`, `Piani` e `Add-on`.
-5. In `Piani` (admin) cambia il prezzo di Smart → verifica su `/registrati` (step 2).
+5. In `Piani` (admin) cambia il prezzo di Smart → verifica su `/app/abbonamento` (griglia piani).
 
 Per test puntuali delle API, la Swagger UI è su `http://localhost:8000/docs`.
 

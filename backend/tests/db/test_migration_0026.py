@@ -303,13 +303,23 @@ class TestCompletePurchase:
         assert active_sub(db, uid)[0] == "gratuito"  # nulla applicato
 
     def test_addon_crea_il_credito(self, db):
+        # Dalla 0028 l'acquisto addon accredita nel ledger + inventario (non
+        # più in user_addons, congelata): il credito = quantità 1.
         uid = new_user(db)
         pid = make_purchase(db, uid, "addon")
-        db.execute("select public.fn_complete_purchase(%s, 'pay-ad')", (pid,))
-        stato = db.execute(
-            "select stato from public.user_addons where purchase_id = %s", (pid,)
+        addon_id = db.execute(
+            "select addon_id from public.purchases where id = %s", (pid,)
         ).fetchone()[0]
-        assert stato == "disponibile"
+        db.execute("select public.fn_complete_purchase(%s, 'pay-ad')", (pid,))
+        qty = db.execute(
+            "select quantita from public.user_addon_inventory "
+            "where user_id = %s and addon_id = %s", (uid, addon_id)
+        ).fetchone()[0]
+        assert qty == 1
+        tipo, delta = db.execute(
+            "select tipo, delta from public.addon_ledger where purchase_id = %s", (pid,)
+        ).fetchone()
+        assert (tipo, delta) == ("purchase", 1)
 
 
 # ------------------------------------------------------------- fn_fail_purchase

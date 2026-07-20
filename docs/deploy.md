@@ -75,7 +75,7 @@ EMAIL_FROM=BandoFit <noreply@tuodominio.it>
 
 ### Pagamenti Revolut: registrazione del webhook e fatturazione (una tantum)
 
-Prerequisiti: migration **0026 e 0027** eseguite sul DB primario **prima** del deploy di questo backend (checkout e fatture leggono `purchases`/`invoices`). In produzione `REVOLUT_ENV=production` con la chiave del **Merchant account reale**; la sandbox è un account Business **separato** (sandbox-business.revolut.com) con chiavi proprie — webhook e secret vanno registrati **per ciascun ambiente**.
+Prerequisiti: migration **0026, 0027 e 0028** eseguite sul DB primario **prima** del deploy di questo backend (checkout e fatture leggono `purchases`/`invoices`; l'inventario add-on e il consulto a pagamento leggono `user_addon_inventory`/`addon_ledger`). La **0028** va rilasciata **in modo atomico** con backend e frontend (R3/R4/R5 — inventario add-on, consumo del consulto e grant admin sono un blocco unico); dal suo rilascio il **consulto esperto diventa a pagamento** appena la riga di catalogo `consulto-esperto` è consumabile a pagamento, senza periodo di omaggio. In produzione `REVOLUT_ENV=production` con la chiave del **Merchant account reale**; la sandbox è un account Business **separato** (sandbox-business.revolut.com) con chiavi proprie — webhook e secret vanno registrati **per ciascun ambiente**.
 
 Il backend riceve gli esiti su `POST /api/v1/webhooks/revolut`, ma il provider non lo sa finché il webhook non viene **registrato via API** (non c'è UI):
 

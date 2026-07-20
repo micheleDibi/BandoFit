@@ -4,6 +4,7 @@ import type {
   Addon,
   AdminInvoicesPage,
   AdminUser,
+  MyAddon,
   Page,
   PaymentAnomaly,
   Plan,
@@ -155,6 +156,49 @@ export function useAdminCreateAddon() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-addons"] });
       queryClient.invalidateQueries({ queryKey: ["addons"] });
+    },
+  });
+}
+
+// ---- Inventario addon degli utenti (grant admin) ----------------------------
+
+/** Inventario addon di un utente (solo voci con quantità > 0): mostra nel
+ *  dialog di grant cosa l'utente possiede già. */
+export function useAdminUserAddons(userId: string | undefined) {
+  return useQuery({
+    queryKey: ["admin-user-addons", userId],
+    queryFn: async () =>
+      (await api.get<MyAddon[]>(`/admin/users/${userId}/addons`)).data,
+    enabled: !!userId,
+  });
+}
+
+export function useAdminGrantAddon() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    // Accredito GRATUITO con motivazione obbligatoria: crea una riga
+    // purchases kind=addon_admin con l'admin come attore (parità cambio piano).
+    mutationFn: async ({
+      userId,
+      addonId,
+      quantita,
+      motivazione,
+    }: {
+      userId: string;
+      addonId: number;
+      quantita: number;
+      motivazione: string;
+    }) =>
+      (
+        await api.post<{ purchase_id: string | null; quantita_residua: number }>(
+          `/admin/users/${userId}/addons`,
+          { addon_id: addonId, quantita, motivazione },
+        )
+      ).data,
+    onSuccess: (_data, { userId }) => {
+      queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-purchases"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-user-addons", userId] });
     },
   });
 }

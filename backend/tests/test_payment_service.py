@@ -64,6 +64,9 @@ class FakeQuery:
         self.filtri.append((col, val))
         return self
 
+    def gt(self, *_a):
+        return self
+
     def order(self, *_a, **_k):
         return self
 
@@ -205,6 +208,19 @@ class TestPreview:
         with pytest.raises(BadRequestError, match="superiore"):
             await payment_service.preview(
                 _primary(sub_plan="pro"), USER, CheckoutTargetIn(plan_slug="smart")
+            )
+
+    async def test_addon_permanente_gia_posseduto_rifiutato(self):
+        # Un addon permanente già in inventario non si ricompra (409).
+        primary = _primary(righe_extra={
+            "addons": [{"id": 9, "slug": "report-pro", "nome": "Report Pro",
+                        "prezzo": "20.00", "tipo_prezzo": "importo",
+                        "tipo_fruizione": "permanente", "is_active": True}],
+            "user_addon_inventory": [{"user_id": USER, "addon_id": 9, "quantita": 1}],
+        })
+        with pytest.raises(ConflictError, match="Possiedi già"):
+            await payment_service.preview(
+                primary, USER, CheckoutTargetIn(addon_slug="report-pro")
             )
 
     async def test_reverse_charge_ue(self):

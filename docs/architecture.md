@@ -72,6 +72,20 @@ Invarianti (fatte rispettare da vincoli + RPC, non da convenzioni):
 
 Gli scheduler (alert e pagamenti) sono **in-process** — uvicorn è un processo singolo — e il **claim è a DB** (INSERT sulla PK del giorno in `payment_runs`/`bando_alert_runs`, 23505 = già eseguito): pronto per un futuro multi-processo senza doppie run.
 
+## Inventario add-on
+
+Le unità add-on possedute da un utente vivono in un modello **saldo + ledger append-only** (migration 0028), che sostituisce il credito riga-per-riga di `user_addons` (**deprecata**):
+- **saldo materializzato** (`user_addon_inventory`, per `(utente, addon)`) = **cache** ricostruibile in ogni momento dal ledger (`quantita = sum(delta)`), l'unica cosa che le letture veloci interrogano;
+- **ledger append-only** (`addon_ledger`) = la verità: ogni movimento (acquisto, accredito admin, consumo, revoca) è una riga immutabile — un trigger rifiuta UPDATE/DELETE **anche al `service_role`**, l'idempotenza è a DB (indici parziali UNIQUE per richiesta / per purchase);
+- **unico punto di scrittura**: `fn_addon_apply_movement` scrive ledger e saldo insieme, col `check(quantita ≥ 0)` come arbitro del consumo (mai saldo negativo). Il saldo è sempre **ricostruibile dal ledger** — è l'invariante che il backfill 0028 verifica e la migration aborta se rotta.
+
+Comportamenti chiave:
+- **consumo atomico**: una richiesta di consulto scala 1 unità **nella stessa transazione** dell'insert della richiesta (`fn_create_consultation_request`); senza credito la richiesta non nasce e il client riceve `409 payment_required`. Il **gating è pilotato dal catalogo** (`addons.tipo_fruizione` + `tipo_prezzo` + prezzo): si accende da sé quando la riga di consulto è consumabile a pagamento, **senza omaggi**.
+- **grant admin gratuito**: l'admin accredita/revoca unità (`fn_admin_grant_addon`/`fn_admin_revoke_addon`); il grant lascia una riga `purchases` a 0 € (`kind='addon_admin'`), **esclusa dai ricavi**, gemella del cambio piano admin.
+- **nessun rimborso automatico**: il tipo ledger `refund` è predisposto ma non emesso — una restituzione la fa l'admin col grant, che riaccredita.
+
+`user_addons` è **deprecata** a favore di questo modello: congelata in sola lettura come rete di rollback, non più scritta da alcun percorso.
+
 ## Flusso di autenticazione
 
 1. Il frontend chiama `supabase.auth.signUp()` con `options.data = {nome, cognome, azienda, plan_slug}`.

@@ -14,7 +14,7 @@ import {
 } from "../hooks/useAdmin";
 import { apiErrorMessage } from "../lib/api";
 import { cn } from "../lib/cn";
-import { PURCHASE_STATO_LABELS } from "../lib/copy";
+import { PURCHASE_KIND_LABELS, PURCHASE_STATO_LABELS } from "../lib/copy";
 import { eurFromCents, formatDateNumeric, formatDateTime } from "../lib/format";
 import type { AdminInvoice, InvoiceStato, PurchaseKind, PurchaseStatus } from "../types";
 
@@ -25,13 +25,6 @@ const PURCHASE_TONI: Record<PurchaseStatus, BadgeProps["tone"]> = {
   scaduto: "slate",
   annullato: "slate",
   gratuito: "slate",
-};
-
-const KIND_LABELS: Record<PurchaseKind, string> = {
-  piano: "Piano",
-  rinnovo: "Rinnovo",
-  addon: "Add-on",
-  cambio_admin: "Cambio amministratore",
 };
 
 /** Colori sobri per lo stato SDI: verde solo a consegna avvenuta, rosso dove
@@ -89,9 +82,9 @@ function SezioneAcquisti() {
           className={selectClass}
         >
           <option value="">Tutti i tipi</option>
-          {(Object.keys(KIND_LABELS) as PurchaseKind[]).map((k) => (
+          {(Object.keys(PURCHASE_KIND_LABELS) as PurchaseKind[]).map((k) => (
             <option key={k} value={k}>
-              {KIND_LABELS[k]}
+              {PURCHASE_KIND_LABELS[k]}
             </option>
           ))}
         </select>
@@ -146,10 +139,17 @@ function SezioneAcquisti() {
                             Cambio admin
                           </Badge>
                         )}
+                        {p.kind === "addon_admin" && (
+                          <Badge tone="brand">
+                            <ShieldCheck className="size-3" aria-hidden />
+                            {PURCHASE_KIND_LABELS.addon_admin}
+                          </Badge>
+                        )}
                       </div>
-                      {p.kind === "cambio_admin" && p.motivazione && (
-                        <p className="mt-0.5 text-xs text-slate-500">{p.motivazione}</p>
-                      )}
+                      {(p.kind === "cambio_admin" || p.kind === "addon_admin") &&
+                        p.motivazione && (
+                          <p className="mt-0.5 text-xs text-slate-500">{p.motivazione}</p>
+                        )}
                       {p.decline_reason && (
                         <p className="mt-0.5 text-xs text-slate-400">
                           Declino: {p.decline_reason}

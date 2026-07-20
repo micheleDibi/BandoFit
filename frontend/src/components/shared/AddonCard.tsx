@@ -1,4 +1,5 @@
 import { Check, MessageCircle, Puzzle, ShoppingCart } from "lucide-react";
+import type { ReactNode } from "react";
 import { Button } from "../ui/Button";
 import { prezzoDisplay } from "../../lib/prezzo";
 import type { Addon } from "../../types";
@@ -6,17 +7,20 @@ import type { Addon } from "../../types";
 /** Card di un add-on (stessa estetica di PlanCard, prezzo una tantum senza
  *  suffisso «/anno»). CTA a tre vie sul tipo_prezzo: «Acquista» (importo) e
  *  «Attiva» (gratis) passano dal punto di estensione purchaseAddon;
- *  «su richiesta» passa da requestConsultation e non è acquisibile. */
+ *  «su richiesta» passa da requestConsultation e non è acquisibile.
+ *  `inventario`: blocco opzionale sotto la CTA («Hai N …» + movimenti). */
 export function AddonCard({
   addon,
   onAcquista,
   onRichiedi,
   loading = false,
+  inventario,
 }: {
   addon: Addon;
   onAcquista: (addon: Addon) => void;
   onRichiedi: (addon: Addon) => void;
   loading?: boolean;
+  inventario?: ReactNode;
 }) {
   const display = prezzoDisplay(addon.tipo_prezzo, addon.etichetta_prezzo, addon.prezzo);
 
@@ -63,6 +67,7 @@ export function AddonCard({
           </Button>
         )}
       </div>
+      {inventario}
     </div>
   );
 }

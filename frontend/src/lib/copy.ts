@@ -143,8 +143,6 @@ export const IMPORT_COPY = {
 
   introForm:
     "Recuperiamo i dati ufficiali della tua azienda dal Registro Imprese tramite openapi.it: anagrafica, ATECO, sede e unità locali, cariche, dipendenti e altro.",
-  notaCosto:
-    "L'operazione utilizza il credito del servizio dati (circa 0,30 € + IVA per importazione).",
   attesa:
     "Recupero dei dati ufficiali dal Registro Imprese in corso. L'operazione può richiedere fino a un paio di minuti: non chiudere questa finestra.",
 

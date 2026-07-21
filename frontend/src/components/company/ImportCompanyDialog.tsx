@@ -94,8 +94,8 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: FormEvent) => {
+    e?.preventDefault();
     if (previewImport.isPending) return; // doppio submit: la chiamata costa
     setError(null);
     const cleaned = normalizePartitaIva(piva);
@@ -199,7 +199,11 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
         <Button variant="ghost" onClick={onClose}>
           {IMPORT_COPY.annulla}
         </Button>
-        <Button type="submit" form="import-company-form">
+        {/* onClick esplicito, non l'associazione `form=`: quest'ultima, con il
+            bottone fuori dal form e dentro un <dialog> modale, in Safari valida
+            per errore i campi obbligatori (inerti) del form azienda sottostante
+            e annulla il submit senza mostrare nulla. */}
+        <Button type="button" onClick={() => handleSubmit()}>
           Importa i dati
         </Button>
       </>
@@ -367,12 +371,11 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
           {erroreBox}
         </div>
       ) : (
-        <form id="import-company-form" onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <p>
             {IMPORT_COPY.introForm} I campi già compilati{" "}
             <strong>non verranno sovrascritti</strong>.
           </p>
-          <p className="text-xs text-slate-400">{IMPORT_COPY.notaCosto}</p>
           <TextField
             label="Partita IVA"
             required

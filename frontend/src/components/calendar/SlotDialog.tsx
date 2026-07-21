@@ -124,8 +124,8 @@ export function SlotDialog({ state, onClose }: { state: SlotDialogState; onClose
     return null;
   };
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: FormEvent) => {
+    e?.preventDefault();
     if (busy) return;
     const problem = validate();
     setValidationError(problem);
@@ -268,9 +268,11 @@ export function SlotDialog({ state, onClose }: { state: SlotDialogState; onClose
           <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
             Annulla
           </Button>
+          {/* onClick esplicito, non l'associazione `form=` (fragile in Safari
+              con il bottone fuori dal form dentro un <dialog> modale). */}
           <Button
-            type="submit"
-            form="slot-form"
+            type="button"
+            onClick={() => handleSubmit()}
             loading={busy && !deleteSlot.isPending && !deleteSerie.isPending}
           >
             {editing ? "Salva modifiche" : "Crea"}
@@ -278,7 +280,7 @@ export function SlotDialog({ state, onClose }: { state: SlotDialogState; onClose
         </>
       }
     >
-      <form id="slot-form" onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <TextField
           label="Data"
           type="date"

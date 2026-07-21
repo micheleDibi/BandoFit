@@ -2,6 +2,11 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-21 — Fix: bottoni di submit dei dialog inattivi in Safari
+
+- **«Importa i dati» (import P.IVA), «Salva» evento e «Crea/Salva» slot non facevano nulla al click su Safari.** I bottoni stavano nel footer del `<dialog>` modale e si legavano al form via `form="…"` (attributo cross-boundary): in Safari, dentro un `<dialog>` modale, questa associazione fallisce e il browser valida invece i campi `required` **vuoti e non focalizzabili** di un form di sfondo (es. la scheda azienda in modifica dietro l'import), bloccando il submit in silenzio (console: *«An invalid form control with name='' is not focusable»*). Corretto in `ImportCompanyDialog`, `EventDialog` e `SlotDialog`: il submit ora parte da un `onClick` esplicito sul bottone (niente più `form=`) e il `<form>` ha `noValidate` (la validazione resta quella applicativa, già presente). Nessun cambio di comportamento su Chrome/Firefox.
+- **Rimossa la nota di costo** «L'operazione utilizza il credito del servizio dati (…)» dal dialog di import P.IVA: dettaglio operativo interno, non da mostrare all'utente finale (`IMPORT_COPY.notaCosto` eliminata).
+
 ## 2026-07-20 — Add-on a inventario + ledger, consulto a pagamento, grant admin, registrazione a 1 step (migration 0028)
 
 Cinque modifiche al sistema piani/add-on (R1–R5).

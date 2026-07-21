@@ -90,8 +90,8 @@ export function EventDialog({ state, onClose }: { state: DialogState; onClose: (
     return null;
   };
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: FormEvent) => {
+    e?.preventDefault();
     const problem = validate();
     setValidationError(problem);
     if (problem) return;
@@ -164,13 +164,15 @@ export function EventDialog({ state, onClose }: { state: DialogState; onClose: (
           <Button type="button" variant="ghost" onClick={onClose}>
             Annulla
           </Button>
-          <Button type="submit" form="event-form" loading={busy && !deleteEvent.isPending}>
+          {/* onClick esplicito, non l'associazione `form=` (fragile in Safari
+              con il bottone fuori dal form dentro un <dialog> modale). */}
+          <Button type="button" onClick={() => handleSubmit()} loading={busy && !deleteEvent.isPending}>
             Salva
           </Button>
         </>
       }
     >
-      <form id="event-form" onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <TextField
           label="Titolo"
           required

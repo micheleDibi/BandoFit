@@ -215,6 +215,30 @@ class TestDemozioni:
             )
 
 
+class TestRagioneSociale:
+    """L'azienda mostrata nell'elenco admin (`_ragione_sociale`): dossier più
+    vecchio NON cancellato dell'embed company_profiles."""
+
+    def test_vuoto_o_none(self):
+        assert user_service._ragione_sociale(None) is None
+        assert user_service._ragione_sociale([]) is None
+
+    def test_piu_vecchia_non_cancellata(self):
+        embed = [
+            {"ragione_sociale": "Nuova", "deleted_at": None, "created_at": "2026-02-01"},
+            {"ragione_sociale": "Vecchia", "deleted_at": None, "created_at": "2026-01-01"},
+        ]
+        assert user_service._ragione_sociale(embed) == "Vecchia"
+
+    def test_cancellate_ignorate(self):
+        embed = [{"ragione_sociale": "Del", "deleted_at": "2026-01-01", "created_at": "2026-01-01"}]
+        assert user_service._ragione_sociale(embed) is None
+
+    def test_embed_1a1_come_dict(self):
+        embed = {"ragione_sociale": "ACME", "deleted_at": None, "created_at": "x"}
+        assert user_service._ragione_sociale(embed) == "ACME"
+
+
 class TestAutoLockout:
     async def test_verso_cliente_bloccato(self):
         primary = FakePrimary()

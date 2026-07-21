@@ -52,10 +52,28 @@ SUBSCRIPTION_EMBED = (
 def profile_from_row(row: dict) -> ProfileOut:
     """Costruisce ProfileOut da una riga di ``profiles``: l'embed PostgREST
     arriva con il nome della tabella (``job_positions``), lo schema lo espone
-    al singolare; gli embed estranei (abbonamento) vengono scartati."""
-    data = {k: v for k, v in row.items() if k not in ("user_subscriptions", "job_positions")}
+    al singolare; gli embed estranei (abbonamento, dossier) vengono scartati."""
+    data = {
+        k: v
+        for k, v in row.items()
+        if k not in ("user_subscriptions", "job_positions", "company_profiles")
+    }
     data["job_position"] = row.get("job_positions")
     return ProfileOut(**data)
+
+
+def _ragione_sociale(embed) -> str | None:
+    """Ragione sociale dal dossier (embed company_profiles): la più vecchia
+    NON cancellata (multi-azienda, 0023). Come ``parent_display_name``, ma
+    filtrando i dossier soft-deleted."""
+    if not embed:
+        return None
+    righe = embed if isinstance(embed, list) else [embed]
+    vive = [c for c in righe if c and not c.get("deleted_at")]
+    if not vive:
+        return None
+    vive.sort(key=lambda c: c.get("created_at") or "")
+    return vive[0].get("ragione_sociale")
 
 
 def _map_subscription(rows: list | None) -> SubscriptionOut | None:
@@ -344,7 +362,11 @@ async def admin_list_users(
     offset = (page - 1) * page_size
     query = (
         primary.table("profiles")
-        .select(f"{PROFILE_SELECT},{SUBSCRIPTION_EMBED}", count="exact")
+        .select(
+            f"{PROFILE_SELECT},{SUBSCRIPTION_EMBED},"
+            "company_profiles(ragione_sociale,deleted_at,created_at)",
+            count="exact",
+        )
         .eq("user_subscriptions.status", "active")
     )
     if q:
@@ -376,6 +398,9 @@ async def admin_list_users(
     )
     parent_subs: dict[str, SubscriptionOut] = {}
     parent_emails: dict[str, str] = {}
+    # Azienda del titolare (ragione sociale del dossier → testo libero): la
+    # ereditano i collegati attivi, che non hanno un dossier proprio.
+    parent_azienda: dict[str, str | None] = {}
     if active_parent_ids:
         subs_resp = (
             await primary.table("user_subscriptions")
@@ -397,11 +422,15 @@ async def admin_list_users(
                 parent_subs[sub_row["user_id"]] = mapped
         emails_resp = (
             await primary.table("profiles")
-            .select("id,email")
+            .select("id,email,azienda,company_profiles(ragione_sociale,deleted_at,created_at)")
             .in_("id", active_parent_ids)
             .execute()
         )
         parent_emails = {r["id"]: r["email"] for r in emails_resp.data}
+        parent_azienda = {
+            r["id"]: _ragione_sociale(r.get("company_profiles")) or r.get("azienda")
+            for r in emails_resp.data
+        }
 
     # Codici dei progettisti (e degli admin, parità 0019) in pagina, batch.
     progettista_ids = [row["id"] for row in rows if row["role"] in ("progettista", "admin")]
@@ -420,6 +449,9 @@ async def admin_list_users(
         subscription = _map_subscription(row.get("user_subscriptions"))
         family: AdminFamilyInfo | None = None
         membership = memberships_by_member.get(row["id"])
+        # Azienda propria (dossier → testo libero); i collegati attivi la
+        # ereditano dal titolare.
+        azienda_nome = _ragione_sociale(row.get("company_profiles")) or row.get("azienda")
         if membership:
             parent_id = membership["parent_id"]
             family = AdminFamilyInfo(
@@ -429,6 +461,7 @@ async def admin_list_users(
             )
             if membership["status"] == "active":
                 subscription = parent_subs.get(parent_id) or subscription
+                azienda_nome = parent_azienda.get(parent_id) or azienda_nome
         elif counts_by_parent.get(row["id"]):
             family = AdminFamilyInfo(type="parent", members_count=counts_by_parent[row["id"]])
         codice = codici.get(row["id"])
@@ -438,6 +471,7 @@ async def admin_list_users(
                 subscription=subscription,
                 family=family,
                 progettista=ProgettistaOut(codice=codice) if codice else None,
+                azienda_nome=azienda_nome,
             )
         )
     return Page.build(items, resp.count or 0, page, page_size)

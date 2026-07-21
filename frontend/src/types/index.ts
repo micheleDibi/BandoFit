@@ -401,6 +401,10 @@ export interface AdminUser {
   subscription: Subscription | null;
   family: AdminFamilyInfo | null;
   progettista?: Progettista | null;
+  /** Ragione sociale mostrata come azienda: dal dossier (P.IVA) del gruppo,
+   *  con fallback al testo libero della registrazione; per i collegati attivi
+   *  è quella del titolare. */
+  azienda_nome: string | null;
 }
 
 export type ClasseDimensionale = "micro" | "piccola" | "media" | "grande";

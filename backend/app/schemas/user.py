@@ -137,6 +137,11 @@ class AdminUserOut(BaseModel):
     subscription: SubscriptionOut | None = None
     family: AdminFamilyInfo | None = None
     progettista: ProgettistaOut | None = None
+    # Ragione sociale mostrata come «azienda» dell'utente: dal dossier
+    # (company_profiles) del gruppo, con fallback al testo libero della
+    # registrazione (profiles.azienda). Per i collegati attivi è quella del
+    # titolare. Stessa priorità di family_service.parent_display_name.
+    azienda_nome: str | None = None
 
 
 class AdminUserUpdate(BaseModel):

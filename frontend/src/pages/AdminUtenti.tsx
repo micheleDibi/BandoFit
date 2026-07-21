@@ -498,9 +498,6 @@ export default function AdminUtenti() {
                               )}
                             </div>
                             <div className="text-xs text-slate-500">{user.profile.email}</div>
-                            {user.profile.azienda && (
-                              <div className="text-xs text-slate-400">{user.profile.azienda}</div>
-                            )}
                           </div>
                         </div>
                       </td>
@@ -513,8 +510,15 @@ export default function AdminUtenti() {
                         )}
                       </td>
                       <td className="px-4 py-3">
+                        {/* Ragione sociale (dossier → registrazione) in cima; il
+                            gruppo account resta come info secondaria sotto. */}
+                        {user.azienda_nome ? (
+                          <div className="font-medium text-slate-700">{user.azienda_nome}</div>
+                        ) : (
+                          !user.family && <span className="text-xs text-slate-300">—</span>
+                        )}
                         {user.family?.type === "child" ? (
-                          <div>
+                          <div className="mt-1">
                             <Badge
                               tone={
                                 user.family.status === "active"
@@ -538,13 +542,13 @@ export default function AdminUtenti() {
                             )}
                           </div>
                         ) : user.family?.type === "parent" ? (
-                          <Badge tone="brand">
-                            <UsersRound className="size-3" aria-hidden />
-                            Titolare · {user.family.members_count ?? 0} collegati
-                          </Badge>
-                        ) : (
-                          <span className="text-xs text-slate-300">—</span>
-                        )}
+                          <div className="mt-1">
+                            <Badge tone="brand">
+                              <UsersRound className="size-3" aria-hidden />
+                              Titolare · {user.family.members_count ?? 0} collegati
+                            </Badge>
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-4 py-3 text-slate-700">
                         {user.subscription ? (

@@ -121,7 +121,13 @@ def _giorni_residui(data_scadenza: str | date | None) -> int:
 
 async def _calcola(primary, user_id: str, target: CheckoutTargetIn,
                    billing: BillingProfileOut | None) -> CheckoutPreviewOut:
-    tipo_soggetto = billing.tipo_soggetto if billing else None
+    # L'aliquota dipende da tipo, paese ed esito VIES persistito (mai
+    # interrogato qui): senza anagrafica si applica il 25% pieno.
+    iva_kwargs = dict(
+        tipo_soggetto=billing.tipo_soggetto if billing else None,
+        paese=billing.paese if billing else None,
+        vies_valid=billing.vies_valid if billing else None,
+    )
 
     if target.addon_slug:
         addon = await _addon_per_slug(primary, target.addon_slug)
@@ -142,7 +148,7 @@ async def _calcola(primary, user_id: str, target: CheckoutTargetIn,
             if inv.data:
                 raise ConflictError("Possiedi già questo add-on")
         imponibile_cents = pricing.in_cents(Decimal(str(addon["prezzo"])))
-        iva_cents, aliquota, natura = pricing.iva_per_soggetto(imponibile_cents, tipo_soggetto)
+        iva_cents, aliquota, natura = pricing.iva_per_soggetto(imponibile_cents, **iva_kwargs)
         return CheckoutPreviewOut(
             kind="addon", oggetto_slug=addon["slug"], oggetto_nome=addon["nome"],
             listino_cents=imponibile_cents, credito_cents=0,
@@ -177,7 +183,7 @@ async def _calcola(primary, user_id: str, target: CheckoutTargetIn,
             "L'importo dell'upgrade risulta nullo: contatta l'assistenza"
         )
     imponibile_cents = pricing.in_cents(imponibile)
-    iva_cents, aliquota, natura = pricing.iva_per_soggetto(imponibile_cents, tipo_soggetto)
+    iva_cents, aliquota, natura = pricing.iva_per_soggetto(imponibile_cents, **iva_kwargs)
     return CheckoutPreviewOut(
         kind="piano", oggetto_slug=piano["slug"], oggetto_nome=piano["nome"],
         listino_cents=pricing.in_cents(prezzo_nuovo),

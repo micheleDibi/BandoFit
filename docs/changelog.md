@@ -2,6 +2,17 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-21 — Venditore croato, IVA 25% e reverse charge via VIES (migration 0029)
+
+Il venditore dei servizi a pagamento diventa **ADVENTUS CONSULTING j.d.o.o.** (Umag/Umago, Croazia, OIB 95855486565, IVA standard 25%). Cambia la prospettiva fiscale: i clienti azienda **italiani diventano esteri UE** (con VIES valido pagano in reverse charge). Decisioni prese con Michele (AskUserQuestion), da validare col commercialista dove indicato.
+
+- **Tipi cliente ridotti a due — «Azienda» e «Privato»** (da `azienda_it`/`privato_it`/`azienda_ue`), con **paese mondiale** per entrambi. Spariscono da UI/API i campi **Codice destinatario SDI** e **PEC** (colonne congelate a DB, non droppate). Le regole italiane (checksum P.IVA a 11 cifre, CF, CAP a 5 cifre, provincia) valgono solo con paese IT; per l'estero P.IVA in forma VIES (UE) o libera (extra-UE), e per i privati esteri nessun codice fiscale. Nuovo select paese worldwide (`lib/paesi.ts`, etichette italiane da `Intl.DisplayNames`).
+- **IVA 25% con reverse charge VIES-gated**: `pricing.iva_per_soggetto` applica **0%** (natura `RC-UE`) SOLO alle aziende con paese **UE ≠ HR** e **`vies_valid=true`** persistito; in ogni altro caso (HR domestica, UE senza prova, **extra-UE prudenziale**, privati, anagrafica assente) **25%**. Il totale al checkout e i rinnovi ne tengono conto; i prezzi di listino («IVA esclusa») non cambiano.
+- **VIES non bloccante**: si interroga **solo al salvataggio dell'anagrafica** (mai al checkout), solo per le aziende UE ≠ HR, con timeout dedicato di 8s. Il salvataggio **riesce sempre** — un guasto del VIES o una P.IVA non valida non lo bloccano più (via i vecchi `400`/`502`/`503`/`504` dal PUT): l'esito seleziona solo l'aliquota. `vies_valid` a `null` (verifica non riuscita) o `false` → 25%, con avviso nel form e nudge a ri-salvare; **fail-open sul salvataggio, fail-closed sull'aliquota**. I profili migrati partono con `vies_valid` NULL → 25% finché il titolare non ri-salva.
+- **Etichetta venditore** sotto «Salva i dati» (per entrambi i tipi): «I servizi a pagamento sono erogati da: ADVENTUS CONSULTING j.d.o.o. …».
+- **Piano «tailored» con bullet custom**: nuova colonna `subscription_plans.features_override` (`text[]`) + campo in AdminPiani («Caratteristiche personalizzate, una per riga») + branch in `PlanCard.planFeatures` (se valorizzata sostituisce i tre punti standard). Nessun seed: le bullet le inserisce l'admin (es. «Proposta su misura in base alle esigenze»). Nessun effetto sugli altri piani.
+- ⚠️ Migration **0029** da eseguire dallo SQL Editor. Il backend tollera i tipi di soggetto vecchi (`_map`), quindi il deploy è sicuro in entrambi gli ordini; idealmente subito dopo il deploy del codice. Nessuna variabile d'ambiente nuova. Le fatture restano emesse **fuori piattaforma** dal titolare (registro interno invariato). Righe storiche `22.00`/`N2.1` conservate immutabili.
+
 ## 2026-07-21 — Rimossa la trasmissione delle fatture a SDI via openapi.it (+ PDF di cortesia)
 
 L'emissione fiscale delle fatture esce dalla piattaforma: la fa il titolare coi suoi strumenti (commercialista/gestionale). Nessuna migration: lo schema della 0027 resta com'è.

@@ -89,6 +89,8 @@ export interface PlanPayload {
   alert_giorni_preavviso?: number | null;
   alert_ritardo_giorni?: number | null;
   num_account_aziendali?: number;
+  /** Bullet custom della card (una per voce); null azzera l'override. */
+  features_override?: string[] | null;
   ordering?: number;
   is_active?: boolean;
 }

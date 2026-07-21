@@ -23,10 +23,10 @@ PIANI = [
 ]
 
 BILLING_IT = {
-    "user_id": USER, "tipo_soggetto": "azienda_it", "denominazione": "ACME Srl",
+    "user_id": USER, "tipo_soggetto": "azienda", "denominazione": "ACME Srl",
     "partita_iva": "03930330794", "paese": "IT", "indirizzo": "Via Roma 1",
     "comune": "Catanzaro", "provincia": "CZ", "cap": "88100",
-    "codice_destinatario": "ABC1234",
+    "vies_valid": None,  # senza prova VIES → 25% pieno
 }
 
 
@@ -200,8 +200,8 @@ class TestPreview:
         )
         assert out.credito_cents == 4964          # 99×183/365 → 49,64
         assert out.imponibile_cents == 24936
-        assert out.iva_cents == 5486              # 22% HALF_UP
-        assert out.totale_cents == 30422
+        assert out.iva_cents == 6234              # 25% HALF_UP
+        assert out.totale_cents == 31170
         assert out.dettaglio["giorni_residui"] == 183
 
     async def test_downgrade_rifiutato(self):
@@ -224,11 +224,12 @@ class TestPreview:
             )
 
     async def test_reverse_charge_ue(self):
+        # Il reverse charge richiede la PROVA VIES persistita, non basta l'UE.
         primary = _primary()
         primary.righe["billing_profiles"][0].update(
-            {"tipo_soggetto": "azienda_ue", "paese": "DE"})
+            {"tipo_soggetto": "azienda", "paese": "DE", "vies_valid": True})
         out = await payment_service.preview(primary, USER, CheckoutTargetIn(plan_slug="pro"))
-        assert out.iva_cents == 0 and out.natura_iva == "N2.1"
+        assert out.iva_cents == 0 and out.natura_iva == "RC-UE"
         assert out.totale_cents == out.imponibile_cents
 
 
@@ -249,9 +250,9 @@ class TestCheckout:
         purchase = primary.righe["purchases"][0]
         assert purchase["billing_snapshot"]["partita_iva"] == "03930330794"
         assert purchase["auto_renew_scelto"] is True
-        assert purchase["totale_cents"] == 30422
+        assert purchase["totale_cents"] == 31170
         ordine = revolut.chiamate[-1][1]
-        assert ordine["amount_cents"] == 30422
+        assert ordine["amount_cents"] == 31170
         assert ordine["metadata"] == {"purchase_id": out.purchase_id}
         assert ordine["expire_pending_after"] == "PT1H"
         assert purchase["revolut_order_id"] == "ord-1"

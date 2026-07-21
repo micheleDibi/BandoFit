@@ -108,10 +108,14 @@ async def _crea_rinnovo(primary, revolut, sub: dict, piano_dest: dict, tentativo
             "rinnovo di %s saltato: profilo di fatturazione mancante", user_id
         )
         return None
-    tipo_soggetto = billing.tipo_soggetto
 
     imponibile_cents = pricing.in_cents(Decimal(str(piano_dest["prezzo_annuale"])))
-    iva_cents, aliquota, natura = pricing.iva_per_soggetto(imponibile_cents, tipo_soggetto)
+    iva_cents, aliquota, natura = pricing.iva_per_soggetto(
+        imponibile_cents,
+        tipo_soggetto=billing.tipo_soggetto,
+        paese=billing.paese,
+        vies_valid=billing.vies_valid,
+    )
     riga = {
         "user_id": user_id, "kind": "rinnovo", "status": "in_attesa",
         "plan_id": piano_dest["id"], "oggetto_slug": piano_dest["slug"],
@@ -180,7 +184,7 @@ async def passo_preavvisi(primary, oggi: date) -> int:
     for sub in resp.data or []:
         piano = sub.get("subscription_plans") or {}
         importo = pricing.in_cents(Decimal(str(piano.get("prezzo_annuale") or "0")))
-        importo += pricing.iva_per_soggetto(importo, None)[0]  # stima IVA italiana
+        importo += pricing.iva_per_soggetto(importo)[0]  # stima prudenziale al 25%
         email, url = await _email_e_url(primary, sub["user_id"], "/app/abbonamento")
         if email:
             await email_service.send_promemoria_rinnovo_email(
@@ -212,7 +216,7 @@ async def passo_promemoria_manuali(primary, oggi: date) -> int:
             if piano.get("tipo_prezzo") != "importo" or Decimal(str(piano.get("prezzo_annuale") or "0")) <= 0:
                 continue
             importo = pricing.in_cents(Decimal(str(piano["prezzo_annuale"])))
-            importo += pricing.iva_per_soggetto(importo, None)[0]
+            importo += pricing.iva_per_soggetto(importo)[0]  # stima prudenziale al 25%
             email, url = await _email_e_url(
                 primary, sub["user_id"], f"/app/checkout?piano={piano['slug']}"
             )

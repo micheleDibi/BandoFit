@@ -183,11 +183,11 @@ def _base_righe(subs, *, customers=True, purchases=None, scheduled=None):
             for s in subs
         ],
         "billing_profiles": [{
-            "user_id": s["user_id"], "tipo_soggetto": "azienda_it",
+            "user_id": s["user_id"], "tipo_soggetto": "azienda",
             "denominazione": "ACME Srl", "partita_iva": "03930330794",
             "paese": "IT", "indirizzo": "Via Roma 1", "comune": "Catanzaro",
-            "provincia": "CZ", "cap": "88100", "codice_destinatario": "ABC1234",
-            "nome": None, "cognome": None, "codice_fiscale": None, "pec": None,
+            "provincia": "CZ", "cap": "88100",
+            "nome": None, "cognome": None, "codice_fiscale": None,
             "vies_valid": None, "vies_checked_at": None,
         } for s in subs],
         "purchases": purchases or [],
@@ -257,11 +257,26 @@ class TestAddebiti:
         purchase = primary.righe["purchases"][0]
         assert purchase["kind"] == "rinnovo" and purchase["tentativo"] == 1
         assert purchase["ciclo_rinnovo"] == OGGI.isoformat()
-        assert purchase["totale_cents"] == 36478  # 299 + 22%
+        assert purchase["totale_cents"] == 37375  # 299 + 25%
         # billing_snapshot COMPLETO congelato: senza, la fattura di rinnovo
         # nascerebbe con cessionario vuoto (difetto bloccante della review).
         assert purchase["billing_snapshot"]["partita_iva"] == "03930330794"
-        assert purchase["billing_snapshot"]["tipo_soggetto"] == "azienda_it"
+        assert purchase["billing_snapshot"]["tipo_soggetto"] == "azienda"
+
+    async def test_rinnovo_reverse_charge_con_prova_vies(self, _email_stub):
+        # Azienda UE con VIES valido: il rinnovo resta a 0% (RC-UE).
+        vecchio = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+        sub = _sub("u1", scadenza=OGGI.isoformat(), notice=vecchio)
+        righe = _base_righe([sub])
+        righe["billing_profiles"][0].update(
+            {"paese": "DE", "partita_iva": "123456789", "vies_valid": True}
+        )
+        primary = FakePrimary(righe)
+        assert await payment_scheduler.passo_addebiti(primary, FakeRevolut(), OGGI) == 1
+        purchase = primary.righe["purchases"][0]
+        assert purchase["iva_cents"] == 0
+        assert purchase["natura_iva"] == "RC-UE"
+        assert purchase["totale_cents"] == 29900  # solo imponibile
 
     async def test_senza_profilo_di_fatturazione_non_addebita(self, _email_stub):
         vecchio = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
@@ -307,7 +322,7 @@ class TestAddebiti:
         await payment_scheduler.passo_addebiti(primary, FakeRevolut(), OGGI)
         purchase = primary.righe["purchases"][0]
         assert purchase["plan_id"] == 2  # snapshotta la DESTINAZIONE
-        assert purchase["totale_cents"] == 12078  # 99 + 22%
+        assert purchase["totale_cents"] == 12375  # 99 + 25%
 
     async def test_senza_metodo_salvato_non_addebita(self, _email_stub):
         vecchio = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()

@@ -130,6 +130,9 @@ export interface Plan {
   num_account_aziendali: number;
   /** Numero di aziende gestibili col piano (Advisor: >1). */
   max_aziende: number;
+  /** Bullet custom della card (una per riga in AdminPiani); null/vuoto =
+   *  bullet derivate dai parametri del piano. */
+  features_override: string[] | null;
   ordering: number;
   is_active: boolean;
   updated_at: string | null;
@@ -757,7 +760,7 @@ export interface CalendarEvent {
 
 // ---- Dati di fatturazione ---------------------------------------------------
 
-export type TipoSoggetto = "azienda_it" | "privato_it" | "azienda_ue";
+export type TipoSoggetto = "azienda" | "privato";
 
 /** Anagrafica di fatturazione (GET/PUT /me/billing-profile). È lo stato
  *  CORRENTE editabile: ogni fattura fotografa i dati al momento dell'acquisto. */
@@ -768,16 +771,15 @@ export interface BillingProfile {
   cognome: string | null;
   partita_iva: string | null;
   codice_fiscale: string | null;
-  /** ISO 3166-1 alpha-2 ("IT" per i soggetti italiani). */
+  /** ISO 3166-1 alpha-2 (default "IT"; qualunque paese per entrambi i tipi). */
   paese: string;
   indirizzo: string;
   comune: string;
   provincia: string | null;
   cap: string;
-  /** Recapito SDI (7 caratteri); null per privati e aziende UE. */
-  codice_destinatario: string | null;
-  pec: string | null;
-  /** Esito della verifica VIES (solo azienda_ue: prova del reverse charge). */
+  /** Esito verifica VIES (solo aziende con paese UE ≠ HR): true = reverse
+   *  charge provato; false = P.IVA non valida (IVA 25%); null = mai
+   *  verificata o VIES non raggiungibile all'ultimo salvataggio (IVA 25%). */
   vies_valid: boolean | null;
   vies_checked_at: string | null;
   completo: boolean;
@@ -793,7 +795,6 @@ export interface BillingPrefill {
   comune: string | null;
   provincia: string | null;
   cap: string | null;
-  pec: string | null;
 }
 
 /** Corpo del PUT: solo i campi pertinenti al tipo di soggetto (il backend
@@ -810,8 +811,6 @@ export interface BillingProfileInput {
   comune: string;
   provincia?: string | null;
   cap: string;
-  codice_destinatario?: string | null;
-  pec?: string | null;
 }
 
 // ---- Checkout e acquisti ----------------------------------------------------
@@ -827,9 +826,10 @@ export interface CheckoutPreview {
   credito_cents: number;
   imponibile_cents: number;
   iva_cents: number;
-  /** Aliquota come stringa decimale ("22.00"; "0.00" col reverse charge). */
+  /** Aliquota come stringa decimale ("25.00"; "0.00" col reverse charge). */
   iva_aliquota: string;
-  /** Natura IVA ("N2.1" = reverse charge art. 7-ter); null con IVA ordinaria. */
+  /** Marcatore del reverse charge (valorizzato solo a IVA 0); null con IVA
+   *  ordinaria. Le righe storiche pre-cambio conservano "N2.1". */
   natura_iva: string | null;
   totale_cents: number;
   valuta: string;

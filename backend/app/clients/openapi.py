@@ -48,6 +48,9 @@ _HOSTS = {
 }
 
 _TOKEN_TTL_SECONDS = 30 * 24 * 3600  # mint gratuito: token brevi, rigenerati al volo
+# Timeout dedicato del VIES: la chiamata sta nel PUT interattivo
+# dell'anagrafica di fatturazione — 30s di attesa sono troppi per un form.
+_VIES_TIMEOUT_SECONDS = 8.0
 _TOKEN_EXPIRY_MARGIN = 300
 _POLL_INTERVAL_SECONDS = 3.0
 _POLL_MAX_ATTEMPTS = 25
@@ -140,27 +143,34 @@ class OpenapiClient:
     # --------------------------------------------------------------- requests
 
     async def _request(
-        self, method: str, url: str, *, json: dict | None = None, _retry_auth: bool = True
+        self, method: str, url: str, *, json: dict | None = None,
+        timeout: float | None = None, _retry_auth: bool = True
     ) -> tuple[int, dict]:
         """Richiesta autenticata con gestione envelope. Ritorna (status, body).
 
         Retry SOLO su errori di connessione (richiesta mai partita, non
         fatturata) e su 401 (token scaduto: re-mint, la respinta non è
         fatturata). ReadTimeout e 5xx NON vengono ritentati: potrebbero
-        essere già stati addebitati.
+        essere già stati addebitati. ``timeout`` sovrascrive quello del
+        client per le chiamate su percorsi interattivi (es. VIES).
         """
         if not self.enabled:
             raise OpenapiNotConfiguredError()
         token = await self._get_token()
         headers = {"Authorization": f"Bearer {token}"}
+        req_timeout = timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT
         try:
-            resp = await self._http.request(method, url, headers=headers, json=json)
+            resp = await self._http.request(
+                method, url, headers=headers, json=json, timeout=req_timeout
+            )
         except httpx.ConnectError:
             logger.warning(
                 "openapi: errore di connessione, ritento una volta (%s)", _mask_url(url)
             )
             try:
-                resp = await self._http.request(method, url, headers=headers, json=json)
+                resp = await self._http.request(
+                    method, url, headers=headers, json=json, timeout=req_timeout
+                )
             except httpx.HTTPError as exc:
                 raise OpenapiUpstreamError() from exc
         except httpx.TimeoutException as exc:
@@ -173,7 +183,9 @@ class OpenapiClient:
         if resp.status_code == 401 and _retry_auth:
             async with self._token_lock:
                 self._token = None
-            return await self._request(method, url, json=json, _retry_auth=False)
+            return await self._request(
+                method, url, json=json, timeout=timeout, _retry_auth=False
+            )
 
         try:
             body = resp.json()
@@ -184,8 +196,8 @@ class OpenapiClient:
             raise OpenapiUpstreamError() from exc
         return resp.status_code, body
 
-    async def _get(self, url: str) -> tuple[int, dict]:
-        return await self._request("GET", url)
+    async def _get(self, url: str, *, timeout: float | None = None) -> tuple[int, dict]:
+        return await self._request("GET", url, timeout=timeout)
 
     @staticmethod
     def _check_envelope(status: int, body: dict, url: str) -> dict | None:
@@ -242,7 +254,11 @@ class OpenapiClient:
 
     async def verifica_piva_ue(self, paese: str, partita_iva: str) -> bool:
         """Verifica di una P.IVA UE (scope EU-start): prova VIES per il
-        reverse charge art. 7-ter. Il prefisso VIES della Grecia è EL, non GR.
+        reverse charge. Il prefisso VIES della Grecia è EL, non GR.
+
+        Timeout dedicato più corto del client (30s): la chiamata vive nel
+        salvataggio interattivo dell'anagrafica ed è comunque non bloccante
+        (un timeout lascia l'esito a NULL, non blocca il salvataggio).
 
         Il formato del payload è difensivo (flag di validità se presente,
         altrimenti anagrafica restituita = P.IVA esistente): va CONFERMATO
@@ -250,7 +266,7 @@ class OpenapiClient:
         prefisso = "EL" if paese.upper() == "GR" else paese.upper()
         url = f"{self._hosts['company']}/EU-start/{prefisso}{partita_iva}"
         try:
-            status, body = await self._get(url)
+            status, body = await self._get(url, timeout=_VIES_TIMEOUT_SECONDS)
             data = self._check_envelope(status, body, url)
         except OpenapiInvalidIdError:
             return False  # identificativo rifiutato dal provider = non valido

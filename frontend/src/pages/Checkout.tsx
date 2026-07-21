@@ -10,10 +10,12 @@ import { useBillingProfile } from "../hooks/useBillingProfile";
 import { useCheckoutPreview, useStartCheckout } from "../hooks/useCheckout";
 import { apiErrorCode, apiErrorMessage } from "../lib/api";
 import { eurFromCents, formatDate } from "../lib/format";
+import { viesApplicabile } from "../lib/paesi";
 import { REVOLUT_MODE } from "../lib/revolut";
+import { Link } from "react-router-dom";
 import type { CheckoutPreview } from "../types";
 
-/** "22.00" → "22": l'aliquota arriva come stringa decimale dal backend. */
+/** "25.00" → "25": l'aliquota arriva come stringa decimale dal backend. */
 const aliquotaDisplay = (aliquota: string) => String(Number(aliquota));
 
 /** Ordine già creato sul provider: basta riaprire il widget con lo stesso
@@ -54,7 +56,7 @@ function Riepilogo({ preview }: { preview: CheckoutPreview }) {
         <RigaRiepilogo
           label={
             preview.natura_iva
-              ? `Reverse charge art. 7-ter (${preview.natura_iva})`
+              ? "Reverse charge — IVA assolta nel tuo paese"
               : `IVA ${aliquotaDisplay(preview.iva_aliquota)}%`
           }
           value={eurFromCents(preview.iva_cents)}
@@ -74,7 +76,7 @@ function Riepilogo({ preview }: { preview: CheckoutPreview }) {
       )}
       {preview.natura_iva && (
         <p className="mt-3 text-xs text-slate-400">
-          Fattura senza IVA italiana: l'imposta si assolve nel tuo paese (reverse charge).
+          Fattura emessa senza IVA (reverse charge): l'imposta si assolve nel tuo paese.
         </p>
       )}
     </>
@@ -229,12 +231,31 @@ export default function Checkout() {
 
     const dati = preview.data;
     const billingMancante = billing.data === null;
+    // Rete per il fail-open del VIES: un'azienda UE senza prova valida paga
+    // il 25% e potrebbe non essersene accorta (il form si chiude al salvataggio).
+    const b = billing.data;
+    const invitoVies =
+      !!b &&
+      b.tipo_soggetto === "azienda" &&
+      viesApplicabile(b.paese) &&
+      b.vies_valid !== true;
 
     return (
       <>
         <Card className="mt-6 p-6">
           <Riepilogo preview={dati} />
         </Card>
+
+        {invitoVies && (
+          <p className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Sei un'azienda UE? Con la partita IVA verificata nel VIES l'acquisto è in
+            reverse charge, senza IVA.{" "}
+            <Link to="/app/fatturazione" className="font-medium underline">
+              Verifica dai dati di fatturazione
+            </Link>
+            .
+          </p>
+        )}
 
         {/* Senza anagrafica di fatturazione niente pagamento: il backend la
             congela nella fattura, quindi si completa QUI, prima di pagare.

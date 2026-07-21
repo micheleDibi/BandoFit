@@ -4,7 +4,7 @@ import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Dialog } from "../components/ui/Dialog";
-import { SelectField, TextField } from "../components/ui/Field";
+import { SelectField, TextareaField, TextField } from "../components/ui/Field";
 import { ErrorState, Skeleton } from "../components/ui/states";
 import {
   useAdminCreatePlan,
@@ -27,6 +27,7 @@ interface PlanFormState {
   alert_giorni_preavviso: string;
   alert_ritardo_giorni: string;
   num_account_aziendali: string;
+  features_override: string;
   ordering: string;
   is_active: boolean;
 }
@@ -46,6 +47,7 @@ function toFormState(plan: Plan): PlanFormState {
     alert_ritardo_giorni:
       plan.alert_ritardo_giorni != null ? String(plan.alert_ritardo_giorni) : "",
     num_account_aziendali: String(plan.num_account_aziendali),
+    features_override: (plan.features_override ?? []).join("\n"),
     ordering: String(plan.ordering),
     is_active: plan.is_active,
   };
@@ -63,6 +65,7 @@ const EMPTY_FORM: PlanFormState = {
   alert_giorni_preavviso: "",
   alert_ritardo_giorni: "",
   num_account_aziendali: "1",
+  features_override: "",
   ordering: "10",
   is_active: true,
 };
@@ -102,6 +105,13 @@ function toPayload(form: PlanFormState): PlanPayload {
         ? Number(form.alert_ritardo_giorni)
         : null,
     num_account_aziendali: Number(form.num_account_aziendali),
+    features_override: (() => {
+      const righe = form.features_override
+        .split("\n")
+        .map((r) => r.trim())
+        .filter(Boolean);
+      return righe.length > 0 ? righe : null;
+    })(),
     ordering: Number(form.ordering) || 0,
     is_active: form.is_active,
   };
@@ -232,6 +242,15 @@ function PlanFormFields({
         value={form.ordering}
         onChange={(e) => setForm((f) => ({ ...f, ordering: e.target.value }))}
       />
+      <div className="sm:col-span-2">
+        <TextareaField
+          label="Caratteristiche personalizzate (una per riga)"
+          rows={3}
+          helper="Se compilate sostituiscono i tre punti standard della card (AI-check, avvisi, account). Vuoto = punti generati dai parametri del piano."
+          value={form.features_override}
+          onChange={(e) => setForm((f) => ({ ...f, features_override: e.target.value }))}
+        />
+      </div>
       <div className="flex items-center gap-2 sm:col-span-2">
         <input
           id={`attivo-${form.slug || "new"}`}

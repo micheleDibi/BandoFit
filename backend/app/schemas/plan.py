@@ -2,7 +2,20 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+def _normalizza_features(v: list[str] | None) -> list[str] | None:
+    """Trim, via le righe vuote, [] → None (così il frontend fa un semplice
+    test di verità). Limiti: max 8 voci da 120 caratteri."""
+    if v is None:
+        return None
+    voci = [r.strip() for r in v if isinstance(r, str) and r.strip()]
+    if len(voci) > 8:
+        raise ValueError("al massimo 8 caratteristiche personalizzate")
+    if any(len(r) > 120 for r in voci):
+        raise ValueError("ogni caratteristica può avere al massimo 120 caratteri")
+    return voci or None
 
 # Come mostrare il prezzo: 'importo' (€), 'gratis' («Gratis»), 'su_richiesta'
 # (etichetta al posto del prezzo; l'item non è attivabile self-serve).
@@ -31,6 +44,10 @@ class PlanOut(BaseModel):
     # embed di user_service serializzano il piano con lo stesso schema e uno
     # schema non ancora migrato non deve rompere /me.
     max_aziende: int = 1
+    # Bullet custom della card piano (0029, usata dal piano «tailored»):
+    # se valorizzata sostituisce i tre punti standard derivati dai campi
+    # numerici. Default None per robustezza (embed pre-migration).
+    features_override: list[str] | None = None
     ordering: int
     is_active: bool
     updated_at: datetime | None = None
@@ -50,8 +67,11 @@ class PlanCreate(BaseModel):
     alert_ritardo_giorni: int | None = Field(default=None, ge=0)
     num_account_aziendali: int = Field(ge=1)
     max_aziende: int = Field(default=1, ge=1)
+    features_override: list[str] | None = None
     ordering: int = 0
     is_active: bool = True
+
+    _features = field_validator("features_override")(_normalizza_features)
 
     @model_validator(mode="after")
     def check_alert_coherence(self) -> "PlanCreate":
@@ -74,5 +94,9 @@ class PlanUpdate(BaseModel):
     alert_ritardo_giorni: int | None = Field(default=None, ge=0)
     num_account_aziendali: int | None = Field(default=None, ge=1)
     max_aziende: int | None = Field(default=None, ge=1)
+    # None esplicito azzera l'override (bullet di nuovo derivate dai campi).
+    features_override: list[str] | None = None
     ordering: int | None = None
     is_active: bool | None = None
+
+    _features = field_validator("features_override")(_normalizza_features)

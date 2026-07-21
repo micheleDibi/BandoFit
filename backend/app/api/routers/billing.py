@@ -30,6 +30,9 @@ async def save_billing_profile(
     primary: PrimaryClient,
     openapi: OpenapiDep,
 ) -> BillingProfileOut:
-    """Salva l'anagrafica. Per le aziende UE la P.IVA passa dal VIES
-    (bloccante: senza prova niente reverse charge)."""
+    """Salva l'anagrafica. Per le aziende con paese UE ≠ HR la P.IVA passa
+    dal VIES, NON bloccante: il salvataggio riesce sempre. L'esito sta in
+    `vies_valid` — true = reverse charge 0% provato; false = verificata e
+    non valida (IVA 25%); null = verifica non riuscita (IVA 25%), si ritenta
+    ri-salvando."""
     return await billing_service.save_billing_profile(primary, openapi, user["id"], data)

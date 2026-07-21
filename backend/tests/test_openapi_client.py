@@ -56,6 +56,7 @@ class FakeHTTP:
     def __init__(self):
         self.queue: list = []
         self.requests: list[tuple[str, str]] = []
+        self.request_kwargs: list[dict] = []
 
     def push(self, item) -> None:
         self.queue.append(item)
@@ -76,6 +77,7 @@ class FakeHTTP:
 
     async def request(self, method, url, **kwargs):
         self.requests.append((method.upper(), url))
+        self.request_kwargs.append(kwargs)
         return self._next()
 
     async def aclose(self):
@@ -262,3 +264,39 @@ class TestVerificaCf:
         http.push(FakeResponse(200, {"data": {}, "success": True, "message": "", "error": None}))
         with pytest.raises(OpenapiUpstreamError):
             await client.verifica_cf("RSSMRA80A01H501U")
+
+
+class TestVerificaPivaUe:
+    """VIES (scope EU-start): prova per il reverse charge del venditore croato."""
+
+    async def test_validita_true_e_false(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, {"data": {"valid": True}, "success": True, "message": "", "error": None}))
+        http.push(FakeResponse(200, {"data": {"valid": False}, "success": True, "message": "", "error": None}))
+        assert await client.verifica_piva_ue("DE", "123456789") is True
+        assert await client.verifica_piva_ue("DE", "999999999") is False
+
+    async def test_identificativo_rifiutato_e_non_valido(self):
+        # HTTP 406 / error 222 = P.IVA malformata per il provider → False,
+        # non un errore (il salvataggio prosegue al 25%).
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(406, {"success": False, "message": "not valid", "error": 222}))
+        assert await client.verifica_piva_ue("DE", "XX") is False
+
+    async def test_grecia_usa_il_prefisso_el(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, {"data": {"valid": True}, "success": True, "message": "", "error": None}))
+        await client.verifica_piva_ue("GR", "123456789")
+        assert http.requests[-1][1].endswith("/EU-start/EL123456789")
+
+    async def test_timeout_dedicato_inoltrato(self):
+        # Percorso interattivo: 8s, non i 30s del client (il down del VIES
+        # non deve tenere appeso il form dell'anagrafica).
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, {"data": {"valid": True}, "success": True, "message": "", "error": None}))
+        await client.verifica_piva_ue("FR", "12345678901")
+        assert http.request_kwargs[-1].get("timeout") == 8.0

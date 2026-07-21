@@ -17,6 +17,9 @@ function alertFeature(plan: Plan): string {
 }
 
 export function planFeatures(plan: Plan): string[] {
+  // Override esplicito (es. piano «tailored»): sostituisce i punti standard.
+  if (plan.features_override && plan.features_override.length > 0)
+    return plan.features_override;
   const features = [
     plan.ai_check > 0 ? `${plan.ai_check} AI-check all'anno` : "AI-check non inclusi",
     alertFeature(plan),

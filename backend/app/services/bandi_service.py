@@ -51,8 +51,9 @@ DETAIL_SELECT = (
 )
 
 # Colonne della ricerca full-text: i grezzi dello scraping E i rielaborati
-# mostrati in UI (card = titolo_breve/descrizione_breve, dettaglio = titolo);
-# senza questi ultimi le parole lette in card sarebbero spesso introvabili.
+# mostrati in UI (titolo e descrizione_breve in card, titolo e descrizione
+# piena nel dettaglio; titolo_breve resta come ripiego del titolo); senza
+# questi ultimi le parole lette in UI sarebbero spesso introvabili.
 FTS_COLUMNS = (
     "titolo_raw",
     "descrizione_raw",

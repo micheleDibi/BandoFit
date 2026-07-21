@@ -7,7 +7,9 @@ import { ScadenzaBadge, StatoBadge } from "./badges";
 import { CompatibilitaBadge } from "./CompatibilitaBadge";
 
 export function BandoCard({ bando }: { bando: BandoListItem }) {
-  const titolo = bando.titolo_breve ?? bando.titolo ?? "Bando senza titolo";
+  // Stesso titolo del dettaglio: si preferisce quello esteso (più specifico),
+  // con titolo_breve come ripiego (BandoDetail.tsx usa lo stesso ordine).
+  const titolo = bando.titolo ?? bando.titolo_breve ?? "Bando senza titolo";
   const regioniVisibili = bando.regioni.slice(0, 2);
   const regioniExtra = bando.regioni.length - regioniVisibili.length;
 

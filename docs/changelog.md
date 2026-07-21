@@ -2,6 +2,10 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-21 — Titolo coerente tra lista e dettaglio dei bandi
+
+Le card della lista bandi mostravano `titolo_breve`, il dettaglio `titolo` (più specifico): stesso bando, due titoli diversi. Ora `BandoCard` preferisce `titolo` (con `titolo_breve` come ripiego), lo stesso ordine di `BandoDetail`. Cambio solo frontend, una riga: il campo esteso era già nella risposta della lista. `titolo_breve` resta a schema/FTS come ripiego.
+
 ## 2026-07-21 — Venditore croato, IVA 25% e reverse charge via VIES (migration 0029)
 
 Il venditore dei servizi a pagamento diventa **ADVENTUS CONSULTING j.d.o.o.** (Umag/Umago, Croazia, OIB 95855486565, IVA standard 25%). Cambia la prospettiva fiscale: i clienti azienda **italiani diventano esteri UE** (con VIES valido pagano in reverse charge). Decisioni prese con Michele (AskUserQuestion), da validare col commercialista dove indicato.

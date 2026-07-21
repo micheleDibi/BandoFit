@@ -91,8 +91,6 @@ async def lifespan(app: FastAPI):
 
     app.state.payment_task = None
     if settings.payment_scheduler_attivo and app.state.revolut.enabled:
-        # Il worker fatture (passo 6) usa lo stesso client openapi dell'app.
-        payment_scheduler.imposta_openapi(app.state.openapi)
         app.state.payment_task = asyncio.create_task(
             payment_scheduler.run_forever(app.state.primary, app.state.revolut)
         )

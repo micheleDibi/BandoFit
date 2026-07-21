@@ -37,24 +37,14 @@ services:
       # di produzione: Cloudflare + nginx. Vedi docs/deploy.md.
       TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-2}
       RATE_LIMIT_PEPPER: ${RATE_LIMIT_PEPPER:-}
-      # Pagamenti (Revolut) e fatturazione SDI (migration 0026/0027). Vuoti =
-      # modulo pagamenti spento (le rotte rispondono 503). REVOLUT_ENV deve
-      # essere 'production' col merchant reale. Vedi docs/deploy.md.
+      # Pagamenti (Revolut, migration 0026/0027). Vuoti = modulo pagamenti
+      # spento (le rotte rispondono 503). REVOLUT_ENV deve essere 'production'
+      # col merchant reale. Vedi docs/deploy.md.
       REVOLUT_SECRET_KEY: ${REVOLUT_SECRET_KEY:-}
       REVOLUT_ENV: ${REVOLUT_ENV:-sandbox}
       REVOLUT_WEBHOOK_SECRET: ${REVOLUT_WEBHOOK_SECRET:-}
       PAYMENT_SCHEDULER_ATTIVO: ${PAYMENT_SCHEDULER_ATTIVO:-true}
       PAYMENT_ORA_ESECUZIONE: ${PAYMENT_ORA_ESECUZIONE:-06:00}
-      # Dati dell'emittente per la fattura elettronica (vuoti = SDI spenta).
-      FATTURA_DENOMINAZIONE: ${FATTURA_DENOMINAZIONE:-}
-      FATTURA_PARTITA_IVA: ${FATTURA_PARTITA_IVA:-}
-      FATTURA_CODICE_FISCALE: ${FATTURA_CODICE_FISCALE:-}
-      FATTURA_REGIME: ${FATTURA_REGIME:-RF01}
-      FATTURA_SEDE_INDIRIZZO: ${FATTURA_SEDE_INDIRIZZO:-}
-      FATTURA_SEDE_COMUNE: ${FATTURA_SEDE_COMUNE:-}
-      FATTURA_SEDE_PROVINCIA: ${FATTURA_SEDE_PROVINCIA:-}
-      FATTURA_SEDE_CAP: ${FATTURA_SEDE_CAP:-}
-      FATTURA_SERIE: ${FATTURA_SERIE:-}
       ENV: production
 
   frontend:

@@ -100,7 +100,8 @@ async def _crea_rinnovo(primary, revolut, sub: dict, piano_dest: dict, tentativo
     customer = cust.data[0]
 
     # billing_snapshot COMPLETO congelato sul purchase (come il checkout): senza,
-    # la fattura di rinnovo nascerebbe con cessionario vuoto → scarto a SDI.
+    # la riga del registro fatture verrebbe rifiutata (mai un cessionario vuoto)
+    # e il titolare non avrebbe i dati per emettere la fattura del rinnovo.
     billing = await billing_service.get_billing_profile(primary, user_id)
     if billing is None:
         logger.warning(
@@ -402,29 +403,12 @@ async def _degrada_a_gratuito(primary, user_id: str, ciclo: str, motivo: str) ->
 
 
 async def passo_fatture(primary) -> int:
-    """6) emette le fatture pendenti e riconcilia gli esiti. L'openapi client
-    è nello state dell'app; il worker lo prende da lì (o lo salta se assente).
-    Nota: qui riceve None come openapi se non configurato — emetti_pendenti
-    lo gestisce (no-op)."""
+    """6) rete di sicurezza del registro fatture: ricrea le righe mancanti dei
+    purchase pagati (la creazione al pagamento è best-effort e può fallire).
+    L'emissione fiscale è fuori piattaforma: qui non si trasmette nulla."""
     from app.services import invoice_service
 
-    esiti = await invoice_service.emetti_pendenti(primary, _openapi(), 50)
-    return esiti.get("emesse", 0)
-
-
-_openapi_client = None
-
-
-def imposta_openapi(client) -> None:
-    """Iniettato dal lifespan: il worker fatture usa lo stesso client openapi
-    dell'app (stesso token/scope). Tenuto a modulo per non cambiare la firma
-    di run_forever (allineata all'alert_scheduler)."""
-    global _openapi_client
-    _openapi_client = client
-
-
-def _openapi():
-    return _openapi_client
+    return await invoice_service.recupera_fatture_mancanti(primary)
 
 
 # ------------------------------------------------------------ orchestrazione

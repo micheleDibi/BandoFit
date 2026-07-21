@@ -876,7 +876,7 @@ export interface Purchase {
   paid_at: string | null;
 }
 
-// ---- Admin pagamenti (fatture SDI, anomalie) --------------------------------
+// ---- Admin pagamenti (registro fatture, anomalie) ---------------------------
 
 export type InvoiceStato =
   | "da_emettere"
@@ -892,7 +892,7 @@ export interface AdminInvoice {
   purchase_id: string;
   anno: number;
   serie: string;
-  /** Assegnato al primo invio (null finché da_emettere). */
+  /** Presente solo sulle righe storiche già trasmesse (null sulle nuove). */
   numero: number | null;
   data_documento: string;
   stato: InvoiceStato;

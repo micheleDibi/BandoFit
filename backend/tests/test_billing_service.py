@@ -142,7 +142,7 @@ class TestSchema:
             partita_iva="123456789", indirizzo="Str. 1", comune="Berlin",
             cap="10115",
         )
-        assert p.codice_destinatario is None  # deciso dal builder XML (XXXXXXX)
+        assert p.codice_destinatario is None  # l'estero non ha un recapito SDI
 
 
 # ------------------------------------------------------------------- servizio

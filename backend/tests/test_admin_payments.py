@@ -1,6 +1,6 @@
 """Admin sul modulo pagamenti: cambio piano gratuito con motivazione+audit
-attore, cancel dell'ordine in corso; viste acquisti/fatture; retry scarti;
-anomalie."""
+attore, cancel dell'ordine in corso; viste acquisti e registro fatture (sola
+lettura); anomalie."""
 
 from types import SimpleNamespace
 
@@ -170,9 +170,3 @@ class TestViste:
         assert tabella == "audit_log"
         assert payload["action"] == "payments.orphan_resolved"
         assert payload["payload"]["audit_id"] == 5
-
-    async def test_retry_solo_su_errore_o_scarto(self):
-        primary = FakePrimary({"invoices": [
-            {"id": "i1", "stato": "consegnata", "purchase_id": "p1"}]})
-        out = await admin_payment_service.retry_invoice(primary, None, "i1")
-        assert "ritrasmettono" in out["note"]

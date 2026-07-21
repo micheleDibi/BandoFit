@@ -113,6 +113,8 @@ class TestConfigurazione:
         assert "GET:risk.openapi.com/IT-verifica_cf" in client._scopes()
         # La visura camerale è stata rimossa: nessuno scope verso visurecamerali.
         assert not any("visurecamerali" in scope for scope in client._scopes())
+        # L'invio fatture SDI è stato rimosso: nessuno scope verso sdi.openapi.
+        assert not any("sdi.openapi" in scope for scope in client._scopes())
 
 
 class TestToken:

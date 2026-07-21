@@ -562,18 +562,19 @@ async def send_downgrade_email(to_email: str, cta_url: str) -> bool:
 async def send_ricevuta_pagamento_email(
     to_email: str, descrizione: str, totale_cents: int, cta_url: str,
 ) -> bool:
-    """Conferma di pagamento riuscito (la fattura vera arriva via SDI)."""
+    """Conferma di pagamento riuscito (la fattura viene emessa dal titolare
+    e recapitata a parte, fuori piattaforma)."""
     html_body = _branded_html(
         "Pagamento ricevuto, grazie!",
         [
             f"Abbiamo registrato il tuo pagamento di <strong>{_euro_da_cents(totale_cents)}</strong> "
             f"per <strong>{html.escape(descrizione)}</strong>.",
-            "Trovi il dettaglio nella sezione «I tuoi acquisti». La fattura elettronica "
-            "verrà emessa e ti sarà recapitata a breve.",
+            "Trovi il dettaglio nella sezione «I tuoi acquisti». La fattura "
+            "ti verrà recapitata separatamente.",
         ],
         "Vedi i tuoi acquisti",
         cta_url,
-        "Conserva questa email come promemoria: il documento fiscale è la fattura elettronica.",
+        "Conserva questa email come promemoria del tuo acquisto.",
     )
     text = (
         f"Pagamento ricevuto: {_euro_da_cents(totale_cents)} per {descrizione}. "

@@ -39,13 +39,11 @@ _HOSTS = {
         "oauth": "https://oauth.openapi.it",
         "company": "https://company.openapi.com",
         "risk": "https://risk.openapi.com",
-        "sdi": "https://sdi.openapi.it",
     },
     "sandbox": {
         "oauth": "https://test.oauth.openapi.it",
         "company": "https://test.company.openapi.com",
         "risk": "https://test.risk.openapi.com",
-        "sdi": "https://test.sdi.openapi.it",
     },
 }
 
@@ -103,14 +101,11 @@ class OpenapiClient:
     def _scopes(self) -> list[str]:
         company = self._hosts["company"].removeprefix("https://")
         risk = self._hosts["risk"].removeprefix("https://")
-        sdi = self._hosts["sdi"].removeprefix("https://")
         return [
             f"GET:{company}/IT-full",
             f"GET:{company}/IT-check_id",
             f"GET:{company}/EU-start",
             f"GET:{risk}/IT-verifica_cf",
-            f"POST:{sdi}/invoices_legal_storage",
-            f"GET:{sdi}/invoices",
         ]
 
     async def _mint_token(self) -> None:
@@ -267,32 +262,6 @@ class OpenapiClient:
                     return bool(data[chiave])
             return True  # anagrafica restituita senza flag: la P.IVA esiste
         return False
-
-    async def invia_fattura(self, fattura: dict) -> dict:
-        """Trasmette una fattura a SDI (variante con conservazione a norma).
-        Payload JSON FatturaPA. Ritorna il data dell'envelope (contiene l'uuid
-        del provider per il tracking degli esiti). NESSUN retry automatico su
-        esito ignoto: una fattura può essere già stata trasmessa a SDI."""
-        url = f"{self._hosts['sdi']}/invoices_legal_storage"
-        status, body = await self._request("POST", url, json=fattura)
-        data = self._check_envelope(status, body, url)
-        if not isinstance(data, dict):
-            logger.error("openapi: risposta invio fattura inattesa: %r", data)
-            raise OpenapiUpstreamError()
-        return data
-
-    async def cerca_fattura(self, riferimento: str) -> dict | None:
-        """Cerca una fattura per riferimento esterno (per riconciliare un invio
-        con esito ignoto PRIMA di ritrasmettere ed evitare la doppia
-        trasmissione a SDI). Ritorna la prima corrispondenza o None."""
-        url = f"{self._hosts['sdi']}/invoices?external_reference={riferimento}"
-        status, body = await self._get(url)
-        data = self._check_envelope(status, body, url)
-        if isinstance(data, list):
-            return data[0] if data else None
-        if isinstance(data, dict) and data.get("id"):
-            return data
-        return None
 
     async def verifica_cf(self, codice_fiscale: str) -> bool:
         """Verifica del codice fiscale all'Anagrafe Tributaria (sincrona)."""

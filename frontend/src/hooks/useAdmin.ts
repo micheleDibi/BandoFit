@@ -203,7 +203,7 @@ export function useAdminGrantAddon() {
   });
 }
 
-// ---- Pagamenti (storico acquisti, fatture SDI, anomalie) --------------------
+// ---- Pagamenti (storico acquisti, registro fatture, anomalie) ---------------
 
 export interface AdminPurchasesParams {
   status: string;
@@ -231,18 +231,6 @@ export function useAdminInvoices(params: { stato: string; page: number }) {
     queryFn: async () =>
       (await api.get<AdminInvoicesPage>("/admin/invoices", { params: query })).data,
     placeholderData: keepPreviousData,
-  });
-}
-
-/** Ritrasmette una fattura in errore/scartata (stesso numero e stessa data).
- *  Per gli altri stati il backend risponde {stato, note} senza fare nulla. */
-export function useRetryInvoice() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (invoiceId: string) =>
-      (await api.post<{ stato: string; note?: string }>(`/admin/invoices/${invoiceId}/retry`))
-        .data,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-invoices"] }),
   });
 }
 

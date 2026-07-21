@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Query
 
 from app.api.deps import BillingAccount, PrimaryClient, RevolutDep
 from app.core.errors import PaymentsNotConfiguredError
@@ -14,7 +14,7 @@ from app.schemas.payment import (
     PurchasesPage,
     SubscriptionMgmtOut,
 )
-from app.services import invoice_service, payment_service, subscription_mgmt_service
+from app.services import payment_service, subscription_mgmt_service
 
 router = APIRouter(prefix="/me", tags=["payments"])
 
@@ -55,18 +55,6 @@ async def dettaglio_acquisto(
     purchase_id: str, user: BillingAccount, primary: PrimaryClient
 ) -> PurchaseOut:
     return await payment_service.dettaglio_acquisto(primary, user["id"], purchase_id)
-
-
-@router.get("/purchases/{purchase_id}/documento.pdf")
-async def documento_acquisto(
-    purchase_id: str, user: BillingAccount, primary: PrimaryClient
-) -> Response:
-    """PDF di cortesia dell'acquisto (l'originale fiscale è la fattura SDI)."""
-    result = await invoice_service.documento_pdf(primary, user["id"], purchase_id)
-    return Response(
-        content=result.content, media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
-    )
 
 
 @router.post("/purchases/{purchase_id}/sync", response_model=PurchaseOut)

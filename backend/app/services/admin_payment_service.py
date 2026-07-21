@@ -1,12 +1,10 @@
-"""Viste e azioni admin sul modulo pagamenti: storico acquisti, fatture con
-stato SDI, ritrasmissione scarti, gestione anomalie (incassi orfani)."""
+"""Viste e azioni admin sul modulo pagamenti: storico acquisti, registro
+fatture (sola lettura), gestione anomalie (incassi orfani)."""
 
 import logging
 
-from app.core.errors import NotFoundError
 from app.schemas.common import Page
 from app.schemas.payment import PurchaseOut
-from app.services import invoice_service
 from app.services.payment_service import _map_purchase
 
 logger = logging.getLogger("bandofit.admin_payments")
@@ -46,22 +44,6 @@ async def list_invoices(primary, stato: str | None, page: int, page_size: int) -
         "items": resp.data or [], "total": resp.count or 0,
         "page": page, "page_size": page_size,
     }
-
-
-async def retry_invoice(primary, openapi, invoice_id: str) -> dict:
-    resp = (
-        await primary.table("invoices")
-        .select("id,purchase_id,anno,serie,numero,data_documento,stato,provider_id,"
-                "imponibile_cents,iva_cents,totale_cents,cliente_snapshot,tentativi")
-        .eq("id", invoice_id).limit(1).execute()
-    )
-    if not resp.data:
-        raise NotFoundError("Fattura non trovata")
-    inv = resp.data[0]
-    if inv["stato"] not in ("errore", "scartata"):
-        return {"stato": inv["stato"], "note": "solo le fatture in errore o scartate si ritrasmettono"}
-    stato = await invoice_service.emetti(primary, openapi, inv)
-    return {"stato": stato}
 
 
 async def list_anomalies(primary, stato: str) -> dict:

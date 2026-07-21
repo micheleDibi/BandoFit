@@ -2,7 +2,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Query
 
-from app.api.deps import AdminUser, OpenapiDep, PrimaryClient
+from app.api.deps import AdminUser, PrimaryClient
 from app.schemas.common import Page
 from app.schemas.payment import PurchaseOut
 from app.services import admin_payment_service
@@ -33,15 +33,6 @@ async def list_invoices(
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> dict:
     return await admin_payment_service.list_invoices(primary, stato, page, page_size)
-
-
-@router.post("/invoices/{invoice_id}/retry")
-async def retry_invoice(
-    invoice_id: str, _admin: AdminUser, primary: PrimaryClient, openapi: OpenapiDep
-) -> dict:
-    """Ritrasmette una fattura in errore/scartata (dopo correzione dei dati)
-    con lo STESSO numero e la STESSA data."""
-    return await admin_payment_service.retry_invoice(primary, openapi, invoice_id)
 
 
 @router.get("/payment-anomalies")

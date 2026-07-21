@@ -10,7 +10,6 @@ import {
   useAdminInvoices,
   useAdminPurchases,
   useResolveAnomaly,
-  useRetryInvoice,
 } from "../hooks/useAdmin";
 import { apiErrorMessage } from "../lib/api";
 import { cn } from "../lib/cn";
@@ -27,8 +26,9 @@ const PURCHASE_TONI: Record<PurchaseStatus, BadgeProps["tone"]> = {
   gratuito: "slate",
 };
 
-/** Colori sobri per lo stato SDI: verde solo a consegna avvenuta, rosso dove
- *  serve un intervento (scarto/errore), amber per tutto il percorso normale. */
+/** Stati del registro fatture. Le nuove righe restano «Da emettere» (l'emissione
+ *  è fuori piattaforma); gli altri stati sono storici, di quando la piattaforma
+ *  trasmetteva a SDI, e restano leggibili sulle righe di allora. */
 const INVOICE_STATI: Record<InvoiceStato, { label: string; tone: BadgeProps["tone"] }> = {
   da_emettere: { label: "Da emettere", tone: "amber" },
   in_invio: { label: "In invio", tone: "amber" },
@@ -39,7 +39,8 @@ const INVOICE_STATI: Record<InvoiceStato, { label: string; tone: BadgeProps["ton
   errore: { label: "Errore", tone: "red" },
 };
 
-/** «12/2026» (o «A12/2026» con serie); il numero arriva solo al primo invio. */
+/** «12/2026» (o «A12/2026» con serie); presente solo sulle righe storiche già
+ *  trasmesse — le nuove non ricevono un numero dalla piattaforma. */
 const numeroFattura = (inv: AdminInvoice) =>
   inv.numero !== null ? `${inv.serie}${inv.numero}/${inv.anno}` : "—";
 
@@ -190,22 +191,8 @@ function SezioneFatture() {
     stato,
     page,
   });
-  const retry = useRetryInvoice();
-  const [esitoRetry, setEsitoRetry] = useState<string | null>(null);
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
-
-  const handleRetry = async (inv: AdminInvoice) => {
-    setEsitoRetry(null);
-    try {
-      const esito = await retry.mutateAsync(inv.id);
-      setEsitoRetry(
-        esito.note ?? `Ritrasmissione di ${numeroFattura(inv)} avviata: stato «${INVOICE_STATI[esito.stato as InvoiceStato]?.label ?? esito.stato}».`,
-      );
-    } catch (err) {
-      setEsitoRetry(apiErrorMessage(err));
-    }
-  };
 
   return (
     <>
@@ -213,7 +200,7 @@ function SezioneFatture() {
         <select
           value={stato}
           onChange={(e) => setStato(e.target.value)}
-          aria-label="Filtra per stato SDI"
+          aria-label="Filtra per stato"
           className={selectClass}
         >
           <option value="">Tutti gli stati</option>
@@ -224,12 +211,6 @@ function SezioneFatture() {
           ))}
         </select>
       </div>
-
-      {esitoRetry && (
-        <p className="mt-3 rounded-lg bg-brand-50 px-4 py-3 text-sm text-brand-800" role="status">
-          {esitoRetry}
-        </p>
-      )}
 
       <Card className="mt-5 overflow-hidden" aria-busy={isPending || isPlaceholderData}>
         {isPending ? (
@@ -259,15 +240,13 @@ function SezioneFatture() {
                   <th className={thClass}>Numero</th>
                   <th className={thClass}>Data documento</th>
                   <th className={cn(thClass, "text-right")}>Totale</th>
-                  <th className={thClass}>Stato SDI</th>
+                  <th className={thClass}>Stato</th>
                   <th className={cn(thClass, "text-right")}>Tentativi</th>
-                  <th className={cn(thClass, "text-right")}>Azioni</th>
                 </tr>
               </thead>
               <tbody>
                 {data?.items.map((inv) => {
                   const stile = INVOICE_STATI[inv.stato];
-                  const ritrasmettibile = inv.stato === "errore" || inv.stato === "scartata";
                   return (
                     <tr
                       key={inv.id}
@@ -287,19 +266,6 @@ function SezioneFatture() {
                       </td>
                       <td className="tabular px-4 py-3 text-right text-slate-500">
                         {inv.tentativi}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {ritrasmettibile && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleRetry(inv)}
-                            loading={retry.isPending && retry.variables === inv.id}
-                            disabled={retry.isPending}
-                          >
-                            Ritrasmetti
-                          </Button>
-                        )}
                       </td>
                     </tr>
                   );
@@ -445,7 +411,7 @@ export default function AdminPagamenti() {
         Pagamenti
       </h1>
       <p className="mt-1 text-sm text-slate-500">
-        Storico acquisti, fatture elettroniche e incassi da riconciliare.
+        Storico acquisti, registro fatture e incassi da riconciliare.
       </p>
 
       {numAperte > 0 && (

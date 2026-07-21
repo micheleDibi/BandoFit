@@ -100,7 +100,7 @@ class BillingProfileIn(BaseModel):
                 errori.append("la ragione sociale è obbligatoria")
             if not self.partita_iva or len(self.partita_iva) < 4:
                 errori.append("serve la partita IVA del paese UE")
-            # Il recapito SDI dell'estero è deciso dal builder XML ('XXXXXXX')
+            # Nessun recapito SDI per l'estero: il campo non si applica.
             self.codice_destinatario = None
         if errori:
             raise ValueError("; ".join(errori))

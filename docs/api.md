@@ -153,9 +153,6 @@ Storico acquisti dell'utente, più recenti prima (`page_size` max 100). Item `Pu
 ### `GET /me/purchases/{id}`
 Singolo acquisto (`404` se non dell'utente).
 
-### `GET /me/purchases/{id}/documento.pdf`
-**PDF di cortesia** dell'acquisto (`application/pdf`, download): se la fattura esiste ne riporta numero/serie/data, altrimenti è una ricevuta costruita dal purchase — l'originale fiscale è sempre la fattura elettronica trasmessa a SDI. `404` se l'acquisto non è dell'utente o non è `pagato`; `503 pdf_unavailable` senza motore PDF.
-
 ### `POST /me/purchases/{id}/sync`
 **Riconciliazione on-demand** (usata dalla pagina esito del checkout quando il webhook tarda o si perde): se il purchase è `in_attesa` con un ordine, rilegge l'ordine dal provider e fa avanzare lo stato con le stesse RPC idempotenti del webhook — chiamarla più volte è sicuro. → `PurchaseOut` aggiornato. `404` se non dell'utente.
 
@@ -476,10 +473,7 @@ Gestione del catalogo add-on, gemella di `/admin/plans` (stessi permessi admin):
 Storico acquisti di **tutti** gli utenti (più recenti prima, `page_size` max 100), filtrabile per `status` e `kind`. Item come `PurchaseOut` di `GET /me/purchases`.
 
 ### `GET /admin/invoices?stato=&page=&page_size=`
-Fatture elettroniche con lo stato SDI (migration 0027): `{items: [{id, purchase_id, anno, serie, numero, data_documento, stato, provider_id, totale_cents, tentativi, created_at, emessa_at}], total, page, page_size}`. Stati: `da_emettere`/`in_invio`/`inviata`/`consegnata`/`non_consegnata`/`scartata`/`errore`.
-
-### `POST /admin/invoices/{invoice_id}/retry`
-Ritrasmette una fattura in `errore`/`scartata` (dopo la correzione dei dati) con lo **stesso numero e la stessa data** — mai una fattura nuova. → `{stato}`; su una fattura in altro stato non fa nulla e risponde `{stato, note}`. `404` fattura inesistente.
+**Registro fatture interno** (migration 0027), sola lettura: `{items: [{id, purchase_id, anno, serie, numero, data_documento, stato, provider_id, totale_cents, tentativi, created_at, emessa_at}], total, page, page_size}`. Le righe nuove nascono e restano `da_emettere` (l'emissione fiscale è fuori piattaforma); gli altri stati (`in_invio`/`inviata`/`consegnata`/`non_consegnata`/`scartata`/`errore`) e i campi `numero`/`provider_id`/`tentativi` valorizzati sono **storici**, di quando la piattaforma trasmetteva a SDI.
 
 ### `GET /admin/payment-anomalies?stato=aperta|risolta`
 **Incassi orfani** da riconciliare (default `aperta`): pagamenti incassati dal provider che non corrispondono a un purchase applicabile (annullato/scaduto/già coperto, o purchase inesistente) — in v1 la risoluzione è manuale (verifica + eventuale rimborso). Le anomalie vivono in `audit_log` (`payments.orphan`; la risoluzione aggiunge `payments.orphan_resolved`): `{items: [{audit_id, payload, created_at, risolta}]}`.

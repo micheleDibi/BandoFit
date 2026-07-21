@@ -76,9 +76,9 @@ async def save_billing_profile(
     payload["user_id"] = str(user_id)
     payload["vies_valid"] = None
     payload["vies_checked_at"] = None
-    # B2C e UE viaggiano rispettivamente con '0000000' e 'XXXXXXX' (deciso dal
-    # builder XML): si NORMALIZZA a '0000000' — un pop lascerebbe a DB il
-    # codice del tipo precedente quando l'utente cambia tipo di soggetto.
+    # B2C e UE non hanno un recapito SDI proprio: si NORMALIZZA a '0000000'
+    # — un pop lascerebbe a DB il codice del tipo precedente quando l'utente
+    # cambia tipo di soggetto.
     if payload.get("codice_destinatario") is None:
         payload["codice_destinatario"] = "0000000"
 

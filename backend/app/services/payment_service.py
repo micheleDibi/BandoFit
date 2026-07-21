@@ -367,10 +367,10 @@ async def _salva_metodo(primary, revolut, ordine: dict) -> None:
 
 
 async def _crea_fattura(primary, purchase_id: str) -> None:
-    """Crea la riga fattura dal purchase pagato (con paid_at aggiornato).
-    Best-effort: un guasto qui non deve annullare il pagamento già applicato.
-    La rete di sicurezza è invoice_service.recupera_fatture_mancanti (passo 6
-    dello scheduler), che scansiona i pagati senza fattura e la ricrea."""
+    """Crea la riga del registro fatture dal purchase pagato (con paid_at
+    aggiornato). Best-effort: un guasto qui non deve annullare il pagamento
+    già applicato. La rete di sicurezza è recupera_fatture_mancanti (passo
+    «fatture» dello scheduler), che scansiona i pagati senza riga e la ricrea."""
     from app.services import invoice_service
 
     resp = (
@@ -445,12 +445,13 @@ async def elabora_ordine(primary, revolut, order_id: str) -> dict:
             )
         elif esito.get("esito") == "applicato":
             # Metodo salvato al primo acquisto con auto_renew: persisti per i
-            # rinnovi. Ricevuta di cortesia + riga fattura 'da_emettere' (il
-            # worker la trasmette a SDI). La data fattura = data dell'incasso.
-            # Queste side-effect sono TUTTE best-effort: il pagamento è già
-            # applicato dalla RPC, un loro guasto non deve far fallire /sync né
-            # marcare il webhook 'errore' (il metodo e la fattura hanno comunque
-            # reti di recupero nello scheduler).
+            # rinnovi. Ricevuta di cortesia + riga nel registro fatture interno
+            # (l'emissione fiscale è fatta fuori piattaforma dal titolare).
+            # La data della riga = data dell'incasso. Queste side-effect sono
+            # TUTTE best-effort: il pagamento è già applicato dalla RPC, un loro
+            # guasto non deve far fallire /sync né marcare il webhook 'errore'
+            # (il metodo e la riga hanno comunque reti di recupero nello
+            # scheduler).
             try:
                 await _salva_metodo(primary, revolut, ordine)
                 await _invia_ricevuta(primary, purchase)

@@ -129,20 +129,6 @@ class Settings(BaseSettings):
     revolut_webhook_secret: str = ""
     revolut_timeout_seconds: float = 30.0
 
-    # Dati dell'emittente per la fattura elettronica (cedente/prestatore).
-    # Vuoti = fatturazione SDI disattivata (i purchase pagati restano senza
-    # fattura, il worker non parte). Il regime è RF01 (ordinario) di default.
-    # ATTENZIONE: dati fiscali reali, mai nel repo — solo in .env di produzione.
-    fattura_denominazione: str = ""
-    fattura_partita_iva: str = ""
-    fattura_codice_fiscale: str = ""
-    fattura_regime: str = "RF01"
-    fattura_sede_indirizzo: str = ""
-    fattura_sede_comune: str = ""
-    fattura_sede_provincia: str = ""
-    fattura_sede_cap: str = ""
-    fattura_serie: str = ""
-
     # Scheduler dei pagamenti (rinnovi, dunning, cambi differiti — fase 3).
     # Stesso stampo dell'alert scheduler: task in-process, claim giornaliero su
     # payment_runs. L'ora è quella locale (alert_fuso). Spento = nessun

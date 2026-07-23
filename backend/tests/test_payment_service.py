@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from app.core.errors import BadRequestError, ConflictError, NotFoundError
 from app.schemas.payment import CheckoutIn, CheckoutTargetIn
@@ -231,6 +232,69 @@ class TestPreview:
         out = await payment_service.preview(primary, USER, CheckoutTargetIn(plan_slug="pro"))
         assert out.iva_cents == 0 and out.natura_iva == "RC-UE"
         assert out.totale_cents == out.imponibile_cents
+
+
+ADDON_CONSUMABILE = {
+    "id": 7, "slug": "posti-extra", "nome": "Posti extra", "prezzo": "20.00",
+    "tipo_prezzo": "importo", "tipo_fruizione": "consumabile", "is_active": True,
+}
+
+
+class TestQuantita:
+    """Acquisto addon a quantità (0030): listino UNITARIO, importi totali,
+    IVA sul totale; i permanenti restano a unità singola; i piani sempre 1."""
+
+    async def test_preview_moltiplica_l_imponibile(self):
+        primary = _primary(righe_extra={"addons": [dict(ADDON_CONSUMABILE)]})
+        out = await payment_service.preview(
+            primary, USER, CheckoutTargetIn(addon_slug="posti-extra", quantita=3))
+        assert out.quantita == 3
+        assert out.listino_cents == 2000           # unitario
+        assert out.imponibile_cents == 6000
+        assert out.iva_cents == 1500               # 25% sul totale
+        assert out.totale_cents == 7500
+        assert out.dettaglio["quantita"] == 3
+        assert out.dettaglio["prezzo_unitario_cents"] == 2000
+
+    async def test_permanente_con_quantita_rifiutato(self):
+        primary = _primary(righe_extra={
+            "addons": [{"id": 9, "slug": "report-pro", "nome": "Report Pro",
+                        "prezzo": "20.00", "tipo_prezzo": "importo",
+                        "tipo_fruizione": "permanente", "is_active": True}],
+        })
+        with pytest.raises(BadRequestError, match="unità singola"):
+            await payment_service.preview(
+                primary, USER, CheckoutTargetIn(addon_slug="report-pro", quantita=2))
+
+    def test_quantita_su_piano_respinta_dallo_schema(self):
+        with pytest.raises(ValidationError):
+            CheckoutIn(plan_slug="pro", quantita=2)
+
+    def test_quantita_fuori_bound_respinta(self):
+        with pytest.raises(ValidationError):
+            CheckoutTargetIn(addon_slug="posti-extra", quantita=0)
+        with pytest.raises(ValidationError):
+            CheckoutTargetIn(addon_slug="posti-extra", quantita=101)
+
+    async def test_checkout_persiste_quantita_e_descrizione(self):
+        primary = _primary(righe_extra={"addons": [dict(ADDON_CONSUMABILE)]})
+        await payment_service.checkout(
+            primary, FakeRevolut(), USER, "u@test.it",
+            CheckoutIn(addon_slug="posti-extra", quantita=3, auto_renew=False))
+        [riga] = [r for t, r in primary.inserts if t == "purchases"]
+        assert riga["quantita"] == 3
+        assert riga["descrizione"] == "Addon Posti extra × 3"
+        assert riga["totale_cents"] == 7500
+        assert riga["dettaglio_calcolo"]["quantita"] == 3
+
+    async def test_checkout_unita_singola_senza_suffisso(self):
+        primary = _primary(righe_extra={"addons": [dict(ADDON_CONSUMABILE)]})
+        await payment_service.checkout(
+            primary, FakeRevolut(), USER, "u@test.it",
+            CheckoutIn(addon_slug="posti-extra", auto_renew=False))
+        [riga] = [r for t, r in primary.inserts if t == "purchases"]
+        assert riga["quantita"] == 1
+        assert riga["descrizione"] == "Addon Posti extra"
 
 
 class TestCheckout:

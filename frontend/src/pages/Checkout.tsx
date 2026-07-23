@@ -42,10 +42,15 @@ function Riepilogo({ preview }: { preview: CheckoutPreview }) {
           label={
             preview.kind === "piano"
               ? `Piano ${preview.oggetto_nome} (12 mesi)`
-              : `Add-on ${preview.oggetto_nome}`
+              : preview.quantita > 1
+                ? `Add-on ${preview.oggetto_nome} — prezzo unitario`
+                : `Add-on ${preview.oggetto_nome}`
           }
           value={eurFromCents(preview.listino_cents)}
         />
+        {preview.kind === "addon" && preview.quantita > 1 && (
+          <RigaRiepilogo label="Quantità" value={`× ${preview.quantita}`} />
+        )}
         {preview.credito_cents > 0 && (
           <RigaRiepilogo
             label="Credito per il periodo residuo del piano attuale"
@@ -90,8 +95,16 @@ export default function Checkout() {
   const addon = searchParams.get("addon");
   const targetValido = (piano === null) !== (addon === null);
 
+  // `?qty=` (solo addon): clampata nei bound del server (1..100); un valore
+  // malformato degrada a 1. Il totale lo calcola SOLO il server (preview).
+  const qtyRaw = Number(searchParams.get("qty") ?? "1");
+  const quantita =
+    addon !== null && Number.isFinite(qtyRaw)
+      ? Math.min(100, Math.max(1, Math.trunc(qtyRaw)))
+      : 1;
+
   const target = targetValido
-    ? { plan_slug: piano ?? undefined, addon_slug: addon ?? undefined }
+    ? { plan_slug: piano ?? undefined, addon_slug: addon ?? undefined, quantita }
     : {};
   const preview = useCheckoutPreview(target);
   const billing = useBillingProfile();

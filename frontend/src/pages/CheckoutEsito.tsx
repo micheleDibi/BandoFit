@@ -17,7 +17,10 @@ const POLL_MAX_MS = 90_000;
 
 /** Dove riprovare l'acquisto fallito: stesso oggetto, nuovo checkout. */
 function retryUrl(purchase: Purchase): string | null {
-  if (purchase.kind === "addon") return `/app/checkout?addon=${purchase.oggetto_slug}`;
+  if (purchase.kind === "addon")
+    return `/app/checkout?addon=${purchase.oggetto_slug}${
+      purchase.quantita > 1 ? `&qty=${purchase.quantita}` : ""
+    }`;
   if (purchase.kind === "piano" || purchase.kind === "rinnovo")
     return `/app/checkout?piano=${purchase.oggetto_slug}`;
   return null; // cambio_admin: non è un flusso self-serve

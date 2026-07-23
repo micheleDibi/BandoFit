@@ -2,6 +2,10 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-23 — Acquisto add-on a quantità (WP1)
+
+Il checkout degli add-on **consumabili** accetta una quantità (1..100, bound del CHECK 0030 e del grant admin): stepper sulla `AddonCard` → `/app/checkout?addon=<slug>&qty=<N>` → preview con prezzo unitario + riga «Quantità × N» (importi moltiplicati lato server, IVA sul totale) → `purchases.quantita` persistita → a pagamento riuscito `fn_complete_purchase` accredita N unità in una **entry unica** di ledger. Il riacquisto **aggrega** sull'inventario (PK utente+addon). I **permanenti** restano a unità singola (`400` con qty ≠ 1); per i **piani** la quantità è sempre 1 (`422` dallo schema). Il link «riprova» dell'esito fallito conserva la quantità; lo storico acquisti la mostra nella descrizione («× N»). Decisione B2: gli add-on sono **permanenti senza scadenza** — niente proration né riduzione self-service (l'aumento è un nuovo acquisto; la riduzione esiste solo come revoca admin).
+
 ## 2026-07-23 — Motore entitlement: formula unica dei limiti (migration 0030)
 
 Fondazione del modulo entitlement (piano WP1–WP8, decisioni B1–B4 del 2026-07-23): i limiti quantitativi — account famiglia, aziende gestibili, AI-check per ciclo — escono da UN'unica formula `effettivo = base (piano) + extra (unità di addon allocativi × quantità)`, con **dormienza** quando la base non abilita la capability. Migration **additiva e behavior-preserving**: senza addon allocativi ogni numero è identico a prima.

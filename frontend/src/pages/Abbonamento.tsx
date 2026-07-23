@@ -235,9 +235,11 @@ export default function Abbonamento() {
   // Add-on a pagamento: si comprano dal checkout (modulo pagamenti). Il caso
   // gratis resta sul punto di estensione purchaseAddon (lib/addons.ts): finché
   // lo stub risponde available=false si apre il dialog «In arrivo».
-  const handleAcquista = async (addon: Addon) => {
+  const handleAcquista = async (addon: Addon, quantita = 1) => {
     if (aPagamento(addon)) {
-      navigate(`/app/checkout?addon=${addon.slug}`);
+      navigate(
+        `/app/checkout?addon=${addon.slug}${quantita > 1 ? `&qty=${quantita}` : ""}`,
+      );
       return;
     }
     if (addonLoading.has(addon.slug)) return;

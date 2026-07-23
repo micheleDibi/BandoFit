@@ -13,11 +13,16 @@ class CheckoutTargetIn(BaseModel):
 
     plan_slug: str | None = Field(default=None, max_length=100)
     addon_slug: str | None = Field(default=None, max_length=100)
+    # Unità acquistate (solo addon; bound allineato al grant admin e al CHECK
+    # di purchases.quantita, migration 0030). Un piano è sempre 1.
+    quantita: int = Field(default=1, ge=1, le=100)
 
     @model_validator(mode="after")
     def _uno_solo(self) -> "CheckoutTargetIn":
         if bool(self.plan_slug) == bool(self.addon_slug):
             raise ValueError("indica un piano oppure un addon")
+        if self.plan_slug and self.quantita != 1:
+            raise ValueError("la quantità vale solo per gli addon")
         return self
 
 
@@ -31,6 +36,9 @@ class CheckoutPreviewOut(BaseModel):
     kind: Literal["piano", "addon"]
     oggetto_slug: str
     oggetto_nome: str
+    # Unità (solo addon > 1): listino_cents resta il prezzo UNITARIO,
+    # imponibile/totale sono già moltiplicati.
+    quantita: int = 1
     listino_cents: int
     credito_cents: int
     imponibile_cents: int
@@ -58,6 +66,7 @@ class PurchaseOut(BaseModel):
     oggetto_slug: str
     oggetto_nome: str
     descrizione: str
+    quantita: int = 1
     imponibile_cents: int
     iva_cents: int
     totale_cents: int

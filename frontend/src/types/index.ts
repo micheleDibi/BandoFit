@@ -825,6 +825,9 @@ export interface CheckoutPreview {
   kind: "piano" | "addon";
   oggetto_slug: string;
   oggetto_nome: string;
+  /** Unità acquistate (solo addon; 1 per i piani). listino_cents resta il
+   *  prezzo UNITARIO, imponibile/totale sono già moltiplicati. */
+  quantita: number;
   listino_cents: number;
   /** Credito per il periodo residuo del piano attuale (0 per gli addon). */
   credito_cents: number;
@@ -867,6 +870,8 @@ export interface Purchase {
   oggetto_slug: string;
   oggetto_nome: string;
   descrizione: string;
+  /** Unità dell'oggetto (solo gli addon possono superare 1). */
+  quantita: number;
   imponibile_cents: number;
   iva_cents: number;
   totale_cents: number;

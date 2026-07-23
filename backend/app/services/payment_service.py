@@ -37,9 +37,9 @@ logger = logging.getLogger("bandofit.payments")
 # causava un KeyError sul ramo 'applicato'. Non viene esposto al client:
 # _map_purchase costruisce PurchaseOut dai soli campi dichiarati.
 _PURCHASE_SELECT = (
-    "id,user_id,kind,status,oggetto_slug,oggetto_nome,descrizione,imponibile_cents,"
-    "iva_cents,totale_cents,iva_aliquota,natura_iva,valuta,decline_reason,"
-    "motivazione,created_at,paid_at,revolut_order_id,plan_id,addon_id"
+    "id,user_id,kind,status,oggetto_slug,oggetto_nome,descrizione,quantita,"
+    "imponibile_cents,iva_cents,totale_cents,iva_aliquota,natura_iva,valuta,"
+    "decline_reason,motivazione,created_at,paid_at,revolut_order_id,plan_id,addon_id"
 )
 
 # Stati ordine Revolut → transizione del purchase (verificati in Fase 0).
@@ -54,6 +54,7 @@ def _map_purchase(row: dict) -> PurchaseOut:
         oggetto_slug=row["oggetto_slug"],
         oggetto_nome=row["oggetto_nome"],
         descrizione=row["descrizione"],
+        quantita=row.get("quantita") or 1,
         imponibile_cents=row["imponibile_cents"],
         iva_cents=row["iva_cents"],
         totale_cents=row["totale_cents"],
@@ -147,15 +148,22 @@ async def _calcola(primary, user_id: str, target: CheckoutTargetIn,
             )
             if inv.data:
                 raise ConflictError("Possiedi già questo add-on")
-        imponibile_cents = pricing.in_cents(Decimal(str(addon["prezzo"])))
+        # Quantità: solo per i consumabili (un permanente è un possesso
+        # binario). L'IVA si applica al TOTALE (unitario × N, esatto in cents).
+        if addon.get("tipo_fruizione") == "permanente" and target.quantita != 1:
+            raise BadRequestError("Un add-on permanente si acquista in unità singola")
+        unitario_cents = pricing.in_cents(Decimal(str(addon["prezzo"])))
+        imponibile_cents = unitario_cents * target.quantita
         iva_cents, aliquota, natura = pricing.iva_per_soggetto(imponibile_cents, **iva_kwargs)
         return CheckoutPreviewOut(
             kind="addon", oggetto_slug=addon["slug"], oggetto_nome=addon["nome"],
-            listino_cents=imponibile_cents, credito_cents=0,
+            quantita=target.quantita,
+            listino_cents=unitario_cents, credito_cents=0,
             imponibile_cents=imponibile_cents, iva_cents=iva_cents,
             iva_aliquota=str(aliquota), natura_iva=natura,
             totale_cents=imponibile_cents + iva_cents,
-            dettaglio={"listino": str(addon["prezzo"])},
+            dettaglio={"listino": str(addon["prezzo"]), "quantita": target.quantita,
+                       "prezzo_unitario_cents": unitario_cents},
         )
 
     piano = await _piano_per_slug(primary, target.plan_slug)
@@ -244,8 +252,11 @@ async def checkout(primary, revolut, user_id: str, email: str, data: CheckoutIn)
         "oggetto_nome": calcolo.oggetto_nome,
         "descrizione": (
             f"Abbonamento {calcolo.oggetto_nome} (12 mesi)"
-            if calcolo.kind == "piano" else f"Addon {calcolo.oggetto_nome}"
+            if calcolo.kind == "piano"
+            else f"Addon {calcolo.oggetto_nome}"
+            + (f" × {calcolo.quantita}" if calcolo.quantita > 1 else "")
         ),
+        "quantita": calcolo.quantita,
         "imponibile_cents": calcolo.imponibile_cents,
         "iva_cents": calcolo.iva_cents,
         "totale_cents": calcolo.totale_cents,

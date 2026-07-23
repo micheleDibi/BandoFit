@@ -12,12 +12,14 @@ import { useAuth } from "./useAuth";
 export interface CheckoutTarget {
   plan_slug?: string;
   addon_slug?: string;
+  /** Unità (solo addon, 1..100); omessa = 1. */
+  quantita?: number;
 }
 
 export function useCheckoutPreview(target: CheckoutTarget) {
   const { session } = useAuth();
   return useQuery({
-    queryKey: ["checkout-preview", target.plan_slug ?? null, target.addon_slug ?? null],
+    queryKey: ["checkout-preview", target.plan_slug ?? null, target.addon_slug ?? null, target.quantita ?? 1],
     // POST ma puro (nessun effetto): resta una query, non una mutation.
     queryFn: async () =>
       (await api.post<CheckoutPreview>("/me/checkout/preview", target)).data,

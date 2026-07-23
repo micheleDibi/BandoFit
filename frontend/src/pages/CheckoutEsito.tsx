@@ -45,10 +45,15 @@ export default function CheckoutEsito() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Pagamento confermato: piano/quote/scadenza possono essere cambiati.
+  // Pagamento confermato: piano/quote/scadenza possono essere cambiati —
+  // e con un addon allocativo anche i limiti effettivi e l'acquistabilità.
   const pagato = purchase?.status === "pagato" || purchase?.status === "gratuito";
   useEffect(() => {
-    if (pagato) queryClient.invalidateQueries({ queryKey: ["me"] });
+    if (pagato) {
+      queryClient.invalidateQueries({ queryKey: ["me"] });
+      queryClient.invalidateQueries({ queryKey: ["entitlements"] });
+      queryClient.invalidateQueries({ queryKey: ["addons"] });
+    }
   }, [pagato, queryClient]);
 
   const renderStato = (p: Purchase) => {

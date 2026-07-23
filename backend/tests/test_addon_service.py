@@ -74,11 +74,23 @@ class FakePrimary:
     def __init__(self, selects: dict | None = None):
         self.selects = selects or {}
         self.ops: list = []
+        self.rpcs: list = []
+        self.rpc_result: dict = {}
         self.insert_fail_unique = False
         self.update_returns_empty = False
 
     def table(self, name: str) -> FakeQuery:
         return FakeQuery(self, name)
+
+    def rpc(self, fn: str, params: dict):
+        self.rpcs.append((fn, params))
+        owner = self
+
+        class _Rpc:
+            async def execute(self_inner):
+                return SimpleNamespace(data=owner.rpc_result.get(fn))
+
+        return _Rpc()
 
     def ops_for(self, table: str, op: str) -> list:
         return [(payload, filters) for t, o, payload, filters in self.ops if t == table and o == op]
@@ -100,6 +112,63 @@ class TestList:
         [(_, filters)] = primary.ops_for("addons", "select")
         assert "is_active" not in filters
         assert filters["__order"] == "ordering"
+
+
+class TestAcquistabilita:
+    """Acquistabilità per l'utente corrente (0030): collegato attivo →
+    solo_titolare su tutti i paid; allocativo con base non idonea →
+    piano_non_idoneo. Il gate vero resta nel checkout."""
+
+    USER = {"id": "aaaaaaaa-0000-0000-0000-000000000001"}
+    ALLOCATIVO = {**ADDON_ROW, "id": 2, "slug": "azienda-aggiuntiva",
+                  "risorsa": "companies"}
+
+    @pytest.fixture
+    def membership(self, monkeypatch):
+        holder = {"value": None}
+
+        async def get_membership(primary, user_id):
+            return holder["value"]
+
+        monkeypatch.setattr("app.services.family_service.get_membership", get_membership)
+        return holder
+
+    async def test_senza_user_nessun_calcolo(self):
+        primary = FakePrimary({"addons": [dict(self.ALLOCATIVO)]})
+        out = await addon_service.list_active_addons(primary)
+        assert out[0].acquistabile is True and primary.rpcs == []
+
+    async def test_collegato_attivo_solo_titolare(self, membership):
+        membership["value"] = {"status": "active", "parent_id": "p"}
+        primary = FakePrimary({"addons": [ADDON_ROW, dict(self.ALLOCATIVO)]})
+        out = await addon_service.list_active_addons(primary, self.USER)
+        assert all(not a.acquistabile for a in out)
+        assert {a.motivo_non_acquistabile for a in out} == {"solo_titolare"}
+        assert primary.rpcs == []  # niente snapshot: il motivo è già deciso
+
+    async def test_allocativo_base_non_idonea(self, membership):
+        primary = FakePrimary({"addons": [ADDON_ROW, dict(self.ALLOCATIVO)]})
+        primary.rpc_result["fn_entitlement_snapshot"] = {
+            "companies": {"base": 1, "extra": 0, "effettivo": 1, "usato": 1, "residuo": 0}}
+        out = await addon_service.list_active_addons(primary, self.USER)
+        normale, allocativo = out
+        assert normale.acquistabile is True and normale.motivo_non_acquistabile is None
+        assert allocativo.acquistabile is False
+        assert allocativo.motivo_non_acquistabile == "piano_non_idoneo"
+
+    async def test_allocativo_base_idonea(self, membership):
+        primary = FakePrimary({"addons": [dict(self.ALLOCATIVO)]})
+        primary.rpc_result["fn_entitlement_snapshot"] = {
+            "companies": {"base": 10, "extra": 0, "effettivo": 10, "usato": 2, "residuo": 8}}
+        out = await addon_service.list_active_addons(primary, self.USER)
+        assert out[0].acquistabile is True
+
+    async def test_gratis_non_toccato(self, membership):
+        membership["value"] = {"status": "active", "parent_id": "p"}
+        gratis = {**ADDON_ROW, "id": 3, "slug": "omaggio", "tipo_prezzo": "gratis"}
+        primary = FakePrimary({"addons": [gratis]})
+        out = await addon_service.list_active_addons(primary, self.USER)
+        assert out[0].acquistabile is True  # la CTA «Attiva» non passa dal checkout
 
 
 class TestCreate:

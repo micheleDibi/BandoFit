@@ -885,6 +885,30 @@ export interface Purchase {
   paid_at: string | null;
 }
 
+// ---- Entitlement (GET /me/entitlements, migration 0030) ---------------------
+
+export interface ResourceEntitlement {
+  base: number;
+  extra: number;
+  effettivo: number;
+  usato: number;
+  residuo: number;
+}
+
+export interface AiChecksEntitlement extends ResourceEntitlement {
+  periodo_inizio: string | null;
+  periodo_fine: string | null;
+}
+
+/** Le quote dell'account in un'unica risposta: il frontend legge, non
+ *  ricalcola. Per un collegato attivo sono quelle del titolare. */
+export interface Entitlements {
+  editable: boolean;
+  seats: ResourceEntitlement;
+  companies: ResourceEntitlement;
+  ai_checks: AiChecksEntitlement;
+}
+
 // ---- Admin pagamenti (registro fatture, anomalie) ---------------------------
 
 export type InvoiceStato =
@@ -972,9 +996,15 @@ export interface Addon {
   prezzo: string | number;
   tipo_prezzo: TipoPrezzo;
   tipo_fruizione: TipoFruizione;
+  /** Risorsa entitlement estesa (0030): seats/companies; null = addon normale. */
+  risorsa: "seats" | "companies" | null;
   etichetta_prezzo: string | null;
   ordering: number;
   is_active: boolean;
+  /** Acquistabilità per l'utente corrente (solo tipo_prezzo 'importo'):
+   *  il gate vero è nel checkout, questa pilota la CTA. */
+  acquistabile: boolean;
+  motivo_non_acquistabile: "solo_titolare" | "piano_non_idoneo" | null;
   updated_at: string | null;
 }
 

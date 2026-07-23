@@ -28,7 +28,13 @@ from app.schemas.payment import (
     PurchaseOut,
     PurchasesPage,
 )
-from app.services import billing_service, email_service, notification_service, pricing
+from app.services import (
+    billing_service,
+    email_service,
+    entitlement_service,
+    notification_service,
+    pricing,
+)
 from app.services.family_service import raise_from_rpc
 
 logger = logging.getLogger("bandofit.payments")
@@ -101,7 +107,7 @@ async def _piano_per_slug(primary, slug: str) -> dict | None:
 async def _addon_per_slug(primary, slug: str) -> dict | None:
     resp = (
         await primary.table("addons")
-        .select("id,slug,nome,prezzo,tipo_prezzo,tipo_fruizione,is_active")
+        .select("id,slug,nome,prezzo,tipo_prezzo,tipo_fruizione,risorsa,is_active")
         .eq("slug", slug)
         .eq("is_active", True)
         .limit(1)
@@ -136,6 +142,15 @@ async def _calcola(primary, user_id: str, target: CheckoutTargetIn,
             raise NotFoundError("Addon non disponibile")
         if addon.get("tipo_prezzo") != "importo" or Decimal(str(addon["prezzo"])) <= 0:
             raise BadRequestError("Questo addon non è acquistabile online")
+        # Eleggibilità per piano (0030): un addon ALLOCATIVO si compra solo se
+        # la base del piano dell'acquirente abilita la risorsa — con base 1
+        # l'extra sarebbe dormiente (WP4/WP5). Arbitro server-side: la CTA del
+        # catalogo è solo il segnale (`acquistabile`).
+        if addon.get("risorsa"):
+            snap = await entitlement_service.snapshot_for_owner(primary, str(user_id))
+            base = int(((snap.get(addon["risorsa"]) or {}).get("base")) or 0)
+            if base <= 1:
+                raise ConflictError("Questo add-on non è disponibile col tuo piano")
         # Un addon PERMANENTE già posseduto non si ricompra (rete di sicurezza:
         # la RPC di completamento lo intercetta comunque come pagamento_orfano).
         if addon.get("tipo_fruizione") == "permanente":

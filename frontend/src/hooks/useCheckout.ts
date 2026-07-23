@@ -63,9 +63,11 @@ export function useSyncPurchase() {
     onSuccess: (purchase) => {
       queryClient.setQueryData(["purchases", purchase.id], purchase);
       queryClient.invalidateQueries({ queryKey: ["purchases", "page"] });
-      // Un pagamento confermato può aver cambiato piano o scadenza.
+      // Un pagamento confermato può aver cambiato piano, scadenza o quote.
       if (purchase.status === "pagato") {
         queryClient.invalidateQueries({ queryKey: ["me"] });
+        queryClient.invalidateQueries({ queryKey: ["entitlements"] });
+        queryClient.invalidateQueries({ queryKey: ["addons"] });
       }
     },
   });

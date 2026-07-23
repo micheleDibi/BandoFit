@@ -7,6 +7,12 @@ import type { Addon } from "../../types";
 /** Bound del checkout e del grant admin (CHECK purchases.quantita, 0030). */
 const QTY_MAX = 100;
 
+/** Perché la CTA «Acquista» è disabilitata (il gate vero è nel checkout). */
+const MOTIVO_LABELS: Record<NonNullable<Addon["motivo_non_acquistabile"]>, string> = {
+  solo_titolare: "Gli acquisti si gestiscono sull'account titolare.",
+  piano_non_idoneo: "Disponibile con i piani che includono questa funzione.",
+};
+
 /** Card di un add-on (stessa estetica di PlanCard, prezzo una tantum senza
  *  suffisso «/anno»). CTA a tre vie sul tipo_prezzo: «Acquista» (importo) e
  *  «Attiva» (gratis) passano dal punto di estensione purchaseAddon;
@@ -29,10 +35,18 @@ export function AddonCard({
 }) {
   const display = prezzoDisplay(addon.tipo_prezzo, addon.etichetta_prezzo, addon.prezzo);
   const [quantita, setQuantita] = useState(1);
+  // Non acquistabile per QUESTO utente (0030: collegato attivo, o piano che
+  // non abilita la risorsa dell'addon): CTA disabilitata con il perché.
+  const bloccato = addon.tipo_prezzo === "importo" && addon.acquistabile === false;
+  const motivoBlocco =
+    bloccato && addon.motivo_non_acquistabile
+      ? MOTIVO_LABELS[addon.motivo_non_acquistabile]
+      : null;
   // Solo i consumabili a pagamento si comprano a quantità (un permanente è un
   // possesso binario; il server rifiuta comunque qty≠1).
   const conQuantita =
     !display.suRichiesta &&
+    !bloccato &&
     addon.tipo_prezzo === "importo" &&
     addon.tipo_fruizione === "consumabile";
 
@@ -103,6 +117,7 @@ export function AddonCard({
             type="button"
             className="w-full"
             loading={loading}
+            disabled={bloccato}
             onClick={() => onAcquista(addon, conQuantita ? quantita : 1)}
           >
             {addon.tipo_prezzo === "gratis" ? (
@@ -117,6 +132,9 @@ export function AddonCard({
               </>
             )}
           </Button>
+        )}
+        {motivoBlocco && (
+          <p className="mt-2 text-xs text-slate-500">{motivoBlocco}</p>
         )}
       </div>
       {inventario}

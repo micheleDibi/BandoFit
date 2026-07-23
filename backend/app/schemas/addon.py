@@ -10,6 +10,10 @@ from app.schemas.plan import TipoPrezzo
 # permanente = possesso binario (0 o 1). Immutabile come lo slug (migration 0028).
 TipoFruizione = Literal["consumabile", "permanente"]
 
+# Risorsa entitlement estesa dall'addon (migration 0030): il motore chiavizza
+# su questa, mai sullo slug. Si assegna solo via migration (non dalla console).
+RisorsaAddon = Literal["seats", "companies"]
+
 
 class AddonOut(BaseModel):
     id: int
@@ -19,10 +23,17 @@ class AddonOut(BaseModel):
     prezzo: Decimal
     tipo_prezzo: TipoPrezzo = "importo"
     tipo_fruizione: TipoFruizione = "consumabile"
+    risorsa: RisorsaAddon | None = None
     etichetta_prezzo: str | None = None
     ordering: int
     is_active: bool
     updated_at: datetime | None = None
+    # Acquistabilità per l'UTENTE della richiesta (0030, solo tipo_prezzo
+    # 'importo'): un collegato attivo non compra dal checkout; un allocativo
+    # richiede un piano la cui base abiliti la risorsa. Il gate vero resta
+    # server-side nel checkout: qui è il segnale per la CTA.
+    acquistabile: bool = True
+    motivo_non_acquistabile: Literal["solo_titolare", "piano_non_idoneo"] | None = None
 
 
 class AddonCreate(BaseModel):

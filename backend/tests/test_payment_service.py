@@ -287,6 +287,30 @@ class TestQuantita:
         assert riga["totale_cents"] == 7500
         assert riga["dettaglio_calcolo"]["quantita"] == 3
 
+    async def test_eleggibilita_allocativo_base_non_idonea(self):
+        # Addon allocativo (risorsa seats) su piano con base 1 → 409: l'extra
+        # sarebbe dormiente (WP4/WP5). La base arriva dallo snapshot RPC.
+        addon = {**ADDON_CONSUMABILE, "slug": "profilo-aziendale-aggiuntivo",
+                 "risorsa": "seats"}
+        primary = _primary(righe_extra={"addons": [addon]})
+        primary.rpc_result["fn_entitlement_snapshot"] = {
+            "seats": {"base": 1, "extra": 0, "effettivo": 1, "usato": 1, "residuo": 0}}
+        with pytest.raises(ConflictError, match="non è disponibile col tuo piano"):
+            await payment_service.preview(
+                primary, USER,
+                CheckoutTargetIn(addon_slug="profilo-aziendale-aggiuntivo"))
+
+    async def test_eleggibilita_allocativo_base_idonea(self):
+        addon = {**ADDON_CONSUMABILE, "slug": "profilo-aziendale-aggiuntivo",
+                 "risorsa": "seats"}
+        primary = _primary(righe_extra={"addons": [addon]})
+        primary.rpc_result["fn_entitlement_snapshot"] = {
+            "seats": {"base": 3, "extra": 0, "effettivo": 3, "usato": 1, "residuo": 2}}
+        out = await payment_service.preview(
+            primary, USER,
+            CheckoutTargetIn(addon_slug="profilo-aziendale-aggiuntivo", quantita=2))
+        assert out.totale_cents == 5000  # 20€ × 2 + 25%
+
     async def test_checkout_unita_singola_senza_suffisso(self):
         primary = _primary(righe_extra={"addons": [dict(ADDON_CONSUMABILE)]})
         await payment_service.checkout(

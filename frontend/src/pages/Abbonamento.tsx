@@ -11,6 +11,7 @@ import { Dialog } from "../components/ui/Dialog";
 import { ErrorState, Skeleton } from "../components/ui/states";
 import { useAddons } from "../hooks/useAddons";
 import { useAuth } from "../hooks/useAuth";
+import { useEntitlements } from "../hooks/useEntitlements";
 import { useMe, useSwitchPlan } from "../hooks/useMe";
 import { useMyAddonLedger, useMyAddons } from "../hooks/useMyAddons";
 import { usePlans } from "../hooks/usePlans";
@@ -127,6 +128,14 @@ export default function Abbonamento() {
   // Inventario addon: se una voce fallisse o fosse vuota, il catalogo resta
   // intatto — l'inventario è un arricchimento, non un requisito.
   const { data: mieiAddon } = useMyAddons();
+  // Extra seats posseduti (0030): servono SOLO all'avviso di downgrade — il
+  // limite effettivo del piano di destinazione è base + extra (dormienti se
+  // base=1, specchio di fn_entitlement_detail; l'arbitro resta il server).
+  const entitlements = useEntitlements();
+  const seatTargetEffettivo = (plan: Plan) => {
+    const base = plan.num_account_aziendali ?? 1;
+    return base > 1 ? base + (entitlements.data?.seats.extra ?? 0) : base;
+  };
   const switchPlan = useSwitchPlan();
   const scheduleDowngrade = useScheduleDowngrade();
   // Intento d'acquisto dalla registrazione: il ?piano= scelto sulla landing
@@ -540,11 +549,16 @@ export default function Abbonamento() {
               </p>
             )}
             {me.family?.role === "parent" &&
-              (me.family.used ?? 1) > (planToConfirm.num_account_aziendali ?? 1) && (
+              (me.family.used ?? 1) > seatTargetEffettivo(planToConfirm) && (
                 <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-amber-800">
                   Attenzione: il piano {planToConfirm.nome} prevede al massimo{" "}
-                  {planToConfirm.num_account_aziendali} account (incluso il tuo). Gli account più
-                  recenti oltre il limite verranno retrocessi al piano Gratuito.
+                  {seatTargetEffettivo(planToConfirm)} account (incluso il tuo
+                  {seatTargetEffettivo(planToConfirm) >
+                  (planToConfirm.num_account_aziendali ?? 1)
+                    ? " e gli add-on che possiedi"
+                    : ""}
+                  ). Gli account più recenti oltre il limite verranno retrocessi al piano
+                  Gratuito.
                 </p>
               )}
             {(switchPlan.isError || scheduleDowngrade.isError) && (

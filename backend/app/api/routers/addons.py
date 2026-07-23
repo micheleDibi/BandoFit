@@ -8,8 +8,9 @@ router = APIRouter(prefix="/addons", tags=["addons"])
 
 
 @router.get("", response_model=list[AddonOut])
-async def list_addons(_user: CurrentUser, primary: PrimaryClient) -> list[AddonOut]:
+async def list_addons(user: CurrentUser, primary: PrimaryClient) -> list[AddonOut]:
     """Add-on attivi, ordinati per `ordering`. A differenza di GET /plans
     (pubblico perché serve alla registrazione) qui serve l'autenticazione:
-    il catalogo si vede solo dentro l'app."""
-    return await addon_service.list_active_addons(primary)
+    il catalogo si vede solo dentro l'app — e l'acquistabilità (0030) è
+    calcolata per l'utente della richiesta."""
+    return await addon_service.list_active_addons(primary, user)

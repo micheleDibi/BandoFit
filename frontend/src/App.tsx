@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AdminRoute, ProgettistaRoute, ProtectedRoute } from "./components/layout/guards";
 import { AppShell } from "./components/layout/AppShell";
 import Abbonamento from "./pages/Abbonamento";
+import MieiAddon from "./pages/MieiAddon";
 import AccettaInvito from "./pages/AccettaInvito";
 import Acquisti from "./pages/Acquisti";
 import AdminAddon from "./pages/AdminAddon";
@@ -62,6 +63,7 @@ export default function App() {
         <Route path="ai-check" element={<AiCheck />} />
         <Route path="preferenze" element={<Preferenze />} />
         <Route path="abbonamento" element={<Abbonamento />} />
+        <Route path="addon" element={<MieiAddon />} />
         <Route path="fatturazione" element={<Fatturazione />} />
         <Route path="checkout" element={<Checkout />} />
         <Route path="checkout/esito/:purchaseId" element={<CheckoutEsito />} />

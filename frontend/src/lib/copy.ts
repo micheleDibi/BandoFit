@@ -111,6 +111,15 @@ export const PURCHASE_KIND_LABELS: Record<import("../types").PurchaseKind, strin
   addon_admin: "Accredito addon",
 };
 
+/** Etichette dei movimenti del ledger addon (Abbonamento + I miei addon). */
+export const ADDON_MOVIMENTO_LABELS: Record<import("../types").AddonMovimentoTipo, string> = {
+  purchase: "Acquisto",
+  admin_grant: "Accredito dall'assistenza",
+  consume: "Consulenza richiesta",
+  refund: "Rimborso",
+  admin_revoke: "Rettifica",
+};
+
 export const PROPOSTA_STATO_LABELS: Record<import("../types").PropostaStato, string> = {
   inviata: "Inviata",
   accettata: "Accettata",

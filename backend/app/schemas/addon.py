@@ -51,13 +51,20 @@ class AddonCreate(BaseModel):
 
 
 class MyAddonOut(BaseModel):
-    """Una voce dell'inventario addon dell'utente."""
+    """Una voce dell'inventario addon dell'utente. Dalla 0030 include anche i
+    totali storici dal ledger (per la pagina «I miei addon»): `acquistate` =
+    accrediti (acquisti + grant + rimborsi), `consumate` = soli consumi — le
+    revoche admin riducono `quantita` senza contare come consumo."""
 
     addon_id: int
     slug: str
     nome: str
+    descrizione: str | None = None
     tipo_fruizione: TipoFruizione
+    risorsa: RisorsaAddon | None = None
     quantita: int
+    acquistate: int = 0
+    consumate: int = 0
     updated_at: datetime | None = None
 
 

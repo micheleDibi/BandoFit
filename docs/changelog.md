@@ -2,6 +2,10 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-23 — Pagina «I miei addon» (WP3)
+
+Nuova pagina `/app/addon` (menu account + link da Abbonamento): una card per add-on posseduto con stato (Attivo / Esaurito / **Dormiente** con spiegazione), quantità, consumo («usate X su Y» dal ledger per i consumabili, «in uso X di Y» da /me/entitlements per gli allocativi), «Una tantum — senza scadenza» (B2: niente date di rinnovo né riduzione self-service), CTA «Aumenta quantità» (gated da `acquistabile`) e storico movimenti. `GET /me/addons` ora include le voci a quantità 0 e i totali `acquistate`/`consumate` (le revoche admin non contano come consumo). `InventarioAddon` estratto come componente condiviso; etichette movimenti in `lib/copy.ts`.
+
 ## 2026-07-23 — Add-on «Account collegato aggiuntivo» e «Azienda aggiuntiva» (WP4+WP5)
 
 I due addon allocativi di produzione (canonizzati dalla 0030 con testi nuovi, slug invariati) diventano acquistabili con **eleggibilità derivata dalla risorsa**: seats richiede un piano con `num_account_aziendali > 1` (pro, advisor), companies un piano con `max_aziende > 1` (advisor, PA/Enti…) — regola automatica per qualunque piano, anche creato da console. Enforcement **server-side** nel checkout (`409`); `GET /addons` espone `risorsa` + `acquistabile`/`motivo_non_acquistabile` per l'utente corrente (collegati attivi → `solo_titolare`) e la CTA si disabilita col motivo. Il dialog di downgrade in Abbonamento confronta ora col limite **effettivo** del piano di destinazione (base + add-on seats, via nuovo hook `useEntitlements`); a pagamento confermato si invalidano anche `entitlements` e `addons`.

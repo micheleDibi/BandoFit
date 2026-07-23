@@ -31,6 +31,7 @@ const directLinks: NavItem[] = [
 const accountBase: NavItem[] = [
   { to: "/app/preferenze", label: "Preferenze" },
   { to: "/app/abbonamento", label: "Abbonamento" },
+  { to: "/app/addon", label: "I miei addon" },
   { to: "/app/fatturazione", label: "Dati di fatturazione" },
   { to: "/app/acquisti", label: "I tuoi acquisti" },
 ];

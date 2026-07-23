@@ -22,7 +22,9 @@ from app.services import notification_service
 
 logger = logging.getLogger("bandofit.addon_inventory")
 
-_INVENTORY_SELECT = "addon_id,quantita,updated_at,addons(slug,nome,tipo_fruizione)"
+_INVENTORY_SELECT = (
+    "addon_id,quantita,updated_at,addons(slug,nome,descrizione,tipo_fruizione,risorsa)"
+)
 
 # detail-code delle RPC 0028 → (classe errore, messaggio)
 _RPC_ERRORS: dict[str, tuple[type[AppError], str]] = {
@@ -46,28 +48,51 @@ def _raise_from_rpc(exc: APIError) -> NoReturn:
     raise UpstreamError() from exc
 
 
-def _map_inventory(row: dict) -> MyAddonOut:
+def _map_inventory(row: dict, acquistate: dict[int, int],
+                   consumate: dict[int, int]) -> MyAddonOut:
     addon = row.get("addons") or {}
     return MyAddonOut(
         addon_id=row["addon_id"],
         slug=addon.get("slug") or "",
         nome=addon.get("nome") or "",
+        descrizione=addon.get("descrizione"),
         tipo_fruizione=addon.get("tipo_fruizione") or "consumabile",
+        risorsa=addon.get("risorsa"),
         quantita=row["quantita"],
+        acquistate=acquistate.get(row["addon_id"], 0),
+        consumate=consumate.get(row["addon_id"], 0),
         updated_at=row.get("updated_at"),
     )
 
 
 async def get_inventory(primary, user_id: str) -> list[MyAddonOut]:
-    """L'inventario dell'utente (solo le voci con quantità > 0)."""
+    """L'inventario dell'utente. Dalla 0030 include ANCHE le voci a quantità 0
+    (un consumabile esaurito resta visibile in «I miei addon») e i totali dal
+    ledger — acquistate/consumate; le revoche admin non contano come consumo."""
     resp = (
         await primary.table("user_addon_inventory")
         .select(_INVENTORY_SELECT)
         .eq("user_id", str(user_id))
-        .gt("quantita", 0)
         .execute()
     )
-    return [_map_inventory(r) for r in (resp.data or [])]
+    rows = resp.data or []
+    if not rows:
+        return []
+    ledger = (
+        await primary.table("addon_ledger")
+        .select("addon_id,tipo,delta")
+        .eq("user_id", str(user_id))
+        .execute()
+    )
+    acquistate: dict[int, int] = {}
+    consumate: dict[int, int] = {}
+    for m in ledger.data or []:
+        aid = m["addon_id"]
+        if m["delta"] > 0:
+            acquistate[aid] = acquistate.get(aid, 0) + m["delta"]
+        elif m["tipo"] == "consume":
+            consumate[aid] = consumate.get(aid, 0) - m["delta"]
+    return [_map_inventory(r, acquistate, consumate) for r in rows]
 
 
 async def get_ledger(primary, user_id: str, addon_id: int | None = None,

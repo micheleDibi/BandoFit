@@ -1014,8 +1014,15 @@ export interface MyAddon {
   addon_id: number;
   slug: string;
   nome: string;
+  descrizione: string | null;
   tipo_fruizione: TipoFruizione;
+  /** Risorsa entitlement (0030): seats/companies; null = addon normale. */
+  risorsa: "seats" | "companies" | null;
   quantita: number;
+  /** Totali storici dal ledger: accrediti (acquisti+grant+rimborsi) e SOLI
+   *  consumi (le revoche admin riducono quantita senza contare come consumo). */
+  acquistate: number;
+  consumate: number;
   updated_at: string | null;
 }
 

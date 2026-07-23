@@ -2,6 +2,7 @@ import { Building2, Check, ChevronDown, FileText, Settings2 } from "lucide-react
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { useActiveCompany } from "../../hooks/useActiveCompany";
+import { useMe } from "../../hooks/useMe";
 import { cn } from "../../lib/cn";
 
 /** Menu «Azienda» della navbar: il punto unico di tutto ciò che riguarda
@@ -12,6 +13,10 @@ import { cn } from "../../lib/cn";
  *  Chiusura su selezione / click fuori / Esc, come NavMenu/UserMenu. */
 export function CompanyMenu() {
   const { isMulti, companies, activeCompanyId, setActiveCompany } = useActiveCompany();
+  const { data: me } = useMe();
+  // Un membro attivo naviga le aziende VISIBILI ma non gestisce il
+  // portafoglio (endpoint owner-only): niente «Gestisci aziende».
+  const isActiveChild = me?.family?.role === "child" && me.family.status === "active";
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -123,10 +128,12 @@ export function CompanyMenu() {
             <FileText className="size-4 text-slate-400" aria-hidden />
             Dati azienda
           </Link>
-          <Link to="/app/aziende" role="menuitem" onClick={() => setOpen(false)} className={itemLink}>
-            <Settings2 className="size-4 text-slate-400" aria-hidden />
-            Gestisci aziende
-          </Link>
+          {!isActiveChild && (
+            <Link to="/app/aziende" role="menuitem" onClick={() => setOpen(false)} className={itemLink}>
+              <Settings2 className="size-4 text-slate-400" aria-hidden />
+              Gestisci aziende
+            </Link>
+          )}
         </div>
       )}
     </div>

@@ -52,13 +52,15 @@ class FakeQuery:
 
 class FakePrimary:
     """`company_rows` = righe company_profiles (con parent_id/deleted_at/
-    archived_at); il fake applica i filtri rilevanti del resolver."""
+    archived_at); il fake applica i filtri rilevanti del resolver.
+    `access` = id azienda visibili al membro (0031)."""
 
     def __init__(self, company_rows: list[dict], membership: dict | None = None,
-                 max_aziende: int = 1):
+                 max_aziende: int = 1, access: list[str] | None = None):
         self.company_rows = company_rows
         self.membership = membership
         self.max_aziende = max_aziende
+        self.access = access or []
 
     def table(self, name):
         return FakeQuery(self, name)
@@ -76,6 +78,14 @@ class FakePrimary:
     def resolve(self, table, filters):
         if table == "family_members":
             return [self.membership] if self.membership else []
+        if table == "family_member_company_access":
+            rows = []
+            for cid in self.access:
+                company = next((r for r in self.company_rows if r["id"] == cid), None)
+                embed = {**company, "ragione_sociale": "ACME", "partita_iva": "0" * 11,
+                         "created_at": company.get("created_at") or "2026-01-01"} if company else None
+                rows.append({"company_profile_id": cid, "company_profiles": embed})
+            return rows
         if table == "company_profiles":
             rows = []
             for r in self.company_rows:
@@ -105,6 +115,11 @@ def _company(company_id=COMPANY, parent_id=OWNER, deleted_at=None, archived_at=N
 USER = {"id": OWNER}
 
 
+def _membership(company: str | None = None):
+    return {"id": "m0000000-0000-0000-0000-000000000001", "status": "active",
+            "parent_id": "p-parent", "company_profile_id": company}
+
+
 class TestDefault:
     async def test_azienda_unica_del_titolare(self):
         primary = FakePrimary([_company()])
@@ -119,15 +134,59 @@ class TestDefault:
         assert active.company_id is None and active.owner_id == OWNER
 
     async def test_figlio_attivo_eredita_owner_e_sola_lettura(self):
-        # owner_and_editable → (parent_id, False); l'azienda attiva è quella del padre.
+        # Membro attivo: owner = padre, sola lettura; default = APPARTENENZA
+        # (0031), risolta dentro l'insieme visibilità ∩ vive.
         primary = FakePrimary(
             [_company(parent_id="p-parent")],
-            membership={"status": "active", "parent_id": "p-parent"},
+            membership=_membership(company=COMPANY),
+            access=[COMPANY],
         )
         active = await active_company(_request(), {"id": "child"}, primary)
         assert active.owner_id == "p-parent"
         assert active.editable is False
         assert active.company_id == COMPANY
+
+    async def test_figlio_header_fuori_visibilita_404(self):
+        # L'azienda esiste ed è del padre, ma NON è stata concessa: 404.
+        primary = FakePrimary(
+            [_company(parent_id="p-parent"),
+             _company(company_id=OTHER_COMPANY, parent_id="p-parent")],
+            membership=_membership(company=COMPANY),
+            access=[COMPANY],
+        )
+        with pytest.raises(NotFoundError):
+            await active_company(_request(OTHER_COMPANY), {"id": "child"}, primary)
+
+    async def test_figlio_header_dentro_visibilita_ok(self):
+        primary = FakePrimary(
+            [_company(parent_id="p-parent"),
+             _company(company_id=OTHER_COMPANY, parent_id="p-parent")],
+            membership=_membership(company=COMPANY),
+            access=[COMPANY, OTHER_COMPANY],
+        )
+        active = await active_company(_request(OTHER_COMPANY), {"id": "child"}, primary)
+        assert active.company_id == OTHER_COMPANY
+
+    async def test_figlio_appartenenza_archiviata_fallback(self):
+        # La sua azienda è stata archiviata (reconcile): default = la più
+        # vecchia VISIBILE viva — mai bloccato.
+        primary = FakePrimary(
+            [_company(parent_id="p-parent", archived_at="2026-07-01T00:00:00+00:00"),
+             _company(company_id=OTHER_COMPANY, parent_id="p-parent")],
+            membership=_membership(company=COMPANY),
+            access=[COMPANY, OTHER_COMPANY],
+        )
+        active = await active_company(_request(), {"id": "child"}, primary)
+        assert active.company_id == OTHER_COMPANY
+
+    async def test_figlio_senza_visibilita_company_none(self):
+        primary = FakePrimary(
+            [_company(parent_id="p-parent")],
+            membership=_membership(company=None),
+            access=[],
+        )
+        active = await active_company(_request(), {"id": "child"}, primary)
+        assert active.company_id is None
 
     async def test_esclude_cancellata_e_archiviata(self):
         primary = FakePrimary([

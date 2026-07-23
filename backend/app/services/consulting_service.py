@@ -552,10 +552,15 @@ async def _fetch_request(primary, request_id: str) -> dict | None:
 
 
 async def _fetch_request_for_family(primary, user: dict, request_id: str) -> tuple[dict, bool]:
-    """Richiesta visibile alla famiglia dell'utente; editable = può agire."""
+    """Richiesta visibile alla famiglia dell'utente; editable = può agire.
+    Un membro ATTIVO vede solo le consulenze delle aziende a lui VISIBILI
+    (0031): stessa regola del resolver dell'azienda attiva, 404 fuori insieme."""
     owner_id, editable = await family_service.owner_and_editable(primary, user)
     request = await _fetch_request(primary, request_id)
     if request is None or request["family_parent_id"] != owner_id:
+        raise NotFoundError("Consulenza non trovata")
+    visibili = await family_service.visible_company_ids_for_member(primary, user)
+    if visibili is not None and str(request.get("company_profile_id")) not in visibili:
         raise NotFoundError("Consulenza non trovata")
     return request, editable
 
@@ -752,13 +757,18 @@ async def create_request(primary, user: dict, ai_check_id: str) -> ConsulenzaOut
 
 async def list_my_requests(primary, user: dict) -> list[ConsulenzaOut]:
     owner_id, editable = await family_service.owner_and_editable(primary, user)
-    resp = (
-        await primary.table("consultation_requests")
+    query = (
+        primary.table("consultation_requests")
         .select(REQUEST_SELECT)
         .eq("family_parent_id", owner_id)
-        .order("created_at", desc=True)
-        .execute()
     )
+    # Un membro ATTIVO elenca solo le consulenze delle aziende visibili (0031).
+    visibili = await family_service.visible_company_ids_for_member(primary, user)
+    if visibili is not None:
+        if not visibili:
+            return []
+        query = query.in_("company_profile_id", visibili)
+    resp = await query.order("created_at", desc=True).execute()
     rows = resp.data
     request_ids = [row["id"] for row in rows]
 

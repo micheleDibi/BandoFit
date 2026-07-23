@@ -103,14 +103,24 @@ class ActiveCompany:
 async def active_company(
     request: Request, user: CurrentUser, primary: PrimaryClient
 ) -> ActiveCompany:
-    """Risolve l'azienda attiva della richiesta, ri-autorizzandola sempre:
-    l'header `X-Active-Company` è onorato solo se punta a un'azienda VIVA del
-    titolare corrente (mai di un altro owner, mai cancellata/archiviata).
-    Senza header si usa l'azienda viva più vecchia del titolare (l'unica, per i
-    non-Advisor): comportamento identico a prima della multi-azienda."""
+    """Risolve l'azienda attiva della richiesta, ri-autorizzandola sempre.
+
+    Titolare/pending/retrocesso: l'header `X-Active-Company` è onorato solo se
+    punta a un'azienda VIVA propria; senza header, la viva più vecchia.
+    Membro ATTIVO (0031): l'insieme utile è la sua VISIBILITÀ ∩ aziende vive
+    dell'owner — header fuori insieme → 404 (non rivela l'esistenza); default =
+    appartenenza se nell'insieme, altrimenti la più vecchia dell'insieme,
+    altrimenti nessuna azienda. `is_multi` resta sul limite dell'OWNER: governa
+    lo scoping dei dati (Gruppo A), non lo switcher del membro (che usa il flag
+    child-aware di /me)."""
     from app.services import company_service, family_service  # import locale: evita cicli
 
-    owner_id, editable = await family_service.owner_and_editable(primary, user)
+    membership = await family_service.get_membership(primary, user["id"])
+    if membership and membership["status"] == "active":
+        owner_id, editable = str(membership["parent_id"]), False
+    else:
+        owner_id, editable = str(user["id"]), True
+        membership = None
     is_multi = await company_service.effective_max_aziende(primary, owner_id) > 1
 
     header = (request.headers.get("X-Active-Company") or "").strip()
@@ -121,6 +131,26 @@ async def active_company(
             # id malformato = azienda inesistente per il chiamante (evita il
             # 22P02 → 502 di Postgres su un uuid non valido).
             raise NotFoundError("Azienda non disponibile") from None
+
+    if membership is not None:
+        appartenenza, vive = await family_service.visible_companies(primary, membership)
+        ids = [c["id"] for c in vive]
+        if header:
+            if header not in ids:
+                raise NotFoundError("Azienda non disponibile")
+            company_id = header
+        elif appartenenza in ids:
+            company_id = appartenenza
+        else:
+            # Appartenenza archiviata/cancellata o mai assegnata: fallback
+            # sulla più vecchia visibile — il membro non resta mai bloccato.
+            company_id = ids[0] if ids else None
+        return ActiveCompany(
+            company_id=company_id, owner_id=owner_id,
+            editable=editable, is_multi=is_multi,
+        )
+
+    if header:
         resp = (
             await primary.table("company_profiles")
             .select("id")

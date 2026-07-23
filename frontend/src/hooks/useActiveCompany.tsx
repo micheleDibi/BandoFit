@@ -10,7 +10,7 @@ import {
 } from "react";
 import { setActiveCompanyHeader } from "../lib/api";
 import type { CompanySummary } from "../types";
-import { useCompanies } from "./useCompanies";
+import { useVisibleCompanies } from "./useCompanies";
 import { useMe } from "./useMe";
 
 const STORAGE_KEY = "bandofit.activeCompany";
@@ -35,9 +35,11 @@ const ActiveCompanyContext = createContext<ActiveCompanyValue>({
 
 export function ActiveCompanyProvider({ children }: { children: ReactNode }) {
   const { data: me } = useMe();
-  const isMulti = (me?.max_aziende ?? 1) > 1;
-  const companiesQuery = useCompanies();
-  const companies = companiesQuery.data?.aziende ?? [];
+  // Flag child-aware (0031): per un membro attivo il server guarda la sua
+  // visibilità; per i titolari il limite effettivo (fallback legacy).
+  const isMulti = me?.multi_azienda ?? (me?.max_aziende ?? 1) > 1;
+  const companiesQuery = useVisibleCompanies();
+  const companies = companiesQuery.data ?? [];
   const queryClient = useQueryClient();
   const [activeCompanyId, setActiveCompanyId] = useState<string | null>(() =>
     localStorage.getItem(STORAGE_KEY),

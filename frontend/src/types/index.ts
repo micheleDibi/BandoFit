@@ -195,6 +195,14 @@ export interface FamilyMember {
   invited_at: string;
   joined_at: string | null;
   demoted_at: string | null;
+  /** Appartenenza/visibilità/budget (0031). aziende_visibili = solo le vive. */
+  company_profile_id: string | null;
+  company_nome: string | null;
+  aziende_visibili: string[];
+  /** null = illimitato; N = tetto per ciclo. */
+  ai_check_budget: number | null;
+  /** Consumi del membro nel ciclo corrente. */
+  ai_check_usati: number;
 }
 
 export interface Family {
@@ -368,8 +376,12 @@ export interface Me {
   family: MeFamily | null;
   /** Valorizzato solo per gli utenti con ruolo progettista. */
   progettista?: Progettista | null;
-  /** Limite EFFETTIVO di aziende gestibili (override > piano > 1): >1 = Advisor. */
+  /** Limite EFFETTIVO di aziende gestibili (override > piano > 1; dalla 0030
+   *  + addon companies): >1 = Advisor. Per un membro attivo è il SUO (=1). */
   max_aziende: number;
+  /** Flag child-aware per lo switcher (0031): per un membro attivo è vero se
+   *  vede più di un'azienda (visibilità ∩ vive); per gli altri max_aziende>1. */
+  multi_azienda: boolean;
   plan_switch_adjustment?: PlanSwitchAdjustment | null;
 }
 

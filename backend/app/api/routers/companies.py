@@ -9,7 +9,7 @@ from uuid import UUID
 
 from fastapi import APIRouter
 
-from app.api.deps import ParentUser, PrimaryClient
+from app.api.deps import CurrentUser, ParentUser, PrimaryClient
 from app.schemas.company import CompaniesOut, CompanyCreate, CompanySummary
 from app.services import company_service
 
@@ -21,6 +21,15 @@ async def list_aziende(user: ParentUser, primary: PrimaryClient) -> CompaniesOut
     """Aziende vive gestite, con il limite effettivo del piano e quante ne sono
     in uso. La prima (più vecchia) è quella attiva di default."""
     return await company_service.list_companies(primary, user["id"])
+
+
+@router.get("/visibili", response_model=list[CompanySummary])
+async def list_aziende_visibili(user: CurrentUser, primary: PrimaryClient) -> list[CompanySummary]:
+    """Le aziende su cui l'utente può operare, per lo switcher (0031): per un
+    membro ATTIVO è la sua visibilità ∩ aziende vive (attiva = il default del
+    resolver); per titolari/pending/retrocessi le proprie vive. A differenza
+    di `GET /me/aziende` non è ParentUser-gated: serve anche ai collegati."""
+    return await company_service.list_visible_companies(primary, user)
 
 
 @router.post("", response_model=CompanySummary, status_code=201)

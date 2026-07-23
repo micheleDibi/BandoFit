@@ -17,6 +17,13 @@ class FamilyMemberOut(BaseModel):
     invited_at: datetime
     joined_at: datetime | None = None
     demoted_at: datetime | None = None
+    # Appartenenza/visibilità/budget (migration 0031). company_nome è
+    # denormalizzato per la UI; aziende_visibili = SOLO le vive.
+    company_profile_id: UUID | None = None
+    company_nome: str | None = None
+    aziende_visibili: list[UUID] = []
+    ai_check_budget: int | None = None  # NULL = illimitato
+    ai_check_usati: int = 0  # consumi del membro nel ciclo corrente
 
 
 class FamilyOut(BaseModel):
@@ -28,6 +35,20 @@ class FamilyOut(BaseModel):
 class InviteMemberIn(BaseModel):
     email: EmailStr
     denominazione: str = Field(min_length=1, max_length=200)
+    # Obbligatoria (lato RPC) se il titolare ha più aziende vive; con una sola
+    # viene assegnata quella; senza aziende resta NULL.
+    company_profile_id: UUID | None = None
+    # NULL = illimitato; N >= 0 = tetto per ciclo.
+    ai_check_budget: int | None = Field(default=None, ge=0)
+
+
+class MemberUpdateIn(BaseModel):
+    """PATCH del membro (solo i campi presenti vengono applicati; per il
+    budget, un null ESPLICITO significa «illimitato»)."""
+
+    company_profile_id: UUID | None = None
+    aziende_visibili: list[UUID] | None = None
+    ai_check_budget: int | None = Field(default=None, ge=0)
 
 
 class InviteMemberOut(BaseModel):

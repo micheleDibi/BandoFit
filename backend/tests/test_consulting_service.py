@@ -1225,3 +1225,51 @@ class TestDossierFull:
         [audit] = [op for op in primary.ops if op[0] == "audit_log"]
         assert audit[2]["action"] == "consulenza.dossier_accessed"
         assert audit[2]["payload"] == {"request_id": REQUEST_ID}
+
+
+class TestVisibilitaMembro:
+    """Scoping 0031: un membro ATTIVO vede solo le consulenze delle aziende a
+    lui visibili (∩ vive) — stessa regola del resolver dell'azienda attiva."""
+
+    MEMBRO = {"id": "99999999-0000-0000-0000-000000000099"}
+    ALTRA_COMPANY = "88888888-0000-0000-0000-000000000088"
+
+    def _primary(self, visibile: str | None) -> FakePrimary:
+        access = []
+        if visibile:
+            access.append({
+                "company_profile_id": visibile,
+                "company_profiles": {
+                    "id": visibile, "ragione_sociale": "ACME", "partita_iva": "0" * 11,
+                    "created_at": "2026-01-01", "deleted_at": None, "archived_at": None,
+                },
+            })
+        return FakePrimary(selects={
+            "family_members": [{
+                "id": "m-1", "parent_id": TITOLARE, "member_id": self.MEMBRO["id"],
+                "denominazione": "Sede", "invited_email": "m@test.it",
+                "invite_kind": "existing_user", "status": "active",
+                "invited_at": tra(0).isoformat(), "joined_at": tra(0).isoformat(),
+                "demoted_at": None, "company_profile_id": visibile,
+                "ai_check_budget": None,
+            }],
+            "family_member_company_access": access,
+            "consultation_requests": [request_row()],
+        })
+
+    async def test_dettaglio_fuori_visibilita_404(self):
+        primary = self._primary(visibile=self.ALTRA_COMPANY)
+        with pytest.raises(NotFoundError):
+            await consulting_service._fetch_request_for_family(
+                primary, self.MEMBRO, REQUEST_ID)
+
+    async def test_dettaglio_dentro_visibilita_ok(self):
+        primary = self._primary(visibile=COMPANY_ID)
+        request, editable = await consulting_service._fetch_request_for_family(
+            primary, self.MEMBRO, REQUEST_ID)
+        assert request["id"] == REQUEST_ID and editable is False
+
+    async def test_lista_vuota_senza_aziende_visibili(self):
+        primary = self._primary(visibile=None)
+        out = await consulting_service.list_my_requests(primary, self.MEMBRO)
+        assert out == []

@@ -37,7 +37,7 @@ CURRENT_STATUSES = ["pending", "active", "demoted"]
 
 MEMBER_SELECT = (
     "id,parent_id,member_id,denominazione,invited_email,invite_kind,"
-    "status,invited_at,joined_at,demoted_at"
+    "status,invited_at,joined_at,demoted_at,company_profile_id,ai_check_budget"
 )
 
 # codice detail della RPC -> (classe errore, messaggio per l'utente)
@@ -83,6 +83,17 @@ _RPC_ERRORS: dict[str, tuple[type[AppError], str]] = {
         "La partita IVA non è valida: controlla le 11 cifre",
     ),
     "company_not_found": (NotFoundError, "Azienda non trovata o già rimossa"),
+    # Appartenenza/visibilità/budget (0031)
+    "company_required": (BadRequestError, "Indica a quale azienda collegare questo account"),
+    "company_has_members": (
+        ConflictError,
+        "Ci sono account collegati a questa azienda: riassegnali prima di rimuoverla",
+    ),
+    "membership_access_required": (
+        BadRequestError,
+        "La visibilità deve includere l'azienda di appartenenza",
+    ),
+    "budget_non_valido": (BadRequestError, "Budget non valido"),
 }
 
 
@@ -98,7 +109,13 @@ def raise_from_rpc(exc: APIError) -> NoReturn:
     raise UpstreamError() from exc
 
 
-def map_member(row: dict) -> FamilyMemberOut:
+def map_member(
+    row: dict,
+    access_map: dict[str, list[str]] | None = None,
+    company_nomi: dict[str, str] | None = None,
+    usati_map: dict[str, int] | None = None,
+) -> FamilyMemberOut:
+    company_id = row.get("company_profile_id")
     return FamilyMemberOut(
         id=row["id"],
         member_id=row["member_id"],
@@ -109,6 +126,11 @@ def map_member(row: dict) -> FamilyMemberOut:
         invited_at=row["invited_at"],
         joined_at=row.get("joined_at"),
         demoted_at=row.get("demoted_at"),
+        company_profile_id=company_id,
+        company_nome=(company_nomi or {}).get(str(company_id)) if company_id else None,
+        aziende_visibili=(access_map or {}).get(str(row["id"]), []),
+        ai_check_budget=row.get("ai_check_budget"),
+        ai_check_usati=(usati_map or {}).get(str(row["member_id"]), 0),
     )
 
 
@@ -135,6 +157,42 @@ async def owner_and_editable(primary, user: dict) -> tuple[str, bool]:
     if membership and membership["status"] == "active":
         return str(membership["parent_id"]), False
     return str(user["id"]), True
+
+
+async def visible_companies(primary, membership: dict) -> tuple[str | None, list[dict]]:
+    """L'insieme utile del membro: visibilità ∩ aziende VIVE dell'owner,
+    ordinate per anzianità. Ritorna (appartenenza, [aziende]) — l'appartenenza
+    può non essere nell'insieme (azienda archiviata/cancellata: fallback)."""
+    resp = (
+        await primary.table("family_member_company_access")
+        .select("company_profile_id,"
+                "company_profiles(id,ragione_sociale,partita_iva,created_at,"
+                "deleted_at,archived_at)")
+        .eq("family_member_id", str(membership["id"]))
+        .execute()
+    )
+    vive: list[dict] = []
+    for row in resp.data or []:
+        company = row.get("company_profiles") or {}
+        if isinstance(company, list):
+            company = company[0] if company else {}
+        if company and company.get("deleted_at") is None and company.get("archived_at") is None:
+            vive.append(company)
+    vive.sort(key=lambda c: (str(c.get("created_at") or ""), str(c["id"])))
+    membership_company = membership.get("company_profile_id")
+    return (str(membership_company) if membership_company else None,
+            [{**c, "id": str(c["id"])} for c in vive])
+
+
+async def visible_company_ids_for_member(primary, user: dict) -> list[str] | None:
+    """Per un membro ATTIVO: gli id delle aziende visibili e vive (lista anche
+    vuota = non vede nulla). None = nessuna restrizione (titolare, pending,
+    retrocesso: operano sui propri dati)."""
+    membership = await get_membership(primary, user["id"])
+    if not membership or membership["status"] != "active":
+        return None
+    _, vive = await visible_companies(primary, membership)
+    return [c["id"] for c in vive]
 
 
 async def parent_display_name(primary, parent_id: str) -> str:
@@ -173,6 +231,67 @@ async def family_limit(primary, parent_id: str) -> int:
         return 0
 
 
+async def _overview_context(primary, parent_id: str, rows: list[dict]) -> tuple[dict, dict, dict]:
+    """Contesto per l'overview arricchita (0031): visibilità per membership
+    (solo aziende VIVE), nomi delle aziende dell'owner, consumi AI-check del
+    ciclo corrente per membro. Tre query batch, best-effort nei contenuti."""
+    membership_ids = [str(r["id"]) for r in rows]
+    access_map: dict[str, list[str]] = {}
+    company_nomi: dict[str, str] = {}
+    usati_map: dict[str, int] = {}
+
+    companies_resp = (
+        await primary.table("company_profiles")
+        .select("id,ragione_sociale,deleted_at,archived_at")
+        .eq("parent_id", parent_id)
+        .execute()
+    )
+    vive: set[str] = set()
+    for c in companies_resp.data or []:
+        company_nomi[str(c["id"])] = c["ragione_sociale"]
+        if c.get("deleted_at") is None and c.get("archived_at") is None:
+            vive.add(str(c["id"]))
+
+    if membership_ids:
+        access_resp = (
+            await primary.table("family_member_company_access")
+            .select("family_member_id,company_profile_id")
+            .in_("family_member_id", membership_ids)
+            .execute()
+        )
+        for row in access_resp.data or []:
+            cid = str(row["company_profile_id"])
+            if cid in vive:
+                access_map.setdefault(str(row["family_member_id"]), []).append(cid)
+
+    # Consumi del ciclo corrente (stessa finestra della quota: sub attiva).
+    sub_resp = (
+        await primary.table("user_subscriptions")
+        .select("data_inizio,data_scadenza")
+        .eq("user_id", parent_id)
+        .eq("status", "active")
+        .limit(1)
+        .execute()
+    )
+    if sub_resp.data:
+        sub = sub_resp.data[0]
+        query = (
+            primary.table("ai_checks")
+            .select("user_id")
+            .eq("family_parent_id", parent_id)
+            .in_("status", ["pending", "ready"])
+        )
+        if sub.get("data_inizio"):
+            query = query.gte("created_at", str(sub["data_inizio"]))
+        checks = await query.execute()
+        for row in checks.data or []:
+            uid = str(row.get("user_id") or "")
+            if uid:
+                usati_map[uid] = usati_map.get(uid, 0) + 1
+
+    return access_map, company_nomi, usati_map
+
+
 async def get_family_overview(primary, parent_id: str) -> FamilyOut:
     members_resp = (
         await primary.table("family_members")
@@ -182,7 +301,9 @@ async def get_family_overview(primary, parent_id: str) -> FamilyOut:
         .order("invited_at")
         .execute()
     )
-    members = [map_member(row) for row in members_resp.data]
+    rows = members_resp.data
+    access_map, company_nomi, usati_map = await _overview_context(primary, parent_id, rows)
+    members = [map_member(row, access_map, company_nomi, usati_map) for row in rows]
     used = 1 + sum(1 for m in members if m.status in ("pending", "active"))
     return FamilyOut(
         limit=await family_limit(primary, parent_id),
@@ -205,7 +326,8 @@ async def _find_profile_by_email(primary, email: str) -> dict | None:
 
 
 async def _create_membership_rpc(
-    primary, parent_id: str, member_id: str, denominazione: str, email: str, kind: str
+    primary, parent_id: str, member_id: str, denominazione: str, email: str, kind: str,
+    company_id: str | None = None, ai_check_budget: int | None = None,
 ) -> None:
     try:
         await primary.rpc(
@@ -216,6 +338,8 @@ async def _create_membership_rpc(
                 "p_denominazione": denominazione,
                 "p_email": email,
                 "p_kind": kind,
+                "p_company_id": str(company_id) if company_id else None,
+                "p_ai_check_budget": ai_check_budget,
             },
         ).execute()
     except APIError as exc:
@@ -223,7 +347,8 @@ async def _create_membership_rpc(
 
 
 async def invite_member(
-    primary, parent_profile: dict, email: str, denominazione: str
+    primary, parent_profile: dict, email: str, denominazione: str,
+    company_id: str | None = None, ai_check_budget: int | None = None,
 ) -> InviteMemberOut:
     settings = get_settings()
     email = email.strip().lower()
@@ -244,7 +369,8 @@ async def invite_member(
     if existing:
         # Utente già registrato: prima la validazione atomica, poi l'email best-effort.
         await _create_membership_rpc(
-            primary, parent_id, existing["id"], denominazione, email, "existing_user"
+            primary, parent_id, existing["id"], denominazione, email, "existing_user",
+            company_id=company_id, ai_check_budget=ai_check_budget,
         )
         display_name = await parent_display_name(primary, parent_id)
         email_sent = await email_service.send_family_invitation_email(
@@ -272,7 +398,10 @@ async def invite_member(
                 # Race: registrazione avvenuta tra il lookup e l'invito.
                 registered = await _find_profile_by_email(primary, email)
                 if registered:
-                    return await invite_member(primary, parent_profile, email, denominazione)
+                    return await invite_member(
+                        primary, parent_profile, email, denominazione,
+                        company_id=company_id, ai_check_budget=ai_check_budget,
+                    )
             logger.error("Creazione utente invitato fallita per %s: %s", email, exc)
             raise UpstreamError("Invio dell'invito non riuscito, riprova") from exc
 
@@ -286,7 +415,8 @@ async def invite_member(
 
         try:
             await _create_membership_rpc(
-                primary, parent_id, member_id, denominazione, email, "new_user"
+                primary, parent_id, member_id, denominazione, email, "new_user",
+                company_id=company_id, ai_check_budget=ai_check_budget,
             )
         except Exception:
             # Compensazione su QUALSIASI errore (anche di rete): l'utente auth è
@@ -309,6 +439,41 @@ async def invite_member(
         family=await get_family_overview(primary, parent_id),
         email_sent=email_sent,
     )
+
+
+async def update_member(
+    primary, parent_profile: dict, membership_id: str, changes: dict
+) -> FamilyOut:
+    """PATCH del membro (0031): appartenenza, visibilità, budget — ognuna via
+    la sua RPC atomica (lock sul padre + audit). Applica SOLO i campi presenti
+    in `changes` (model_dump(exclude_unset=True) del router)."""
+    parent_id = str(parent_profile["id"])
+    try:
+        if "company_profile_id" in changes:
+            if changes["company_profile_id"] is None:
+                # L'appartenenza non si azzera: si cambia (o si rimuove il membro).
+                raise BadRequestError("Indica l'azienda di appartenenza")
+            await primary.rpc("fn_set_member_company", {
+                "p_parent_id": parent_id,
+                "p_membership_id": str(membership_id),
+                "p_company_id": str(changes["company_profile_id"]),
+            }).execute()
+        if "aziende_visibili" in changes:
+            await primary.rpc("fn_set_member_access", {
+                "p_parent_id": parent_id,
+                "p_membership_id": str(membership_id),
+                "p_company_ids": [str(c) for c in changes["aziende_visibili"]],
+            }).execute()
+        if "ai_check_budget" in changes:
+            budget = changes["ai_check_budget"]
+            await primary.rpc("fn_set_member_budget", {
+                "p_parent_id": parent_id,
+                "p_membership_id": str(membership_id),
+                "p_budget": int(budget) if budget is not None else None,
+            }).execute()
+    except APIError as exc:
+        raise_from_rpc(exc)
+    return await get_family_overview(primary, parent_id)
 
 
 async def _get_parent_membership_row(primary, parent_id: str, membership_id: str) -> dict:

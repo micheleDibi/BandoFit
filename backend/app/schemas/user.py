@@ -51,9 +51,12 @@ class MeOut(BaseModel):
     # Valorizzato per i progettisti e per gli admin che hanno già un codice
     # (assegnato alla prima proposta inviata — parità admin, 0019).
     progettista: ProgettistaOut | None = None
-    # Limite EFFETTIVO di aziende gestibili (override utente > piano > 1). >1
-    # per gli Advisor: il frontend lo usa per mostrare lo switcher azienda.
+    # Limite EFFETTIVO di aziende gestibili (override utente > piano > 1;
+    # dalla 0030 + addon companies). Per un membro attivo è il SUO (=1).
     max_aziende: int = 1
+    # Flag child-aware per lo switcher (0031): per un membro ATTIVO è vero se
+    # vede più di un'azienda (visibilità ∩ vive); per gli altri, max_aziende>1.
+    multi_azienda: bool = False
     # Presente solo nella risposta di un cambio piano che ha causato retrocessioni.
     plan_switch_adjustment: PlanSwitchAdjustment | None = None
 

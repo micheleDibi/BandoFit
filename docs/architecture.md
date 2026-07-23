@@ -96,6 +96,8 @@ Topologia dell'enforcement (vincolo di design: **un'unica formula, N call-site a
 - la **riduzione è IMMEDIATA** (decisione B3): al downgrade o alla revoca admin di un addon allocativo scattano subito `fn_reconcile_family` (retrocede i più recenti) / `fn_reconcile_companies` (archivia le più recenti) — mai cancellazioni, tutto reversibile risalendo;
 - il frontend **legge e basta**: `GET /me/entitlements` serve lo snapshot (`fn_entitlement_snapshot`) e gli stessi numeri alimentano i serializer esistenti (`/me`, `/me/family`, quota AI-check) — display e arbitri non possono divergere.
 
+**Visibilità aziende dei membri (0031)**: ogni membro ha un'APPARTENENZA (una azienda) e una VISIBILITÀ (insieme ⊇ appartenenza, tabella `family_member_company_access`). L'enforcement è **query scoping server-side**, non filtro UI: il resolver dell'azienda attiva risolve un membro ATTIVO solo dentro visibilità ∩ vive (header fuori insieme → 404, default = appartenenza con fallback alla più vecchia visibile), e i due percorsi company-scoped fuori resolver — consulenze e digest alert — sono filtrati sullo stesso insieme. Lo switcher del membro usa `GET /me/aziende/visibili` + il flag child-aware `multi_azienda` di `/me` (l'`is_multi` del resolver resta sul limite dell'owner: governa lo scoping dei dati, non la UI).
+
 ## Flusso di autenticazione
 
 1. Il frontend chiama `supabase.auth.signUp()` con `options.data = {nome, cognome, azienda, plan_slug}`.

@@ -8,6 +8,7 @@ from app.schemas.family import (
     InvitationOut,
     InviteMemberIn,
     InviteMemberOut,
+    MemberUpdateIn,
 )
 from app.schemas.user import MeOut
 from app.services import family_service, user_service
@@ -26,7 +27,21 @@ async def invite_member(
     data: InviteMemberIn, parent: ParentUser, primary: PrimaryClient
 ) -> InviteMemberOut:
     return await family_service.invite_member(
-        primary, parent, str(data.email), data.denominazione.strip()
+        primary, parent, str(data.email), data.denominazione.strip(),
+        company_id=str(data.company_profile_id) if data.company_profile_id else None,
+        ai_check_budget=data.ai_check_budget,
+    )
+
+
+@router.patch("/family/members/{membership_id}", response_model=FamilyOut)
+async def update_member(
+    membership_id: UUID, data: MemberUpdateIn, parent: ParentUser, primary: PrimaryClient
+) -> FamilyOut:
+    """Modifica di un membro (0031): azienda di appartenenza, aziende visibili
+    (⊇ appartenenza), budget AI-check (null esplicito = illimitato). Applica
+    solo i campi presenti nel body."""
+    return await family_service.update_member(
+        primary, parent, str(membership_id), data.model_dump(exclude_unset=True)
     )
 
 

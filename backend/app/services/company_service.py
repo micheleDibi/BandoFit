@@ -229,6 +229,32 @@ async def list_companies(primary, owner_id: str) -> CompaniesOut:
     )
 
 
+async def list_visible_companies(primary, user: dict) -> list[CompanySummary]:
+    """Le aziende su cui l'utente può operare, per lo SWITCHER (0031):
+    membro ATTIVO → visibilità ∩ vive dell'owner (attiva = il default del
+    resolver: appartenenza, o la più vecchia visibile); tutti gli altri →
+    le proprie vive (attiva = la più vecchia, come list_companies)."""
+    from app.services import family_service  # import locale: evita cicli
+
+    membership = await family_service.get_membership(primary, user["id"])
+    if membership and membership["status"] == "active":
+        appartenenza, vive = await family_service.visible_companies(primary, membership)
+        ids = [c["id"] for c in vive]
+        attiva_id = appartenenza if appartenenza in ids else (ids[0] if ids else None)
+        return [
+            CompanySummary(
+                id=c["id"],
+                ragione_sociale=c["ragione_sociale"],
+                partita_iva=c["partita_iva"],
+                created_at=c["created_at"],
+                attiva=(c["id"] == attiva_id),
+            )
+            for c in vive
+        ]
+    result = await list_companies(primary, str(user["id"]))
+    return result.aziende
+
+
 async def create_company(primary, owner_id: str, data: CompanyCreate) -> CompanySummary:
     """Crea un'azienda via `fn_create_company` (limite race-free, P.IVA e
     ragione sociale obbligatorie). Gli errori della RPC diventano AppError."""

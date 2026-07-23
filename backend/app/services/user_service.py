@@ -226,12 +226,22 @@ async def get_me(primary, user_id: str) -> MeOut:
 
     from app.services import company_service  # import locale: evita cicli
 
+    max_aziende = await company_service.effective_max_aziende(primary, user_id)
+    # Flag switcher child-aware (0031): un membro attivo vede lo switcher se
+    # ha più di un'azienda VISIBILE; per gli altri decide il limite effettivo.
+    if membership and membership["status"] == "active":
+        _, visibili = await family_service.visible_companies(primary, membership)
+        multi_azienda = len(visibili) > 1
+    else:
+        multi_azienda = max_aziende > 1
+
     return MeOut(
         profile=profile_from_row(row),
         subscription=subscription,
         family=family,
         progettista=await _fetch_progettista(primary, user_id, row["role"]),
-        max_aziende=await company_service.effective_max_aziende(primary, user_id),
+        max_aziende=max_aziende,
+        multi_azienda=multi_azienda,
     )
 
 

@@ -360,7 +360,7 @@ class TestGuards:
             """select
                  has_function_privilege('anon', 'public.fn_switch_plan(uuid,bigint)', 'execute'),
                  has_function_privilege('authenticated',
-                   'public.fn_create_family_member(uuid,uuid,text,text,text)', 'execute'),
+                   'public.fn_create_family_member(uuid,uuid,text,text,text,uuid,integer)', 'execute'),
                  has_table_privilege('anon', 'public.family_members', 'select'),
                  has_table_privilege('authenticated', 'public.company_profiles', 'select'),
                  has_table_privilege('anon', 'public.audit_log', 'select')"""

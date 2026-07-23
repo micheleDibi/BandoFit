@@ -370,6 +370,37 @@ async def carica_destinatari(primary, owner_ids: list[str]) -> dict[str, list[di
     return per_owner
 
 
+async def carica_visibilita_membri(primary, owner_ids: list[str]) -> dict[str, set[str]]:
+    """Visibilità aziende dei membri ATTIVI (0031): member_id → id azienda
+    concessi. Il digest di un membro va INTERSECATO con questo insieme (le
+    sezioni per-azienda di un multi-azienda non devono rivelare aziende non
+    concesse); l'owner riceve sempre tutto."""
+    if not owner_ids:
+        return {}
+    members = (
+        await primary.table("family_members")
+        .select("id,member_id")
+        .in_("parent_id", owner_ids)
+        .eq("status", "active")
+        .execute()
+    )
+    membership_to_member = {str(r["id"]): str(r["member_id"]) for r in members.data or []}
+    if not membership_to_member:
+        return {}
+    access = (
+        await primary.table("family_member_company_access")
+        .select("family_member_id,company_profile_id")
+        .in_("family_member_id", list(membership_to_member))
+        .execute()
+    )
+    visibilita: dict[str, set[str]] = {m: set() for m in membership_to_member.values()}
+    for row in access.data or []:
+        member = membership_to_member.get(str(row["family_member_id"]))
+        if member:
+            visibilita[member].add(str(row["company_profile_id"]))
+    return visibilita
+
+
 async def filtra_recapitabili(primary, destinatari: list[dict]) -> list[dict]:
     """Solo email VERIFICATE (auth.users, via RPC batch) e non in
     suppression list (confronto case-insensitive)."""
@@ -668,6 +699,7 @@ async def esegui_run(primary, secondary, oggi: date) -> dict:
             ritardi = await carica_ritardi_piano(primary, list(aziende_per_owner))
             owner_abilitati = [o for o in aziende_per_owner if o in ritardi]
             destinatari_per_owner = await carica_destinatari(primary, owner_abilitati)
+            visibilita_membri = await carica_visibilita_membri(primary, owner_abilitati)
             totale_regioni = len(lookups.regioni)
 
             for owner_id in owner_abilitati:
@@ -699,11 +731,24 @@ async def esegui_run(primary, secondary, oggi: date) -> dict:
                     settings_row = impostazioni.get(destinatario["id"])
                     if not settings_row or not settings_row["abilitati"]:
                         continue  # opt-out: valutato ADESSO, all'invio
+                    # 0031: un MEMBRO riceve solo le sezioni delle aziende a
+                    # lui visibili (scope_value None = azienda unica legacy:
+                    # sempre inclusa, la visibilità la copre per costruzione).
+                    sezioni_destinatario = sezioni
+                    if destinatario["id"] != owner_id:
+                        vis = visibilita_membri.get(str(destinatario["id"]), set())
+                        sezioni_destinatario = [
+                            (azienda, eleggibili)
+                            for azienda, eleggibili in sezioni
+                            if azienda.scope_value is None or str(azienda.scope_value) in vis
+                        ]
+                        if not sezioni_destinatario:
+                            continue
                     riepilogo["destinatari"] += 1
                     inviate, fallite = await _invia_digest(
                         primary,
                         destinatario,
-                        sezioni,
+                        sezioni_destinatario,
                         settings_row,
                         oggi=oggi,
                         lookups=lookups,

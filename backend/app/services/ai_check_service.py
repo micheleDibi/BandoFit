@@ -16,7 +16,7 @@ import asyncio
 import logging
 import math
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from postgrest.exceptions import APIError
 
@@ -37,7 +37,7 @@ from app.schemas.ai_check import (
     AiQuotaOut,
     ExtractionResult,
 )
-from app.services import bandi_service, link_policy
+from app.services import bandi_service, entitlement_service, link_policy
 from app.services.ai_check_prompts import (
     PROMPT_VERSION,
     SYSTEM_EXTRACT,
@@ -151,45 +151,19 @@ async def get_quota(primary, owner_id: str) -> AiQuotaOut:
     Le analisi fallite (`error`) non consumano quota. Ogni generazione, anche
     la rigenerazione sullo stesso bando, consuma 1. Nota: la finestra segue
     l'abbonamento attivo (un cambio piano la fa ripartire — accettato in
-    fase 1, senza pagamenti)."""
-    sub_resp = (
-        await primary.table("user_subscriptions")
-        .select("data_inizio,data_scadenza,subscription_plans(ai_check)")
-        .eq("user_id", str(owner_id))
-        .eq("status", "active")
-        .limit(1)
-        .execute()
-    )
-    if not sub_resp.data:
-        return AiQuotaOut(totale=0, usati=0, rimanenti=0)
-    sub = sub_resp.data[0]
-    plan = sub.get("subscription_plans") or {}
-    totale = int(plan.get("ai_check") or 0)
-    inizio = str(sub.get("data_inizio") or "")
-    scadenza = str(sub.get("data_scadenza") or "")
+    fase 1, senza pagamenti).
 
-    used_query = (
-        primary.table("ai_checks")
-        .select("id", count="exact")
-        .eq("family_parent_id", str(owner_id))
-        .in_("status", ["pending", "ready"])
-    )
-    if inizio:
-        used_query = used_query.gte("created_at", inizio)
-    if scadenza:
-        try:
-            end_exclusive = (date.fromisoformat(scadenza) + timedelta(days=1)).isoformat()
-            used_query = used_query.lt("created_at", end_exclusive)
-        except ValueError:
-            pass
-    usati = await _count(used_query)
-
+    Dalla 0030 conteggio e finestra vivono nella formula unica entitlement
+    (`fn_entitlement_snapshot`, stessa semantica di prima): totale =
+    effettivo (base del piano + eventuali addon ai_checks futuri)."""
+    snap = await entitlement_service.snapshot_for_owner(primary, owner_id)
+    ai = snap.get("ai_checks") or {}
     return AiQuotaOut(
-        totale=totale,
-        usati=usati,
-        rimanenti=max(0, totale - usati),
-        periodo_inizio=inizio or None,
-        periodo_fine=scadenza or None,
+        totale=int(ai.get("effettivo") or 0),
+        usati=int(ai.get("usato") or 0),
+        rimanenti=int(ai.get("residuo") or 0),
+        periodo_inizio=ai.get("periodo_inizio"),
+        periodo_fine=ai.get("periodo_fine"),
     )
 
 

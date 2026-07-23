@@ -167,11 +167,46 @@ class FakePrimary:
 
         class _Rpc:
             async def execute(self_inner):
-                return SimpleNamespace(
-                    data=primary.lock if name == "fn_acquire_import_lock" else None
-                )
+                if name == "fn_acquire_import_lock":
+                    return SimpleNamespace(data=primary.lock)
+                if name == "fn_entitlement_snapshot":
+                    return SimpleNamespace(
+                        data=primary.entitlement_snapshot(params.get("p_user_id"))
+                    )
+                return SimpleNamespace(data=None)
 
         return _Rpc()
+
+    def entitlement_snapshot(self, owner_id: str) -> dict:
+        """Replica di fn_entitlement_snapshot sui dati inscenati nel fake —
+        solo la parte ai_checks che get_quota consuma: base dal piano della
+        sub attiva, usato = righe ai_checks che il vecchio count avrebbe
+        contato (stessi filtri, così le select-callable restano valide)."""
+        vuota = {"base": 0, "extra": 0, "effettivo": 0, "usato": 0, "residuo": 0}
+        subs = self.selects.get("user_subscriptions") or []
+        sub = subs[0] if subs else None
+        plan = (sub or {}).get("subscription_plans") or {}
+        base = int(plan.get("ai_check") or 0) if sub else 0
+        usato = 0
+        if sub:
+            source = self.selects.get("ai_checks", [])
+            filters = {
+                "family_parent_id": owner_id,
+                "status__in": ["pending", "ready"],
+                "created_at__gte": sub.get("data_inizio"),
+                "created_at__lt": sub.get("data_scadenza"),
+            }
+            usato = len(source(filters) if callable(source) else source)
+        return {
+            "seats": dict(vuota),
+            "companies": dict(vuota),
+            "ai_checks": {
+                "base": base, "extra": 0, "effettivo": base,
+                "usato": usato, "residuo": max(0, base - usato),
+                "periodo_inizio": (sub or {}).get("data_inizio"),
+                "periodo_fine": (sub or {}).get("data_scadenza"),
+            },
+        }
 
     def ops_for(self, table: str, op: str) -> list:
         return [(payload, filters) for t, o, payload, filters in self.ops if t == table and o == op]
@@ -629,15 +664,16 @@ class TestLettura:
         assert quota.totale == 0 and quota.rimanenti == 0
 
     async def test_quota_finestra_e_conteggio_su_righe(self):
-        # 2 righe (pending o ready) nella finestra → 2 usate su 5.
+        # 2 righe (pending o ready) nella finestra → 2 usate su 5. Dalla 0030
+        # filtri e finestra vivono in fn_entitlement_snapshot (coperti dal
+        # test DB della 0030): qui si verifica il contratto — RPC chiavata
+        # sull'owner e mapping snapshot → AiQuotaOut.
         primary = FakePrimary(base_selects(ai_checks=[{"id": "a"}, {"id": "b"}]))
         quota = await ai_check_service.quota_for(primary, USER)
         assert quota.usati == 2 and quota.rimanenti == 3
-        [(_, filters)] = primary.ops_for("ai_checks", "select")
-        assert filters["family_parent_id"] == OWNER
-        assert filters["status__in"] == ["pending", "ready"]
-        assert filters["created_at__gte"] == "2026-01-01"
-        assert filters["created_at__lt"] == "2027-01-02"
+        assert quota.periodo_inizio == "2026-01-01"
+        assert quota.periodo_fine == "2027-01-01"
+        assert ("fn_entitlement_snapshot", {"p_user_id": OWNER}) in primary.rpcs
 
 
 def test_cost_cents():

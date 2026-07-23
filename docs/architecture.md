@@ -86,6 +86,16 @@ Comportamenti chiave:
 
 `user_addons` è **deprecata** a favore di questo modello: congelata in sola lettura come rete di rollback, non più scritta da alcun percorso.
 
+## Entitlement (limiti quantitativi)
+
+I tre limiti quantitativi — **seats** (account della famiglia), **companies** (aziende gestibili), **ai_checks** (AI-check per ciclo) — escono da UN'unica formula (migration 0030): **effettivo = base (piano attivo del titolare) + extra** (unità di addon allocativi possedute: `addons.risorsa` × inventario 0028). **Dormienza**: l'extra conta solo se la base abilita la capability (seats/companies > 1, ai_checks > 0) — la capability è del piano, l'addon estende la capacità; al downgrade le unità restano possedute e tornano attive risalendo di piano.
+
+Topologia dell'enforcement (vincolo di design: **un'unica formula, N call-site atomici** — con PostgREST non esistono transazioni applicative, quindi un gate Python pre-azione sarebbe check-then-act raceable):
+- la formula vive in SQL (`fn_entitlement_detail`); i risolutori storici `fn_family_limit` e `fn_effective_max_aziende` sono **wrapper**, così ogni arbitro atomico esistente (inviti, accettazioni, riattivazioni, creazione aziende, riconciliazioni, cambio piano — tutti sotto `FOR UPDATE` sul profilo del titolare) applica l'effettivo senza duplicare nulla;
+- il consumo AI-check resta **a conteggio** (le righe `ai_checks` pending|ready nella finestra del ciclo SONO il consumo: insert = decremento, errore = rollback naturale, idempotenza dall'indice one-pending), serializzato dal lock owner;
+- la **riduzione è IMMEDIATA** (decisione B3): al downgrade o alla revoca admin di un addon allocativo scattano subito `fn_reconcile_family` (retrocede i più recenti) / `fn_reconcile_companies` (archivia le più recenti) — mai cancellazioni, tutto reversibile risalendo;
+- il frontend **legge e basta**: `GET /me/entitlements` serve lo snapshot (`fn_entitlement_snapshot`) e gli stessi numeri alimentano i serializer esistenti (`/me`, `/me/family`, quota AI-check) — display e arbitri non possono divergere.
+
 ## Flusso di autenticazione
 
 1. Il frontend chiama `supabase.auth.signUp()` con `options.data = {nome, cognome, azienda, plan_slug}`.

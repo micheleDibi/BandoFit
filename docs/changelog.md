@@ -2,6 +2,17 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-23 — Motore entitlement: formula unica dei limiti (migration 0030)
+
+Fondazione del modulo entitlement (piano WP1–WP8, decisioni B1–B4 del 2026-07-23): i limiti quantitativi — account famiglia, aziende gestibili, AI-check per ciclo — escono da UN'unica formula `effettivo = base (piano) + extra (unità di addon allocativi × quantità)`, con **dormienza** quando la base non abilita la capability. Migration **additiva e behavior-preserving**: senza addon allocativi ogni numero è identico a prima.
+
+- **`addons.risorsa`** (`seats`/`companies`) — la mappatura addon→risorsa; il motore non usa mai lo slug. **Canonizzati i due addon di produzione** (`profilo-aziendale-aggiuntivo` → «Account collegato aggiuntivo», seats; `azienda-aggiuntiva` → «Azienda aggiuntiva», companies) con testi nuovi via `fn_canonizza_addon_0030()` richiamabile; slug invariati.
+- **`purchases.quantita`** (1..100, default 1) + backfill dei grant admin dallo storico `dettaglio_calcolo`: `fn_complete_purchase` accredita N unità in una entry unica di ledger, `fn_admin_grant_addon` persiste la quantità in colonna.
+- **`fn_entitlement_detail/limit/extra/snapshot`** in SQL; `fn_family_limit` e `fn_effective_max_aziende` diventano wrapper → tutti gli arbitri atomici applicano l'effettivo senza duplicazioni. Lato backend `family_service.family_limit`, l'`own_limit` di `/me` e la quota AI-check leggono la stessa fonte (repliche Python eliminate).
+- **Nuovo `GET /me/entitlements`**: le quote in un'unica risposta (per un collegato attivo: quelle del titolare, pool condiviso).
+- **Riduzione immediata (B3)**: `fn_reconcile_family` estratta e riusata; la revoca admin di un addon allocativo riconcilia subito (seats → retrocessioni, companies → archiviazioni) e locka profilo→inventario in ordine globale. Guardia nuova: un allocativo non si accredita a un membro di famiglia attivo (`addon_risorsa_solo_titolare`).
+- ⚠️ Migration **0030** da eseguire dallo SQL Editor **prima** del deploy. Nota operativa: annotare da console i testi attuali dei due addon (servono all'eventuale rollback) e verificare a chi sono state già vendute unità (su piani non idonei diventerebbero dormienti).
+
 ## 2026-07-21 — Titolo coerente tra lista e dettaglio dei bandi
 
 Le card della lista bandi mostravano `titolo_breve`, il dettaglio `titolo` (più specifico): stesso bando, due titoli diversi. Ora `BandoCard` preferisce `titolo` (con `titolo_breve` come ripiego), lo stesso ordine di `BandoDetail`. Cambio solo frontend, una riga: il campo esteso era già nella risposta della lista. `titolo_breve` resta a schema/FTS come ripiego.

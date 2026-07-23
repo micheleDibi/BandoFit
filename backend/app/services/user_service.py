@@ -208,7 +208,10 @@ async def get_me(primary, user_id: str) -> MeOut:
     row = resp.data[0]
     subscription = _map_subscription(row.get("user_subscriptions"))
 
-    own_limit = subscription.plan.num_account_aziendali if subscription else 0
+    # Limite EFFETTIVO (base piano + addon seats) dalla formula unica: la
+    # colonna del piano da sola mostrerebbe la base mentre l'arbitro degli
+    # inviti applica base+extra.
+    own_limit = await family_service.family_limit(primary, user_id)
     membership = await family_service.get_membership(primary, user_id)
     family = await family_service.build_me_family(
         primary, user_id, own_limit, membership=membership

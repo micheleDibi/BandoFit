@@ -161,18 +161,16 @@ async def parent_display_name(primary, parent_id: str) -> str:
 
 
 async def family_limit(primary, parent_id: str) -> int:
-    resp = (
-        await primary.table("user_subscriptions")
-        .select("subscription_plans(num_account_aziendali)")
-        .eq("user_id", parent_id)
-        .eq("status", "active")
-        .limit(1)
-        .execute()
-    )
-    if not resp.data:
+    """Limite EFFETTIVO di account della famiglia (include il titolare).
+
+    Dalla 0030 il numero esce dalla formula unica entitlement (base del piano
+    + unità di addon seats, con dormienza): si legge dal wrapper SQL, non più
+    dalla colonna del piano — così display e arbitri non divergono mai."""
+    resp = await primary.rpc("fn_family_limit", {"p_user_id": str(parent_id)}).execute()
+    try:
+        return int(resp.data)
+    except (TypeError, ValueError):
         return 0
-    plan = resp.data[0].get("subscription_plans") or {}
-    return plan.get("num_account_aziendali") or 0
 
 
 async def get_family_overview(primary, parent_id: str) -> FamilyOut:

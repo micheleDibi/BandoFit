@@ -8,6 +8,8 @@ function useInvalidateFamily() {
   return () => {
     queryClient.invalidateQueries({ queryKey: ["family"] });
     queryClient.invalidateQueries({ queryKey: ["me"] });
+    // I posti occupati sono una quota: la fonte unica va rinfrescata.
+    queryClient.invalidateQueries({ queryKey: ["entitlements"] });
   };
 }
 
@@ -24,10 +26,40 @@ export function useInviteMember() {
   const invalidate = useInvalidateFamily();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { email: string; denominazione: string }) =>
-      (await api.post<InviteMemberResult>("/me/family/members", data)).data,
+    mutationFn: async (data: {
+      email: string;
+      denominazione: string;
+      /** Obbligatoria (lato server) se il titolare ha più aziende vive. */
+      company_profile_id?: string;
+      /** null = illimitato; N ≥ 0 = tetto per ciclo. */
+      ai_check_budget?: number | null;
+    }) => (await api.post<InviteMemberResult>("/me/family/members", data)).data,
     onSuccess: (result) => {
       queryClient.setQueryData(["family"], result.family);
+      invalidate();
+    },
+  });
+}
+
+/** PATCH del membro (0031): appartenenza, visibilità (⊇ appartenenza),
+ *  budget — applica solo i campi presenti in `changes`. */
+export function useUpdateMember() {
+  const invalidate = useInvalidateFamily();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      membershipId,
+      changes,
+    }: {
+      membershipId: string;
+      changes: {
+        company_profile_id?: string;
+        aziende_visibili?: string[];
+        ai_check_budget?: number | null;
+      };
+    }) => (await api.patch<Family>(`/me/family/members/${membershipId}`, changes)).data,
+    onSuccess: (family) => {
+      queryClient.setQueryData(["family"], family);
       invalidate();
     },
   });

@@ -2,6 +2,10 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-07-23 — Pagina «Account collegati» (WP8)
+
+Nuova `/app/collegati` (voce nel menu account per OGNI titolare, Advisor compresi): la vista unica dei membri — stato invito, azienda di appartenenza, aziende visibili, budget AI-check assegnato/consumato — con menu azioni per riga (Modifica appartenenza/visibilità/budget via `PATCH /me/family/members/{id}`, Reinvia, Riattiva, Rimuovi/Revoca) e dialog di invito con scelta azienda (obbligatoria se multi) e budget. Contatore seat «X di Y» nell'header e nel dialog di invito (il punto di consumo); banner overbooking `aria-live` quando Σ budget > pool residuo. «Sospendi» del brief mappato v1 sugli esistenti Retrocedi/Rimuovi (nessun nuovo stato). `FamilyCard` rimossa: in Profilo resta un teaser col contatore (anchor `#collegati` preservato).
+
 ## 2026-07-23 — Budget AI-check per i membri (WP6)
 
 Un **membro attivo** può ora avviare l'AI-check (prima: solo il titolare) sulle aziende a lui **visibili** (garanzia del resolver, B4) ed entro il **budget** assegnato dal titolare (`ai_check_budget`: null = illimitato, N = tetto per ciclo; backfill 0 → nessuno abilitato finché il titolare non assegna). Il vincolo del singolo check è **min(residuo membro, residuo pool)**, verificato **sotto lo stesso lock owner** del pool: consumi concorrenti di più membri si serializzano, l'insert della riga è il decremento atomico, un errore non consuma, il doppio submit è respinto dall'indice one-pending. Lo scalo avviene SEMPRE dal pool del titolare al consumo (overbooking dei budget permesso per scelta). `GET /me/entitlements` espone al membro `budget_membro`/`usati_membro` (formula unica in `entitlement_service.usati_membro`, delegata dal gate); `AiCheckCard` mostra ENTRAMBI i numeri («puoi avviarne ancora X; all'Azienda ne restano Y») e disabilita la CTA col motivo puntuale (budget vs pool). Audit per consumo: riga `ai_checks` + `audit_log` con azienda e richiedente + registro spesa.

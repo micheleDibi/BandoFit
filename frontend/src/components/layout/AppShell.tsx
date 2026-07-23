@@ -1,7 +1,6 @@
 import { Menu, ShieldCheck, X } from "lucide-react";
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { useActiveCompany } from "../../hooks/useActiveCompany";
 import { useAuth } from "../../hooks/useAuth";
 import { useMe } from "../../hooks/useMe";
 import { cn } from "../../lib/cn";
@@ -61,18 +60,17 @@ const navLinkClasses = ({ isActive }: { isActive: boolean }) =>
 export function AppShell() {
   const { data: me } = useMe();
   const { signOut } = useAuth();
-  const { isMulti } = useActiveCompany();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = me?.profile.role === "admin";
   const isProgettista = hasAreaProgettista(me?.profile.role);
-  // «Account collegati» (gestione famiglia) solo al titolare con posti collegati
-  // e NON Advisor: in v1 Advisor e famiglia sono mutuamente esclusivi.
+  // «Account collegati»: per OGNI titolare con posti collegati (dal WP7/WP8
+  // anche gli Advisor multi-azienda gestiscono membri, con appartenenza e
+  // visibilità per azienda). La pagina dedicata è /app/collegati.
   const isParent = me?.family?.role === "parent";
-  const accountLinks: NavItem[] =
-    isParent && !isMulti
-      ? [...accountBase, { to: "/app/profilo#collegati", label: "Account collegati" }]
-      : accountBase;
+  const accountLinks: NavItem[] = isParent
+    ? [...accountBase, { to: "/app/collegati", label: "Account collegati" }]
+    : accountBase;
 
   const handleSignOut = async () => {
     await signOut();

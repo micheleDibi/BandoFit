@@ -2,10 +2,9 @@ import { BadgeCheck, ShieldCheck } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useLocation } from "react-router-dom";
 import { AziendaTeaser } from "../components/company/AziendaTeaser";
-import { FamilyCard } from "../components/family/FamilyCard";
 import { PreferenzeTeaser } from "../components/preferences/PreferenzeTeaser";
 import { AbbonamentoTeaser } from "../components/shared/AbbonamentoTeaser";
-import { Button } from "../components/ui/Button";
+import { Button, LinkButton } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Combobox } from "../components/ui/Combobox";
 import { Dialog } from "../components/ui/Dialog";
@@ -298,11 +297,25 @@ export default function Profilo() {
         <AbbonamentoTeaser />
       </div>
 
-      {/* Gestione account collegati: solo per il titolare con piano multi-account.
-          id="collegati": bersaglio del deep-link dalla voce «Account collegati». */}
+      {/* Account collegati: la GESTIONE vive nella pagina dedicata (WP8).
+          id="collegati" resta come bersaglio dei vecchi deep-link. */}
       {me.family?.role === "parent" && (
         <div id="collegati" className="mt-6 scroll-mt-24">
-          <FamilyCard />
+          <Card className="flex flex-wrap items-center justify-between gap-3 p-5">
+            <div>
+              <h2 className="font-display text-base font-semibold text-slate-900">
+                Account collegati
+              </h2>
+              <p className="mt-0.5 text-sm text-slate-500">
+                {me.family.used ?? 1} di {me.family.limit ?? 1} account usati (incluso il
+                tuo). Inviti, aziende visibili e budget AI-check si gestiscono dalla
+                pagina dedicata.
+              </p>
+            </div>
+            <LinkButton to="/app/collegati" variant="secondary">
+              Gestisci collegati
+            </LinkButton>
+          </Card>
         </div>
       )}
 

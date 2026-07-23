@@ -77,10 +77,10 @@ function BudgetFields({
 }) {
   return (
     <fieldset className="mt-3">
-      <legend className="text-sm font-medium text-slate-700">Budget AI-check</legend>
+      <legend className="text-sm font-medium text-slate-700">AI-check</legend>
       <p className="mt-0.5 text-xs text-slate-500">
-        I check dei collegati consumano il pool della tua Azienda al momento dell'uso: il
-        budget è il tetto per ciclo di questo account.
+        Decidi quanti AI-check all'anno può usare questo account (con 0 non può avviarne).
+        Ogni analisi si scala comunque dagli AI-check inclusi nel tuo piano.
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-4">
         <label className="inline-flex items-center gap-1.5 text-sm text-slate-700">
@@ -91,7 +91,7 @@ function BudgetFields({
             checked={value.illimitato}
             onChange={() => onChange({ ...value, illimitato: true })}
           />
-          Illimitato
+          Senza limite
         </label>
         <label className="inline-flex items-center gap-1.5 text-sm text-slate-700">
           <input
@@ -101,18 +101,21 @@ function BudgetFields({
             checked={!value.illimitato}
             onChange={() => onChange({ illimitato: false, tetto: value.tetto || "0" })}
           />
-          Tetto per ciclo
+          Al massimo
         </label>
         {!value.illimitato && (
-          <input
-            type="number"
-            min={0}
-            max={9999}
-            aria-label="Tetto di AI-check per ciclo"
-            value={value.tetto}
-            onChange={(e) => onChange({ illimitato: false, tetto: e.target.value })}
-            className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm tabular-nums focus:border-brand-400 focus:outline-none"
-          />
+          <>
+            <input
+              type="number"
+              min={0}
+              max={9999}
+              aria-label="Numero massimo di AI-check all'anno"
+              value={value.tetto}
+              onChange={(e) => onChange({ illimitato: false, tetto: e.target.value })}
+              className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm tabular-nums focus:border-brand-400 focus:outline-none"
+            />
+            <span className="text-sm text-slate-500">all'anno</span>
+          </>
         )}
       </div>
     </fieldset>
@@ -340,9 +343,9 @@ export default function Collegati() {
           className="mt-4 inline-flex items-start gap-2 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800"
         >
           <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-          La somma dei budget assegnati ({sommaBudget}) supera gli AI-check rimasti nel pool
-          ({poolResiduo}): va bene — lo scalo avviene al consumo — ma i primi ad usarli
-          esauriranno il pool per tutti.
+          Hai assegnato in tutto {sommaBudget} AI-check, ma al tuo piano ne restano{" "}
+          {poolResiduo}: va bene, conta solo chi li usa davvero — però se tutti usano il
+          loro, i primi li esauriranno per tutti.
         </p>
       )}
 
@@ -387,7 +390,7 @@ export default function Collegati() {
                     {multiAziende && (
                       <th scope="col" className="px-4 py-3 font-medium">Visibilità</th>
                     )}
-                    <th scope="col" className="px-4 py-3 font-medium">Budget AI-check</th>
+                    <th scope="col" className="px-4 py-3 font-medium">AI-check</th>
                     <th scope="col" className="px-4 py-3 font-medium">Invitato</th>
                     <th scope="col" className="px-4 py-3 text-right font-medium">
                       <span className="sr-only">Azioni</span>
@@ -440,7 +443,7 @@ export default function Collegati() {
                       )}
                       <td className="px-4 py-3">
                         {member.ai_check_budget === null ? (
-                          <span className="text-slate-700">Illimitato</span>
+                          <span className="text-slate-700">Senza limite</span>
                         ) : member.ai_check_budget === 0 ? (
                           <span className="text-slate-400">Nessuno</span>
                         ) : (
@@ -645,7 +648,7 @@ export default function Collegati() {
         <BudgetFields value={editBudget} onChange={setEditBudget} idPrefix="edit" />
         {editing && editing.ai_check_usati > 0 && (
           <p className="mt-2 text-xs text-slate-500">
-            In questo ciclo ha già usato {editing.ai_check_usati} AI-check.
+            Quest'anno ha già usato {editing.ai_check_usati} AI-check.
           </p>
         )}
         {actionError && (

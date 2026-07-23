@@ -21,6 +21,10 @@ class AiChecksEntitlement(ResourceEntitlement):
     # Finestra del ciclo di abbonamento attivo (ISO date); None senza ciclo.
     periodo_inizio: str | None = None
     periodo_fine: str | None = None
+    # Solo per un MEMBRO attivo (WP6): il suo budget (None nel payload di un
+    # titolare; per il membro, null = illimitato) e i suoi consumi nel ciclo.
+    budget_membro: int | None = None
+    usati_membro: int | None = None
 
 
 class EntitlementsOut(BaseModel):

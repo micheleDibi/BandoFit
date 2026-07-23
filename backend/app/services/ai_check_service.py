@@ -167,6 +167,25 @@ async def get_quota(primary, owner_id: str) -> AiQuotaOut:
     )
 
 
+async def owner_membership(primary, user_id: str) -> dict | None:
+    """La membership ATTIVA dell'utente (None altrimenti). Import locale del
+    servizio famiglia per evitare cicli."""
+    from app.services import family_service
+
+    membership = await family_service.get_membership(primary, user_id)
+    if membership and membership["status"] == "active":
+        return membership
+    return None
+
+
+async def _usati_membro(primary, owner_id: str, member_id: str, quota: AiQuotaOut) -> int:
+    """Consumi del MEMBRO nella stessa finestra della quota. La formula vive
+    in entitlement_service.usati_membro (unica sede, riusata da /me/entitlements)."""
+    return await entitlement_service.usati_membro(
+        primary, owner_id, member_id, quota.periodo_inizio, quota.periodo_fine
+    )
+
+
 # ----------------------------------------------------------------- richiesta
 
 async def _company_context(primary, company_id: str | None) -> tuple[dict, dict | None, list[dict]]:
@@ -218,8 +237,16 @@ async def request_check(
     if not ai.enabled:
         raise AiNotConfiguredError()
 
+    # WP6 (0031): anche un membro ATTIVO può avviare l'AI-check — sulle
+    # aziende a lui VISIBILI (il resolver garantisce già che active.company_id
+    # appartiene alla sua visibilità) e dentro il budget assegnato dal
+    # titolare (verificato sotto lock, insieme al pool). NULL = illimitato.
+    membership_budget: int | None = None
     if not active.editable:
-        raise ForbiddenError("L'AI-check lo avvia il titolare dell'azienda")
+        membership = await owner_membership(primary, user["id"])
+        if membership is None:
+            raise ForbiddenError("L'AI-check lo avvia il titolare dell'azienda")
+        membership_budget = membership.get("ai_check_budget")
     owner_id = active.owner_id
 
     # Failsafe anche qui: un'analisi zombie (riavvio del container) non deve
@@ -297,6 +324,15 @@ async def request_check(
             raise AiQuotaExceededError(
                 "Hai esaurito gli AI-check del tuo piano per questo periodo"
             )
+        # WP6: vincolo del singolo check = min(residuo membro, residuo pool).
+        # Stesso lock owner del pool: due membri concorrenti si serializzano.
+        if membership_budget is not None:
+            usati_membro = await _usati_membro(primary, owner_id, str(user["id"]), quota)
+            if usati_membro >= membership_budget:
+                raise ForbiddenError(
+                    "Hai esaurito il budget di AI-check assegnato dal titolare "
+                    "per questo periodo"
+                )
         try:
             insert = await primary.table("ai_checks").insert(
                 {
@@ -350,7 +386,9 @@ async def request_check(
                 "action": "company.ai_check_requested",
                 "target_user_id": str(owner_id),
                 "family_parent_id": str(owner_id),
-                "payload": {"bando_slug": bando["slug"], "bando_id": bando["id"]},
+                "payload": {"bando_slug": bando["slug"], "bando_id": bando["id"],
+                            "company_profile_id": str(active.company_id),
+                            "richiedente": str(user["id"])},
             }
         ).execute()
     except Exception:

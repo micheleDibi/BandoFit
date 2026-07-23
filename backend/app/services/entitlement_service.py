@@ -14,7 +14,7 @@ from app.schemas.entitlement import (
     EntitlementsOut,
     ResourceEntitlement,
 )
-from app.services.family_service import owner_and_editable
+from app.services.family_service import get_membership
 
 _VUOTA = {"base": 0, "extra": 0, "effettivo": 0, "usato": 0, "residuo": 0}
 
@@ -33,15 +33,54 @@ def _risorsa(snap: dict, chiave: str) -> dict:
     return {**_VUOTA, **(snap.get(chiave) or {})}
 
 
+async def usati_membro(
+    primary, owner_id: str, member_id: str,
+    periodo_inizio: str | None, periodo_fine: str | None,
+) -> int:
+    """Consumi AI-check del MEMBRO nella finestra del ciclo (righe ai_checks
+    pending|ready con user_id = membro; gli errori non contano, come il pool).
+    Unica sede della formula: il gate di consumo (ai_check_service) delega qui."""
+    from datetime import date, timedelta
+
+    query = (
+        primary.table("ai_checks")
+        .select("id", count="exact")
+        .eq("family_parent_id", str(owner_id))
+        .eq("user_id", str(member_id))
+        .in_("status", ["pending", "ready"])
+    )
+    if periodo_inizio:
+        query = query.gte("created_at", periodo_inizio)
+    if periodo_fine:
+        try:
+            end = (date.fromisoformat(periodo_fine) + timedelta(days=1)).isoformat()
+            query = query.lt("created_at", end)
+        except ValueError:
+            pass
+    resp = await query.limit(1).execute()
+    return resp.count or 0
+
+
 async def get_entitlements(primary, user: dict) -> EntitlementsOut:
     """Per un collegato ATTIVO risolve il titolare (pool condiviso della
-    famiglia, editable=False); titolari, pending e retrocessi hanno il
-    proprio snapshot."""
-    owner_id, editable = await owner_and_editable(primary, user)
+    famiglia, editable=False) e aggiunge budget/consumi propri (WP6);
+    titolari, pending e retrocessi hanno il proprio snapshot."""
+    membership = await get_membership(primary, user["id"])
+    if membership and membership["status"] == "active":
+        owner_id, editable = str(membership["parent_id"]), False
+    else:
+        owner_id, editable = str(user["id"]), True
+        membership = None
     snap = await snapshot_for_owner(primary, owner_id)
+    ai = AiChecksEntitlement(**_risorsa(snap, "ai_checks"))
+    if membership is not None:
+        ai.budget_membro = membership.get("ai_check_budget")
+        ai.usati_membro = await usati_membro(
+            primary, owner_id, str(user["id"]), ai.periodo_inizio, ai.periodo_fine
+        )
     return EntitlementsOut(
         editable=editable,
         seats=ResourceEntitlement(**_risorsa(snap, "seats")),
         companies=ResourceEntitlement(**_risorsa(snap, "companies")),
-        ai_checks=AiChecksEntitlement(**_risorsa(snap, "ai_checks")),
+        ai_checks=ai,
     )

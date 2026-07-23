@@ -21,7 +21,7 @@ from app.core.errors import (
     NotFoundError,
 )
 from app.schemas.ai_check import ExtractionResult, MatchingResult
-from app.services import ai_check_service
+from app.services import ai_check_service, entitlement_service
 from app.services.ai_check_prompts import PROMPT_VERSION, build_bando_input
 from app.services.ai_check_scoring import facet_prechecks
 from app.services.bandi_service import normalize_contenuto
@@ -336,8 +336,9 @@ class TestRequestCheck:
                 FakePrimary(), None, FakeAi(enabled=False), USER, _active(), SLUG
             )
 
-    async def test_figlio_attivo_bloccato(self, spawned):
-        # Un figlio attivo arriva dal resolver con editable=False.
+    async def test_editable_false_senza_membership_bloccato(self, spawned):
+        # editable=False ma nessuna membership attiva (incoerenza): guardia
+        # storica — l'AI-check lo avvia il titolare.
         with pytest.raises(ForbiddenError):
             await ai_check_service.request_check(
                 FakePrimary(base_selects()), None, FakeAi(), USER, _active(editable=False), SLUG
@@ -674,6 +675,58 @@ class TestLettura:
         assert quota.periodo_inizio == "2026-01-01"
         assert quota.periodo_fine == "2027-01-01"
         assert ("fn_entitlement_snapshot", {"p_user_id": OWNER}) in primary.rpcs
+
+
+class TestBudgetMembro:
+    """WP6 (0031): un membro ATTIVO avvia l'AI-check sulle aziende visibili
+    (garantite dal resolver) entro il budget assegnato dal titolare — il
+    vincolo del singolo check è min(residuo membro, residuo pool), verificato
+    sotto lo stesso lock owner."""
+
+    def _membro(self, monkeypatch, budget, usati: int):
+        async def membership(primary, user_id):
+            return {"id": "m-1", "status": "active", "parent_id": OWNER,
+                    "ai_check_budget": budget}
+
+        monkeypatch.setattr("app.services.family_service.get_membership", membership)
+
+        async def fake_usati(primary, owner_id, member_id, inizio, fine):
+            return usati
+
+        monkeypatch.setattr(entitlement_service, "usati_membro", fake_usati)
+
+    async def test_budget_esaurito_403(self, monkeypatch, spawned):
+        self._membro(monkeypatch, budget=1, usati=1)
+        primary = FakePrimary(base_selects())
+        with pytest.raises(ForbiddenError, match="budget"):
+            await ai_check_service.request_check(
+                primary, None, FakeAi(), USER, _active(editable=False), SLUG)
+        # il lock è stato comunque rilasciato
+        assert ("fn_release_import_lock", {"p_parent_id": OWNER}) in primary.rpcs
+        assert spawned == []
+
+    async def test_dentro_budget_avvia(self, monkeypatch, spawned):
+        self._membro(monkeypatch, budget=2, usati=1)
+        primary = FakePrimary(base_selects())
+        out = await ai_check_service.request_check(
+            primary, None, FakeAi(), USER, _active(editable=False), SLUG)
+        assert out.status == "pending"
+        assert len(spawned) == 1
+
+    async def test_illimitato_avvia(self, monkeypatch, spawned):
+        self._membro(monkeypatch, budget=None, usati=999)
+        primary = FakePrimary(base_selects())
+        out = await ai_check_service.request_check(
+            primary, None, FakeAi(), USER, _active(editable=False), SLUG)
+        assert out.status == "pending"
+        assert len(spawned) == 1
+
+    async def test_budget_zero_bloccato(self, monkeypatch, spawned):
+        self._membro(monkeypatch, budget=0, usati=0)
+        primary = FakePrimary(base_selects())
+        with pytest.raises(ForbiddenError, match="budget"):
+            await ai_check_service.request_check(
+                primary, None, FakeAi(), USER, _active(editable=False), SLUG)
 
 
 def test_cost_cents():

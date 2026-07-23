@@ -910,6 +910,10 @@ export interface ResourceEntitlement {
 export interface AiChecksEntitlement extends ResourceEntitlement {
   periodo_inizio: string | null;
   periodo_fine: string | null;
+  /** Solo per un MEMBRO attivo (WP6): il suo budget (null nel payload di un
+   *  titolare; per il membro, null = illimitato) e i suoi consumi nel ciclo. */
+  budget_membro: number | null;
+  usati_membro: number | null;
 }
 
 /** Le quote dell'account in un'unica risposta: il frontend legge, non

@@ -2,6 +2,7 @@ import { Loader2, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAiChecksForBando, useRequestAiCheck } from "../../hooks/useAiCheck";
+import { useEntitlements } from "../../hooks/useEntitlements";
 import { apiErrorMessage } from "../../lib/api";
 import { scoreColorClasses } from "../../lib/scoreColor";
 import { Button } from "../ui/Button";
@@ -24,6 +25,22 @@ export function AiCheckCard({ slug }: { slug: string }) {
   const hasPending = data?.items.some((c) => c.status === "pending") ?? false;
   const quotaEsaurita = (quota?.rimanenti ?? 0) <= 0;
 
+  // WP6 (0031): anche un MEMBRO attivo avvia l'AI-check (sulle aziende a lui
+  // visibili), entro il budget assegnato dal titolare. Il vincolo del singolo
+  // check è min(residuo membro, residuo pool): la card lo dice, non lo
+  // nasconde — l'arbitro resta il server.
+  const entitlements = useEntitlements();
+  const membro =
+    !editable && entitlements.data && !entitlements.data.editable
+      ? entitlements.data.ai_checks
+      : null;
+  const budgetResiduo =
+    membro && membro.budget_membro !== null
+      ? Math.max(0, membro.budget_membro - (membro.usati_membro ?? 0))
+      : null; // null = illimitato
+  const budgetEsaurito = membro !== null && budgetResiduo !== null && budgetResiduo <= 0;
+  const puoAvviare = editable || membro !== null;
+
   const handleRequest = async () => {
     setActionError(null);
     try {
@@ -34,14 +51,18 @@ export function AiCheckCard({ slug }: { slug: string }) {
     }
   };
 
-  const ctaDisabled = hasPending || quotaEsaurita;
+  const ctaDisabled = hasPending || quotaEsaurita || budgetEsaurito;
   // Spiegazione VISIBILE (un `title` su un bottone disabilitato non è
   // raggiungibile: pointer-events-none, e resta invisibile a tastiera/SR).
   const ctaHint = hasPending
     ? "C'è già un'analisi in corso."
     : quotaEsaurita && quota && quota.totale > 0
-      ? "Hai esaurito gli AI-check del tuo piano."
-      : null;
+      ? membro
+        ? "L'Azienda ha esaurito gli AI-check del piano."
+        : "Hai esaurito gli AI-check del tuo piano."
+      : budgetEsaurito
+        ? "Hai esaurito il budget di AI-check assegnato dal titolare."
+        : null;
 
   return (
     <Card className="border-brand-200 bg-gradient-to-b from-brand-50/70 to-white p-5">
@@ -94,7 +115,7 @@ export function AiCheckCard({ slug }: { slug: string }) {
           >
             Vedi il report completo ↓
           </a>
-          {editable && (
+          {puoAvviare && (
             <>
               <Button
                 variant="ghost"
@@ -125,7 +146,7 @@ export function AiCheckCard({ slug }: { slug: string }) {
             Scopri se la tua azienda è ammissibile e quanto è compatibile con questo bando:
             l'AI confronta ogni requisito con i tuoi dati, citando i passaggi del bando.
           </p>
-          {editable ? (
+          {puoAvviare ? (
             <>
               <Button
                 className="mt-3 w-full"
@@ -164,7 +185,13 @@ export function AiCheckCard({ slug }: { slug: string }) {
               per usarli.
             </>
           ) : (
-            `Ti restano ${quota.rimanenti} AI-check su ${quota.totale} per quest'anno.`
+            membro ? (
+              budgetResiduo === null
+                ? `Alla tua Azienda restano ${quota.rimanenti} AI-check su ${quota.totale}; il tuo budget è senza limite.`
+                : `Puoi avviarne ancora ${Math.min(budgetResiduo, quota.rimanenti)} (il tuo budget: ${budgetResiduo}; all'Azienda ne restano ${quota.rimanenti} su ${quota.totale}).`
+            ) : (
+              `Ti restano ${quota.rimanenti} AI-check su ${quota.totale} per quest'anno.`
+            )
           )}
         </p>
       )}

@@ -11,21 +11,23 @@ import { apiErrorMessage } from "../lib/api";
 import { formatDate } from "../lib/format";
 import type { SavedBandoItem } from "../types";
 
-/** Card di ripiego per un bando salvato che non è più nel catalogo: niente
- *  link (il dettaglio darebbe 404), solo lo snapshot e la rimozione. */
+/** Card di ripiego per un bando salvato che il catalogo non restituisce: niente
+ *  link (il dettaglio darebbe 404), solo lo snapshot e la rimozione. Il testo
+ *  resta neutro: il bando potrebbe tornare o essere confluito in un altro. */
 function UnavailableCard({ item }: { item: SavedBandoItem }) {
   const toggle = useToggleSaved();
   return (
     <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone="amber">Non più disponibile</Badge>
+        <Badge tone="slate">Scheda non disponibile</Badge>
       </div>
       <h3 className="mt-3 font-display text-base font-semibold text-slate-500">
         {item.bando.titolo ?? item.bando.slug}
       </h3>
       <p className="mt-1.5 text-sm text-slate-400">
-        Questo bando non è più presente nel catalogo.
-        {item.bando.data_scadenza && <> Scadeva il {formatDate(item.bando.data_scadenza)}.</>}
+        Al momento non riusciamo a mostrare la scheda aggiornata di questo bando. Qui trovi i dati
+        che avevi salvato.
+        {item.bando.data_scadenza && <> Scadenza: {formatDate(item.bando.data_scadenza)}.</>}
       </p>
       <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-200 pt-3">
         <span className="text-xs text-slate-400">Salvato il {formatDate(item.salvato_il)}</span>

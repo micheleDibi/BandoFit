@@ -305,7 +305,9 @@ Valori delle faccette di filtro, dal DB secondario (cache server 1h, `Cache-Cont
 ### `GET /bandi`
 Elenco paginato dei bandi (solo quelli pubblicabili: `stato_processing='completed'`).
 
-**I bandi chiusi vanno sempre in coda**, qualunque ordinamento: "chiuso" = `stato_bando='chiuso'` **oppure** `data_scadenza` passata rispetto a oggi nel fuso italiano (robusto anche se lo stato nel catalogo non è aggiornato). PostgREST non ordina per espressioni, quindi l'elenco è servito da due query complementari (non chiusi + chiusi) con paginazione che unisce le due code; con `scadenza_asc` i chiusi in coda sono ordinati dalla chiusura più recente.
+**I bandi chiusi vanno sempre in coda**, qualunque ordinamento: "chiuso" (tra gli stati ammessi nei segmenti, vedi sotto) = `stato_bando='chiuso'` **oppure** `data_scadenza` passata rispetto a oggi nel fuso italiano (robusto anche se lo stato nel catalogo non è aggiornato). PostgREST non ordina per espressioni, quindi l'elenco è servito da due query complementari (non chiusi + chiusi) con paginazione che unisce le due code; con `scadenza_asc` i chiusi in coda sono ordinati dalla chiusura più recente.
+
+**Stati fuori dall'elenco** (contratto DB bandi §4 e §7, rilascio R0-a): i due segmenti comprendono solo i bandi con `stato_bando` tra `aperto`, `in apertura prossimamente`, `chiuso` oppure NULL (NULL: non chiuso se la scadenza non è passata o manca, altrimenti chiuso). `sospeso`, `revocato` e qualunque stato non previsto **non sono né aperti né chiusi** e restano fuori da entrambi i segmenti (un sospeso non viene mai chiuso dalla scadenza). La stessa esclusione vale per i candidati degli alert, che riusano il segmento dei non chiusi. Il totale della paginazione resta la somma dei due conteggi.
 
 Parametri query:
 | Parametro | Tipo | Note |
@@ -313,7 +315,7 @@ Parametri query:
 | `page` / `page_size` | int | default 1 / 20, `page_size` max 50 |
 | `sort` | string | `pubblicazione_desc` (default: più recenti prima), `scadenza_asc`, `scadenza_desc`, `importo_desc` |
 | `q` | string | ricerca full-text italiana (websearch) su titoli e descrizioni, sia grezzi (`titolo_raw`, `descrizione_raw`) sia rielaborati mostrati in UI (`titolo`, `titolo_breve`, `descrizione_breve`) |
-| `stato` | csv | tra `aperto`, `chiuso`, `in apertura prossimamente` |
+| `stato` | csv | tra `aperto`, `chiuso`, `in apertura prossimamente`, `sospeso`, `revocato`; i valori sconosciuti vengono **ignorati** (mai `400`). `sospeso`/`revocato` sono ammessi ma non restituiscono risultati, perché esclusi da entrambi i segmenti |
 | `livello` | string | `flash_bando` o `guida_bando` |
 | `tipologie`, `modalita`, `programmi` | csv di id | filtri su colonne dirette |
 | `regioni`, `settori`, `beneficiari`, `ateco` | csv di id | filtri M:N via junction (OR dentro la faccetta, AND tra faccette) |
@@ -336,7 +338,7 @@ Dettaglio completo: campi dell'elenco (`compatibilita` compreso) + `area_geograf
 
 ## Bandi salvati
 
-Preferiti **per utente** sul DB primario: RIFERIMENTI al catalogo (bando_id + snapshot di slug/titolo/scadenza/stato), non copie. Se il bando sparisce dal catalogo la riga resta e viene servita dallo snapshot con `disponibile: false`. Cap: 200 bandi salvati per utente. Per un **Advisor** i preferiti sono segregati per **azienda attiva** (header `X-Active-Company`); per gli altri restano legati al solo utente (comportamento invariato).
+Preferiti **per utente** sul DB primario: RIFERIMENTI al catalogo (bando_id + snapshot di slug/titolo/scadenza/stato), non copie. Se il catalogo non restituisce più il bando (miss) la riga resta e viene servita dallo snapshot con `disponibile: false`: un miss non rompe mai la lista (contratto DB bandi §7, R0-a). Cap: 200 bandi salvati per utente. Per un **Advisor** i preferiti sono segregati per **azienda attiva** (header `X-Active-Company`); per gli altri restano legati al solo utente (comportamento invariato).
 
 ### `POST /me/saved-bandi` (201)
 Body `{ "bando_slug": "..." }`. **Idempotente** (è un toggle): già salvato → ritorna la riga esistente. Risposta `SavedBandoItem`: `{ bando: <item della lista bandi>, disponibile, in_calendario, salvato_il }`.

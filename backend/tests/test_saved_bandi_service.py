@@ -288,6 +288,21 @@ class TestListSaved:
         assert filters["id__in"] == [42, 99]
         assert filters["stato_processing"] == "completed"
 
+    async def test_stati_nuovi_e_miss_non_rompono_la_lista(self):
+        # Contratto DB bandi §7 (R0-a): stati che oggi non esistono (revocato,
+        # sospeso) sia dal catalogo sia dallo snapshot, più un miss.
+        rows = [saved_row(42), saved_row(99, stato_bando="sospeso")]
+        primary = FakeDb({"saved_bandi": rows, "calendar_events": []})
+        secondary = FakeDb({"bando": [{**BANDO_VIVO, "stato_bando": "revocato"}]})
+
+        page = await saved_bandi_service.list_saved(primary, secondary, USER_ID, _active(), 1, 20)
+        vivo, mancante = page.items
+        assert vivo.disponibile is True
+        assert vivo.bando.stato_bando == "revocato"
+        assert mancante.disponibile is False
+        assert mancante.bando.titolo == "Bando 99"  # dallo snapshot
+        assert mancante.bando.stato_bando == "sospeso"
+
     async def test_pagina_vuota_salta_il_secondario(self):
         primary = FakeDb({"saved_bandi": []})
         secondary = FakeDb({"bando": [BANDO_VIVO]})

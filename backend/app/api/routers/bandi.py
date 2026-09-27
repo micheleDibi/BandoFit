@@ -14,7 +14,7 @@ from app.services.lookup_service import get_lookups
 
 router = APIRouter(prefix="/bandi", tags=["bandi"])
 
-_VALID_STATI = {"aperto", "chiuso", "in apertura prossimamente"}
+_VALID_STATI = {"aperto", "chiuso", "in apertura prossimamente", "sospeso", "revocato"}
 _VALID_LIVELLI = {"flash_bando", "guida_bando"}
 
 
@@ -44,10 +44,10 @@ def parse_filters(
     scadenza_a: date | None = Query(default=None),
     scade_entro_giorni: int | None = Query(default=None, ge=1, le=365),
 ) -> BandiFilters:
-    stati = [s for s in (stato.split(",") if stato else []) if s]
-    invalid = set(stati) - _VALID_STATI
-    if invalid:
-        raise BadRequestError(f"Stato bando non valido: {', '.join(sorted(invalid))}")
+    # Gli stati sconosciuti si ignorano, mai un 400: il catalogo può introdurre
+    # stati nuovi prima di noi (contratto DB bandi §7, R0-a).
+    stati = [s.strip() for s in (stato.split(",") if stato else [])]
+    stati = [s for s in stati if s in _VALID_STATI]
     if livello and livello not in _VALID_LIVELLI:
         raise BadRequestError(f"Livello non valido: {livello}")
     return BandiFilters(

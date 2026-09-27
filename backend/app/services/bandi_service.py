@@ -192,22 +192,39 @@ def apply_filters(query, filters: BandiFilters, today: date | None = None):
 
 # Un bando è "chiuso" se lo dice il catalogo O se la scadenza è passata: la
 # doppia condizione regge anche quando stato_bando non è aggiornato dalla
-# pipeline. I due filtri sono complementari (null-safe): ogni riga finisce in
-# esattamente uno dei due segmenti. PostgREST mette in AND i parametri ``or``
-# ripetuti, quindi convivono anche con l'``or`` della ricerca full-text.
+# pipeline. Entrambi i segmenti passano dalla stessa guardia sugli stati
+# (STATI_SEGMENTATI o NULL): tra le righe che la soddisfano i due filtri sono
+# complementari (null-safe), ogni riga finisce in esattamente uno dei due;
+# 'sospeso', 'revocato' e qualunque stato non previsto non sono né aperti né
+# chiusi e restano fuori da ENTRAMBI (contratto DB bandi §4 e §7, R0-a: un
+# sospeso non viene mai chiuso dalla scadenza). PostgREST mette in AND i
+# parametri ``or`` ripetuti, quindi convivono anche con l'``or`` della ricerca
+# full-text.
+
+STATI_SEGMENTATI = ("aperto", "in apertura prossimamente", "chiuso")
+
+
+def _solo_stati_segmentati(query):
+    # Valori fra doppi apici: "in apertura prossimamente" contiene spazi.
+    stati = ",".join(f'"{stato}"' for stato in STATI_SEGMENTATI)
+    return query.or_(f"stato_bando.in.({stati}),stato_bando.is.null")
 
 
 def apply_open_tier(query, today: date):
     """Solo i bandi non chiusi: stato diverso da 'chiuso' E scadenza non passata
     (i null contano come non chiusi: bandi a sportello o senza data)."""
-    return query.or_("stato_bando.neq.chiuso,stato_bando.is.null").or_(
-        f"data_scadenza.gte.{today.isoformat()},data_scadenza.is.null"
+    return (
+        _solo_stati_segmentati(query)
+        .or_("stato_bando.neq.chiuso,stato_bando.is.null")
+        .or_(f"data_scadenza.gte.{today.isoformat()},data_scadenza.is.null")
     )
 
 
 def apply_closed_tier(query, today: date):
     """Solo i bandi chiusi: stato 'chiuso' O scadenza passata."""
-    return query.or_(f"stato_bando.eq.chiuso,data_scadenza.lt.{today.isoformat()}")
+    return _solo_stati_segmentati(query).or_(
+        f"stato_bando.eq.chiuso,data_scadenza.lt.{today.isoformat()}"
+    )
 
 
 def _lookup(value: dict | None) -> dict | None:

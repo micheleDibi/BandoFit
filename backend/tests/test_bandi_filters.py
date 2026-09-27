@@ -6,10 +6,17 @@ query e si ispezionano i parametri URL generati.
 
 from datetime import date
 from types import SimpleNamespace
+from typing import Annotated
+from zoneinfo import ZoneInfo
 
+import httpx
 import pytest
+from fastapi import Depends, FastAPI
 from postgrest import AsyncPostgrestClient
 
+from app.api.routers.bandi import parse_filters
+from app.core.errors import register_exception_handlers
+from app.services.bando_alert_service import carica_candidati
 from app.services.bandi_service import (
     BandiFilters,
     apply_closed_tier,
@@ -146,6 +153,11 @@ class TestSorting:
         assert value.endswith("id.asc")
 
 
+GUARDIA_STATI = (
+    '(stato_bando.in.("aperto","in apertura prossimamente","chiuso"),stato_bando.is.null)'
+)
+
+
 class TestTiers:
     """I due segmenti (non chiusi / chiusi) devono essere complementari e
     null-safe: la partizione è il contratto su cui poggia la paginazione."""
@@ -153,23 +165,139 @@ class TestTiers:
     def test_open_tier_excludes_chiusi_and_scaduti(self, client):
         params = params_of(apply_open_tier(build(client, BandiFilters()), TODAY))
         assert params["or"] == [
+            GUARDIA_STATI,
             "(stato_bando.neq.chiuso,stato_bando.is.null)",
             "(data_scadenza.gte.2026-07-03,data_scadenza.is.null)",
         ]
 
     def test_closed_tier_matches_stato_or_scadenza_passata(self, client):
         params = params_of(apply_closed_tier(build(client, BandiFilters()), TODAY))
-        assert params["or"] == ["(stato_bando.eq.chiuso,data_scadenza.lt.2026-07-03)"]
+        assert params["or"] == [
+            GUARDIA_STATI,
+            "(stato_bando.eq.chiuso,data_scadenza.lt.2026-07-03)",
+        ]
 
     def test_tier_or_coexists_with_fts_or(self, client):
         # PostgREST mette in AND i parametri ``or`` ripetuti: la ricerca
         # full-text e il segmento devono restare condizioni separate.
         params = params_of(apply_open_tier(build(client, BandiFilters(q="energia")), TODAY))
-        assert len(params["or"]) == 3
+        assert len(params["or"]) == 4
         assert params["or"][0].startswith("(titolo_raw.wfts")
 
     def test_today_italy_is_a_date(self):
         assert isinstance(today_italy(), date)
+
+
+# --- Valutatore minimo dei filtri dei segmenti -------------------------------
+# Applica alle righe i parametri ``or`` VERI generati dal builder, con la logica
+# a tre valori di SQL (None = NULL): così i casi sotto verificano la semantica
+# dei segmenti riga per riga, non solo la forma delle stringhe. Copre la sola
+# grammatica usata dai segmenti: or/and annidati, eq/neq/lt/gte, in, is.null.
+
+
+def _split_top(expr: str) -> list[str]:
+    """Divide sulle virgole di primo livello (fuori da parentesi e doppi apici)."""
+    parts, current, depth, quoted = [], "", 0, False
+    for ch in expr:
+        if ch == '"':
+            quoted = not quoted
+        elif not quoted and ch == "(":
+            depth += 1
+        elif not quoted and ch == ")":
+            depth -= 1
+        elif not quoted and depth == 0 and ch == ",":
+            parts.append(current)
+            current = ""
+            continue
+        current += ch
+    parts.append(current)
+    return parts
+
+
+def _or3(values: list) -> bool | None:
+    if any(v is True for v in values):
+        return True
+    return None if any(v is None for v in values) else False
+
+
+def _and3(values: list) -> bool | None:
+    if any(v is False for v in values):
+        return False
+    return None if any(v is None for v in values) else True
+
+
+def valuta(cond: str, row: dict) -> bool | None:
+    for prefix, combine in (("or(", _or3), ("and(", _and3)):
+        if cond.startswith(prefix):
+            return combine([valuta(c, row) for c in _split_top(cond[len(prefix):-1])])
+    column, op, arg = cond.split(".", 2)
+    value = row[column]
+    if op == "is":
+        assert arg == "null"
+        return value is None
+    if value is None:
+        return None  # confronti con NULL: né veri né falsi
+    if op == "in":
+        return value in [v.strip('"') for v in _split_top(arg[1:-1])]
+    return {"eq": value == arg, "neq": value != arg, "lt": value < arg, "gte": value >= arg}[op]
+
+
+FUTURA, PASSATA = "2026-08-01", "2026-06-01"
+
+
+def segmenti_di(client, stato: str | None, scadenza: str | None) -> set[str]:
+    """In quali segmenti finisce una riga: come WHERE, conta solo il vero."""
+    row = {"stato_bando": stato, "data_scadenza": scadenza}
+    out = set()
+    for nome, tier in (("aperti", apply_open_tier), ("chiusi", apply_closed_tier)):
+        params = params_of(tier(client.from_("bando").select("id"), TODAY))
+        assert set(params) == {"select", "or"}  # nessun filtro sfugge al valutatore
+        if all(valuta(f"or{cond}", row) is True for cond in params["or"]):
+            out.add(nome)
+    return out
+
+
+class TestSegmentiPerStato:
+    """Contratto DB bandi §4 e §7 (R0-a): 'sospeso' e 'revocato' non sono né
+    aperti né chiusi; un sospeso non viene mai chiuso dalla scadenza. Gli
+    stati non previsti restano fuori come loro; NULL si comporta come prima."""
+
+    @pytest.mark.parametrize(
+        ("stato", "scadenza", "atteso"),
+        [
+            # stati di oggi: comportamento invariato
+            ("aperto", FUTURA, {"aperti"}),
+            ("aperto", TODAY.isoformat(), {"aperti"}),  # il giorno di scadenza è ancora aperto
+            ("aperto", None, {"aperti"}),
+            ("aperto", PASSATA, {"chiusi"}),
+            ("in apertura prossimamente", FUTURA, {"aperti"}),
+            ("in apertura prossimamente", PASSATA, {"chiusi"}),
+            ("chiuso", FUTURA, {"chiusi"}),
+            ("chiuso", None, {"chiusi"}),
+            (None, FUTURA, {"aperti"}),
+            (None, None, {"aperti"}),
+            (None, PASSATA, {"chiusi"}),
+            # stati nuovi e sconosciuti: fuori da entrambi
+            ("sospeso", FUTURA, set()),
+            ("sospeso", PASSATA, set()),
+            ("sospeso", None, set()),
+            ("revocato", FUTURA, set()),
+            ("revocato", PASSATA, set()),
+            ("revocato", None, set()),
+            ("pippo", FUTURA, set()),
+            ("pippo", PASSATA, set()),
+            ("pippo", None, set()),
+        ],
+    )
+    def test_segmento_della_riga(self, client, stato, scadenza, atteso):
+        assert segmenti_di(client, stato, scadenza) == atteso
+
+    def test_segmenti_complementari_sugli_stati_noti(self, client):
+        # Ogni riga con stato noto (o NULL) sta in esattamente un segmento: la
+        # somma dei due count resta il totale della paginazione.
+        for stato in ("aperto", "in apertura prossimamente", "chiuso", None):
+            for scadenza in (FUTURA, TODAY.isoformat(), PASSATA, None):
+                assert len(segmenti_di(client, stato, scadenza)) == 1, (stato, scadenza)
 
 
 def bando_row(id_: int) -> dict:
@@ -311,6 +439,9 @@ class TestFetchBandi:
         assert any("stato_bando.neq.chiuso" in f for f in open_q.or_filters)
         assert any("data_scadenza.gte." in f for f in open_q.or_filters)
         assert any("stato_bando.eq.chiuso" in f for f in closed_q.or_filters)
+        # la guardia sugli stati vale per entrambe le query (R0-a)
+        assert f"({open_q.or_filters[0]})" == GUARDIA_STATI
+        assert f"({closed_q.or_filters[0]})" == GUARDIA_STATI
 
     async def test_unknown_sort_falls_back_to_most_recent(self):
         secondary = FakeSecondary([
@@ -332,6 +463,64 @@ class TestFetchBandi:
         ])
         page = await fetch_bandi(secondary, BandiFilters(), 1, 4, "pubblicazione_desc")
         assert [item.id for item in page.items] == [1, 2, 50]
+
+
+class TestCandidatiAlert:
+    async def test_candidati_ereditano_il_segmento_aperti(self, client):
+        # Gli alert riusano apply_open_tier: sospesi, revocati e stati non
+        # previsti non diventano mai candidati (contratto DB bandi §7, R0-a).
+        secondary = FakeSecondary([SimpleNamespace(data=[], count=None)])
+        await carica_candidati(
+            secondary,
+            oggi=TODAY,
+            attivazione=date(2026, 6, 1),
+            orizzonte_giorni=60,
+            fuso=ZoneInfo("Europe/Rome"),
+        )
+        [query] = secondary.queries
+        segmento_aperti = params_of(apply_open_tier(client.from_("bando").select("id"), TODAY))
+        assert [f"({f})" for f in query.or_filters[:3]] == segmento_aperti["or"]
+        assert segmento_aperti["or"][0] == GUARDIA_STATI
+
+
+def filters_client() -> httpx.AsyncClient:
+    """App minima con la sola dipendenza parse_filters e gli handler degli errori
+    di produzione (un BadRequestError diventa 400 come in /bandi)."""
+    app = FastAPI()
+    register_exception_handlers(app)
+
+    @app.get("/filtri")
+    async def filtri(filters: Annotated[BandiFilters, Depends(parse_filters)]):
+        return {"stato": filters.stato}
+
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+class TestFiltroStato:
+    """Il filtro ``stato`` non risponde mai 400 per un valore sconosciuto
+    (contratto DB bandi §7, R0-a): lo ignora."""
+
+    @pytest.mark.parametrize(
+        ("stato", "atteso"),
+        [
+            ("pippo", []),
+            ("sospeso", ["sospeso"]),
+            ("revocato", ["revocato"]),
+            ("aperto,pippo", ["aperto"]),
+            ("aperto, chiuso", ["aperto", "chiuso"]),  # spazi intorno: valore noto
+            ("aperto,in apertura prossimamente,chiuso", ["aperto", "in apertura prossimamente", "chiuso"]),
+        ],
+    )
+    async def test_stati(self, stato, atteso):
+        async with filters_client() as http:
+            resp = await http.get("/filtri", params={"stato": stato})
+        assert resp.status_code == 200
+        assert resp.json() == {"stato": atteso}
+
+    async def test_livello_non_valido_resta_400(self):
+        async with filters_client() as http:
+            resp = await http.get("/filtri", params={"livello": "boh"})
+        assert resp.status_code == 400
 
 
 class TestMapping:

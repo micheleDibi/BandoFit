@@ -17,7 +17,15 @@ export interface Page<T> {
   total_pages: number;
 }
 
-export type StatoBando = "aperto" | "chiuso" | "in apertura prossimamente";
+/** Stati del catalogo (contratto DB bandi §4). Il catalogo può introdurre valori
+ *  nuovi prima di noi: a runtime `stato_bando` può essere anche un'altra stringa,
+ *  che `StatoBadge` mostra con un badge neutro. */
+export type StatoBando =
+  | "aperto"
+  | "chiuso"
+  | "in apertura prossimamente"
+  | "sospeso"
+  | "revocato";
 
 /** Dettaglio di un requisito del pre-check. Le voci del bando sono alternative:
  *  `soddisfatta` è vera con ANCHE UNA SOLA voce in comune (`matched_ids`).

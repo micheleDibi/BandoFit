@@ -1,4 +1,12 @@
-import { CalendarClock, CheckCircle2, Clock3, HelpCircle, XCircle } from "lucide-react";
+import {
+  Ban,
+  CalendarClock,
+  CheckCircle2,
+  Clock3,
+  HelpCircle,
+  PauseCircle,
+  XCircle,
+} from "lucide-react";
 import { daysUntil, formatDate } from "../../lib/format";
 import type { AiEsito, StatoBando } from "../../types";
 import { Badge } from "../ui/Badge";
@@ -45,10 +53,36 @@ export function StatoBadge({ stato }: { stato: StatoBando | null }) {
       </Badge>
     );
   }
+  if (stato === "in apertura prossimamente") {
+    return (
+      <Badge tone="amber">
+        <Clock3 className="size-3" aria-hidden />
+        In apertura
+      </Badge>
+    );
+  }
+  // Tutto il resto ha un badge neutro: un bando sospeso o revocato non va mai
+  // presentato come aperto o in apertura (contratto DB bandi §7, R0-a).
+  if (stato === "sospeso") {
+    return (
+      <Badge tone="slate">
+        <PauseCircle className="size-3" aria-hidden />
+        Sospeso
+      </Badge>
+    );
+  }
+  if (stato === "revocato") {
+    return (
+      <Badge tone="slate">
+        <Ban className="size-3" aria-hidden />
+        Revocato
+      </Badge>
+    );
+  }
   return (
-    <Badge tone="amber">
-      <Clock3 className="size-3" aria-hidden />
-      In apertura
+    <Badge tone="slate">
+      <HelpCircle className="size-3" aria-hidden />
+      Stato da verificare
     </Badge>
   );
 }

@@ -559,6 +559,8 @@ export interface CompanyDossier {
     trend: number | null;
     percentuali_contratti: Record<string, number | null> | null;
   };
+  /** Fotografia della visura (un solo esercizio). Lo storico pluriennale sta
+   *  in `BilanciOut` (GET /me/company/bilanci). */
   bilanci: {
     dimensione_impresa: string | null;
     fatturato: number | null;
@@ -566,6 +568,12 @@ export interface CompanyDossier {
     patrimonio_netto: number | null;
     ebitda: number | null;
     utile: number | null;
+    /** Esercizio a cui si riferiscono i valori (anno della data di chiusura). */
+    anno: number | null;
+    data_chiusura: string | null;
+    /** Anno del fatturato (`turnoverYear`): può differire da `anno`. Assente
+     *  nei dossier precedenti. */
+    anno_fatturato?: number | null;
   };
   partecipazioni: Array<{
     denominazione: string | null;
@@ -632,6 +640,106 @@ export interface ImportPreview {
   draft_expires_at: string;
   reused: boolean;
   sandbox: boolean;
+  /** Esito del recupero dei bilanci pluriennali fatto insieme all'anteprima. */
+  bilanci: ImportPreviewBilanci;
+}
+
+// ---- Bilanci per esercizio (GET /me/company/bilanci) ----------------------
+
+/** Da dove arriva un valore: bilancio ufficiale XBRL, visura (ultimo
+ *  esercizio) o storico del Registro Imprese. Il backend fonde per campo con
+ *  precedenza xbrl > it_full > it_advanced. */
+export type FonteBilancio = "xbrl" | "it_full" | "it_advanced";
+
+/** Perché i bilanci non ci sono (vocabolario chiuso del backend). */
+export type MotivoBilanci =
+  | "nessun_bilancio"
+  | "forma_senza_bilancio"
+  | "errore_provider"
+  | "esito_incerto"
+  | "tempo_insufficiente"
+  | "dati_non_corrispondenti"
+  | "non_richiesto"
+  | "piva_diversa";
+
+/** Esito dell'ultimo tentativo di recupero dello storico. */
+export type EsitoStoricoBilanci =
+  | "ok"
+  | "non_disponibili"
+  | "errore"
+  | "timeout"
+  | "saltato"
+  | "mismatch";
+
+export type TipoBilancio = "ordinario" | "abbreviato" | "micro" | "ignoto";
+
+/** Le 15 voci di bilancio, nello stesso ordine del backend. */
+export type CampoBilancio =
+  | "fatturato"
+  | "valore_produzione"
+  | "risultato_esercizio"
+  | "patrimonio_netto"
+  | "capitale_sociale"
+  | "totale_attivo"
+  | "debiti_totali"
+  | "disponibilita_liquide"
+  | "ebitda"
+  | "ebit"
+  | "cash_flow"
+  | "oneri_finanziari"
+  | "dipendenti"
+  | "costo_personale"
+  | "retribuzione_media_lorda";
+
+/** Un esercizio già fuso: per ogni voce il valore della fonte più affidabile.
+ *  `fonti` elenca solo le voci con un valore. */
+export interface EsercizioBilancio extends Record<CampoBilancio, number | null> {
+  anno: number;
+  data_chiusura: string | null;
+  tipo_bilancio: TipoBilancio;
+  fonti: Partial<Record<CampoBilancio, FonteBilancio>>;
+}
+
+/** Indicatore calcolato dal server (il frontend non ricalcola nulla). Con
+ *  `valore` null, `motivo_mancanza` spiega perché. */
+export interface IndicatoreBilancio {
+  chiave: string;
+  etichetta: string;
+  valore: number | null;
+  unita: "percentuale" | "euro" | "rapporto";
+  anni: number[];
+  formula: string;
+  motivo_mancanza: string | null;
+}
+
+/** Codici di fascia (vedi `lib/bilanci.ts` per le etichette). */
+export interface FasceBilancio {
+  fatturato: string | null;
+  patrimonio_netto: string | null;
+  dipendenti: string | null;
+  trend_fatturato: string | null;
+  anno_riferimento: number | null;
+}
+
+export interface BilanciOut {
+  editable: boolean;
+  stato: "disponibili" | "non_disponibili" | "mai_richiesti";
+  motivo: MotivoBilanci | null;
+  storico_esito: EsitoStoricoBilanci | null;
+  ultimo_tentativo_at: string | null;
+  /** Prima del quale «Recupera i bilanci» risponde 409 (cooldown); null = subito. */
+  recuperabile_da: string | null;
+  sandbox: boolean | null;
+  /** Ordinati per anno crescente. */
+  esercizi: EsercizioBilancio[];
+  indicatori: IndicatoreBilancio[];
+  fasce: FasceBilancio | null;
+}
+
+export interface ImportPreviewBilanci {
+  stato: "disponibili" | "non_disponibili";
+  motivo: MotivoBilanci | null;
+  anni: number[];
 }
 
 // ---- Preferenze per utente -------------------------------------------------

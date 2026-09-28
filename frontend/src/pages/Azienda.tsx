@@ -1,9 +1,11 @@
 import { Download, FileDown, RefreshCw } from "lucide-react";
 import { useState } from "react";
+import { useActiveCompany } from "../hooks/useActiveCompany";
 import { useCompany } from "../hooks/useCompany";
 import { useCompanyDossier } from "../hooks/useCompanyDossier";
 import { CompanyCard } from "../components/company/CompanyCard";
 import { ImportCompanyDialog } from "../components/company/ImportCompanyDialog";
+import { BilanciSection } from "../components/company/bilanci/BilanciSection";
 import { DossierView } from "../components/company/dossier/DossierView";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -58,6 +60,7 @@ function ExportPdfButton({
 export default function Azienda() {
   const { data, isPending, isError, refetch } = useCompanyDossier();
   const { data: companyData } = useCompany();
+  const { activeCompanyId } = useActiveCompany();
   const [importOpen, setImportOpen] = useState(false);
 
   if (isPending) {
@@ -95,7 +98,7 @@ export default function Azienda() {
       .replace(/^-|-$/g, "") || "azienda";
 
   const renderDossier = () => (
-    <DossierView dossier={data.dossier!} people={data.people} />
+    <DossierView dossier={data.dossier!} people={data.people} linkBilanci />
   );
 
   return (
@@ -194,6 +197,11 @@ export default function Azienda() {
           </div>
         )}
       </section>
+
+      {/* 3. Bilanci per esercizio: arrivano con l'import, quindi la sezione
+          compare solo dopo (prima c'è già la CTA «Importa da P.IVA»). La key
+          azzera l'esito di un recupero quando un Advisor cambia azienda. */}
+      {data.imported && <BilanciSection key={activeCompanyId ?? "azienda"} />}
 
       <p className="mt-8 pb-2 text-xs text-slate-400">
         Dati provenienti da fonti pubbliche (Registro Imprese) tramite openapi.it, per uso

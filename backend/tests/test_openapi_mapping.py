@@ -1,11 +1,15 @@
 """Test del mapping IT-full → BandoFit: funzioni pure sulla fixture reale
-registrata dallo spike (tests/fixtures/openapi/it_full_sample.json)."""
+registrata dallo spike (tests/fixtures/openapi/it_full_sample.json) e, per i
+dati economici, sulla fixture sintetica derivata dagli esempi OAS
+(it_full_bilanci_sintetico.json: la fixture reale è un'associazione senza
+bilanci, su cui il mapping economico non era mai stato esercitato)."""
 
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
 from app.services.openapi_mapping import (
+    _voce_cee,
     ateco_division,
     build_autofill,
     build_derived,
@@ -13,6 +17,7 @@ from app.services.openapi_mapping import (
     classe_dimensionale,
     extract_people,
     fascia_fatturato,
+    forma_giuridica_codice,
     normalize_region,
     parse_openapi_date,
     secondary_ateco_codes,
@@ -25,6 +30,14 @@ FIXTURES = Path(__file__).parent / "fixtures" / "openapi"
 
 def payload() -> dict:
     return json.loads((FIXTURES / "it_full_sample.json").read_text())["data"]
+
+
+def payload_bilanci() -> dict:
+    return json.loads((FIXTURES / "it_full_bilanci_sintetico.json").read_text())["data"]
+
+
+def advanced() -> dict:
+    return json.loads((FIXTURES / "it_advanced_sintetico.json").read_text())["data"][0]
 
 
 def lookups(**overrides) -> SimpleNamespace:
@@ -257,3 +270,150 @@ class TestDossier:
         assert secondary_ateco_codes({"atecoClassification": {"secondaryAteco": "1, 2;3"}}) == ["1", "2", "3"]
         assert secondary_ateco_codes({"atecoClassification": {"secondaryAteco": ["620100"]}}) == ["620100"]
         assert secondary_ateco_codes({}) == []
+
+
+class TestBilanciDossier:
+    """Regressione del bug di produzione: `ecofin.ebitda` ed `ecofin.profit`
+    non esistono in IT-full, quindi EBITDA e utile del dossier valevano
+    sempre None."""
+
+    def test_ebitda_utile_anno_dalla_fixture_sintetica(self):
+        bilanci = build_dossier(payload_bilanci())["bilanci"]
+        assert bilanci["ebitda"] == 714856  # operatingResults.ebitda
+        assert bilanci["utile"] == 469366  # annualResult IIC179
+        assert bilanci["patrimonio_netto"] == 563473  # ecofin.netWorth = PN
+        assert bilanci["fatturato"] == 4432761
+        assert bilanci["capitale_sociale"] == 50000
+        assert bilanci["anno"] == 2021
+        assert bilanci["data_chiusura"] == "2021-12-31"
+        assert bilanci["dimensione_impresa"] == "Small"
+
+    def test_variante_ipl(self):
+        data = payload_bilanci()
+        data["annualResult"] = [{"code": "IPL179", "value": 469366.0}]
+        data["netWorth"] = [{"code": "IPL083", "value": 1.0}]
+        assert build_dossier(data)["bilanci"]["utile"] == 469366
+
+    def test_ripiego_su_voce_a_ix_iic_e_ipl(self):
+        data = payload_bilanci()
+        del data["annualResult"]
+        assert build_dossier(data)["bilanci"]["utile"] == 469366
+        data["netWorth"] = [{"code": "IPL083", "value": -2500.0}]
+        assert build_dossier(data)["bilanci"]["utile"] == -2500.0  # perdita
+
+    def test_voce_179_prevale_su_083(self):
+        data = payload_bilanci()
+        data["netWorth"][-1]["value"] = 1.0
+        assert build_dossier(data)["bilanci"]["utile"] == 469366
+
+    def test_anno_con_ripiego_su_turnover_year(self):
+        data = payload_bilanci()
+        del data["ecofin"]["balanceSheetDate"]
+        bilanci = build_dossier(data)["bilanci"]
+        assert bilanci["anno"] == 2021 and bilanci["data_chiusura"] is None
+
+    def test_turnover_year_discordante_ha_il_suo_anno(self):
+        # Gemello di test_bilanci_mapping: la tabella dei bilanci esclude quel
+        # fatturato dall'esercizio 2021; il dossier non deve presentarlo come
+        # «Esercizio 2021» — lo accompagna con il suo anno.
+        data = payload_bilanci()
+        data["ecofin"]["turnoverYear"] = "2022"  # anche come stringa
+        bilanci = build_dossier(data)["bilanci"]
+        assert bilanci["anno"] == 2021
+        assert bilanci["fatturato"] == 4432761 and bilanci["anno_fatturato"] == 2022
+
+    def test_anno_fatturato_coincidente(self):
+        bilanci = build_dossier(payload_bilanci())["bilanci"]
+        assert bilanci["anno_fatturato"] == bilanci["anno"] == 2021
+
+    def test_fixture_reale_associazione_tutto_none(self):
+        bilanci = build_dossier(payload())["bilanci"]
+        for campo in (
+            "fatturato", "capitale_sociale", "patrimonio_netto", "ebitda", "utile",
+            "anno", "data_chiusura",
+        ):
+            assert bilanci[campo] is None, campo
+        assert fascia_fatturato(payload()) is None
+        assert fascia_fatturato(payload(), advanced={"balanceSheets": {"last": None}}) is None
+
+    def test_valori_non_numerici_ignorati(self):
+        data = payload_bilanci()
+        data["operatingResults"]["ebitda"] = True
+        data["annualResult"] = [{"code": "IIC179", "value": "469366"}]
+        data["netWorth"] = []
+        bilanci = build_dossier(data)["bilanci"]
+        assert bilanci["ebitda"] is None and bilanci["utile"] is None
+
+
+class TestVoceCee:
+    def test_cerca_in_tutti_i_blocchi_di_primo_livello(self):
+        data = {
+            "altro": {"code": "IIC179", "value": 1},  # non è una lista: ignorato
+            "blocco_a": [{"code": "IIC001", "value": 5}],
+            "blocco_b": ["rumore", {"code": "iic179", "value": 7}],
+        }
+        assert _voce_cee(data, ("IIC179", "IPL179")) == 7
+
+    def test_ordine_dei_codici(self):
+        data = {"a": [{"code": "IPL179", "value": 1}], "b": [{"code": "IIC179", "value": 2}]}
+        assert _voce_cee(data, ("IIC179", "IPL179")) == 2
+        assert _voce_cee(data, ("IPL179", "IIC179")) == 1
+
+    def test_assente_o_non_valido(self):
+        assert _voce_cee({"a": [{"code": "IIC179", "value": None}]}, ("IIC179",)) is None
+        assert _voce_cee({"a": [{"code": "IIC179", "value": float("nan")}]}, ("IIC179",)) is None
+        assert _voce_cee({}, ("IIC179",)) is None
+        assert _voce_cee(None, ("IIC179",)) is None
+
+
+class TestFormaGiuridica:
+    def test_collisione_sp_primo_livello_contro_dettaglio(self):
+        # SpA: nel DETTAGLIO 'SP' significa società per azioni, il primo
+        # livello è SC. Non deve mai risultare società di persone.
+        spa = {"legalForm": {
+            "legalForm": {"code": "SC", "description": "Capital company"},
+            "detailedLegalForm": {"code": "SP", "description": "Joint-stock company"},
+        }}
+        assert forma_giuridica_codice(spa) == "SC"
+        snc = {"legalForm": {
+            "legalForm": {"code": "SP", "description": "Partnership"},
+            "detailedLegalForm": {"code": "SN", "description": "General partnership"},
+        }}
+        assert forma_giuridica_codice(snc) == "SP"
+
+    def test_solo_dettaglio_non_basta(self):
+        assert forma_giuridica_codice({"legalForm": {"detailedLegalForm": {"code": "SP"}}}) is None
+        assert forma_giuridica_codice({"detailedLegalForm": {"code": "SP"}}) is None
+
+    def test_fixture_e_valori_anomali(self):
+        assert forma_giuridica_codice(payload()) == "AL"  # associazione
+        assert forma_giuridica_codice(payload_bilanci()) == "SC"
+        assert forma_giuridica_codice({"legalForm": {"legalForm": {"code": " sc "}}}) == "SC"
+        assert forma_giuridica_codice({"legalForm": {"legalForm": {"code": "XX"}}}) is None
+        assert forma_giuridica_codice({}) is None
+
+
+class TestFasciaFatturatoRipiego:
+    def test_solo_ecofin_turnover(self):
+        assert fascia_fatturato(payload_bilanci()) == "2m_10m"
+        # i vecchi path morti non contano più
+        assert fascia_fatturato({"ecofin": {"revenue": 5_000}}) is None
+        assert fascia_fatturato({"balanceSheets": {"turnover": 5_000}}) is None
+        assert fascia_fatturato({"ecofin": {"turnover": -1}}) is None
+        assert fascia_fatturato({"ecofin": {"turnover": True}}) is None
+
+    def test_ripiego_su_ultimo_bilancio_advanced(self):
+        assert fascia_fatturato(payload(), advanced()) == "2m_10m"  # last 2022: 5.102.233
+        dato = advanced()
+        dato["balanceSheets"]["last"]["turnover"] = 80_000
+        assert fascia_fatturato({}, dato) == "fino_100k"
+        # IT-full, quando c'è, prevale
+        assert fascia_fatturato({"ecofin": {"turnover": 60_000_000}}, dato) == "oltre_50m"
+
+    def test_autofill_e_derived_con_advanced(self):
+        updates, applied, _, _ = build_autofill(payload(), None, lookups(), advanced())
+        assert updates["fascia_fatturato"] == "2m_10m" and "fascia_fatturato" in applied
+        assert build_derived(payload(), lookups(), advanced())["fascia_fatturato"] == "2m_10m"
+        # senza advanced il comportamento resta quello di prima
+        updates, _, _, _ = build_autofill(payload(), None, lookups())
+        assert "fascia_fatturato" not in updates

@@ -3,14 +3,18 @@ conferma (gratuita) — con client PostgREST e openapi finti.
 
 Il tema di fondo è il denaro: ogni chiamata IT-full costa credito reale.
 I test presidiano i tre punti in cui si può pagare due volte (cooldown, lock,
-riuso del draft) e l'unico in cui si può pagare per nulla (il draft scaduto)."""
+riuso del draft) e l'unico in cui si può pagare per nulla (il draft scaduto).
+Da WP1 anche IT-advanced (storico dei bilanci) nell'anteprima: si paga solo
+quando serve, mai due volte, e non blocca mai l'import."""
 
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from postgrest.exceptions import APIError
 
 from app.core.errors import (
     AppError,
@@ -23,14 +27,20 @@ from app.core.errors import (
 )
 from app.api.deps import ActiveCompany
 from app.clients.openapi import OpenapiInvalidIdError
+from app.core.errors import UpstreamError
 from app.services import openapi_service
+from app.services.bilanci_mapping import MAPPING_BILANCI_VERSIONE
 
 FIXTURES = Path(__file__).parent / "fixtures" / "openapi"
 USER = {"id": "a0000000-0000-0000-0000-000000000001", "role": "cliente", "is_active": True}
 PIVA = "14061981008"
+ACTIVE_COMPANY = "c-openapi"
+# Token restituito da fn_acquire_import_lock_token nel finto primario.
+LOCK_TOKEN = "70000000-0000-0000-0000-00000000cafe"
+RILASCIO = ("fn_release_import_lock_token", {"p_parent_id": USER["id"], "p_token": LOCK_TOKEN})
 
 
-def _active(company_id: str | None = "c-openapi", editable: bool = True) -> ActiveCompany:
+def _active(company_id: str | None = ACTIVE_COMPANY, editable: bool = True) -> ActiveCompany:
     return ActiveCompany(company_id=company_id, owner_id=USER["id"], editable=editable)
 
 
@@ -48,8 +58,11 @@ def _parse_iso(value: str) -> datetime:
 def draft_row(
     piva: str = PIVA, *, payload: dict | None = None, sandbox: bool = False,
     eta_minuti: int = 0, ttl_minuti: int = 30,
+    company_profile_id: str | None = ACTIVE_COMPANY, **advanced,
 ) -> dict:
-    """Riga di `company_import_drafts`. `eta_minuti` > `ttl_minuti` = draft scaduto."""
+    """Riga di `company_import_drafts`. `eta_minuti` > `ttl_minuti` = draft scaduto.
+    `company_profile_id` = azienda per cui l'anteprima è stata pagata;
+    `advanced` = colonne advanced_* (assenti = draft precedente alla 0032)."""
     fetched_at = datetime.now(timezone.utc) - timedelta(minutes=eta_minuti)
     return {
         "partita_iva": piva,
@@ -57,6 +70,8 @@ def draft_row(
         "sandbox": sandbox,
         "fetched_at": fetched_at.isoformat(),
         "expires_at": (fetched_at + timedelta(minutes=ttl_minuti)).isoformat(),
+        "company_profile_id": company_profile_id,
+        **{f"advanced_{k}": v for k, v in advanced.items()},
     }
 
 
@@ -136,11 +151,17 @@ class FakeStorage:
 
 
 class FakePrimary:
-    """Registra le operazioni; `selects` configura le risposte alle SELECT."""
+    """Registra le operazioni; `selects` configura le risposte alle SELECT.
 
-    def __init__(self, selects: dict | None = None, lock: bool = True):
+    RPC: il lock con token (`lock=False` = occupato), la quota giornaliera
+    (`quota`: True/False) e la registrazione dei bilanci (risponde con gli
+    anni ricevuti). `rpc_errors` fa fallire una RPC per nome."""
+
+    def __init__(self, selects: dict | None = None, lock: bool = True, quota: bool = True):
         self.selects = selects or {}
         self.lock = lock
+        self.quota = quota
+        self.rpc_errors: dict[str, Exception] = {}
         self.ops: list = []
         self.rpcs: list = []
         self.storage = FakeStorage()
@@ -154,9 +175,17 @@ class FakePrimary:
 
         class _Rpc:
             async def execute(self_inner):
-                return SimpleNamespace(
-                    data=primary.lock if name == "fn_acquire_import_lock" else None
-                )
+                if name in primary.rpc_errors:
+                    raise primary.rpc_errors[name]
+                if name == "fn_acquire_import_lock_token":
+                    return SimpleNamespace(data=LOCK_TOKEN if primary.lock else None)
+                if name == "fn_openapi_prenota_operazione":
+                    return SimpleNamespace(data=primary.quota)
+                if name == "fn_bilanci_registra_fonte":
+                    return SimpleNamespace(
+                        data={"anni": sorted({r["anno"] for r in params["p_righe"]})}
+                    )
+                return SimpleNamespace(data=None)
 
         return _Rpc()
 
@@ -164,14 +193,38 @@ class FakePrimary:
     def ops_for(self, table: str, op: str) -> list:
         return [payload for t, o, payload in self.ops if t == table and o == op]
 
+    def rpc_names(self) -> list[str]:
+        return [name for name, _ in self.rpcs]
 
-def fake_openapi(result=None, error: Exception | None = None, enabled=True, sandbox=False):
+
+def fake_openapi(
+    result=None, error: Exception | None = None, enabled=True, sandbox=False,
+    advanced=None, advanced_error: Exception | None = None,
+):
+    """openapi finto. `calls` registra le chiamate a pagamento, per prodotto
+    (il tetto di IT-advanced arrotondato: il mint, gratuito, ne consuma un
+    istante)."""
+    calls: dict[str, list] = {"it_full": [], "it_advanced": []}
+
     async def it_full(piva):
+        calls["it_full"].append(piva)
         if error:
             raise error
         return result
 
-    return SimpleNamespace(enabled=enabled, sandbox=sandbox, it_full=it_full)
+    async def prepara_token(gruppo):
+        return None
+
+    async def it_advanced(piva, *, timeout_s):
+        calls["it_advanced"].append((piva, round(timeout_s)))
+        if advanced_error:
+            raise advanced_error
+        return advanced
+
+    return SimpleNamespace(
+        enabled=enabled, sandbox=sandbox, it_full=it_full, it_advanced=it_advanced,
+        prepara_token=prepara_token, calls=calls,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -335,6 +388,8 @@ class TestCooldownELock:
             await openapi_service.preview_import(primary, None, openapi, _active(), PIVA)
         assert exc.value.code == "import_in_progress"
         assert called == []  # la chiamata a pagamento non parte
+        # un lock occupato non consuma la quota giornaliera
+        assert "fn_openapi_prenota_operazione" not in primary.rpc_names()
         # il messaggio dichiara l'attesa reale, non «qualche istante»
         assert "5 minuti" in exc.value.message
 
@@ -381,7 +436,7 @@ class TestEsitiChiamata:
         events = primary.ops_for("api_usage_events", "insert")
         assert events[0]["outcome"] == "error"
         assert primary.ops_for("company_import_drafts", "upsert") == []
-        assert ("fn_release_import_lock", {"p_parent_id": USER["id"]}) in primary.rpcs
+        assert RILASCIO in primary.rpcs
 
     async def test_timeout_ledger_e_lock_non_rilasciato(self):
         primary = FakePrimary(selects={"company_profiles": [COMPANY_ROW]})
@@ -392,7 +447,7 @@ class TestEsitiChiamata:
         events = primary.ops_for("api_usage_events", "insert")
         assert events[0]["outcome"] == "timeout_unknown"
         assert events[0]["cost_cents"] == 30  # possibile addebito
-        released = [name for name, _ in primary.rpcs if name == "fn_release_import_lock"]
+        released = [name for name, _ in primary.rpcs if name.startswith("fn_release")]
         assert released == []  # scade da solo: protegge dal doppio addebito
 
     async def test_mismatch_piva_non_va_in_staging(self):
@@ -407,7 +462,7 @@ class TestEsitiChiamata:
         assert primary.ops_for("company_import_drafts", "upsert") == []
         events = primary.ops_for("api_usage_events", "insert")
         assert events[0]["request_meta"]["mismatch"] is True
-        assert ("fn_release_import_lock", {"p_parent_id": USER["id"]}) in primary.rpcs
+        assert RILASCIO in primary.rpcs
 
 
 class TestAnteprima:
@@ -419,7 +474,7 @@ class TestAnteprima:
         # ledger success con costo pieno, lock rilasciato
         events = primary.ops_for("api_usage_events", "insert")
         assert events[0]["outcome"] == "success" and events[0]["cost_cents"] == 30
-        assert ("fn_release_import_lock", {"p_parent_id": USER["id"]}) in primary.rpcs
+        assert RILASCIO in primary.rpcs
         # SOLA LETTURA: il payload finisce in staging, nient'altro viene toccato
         draft = primary.ops_for("company_import_drafts", "upsert")[0]
         assert draft["partita_iva"] == PIVA and draft["raw"] == it_full_payload()
@@ -507,11 +562,16 @@ class TestConferma:
         assert primary.ops_for("company_people", "delete")
         people_insert = primary.ops_for("company_people", "insert")[0]
         assert people_insert[0]["kind"] == "manager"
-        assert primary.ops_for("audit_log", "insert")[0]["action"] == "company.imported"
+        [audit] = primary.ops_for("audit_log", "insert")
+        assert audit["action"] == "company.imported"
+        # P.IVA mascherata anche nell'audit (per una ditta individuale è un
+        # dato personale; quella completa sta in company_data.piva_fetched)
+        assert audit["payload"]["piva"] == "140*****008"
+        assert PIVA not in json.dumps(audit)
         # draft consumato: una seconda conferma non trova nulla
         assert primary.ops_for("company_import_drafts", "delete")
         # lock rilasciato
-        assert ("fn_release_import_lock", {"p_parent_id": USER["id"]}) in primary.rpcs
+        assert RILASCIO in primary.rpcs
         # risultato: identico a quello del vecchio import in un colpo solo
         assert result.sandbox is False
         assert result.dossier["anagrafica"]["stato"] == "Attiva"
@@ -553,8 +613,12 @@ class TestConferma:
         assert primary.rpcs == []  # nemmeno il lock
 
     async def test_primo_import_crea_il_profilo_aziendale(self):
+        # anteprima pagata quando l'azienda non esisteva ancora: draft senza azienda
         primary = FakePrimary(
-            selects={"company_profiles": [], "company_import_drafts": [draft_row()]}
+            selects={
+                "company_profiles": [],
+                "company_import_drafts": [draft_row(company_profile_id=None)],
+            }
         )
 
         # dopo l'insert la select deve trovare la riga
@@ -630,3 +694,480 @@ class TestDossier:
             primary, _active(company_id=None, editable=False)
         )
         assert resp.editable is False and resp.imported is False
+
+
+# ============================================================ WP1: bilanci
+
+PIVA_BIL = "09876543217"  # P.IVA fittizia della fixture sintetica
+PIVA_BIL_MASCHERATA = "098*****217"
+TENTATO_AT = "2026-09-28T09:00:00+00:00"
+
+
+def it_full_bilanci() -> dict:
+    return json.loads((FIXTURES / "it_full_bilanci_sintetico.json").read_text())["data"]
+
+
+def it_advanced_dato() -> dict:
+    return json.loads((FIXTURES / "it_advanced_sintetico.json").read_text())["data"][0]
+
+
+COMPANY_BIL = {**COMPANY_ROW, "partita_iva": PIVA_BIL, "ragione_sociale": "ALFA"}
+
+
+def eventi(primary, service: str) -> list[dict]:
+    return [e for e in primary.ops_for("api_usage_events", "insert") if e["service"] == service]
+
+
+def registrazioni(primary) -> dict[str, dict]:
+    """Chiamate a fn_bilanci_registra_fonte per fonte."""
+    return {p["p_fonte"]: p for name, p in primary.rpcs if name == "fn_bilanci_registra_fonte"}
+
+
+def upsert_stato(primary) -> list[dict]:
+    return primary.ops_for("company_financials_stato", "upsert")
+
+
+class TestItAdvancedNienteDoppiaSpesa:
+    """IT-advanced (0,10 €) non si paga MAI quando è inutile."""
+
+    @pytest.mark.parametrize(
+        "errore", [OpenapiInvalidIdError(), OpenapiTimeoutError(), OpenapiUpstreamError()]
+    )
+    async def test_it_full_fallito(self, errore):
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(error=errore, advanced=it_advanced_dato())
+        with pytest.raises((AppError, OpenapiInvalidIdError)):
+            await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        assert openapi.calls["it_full"] == [PIVA_BIL]
+        assert openapi.calls["it_advanced"] == []
+        assert eventi(primary, "IT-advanced") == []
+        assert primary.ops_for("company_import_drafts", "upsert") == []
+
+    async def test_mismatch_di_it_full(self):
+        data = it_full_bilanci()
+        data["companyDetails"]["vatCode"] = ALTRA_PIVA
+        data["companyDetails"]["taxCode"] = ALTRA_PIVA
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(result=data, advanced=it_advanced_dato())
+        with pytest.raises(OpenapiUpstreamError):
+            await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        assert openapi.calls["it_advanced"] == []
+        assert RILASCIO in primary.rpcs
+
+    async def test_draft_riusato(self):
+        """Il riuso è gratis per ENTRAMBI i prodotti: lo storico viene dal draft."""
+        draft = draft_row(
+            PIVA_BIL, payload=it_full_bilanci(), eta_minuti=1,
+            esito="ok", motivo=None, raw=it_advanced_dato(), tentato_at=TENTATO_AT,
+        )
+        primary = FakePrimary(
+            selects={"company_profiles": [COMPANY_BIL], "company_import_drafts": [draft]}
+        )
+        openapi = fake_openapi(result=it_full_bilanci(), advanced=it_advanced_dato())
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        assert preview.reused is True
+        assert openapi.calls == {"it_full": [], "it_advanced": []}
+        assert primary.rpcs == []
+        assert preview.bilanci.stato == "disponibili"
+        assert preview.bilanci.anni == [2017, 2018, 2019, 2020, 2021, 2022]
+
+    async def test_societa_di_persone(self):
+        data = it_full_bilanci()
+        data["legalForm"]["legalForm"] = {"code": "SP", "description": "Partnership"}
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(result=data, advanced=it_advanced_dato())
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        assert openapi.calls["it_advanced"] == []
+        draft = primary.ops_for("company_import_drafts", "upsert")[0]
+        assert draft["advanced_esito"] == "saltato"
+        assert draft["advanced_motivo"] == "forma_senza_bilancio"
+        assert draft["advanced_tentato_at"] is None  # niente cooldown: non si è pagato
+        # l'esercizio di IT-full la conferma lo registra comunque
+        assert preview.bilanci.model_dump() == {
+            "stato": "disponibili", "motivo": "forma_senza_bilancio", "anni": [2021]
+        }
+
+    async def test_spa_nel_dettaglio_non_e_una_societa_di_persone(self):
+        # 'SP' in detailedLegalForm è la SpA: conta solo il codice di primo livello.
+        data = it_full_bilanci()
+        data["legalForm"]["detailedLegalForm"] = {"code": "SP", "description": "SpA"}
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(result=data, advanced=it_advanced_dato())
+        await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        assert len(openapi.calls["it_advanced"]) == 1
+
+    async def test_piva_diversa_da_quella_del_profilo(self):
+        # Il profilo dichiara un'altra P.IVA (nessun import ancora): IT-full sì,
+        # lo storico no — lo si recupera dopo, a P.IVA chiarita.
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_ROW]})
+        openapi = fake_openapi(result=it_full_bilanci(), advanced=it_advanced_dato())
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        assert openapi.calls["it_full"] == [PIVA_BIL]
+        assert openapi.calls["it_advanced"] == []
+        draft = primary.ops_for("company_import_drafts", "upsert")[0]
+        assert (draft["advanced_esito"], draft["advanced_motivo"]) == ("saltato", "piva_diversa")
+        assert preview.bilanci.motivo == "piva_diversa"
+
+    async def test_tempo_insufficiente_dopo_it_full(self, monkeypatch):
+        """IT-full durato 260 s: avviare IT-advanced sforerebbe la catena
+        server 277 s < frontend 290 s < lock 330 s."""
+        reale = time.monotonic
+        salto = {"secondi": 0.0}
+        openapi = fake_openapi(result=it_full_bilanci(), advanced=it_advanced_dato())
+        it_full_originale = openapi.it_full
+
+        async def it_full_lento(piva):
+            data = await it_full_originale(piva)
+            salto["secondi"] = 260.0
+            return data
+
+        openapi.it_full = it_full_lento
+        # Salto in avanti (l'orologio resta monotono): è il tempo "passato" in IT-full.
+        monkeypatch.setattr(openapi_service.time, "monotonic", lambda: reale() + salto["secondi"])
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        assert openapi.calls["it_advanced"] == []
+        draft = primary.ops_for("company_import_drafts", "upsert")[0]
+        assert draft["advanced_motivo"] == "tempo_insufficiente"
+        assert (preview.bilanci.stato, preview.bilanci.anni) == ("disponibili", [2021])
+        assert preview.bilanci.motivo == "tempo_insufficiente"
+        assert eventi(primary, "IT-advanced") == []
+
+    async def test_entro_il_budget_di_tempo_si_chiama(self):
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(result=it_full_bilanci(), advanced=it_advanced_dato())
+        await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        # tetto rigido della singola chiamata
+        assert openapi.calls["it_advanced"] == [
+            (PIVA_BIL, openapi_service.IT_ADVANCED_TIMEOUT_SECONDS)
+        ]
+
+
+class TestItAdvancedEsiti:
+    """Qualunque esito di IT-advanced lascia valida l'anteprima IT-full."""
+
+    async def test_ok_storico_in_staging(self):
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(result=it_full_bilanci(), advanced=it_advanced_dato())
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+
+        # UN solo upsert del draft, con entrambi i payload e l'azienda
+        [draft] = primary.ops_for("company_import_drafts", "upsert")
+        assert draft["raw"] == it_full_bilanci()
+        assert draft["advanced_raw"] == it_advanced_dato()
+        assert draft["advanced_esito"] == "ok" and draft["advanced_motivo"] is None
+        assert draft["advanced_tentato_at"]
+        assert draft["company_profile_id"] == ACTIVE_COMPANY
+        # registro: IT-full + IT-advanced a costo pieno
+        [adv] = eventi(primary, "IT-advanced")
+        assert adv["outcome"] == "success" and adv["cost_cents"] == 10
+        assert adv["request_meta"]["anni"] == [2017, 2018, 2019, 2020, 2021, 2022]
+        assert eventi(primary, "IT-full")[0]["cost_cents"] == 30
+        # la quota giornaliera conta UNA operazione per anteprima
+        assert primary.rpc_names().count("fn_openapi_prenota_operazione") == 1
+        assert RILASCIO in primary.rpcs
+        # anteprima: storico (2017-2022) ∪ esercizio di IT-full (2021)
+        assert preview.bilanci.stato == "disponibili"
+        assert preview.bilanci.anni == [2017, 2018, 2019, 2020, 2021, 2022]
+        assert preview.bilanci.motivo is None
+        # nessuna scrittura sui dati aziendali, bilanci compresi
+        assert "fn_bilanci_registra_fonte" not in primary.rpc_names()
+        assert upsert_stato(primary) == []
+
+    async def test_timeout_anteprima_200_e_lock_rilasciato(self):
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(
+            result=it_full_bilanci(), advanced_error=OpenapiTimeoutError()
+        )
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        # l'anteprima IT-full resta valida
+        assert preview.azienda.partita_iva == PIVA_BIL
+        # l'esercizio di IT-full c'è comunque; manca lo storico, e si dice perché
+        assert preview.bilanci.model_dump() == {
+            "stato": "disponibili", "motivo": "esito_incerto", "anni": [2021]
+        }
+        # esito ignoto: costo pieno a registro, mai retry
+        [adv] = eventi(primary, "IT-advanced")
+        assert adv["outcome"] == "timeout_unknown" and adv["cost_cents"] == 10
+        assert len(openapi.calls["it_advanced"]) == 1
+        # il lock si rilascia (col token), altrimenti la conferma resterebbe
+        # bloccata per 5 minuti: il doppio addebito lo ferma il cooldown
+        assert RILASCIO in primary.rpcs
+        [draft] = primary.ops_for("company_import_drafts", "upsert")
+        assert (draft["advanced_esito"], draft["advanced_motivo"]) == ("timeout", "esito_incerto")
+        assert draft["advanced_raw"] is None
+        assert draft["advanced_tentato_at"]  # base del cooldown di «Recupera»
+
+    @pytest.mark.parametrize(
+        ("status", "outcome", "costo"),
+        [(200, "success", 10), (204, "success", 10), (404, "error", 0)],
+    )
+    async def test_nessun_bilancio(self, status, outcome, costo):
+        from app.clients.openapi import OpenapiNessunDatoError
+
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(
+            result=it_full_bilanci(), advanced_error=OpenapiNessunDatoError(status)
+        )
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        assert preview.bilanci.motivo == "nessun_bilancio"
+        [adv] = eventi(primary, "IT-advanced")
+        assert (adv["outcome"], adv["cost_cents"]) == (outcome, costo)
+
+    async def test_storico_di_unaltra_impresa_scartato(self):
+        dato = it_advanced_dato()
+        dato["vatCode"] = dato["taxCode"] = ALTRA_PIVA
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(result=it_full_bilanci(), advanced=dato)
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        [draft] = primary.ops_for("company_import_drafts", "upsert")
+        assert draft["advanced_esito"] == "mismatch"
+        assert draft["advanced_raw"] is None  # i dati altrui non entrano MAI
+        [adv] = eventi(primary, "IT-advanced")
+        assert adv["outcome"] == "success" and adv["request_meta"]["mismatch"] is True
+        assert preview.bilanci.motivo == "dati_non_corrispondenti"
+
+    async def test_mint_del_gruppo_fallito(self):
+        from app.clients.openapi import OpenapiNonInviataError
+
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(result=it_full_bilanci(), advanced_error=OpenapiNonInviataError())
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        assert preview.bilanci.motivo == "errore_provider"
+        [adv] = eventi(primary, "IT-advanced")
+        assert (adv["outcome"], adv["cost_cents"]) == ("error", 0)
+
+    async def test_sandbox_costo_zero(self):
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(result=it_full_bilanci(), advanced=it_advanced_dato(), sandbox=True)
+        await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        assert eventi(primary, "IT-advanced")[0]["cost_cents"] == 0
+
+    async def test_senza_bilanci_ne_storico_non_disponibili(self):
+        # Nessun esercizio da IT-full (fixture reale: associazione) e storico
+        # assente: allora sì «non disponibili», con il motivo.
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_ROW]})
+        openapi = fake_openapi(
+            result=it_full_payload(), advanced_error=OpenapiTimeoutError()
+        )
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA)
+        assert preview.bilanci.model_dump() == {
+            "stato": "non_disponibili", "motivo": "esito_incerto", "anni": []
+        }
+
+
+class TestQuotaGiornaliera:
+    """Q10: tetto fail-closed delle operazioni openapi a pagamento."""
+
+    async def test_prenotazione_per_owner(self):
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_ROW]})
+        await openapi_service.preview_import(
+            primary, None, fake_openapi(result=it_full_payload()), _active(), PIVA
+        )
+        assert (
+            "fn_openapi_prenota_operazione",
+            {"p_owner": USER["id"], "p_per_azienda": 3},
+        ) in primary.rpcs
+        # dopo il lock: l'ordine delle RPC è acquire → prenota
+        nomi = primary.rpc_names()
+        assert nomi.index("fn_acquire_import_lock_token") < nomi.index(
+            "fn_openapi_prenota_operazione"
+        )
+
+    async def test_esaurita_429_senza_chiamata(self):
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_ROW]}, quota=False)
+        openapi = fake_openapi(result=it_full_payload())
+        with pytest.raises(AppError) as exc:
+            await openapi_service.preview_import(primary, None, openapi, _active(), PIVA)
+        assert (exc.value.status_code, exc.value.code) == (429, "limite_giornaliero_openapi")
+        assert openapi.calls == {"it_full": [], "it_advanced": []}
+        assert primary.ops_for("api_usage_events", "insert") == []
+        assert RILASCIO in primary.rpcs
+
+    async def test_errore_rpc_fail_closed(self):
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_ROW]})
+        primary.rpc_errors["fn_openapi_prenota_operazione"] = APIError(
+            {"message": "boom", "code": "XX000", "hint": None, "details": None}
+        )
+        openapi = fake_openapi(result=it_full_payload())
+        with pytest.raises(UpstreamError):
+            await openapi_service.preview_import(primary, None, openapi, _active(), PIVA)
+        assert openapi.calls["it_full"] == []  # quota non verificabile = nessuna spesa
+        assert RILASCIO in primary.rpcs
+
+
+class TestPivaLegataAllAzienda:
+    """Q10: dopo il primo import la P.IVA resta legata all'azienda."""
+
+    async def test_piva_diversa_da_importata_409(self):
+        old = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        primary = FakePrimary(
+            selects={
+                "company_profiles": [COMPANY_ROW],
+                "company_data": [{"piva_fetched": PIVA, "fetched_at": old, "fetch_count": 1}],
+            }
+        )
+        openapi = fake_openapi(result=it_full_bilanci())
+        with pytest.raises(AppError) as exc:
+            await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        assert (exc.value.status_code, exc.value.code) == (409, "piva_diversa_da_importata")
+        assert openapi.calls["it_full"] == []
+        assert primary.rpcs == []  # nemmeno lock o quota
+
+    async def test_stessa_piva_si_aggiorna(self):
+        old = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        primary = FakePrimary(
+            selects={
+                "company_profiles": [COMPANY_ROW],
+                "company_data": [{"piva_fetched": PIVA, "fetched_at": old, "fetch_count": 1}],
+            }
+        )
+        openapi = fake_openapi(result=it_full_payload())
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA)
+        assert openapi.calls["it_full"] == [PIVA] and preview.reused is False
+
+
+class TestDraftPerAzienda:
+    """B4: il draft è per owner, ma vale solo per l'azienda per cui è stato pagato."""
+
+    async def test_draft_di_unaltra_azienda_non_riusato(self):
+        altrui = draft_row(eta_minuti=15, company_profile_id="c-altra-azienda")
+        primary = FakePrimary(
+            selects={"company_profiles": [COMPANY_ROW], "company_import_drafts": [altrui]}
+        )
+        openapi = fake_openapi(result=it_full_payload())
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA)
+        assert preview.reused is False
+        assert openapi.calls["it_full"] == [PIVA]  # si ripaga: i dati sono per un'altra azienda
+        [draft] = primary.ops_for("company_import_drafts", "upsert")
+        assert draft["company_profile_id"] == ACTIVE_COMPANY
+
+    async def test_conferma_draft_di_unaltra_azienda_409(self):
+        primary = FakePrimary(
+            selects={
+                "company_profiles": [COMPANY_ROW],
+                "company_import_drafts": [draft_row(company_profile_id="c-altra-azienda")],
+            }
+        )
+        with pytest.raises(AppError) as exc:
+            await openapi_service.confirm_import(primary, None, _active(), PIVA)
+        assert exc.value.code == "draft_mismatch"
+        assert primary.ops_for("company_data", "upsert") == []
+        assert primary.rpcs == []
+
+    async def test_draft_senza_azienda_non_vale_per_unazienda_esistente(self):
+        primary = FakePrimary(
+            selects={
+                "company_profiles": [COMPANY_ROW],
+                "company_import_drafts": [draft_row(company_profile_id=None)],
+            }
+        )
+        with pytest.raises(AppError) as exc:
+            await openapi_service.confirm_import(primary, None, _active(), PIVA)
+        assert exc.value.code == "draft_mismatch"
+
+
+class TestConfermaBilanci:
+    def _primary(self, **draft_advanced) -> FakePrimary:
+        draft = draft_row(PIVA_BIL, payload=it_full_bilanci(), **draft_advanced)
+        return FakePrimary(
+            selects={"company_profiles": [COMPANY_BIL], "company_import_drafts": [draft]}
+        )
+
+    async def test_persiste_it_full_e_it_advanced(self):
+        primary = self._primary(
+            esito="ok", motivo=None, raw=it_advanced_dato(), tentato_at=TENTATO_AT
+        )
+        await openapi_service.confirm_import(primary, None, _active(), PIVA_BIL)
+
+        fonti = registrazioni(primary)
+        full, adv = fonti["it_full"], fonti["it_advanced"]
+        # it_full: l'esercizio di IT-full, senza sostituire gli anni precedenti
+        assert full["p_sostituisci"] is False and full["p_riferimento"] == "import"
+        assert full["p_company_id"] == COMPANY_BIL["id"]
+        [riga] = full["p_righe"]
+        assert riga["anno"] == 2021
+        assert riga["valori"]["patrimonio_netto"] == "563473.00"  # stringhe, mai float
+        # it_advanced: lo storico sostituisce il precedente; netWorth = UTILE
+        assert adv["p_sostituisci"] is True
+        assert [r["anno"] for r in adv["p_righe"]] == [2017, 2018, 2019, 2020, 2021, 2022]
+        r2021 = next(r for r in adv["p_righe"] if r["anno"] == 2021)
+        assert r2021["valori"]["risultato_esercizio"] == "469366.00"
+        assert "patrimonio_netto" not in r2021["valori"]
+
+        stato, versione = upsert_stato(primary)
+        assert stato["advanced_esito"] == "ok"
+        assert stato["advanced_raw"] == it_advanced_dato()
+        assert stato["advanced_tentato_at"] == TENTATO_AT
+        assert stato["advanced_fetched_at"] == TENTATO_AT
+        assert stato["advanced_fetch_count"] == 1
+        assert stato["advanced_piva"] == PIVA_BIL
+        # versione del mapping SOLO dopo tutte le registrazioni
+        assert versione == {
+            "company_profile_id": COMPANY_BIL["id"], "mapping_versione": MAPPING_BILANCI_VERSIONE
+        }
+        # ordine: dati certificati prima, bilanci dopo
+        tabelle = [t for t, o, _ in primary.ops if o == "upsert"]
+        assert tabelle.index("company_data") < tabelle.index("company_financials_stato")
+        # gratis: nessuna chiamata a pagamento né riga nel registro consumi
+        assert primary.ops_for("api_usage_events", "insert") == []
+        assert "fn_openapi_prenota_operazione" not in primary.rpc_names()
+        assert primary.ops_for("company_import_drafts", "delete")
+
+    async def test_rpc_bilanci_fallita_non_rompe_la_conferma(self):
+        primary = self._primary(
+            esito="ok", motivo=None, raw=it_advanced_dato(), tentato_at=TENTATO_AT
+        )
+        primary.rpc_errors["fn_bilanci_registra_fonte"] = APIError(
+            {"message": "x", "code": "P0001", "hint": None, "details": "righe_non_valide"}
+        )
+        result = await openapi_service.confirm_import(primary, None, _active(), PIVA_BIL)
+        assert result.sandbox is False
+        assert primary.ops_for("company_data", "upsert")  # i dati certificati ci sono
+        assert primary.ops_for("company_import_drafts", "delete")  # conferma completata
+        assert RILASCIO in primary.rpcs
+        # la versione NON sale: resta (anzi torna) vecchia, così la
+        # rimappatura pigra registra gratis i bilanci alla prossima lettura
+        versioni = [u["mapping_versione"] for u in upsert_stato(primary) if "mapping_versione" in u]
+        assert MAPPING_BILANCI_VERSIONE not in versioni
+        assert versioni == [0]
+        # il raw pagato è comunque al sicuro nello stato
+        assert upsert_stato(primary)[0]["advanced_raw"] == it_advanced_dato()
+
+    async def test_draft_precedente_alla_0032(self):
+        """Colonne advanced_* assenti: «non richiesto», nessuno stato scritto,
+        solo l'esercizio di IT-full."""
+        primary = self._primary()
+        await openapi_service.confirm_import(primary, None, _active(), PIVA_BIL)
+        assert set(registrazioni(primary)) == {"it_full"}
+        assert all("advanced_esito" not in u for u in upsert_stato(primary))
+
+    async def test_esito_saltato_non_tocca_il_cooldown(self):
+        primary = self._primary(esito="saltato", motivo="tempo_insufficiente", tentato_at=None)
+        await openapi_service.confirm_import(primary, None, _active(), PIVA_BIL)
+        stato = upsert_stato(primary)[0]
+        assert stato["advanced_esito"] == "saltato"
+        # nessuna chiamata pagata: il tentativo precedente (se c'è) resta la base
+        assert "advanced_tentato_at" not in stato
+        assert "advanced_raw" not in stato
+        assert set(registrazioni(primary)) == {"it_full"}
+
+
+class TestMascheramentoPiva:
+    async def test_piva_mai_in_chiaro_nel_registro(self):
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(result=it_full_bilanci(), advanced=it_advanced_dato())
+        await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        events = primary.ops_for("api_usage_events", "insert")
+        assert {e["service"] for e in events} == {"IT-full", "IT-advanced"}
+        assert all(e["request_meta"]["piva"] == PIVA_BIL_MASCHERATA for e in events)
+        assert PIVA_BIL not in json.dumps([e["request_meta"] for e in events])
+
+    async def test_anche_nei_rami_di_errore_di_it_full(self):
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_ROW]})
+        with pytest.raises(NotFoundError):
+            await openapi_service.preview_import(
+                primary, None, fake_openapi(error=OpenapiInvalidIdError()), _active(), PIVA
+            )
+        [event] = primary.ops_for("api_usage_events", "insert")
+        assert event["request_meta"] == {"piva": "140*****008"}

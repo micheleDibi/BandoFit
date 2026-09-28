@@ -147,3 +147,101 @@ class TestMatchingInput:
         assert "## Verifiche strutturate" in text
         assert text.endswith("## Profilo azienda\nPACK")
         assert "soddisfatto" in text
+
+
+class TestBilanciNelCompanyPack:
+    """WP1: i bilanci entrano come righe per esercizio + indicatori calcolati."""
+
+    @staticmethod
+    def _esercizi():
+        from datetime import date
+        from decimal import Decimal
+
+        from app.services.bilanci_indicatori import EsercizioBilancio
+
+        def es(anno, fatturato, utile, fonte="it_advanced", **altri):
+            valori = {"fatturato": Decimal(fatturato), "risultato_esercizio": Decimal(utile)}
+            valori.update({k: Decimal(v) for k, v in altri.items()})
+            return EsercizioBilancio(
+                anno=anno, data_chiusura=date(anno, 12, 31), valori=valori,
+                fonti={k: fonte for k in valori},
+            )
+
+        return [
+            es(2019, "3530126", "201877"),
+            es(2020, "3712554", "312004"),
+            es(2021, "4432761.00", "469366", fonte="it_full", patrimonio_netto="563473"),
+            es(2022, "5102233", "-12000.50"),
+        ]
+
+    def test_righe_per_esercizio_con_fonte(self):
+        pack = build_company_pack(
+            PROFILE, COMPANY, None, None, [], bilanci=self._esercizi(), storico_completo=True
+        )
+        blocco = pack.split("## Bilanci per esercizio (valori in euro)\n")[1]
+        assert "bilanci.numero_esercizi: 4\n" in blocco
+        assert (
+            "bilanci.2021.fatturato: 4432761 (fonte: Registro Imprese, ultimo bilancio depositato)"
+            in blocco
+        )
+        assert "bilanci.2022.risultato_esercizio: -12000.5 (fonte: storico" in blocco
+        assert "bilanci.2022.data_chiusura: 2022-12-31" in blocco
+        assert "bilanci.2020.patrimonio_netto: NON DISPONIBILE" in blocco
+        assert "bilanci.2019." not in blocco  # solo gli ultimi 3 voce per voce
+
+    def test_storico_incompleto_numero_esercizi_minimo(self):
+        """Solo IT-full (storico mai recuperato, saltato, in errore…): il
+        conteggio è un minimo, mai un totale — altrimenti «almeno 2 bilanci»
+        diventa un falso non_soddisfatto → non_ammissibile."""
+        solo_it_full = self._esercizi()[2:3]
+        for pack in (
+            build_company_pack(PROFILE, COMPANY, None, None, [], bilanci=solo_it_full),
+            build_company_pack(
+                PROFILE, COMPANY, None, None, [], bilanci=solo_it_full, storico_completo=False
+            ),
+        ):
+            assert "bilanci.numero_esercizi: almeno 1 (storico dei bilanci non recuperato" in pack
+            assert "bilanci.numero_esercizi: 1\n" not in pack
+
+    def test_indicatori_gia_calcolati(self):
+        pack = build_company_pack(PROFILE, COMPANY, None, None, [], bilanci=self._esercizi())
+        assert "bilanci.indicatori.fatturato_medio_3: 4415849.33 euro (esercizi 2020-2022" in pack
+        assert "bilanci.indicatori.indipendenza_finanziaria: NON DISPONIBILE (" in pack
+        assert "bilanci.indicatori.copertura_immobilizzazioni: NON DISPONIBILE" in pack
+
+    def test_senza_bilanci_non_disponibile(self):
+        for bilanci in (None, []):
+            pack = build_company_pack(PROFILE, COMPANY, None, None, [], bilanci=bilanci)
+            assert "## Bilanci per esercizio (valori in euro)\nbilanci: NON DISPONIBILE" in pack
+
+    def test_blocco_bilanci_del_dossier_escluso(self):
+        dossier = {
+            "anagrafica": {"denominazione": "ACME Srl"},
+            "bilanci": {"fatturato": 999, "utile": 1, "anno": 2021},
+        }
+        pack = build_company_pack(PROFILE, COMPANY, dossier, None, [], bilanci=self._esercizi())
+        assert "dossier.anagrafica.denominazione: ACME Srl" in pack
+        assert "dossier.bilanci" not in pack
+        assert "999" not in pack
+
+    def test_regola_di_matching_sui_bilanci(self):
+        from app.services.ai_check_prompts import SYSTEM_MATCH
+
+        assert "bilanci.<anno>.<voce>" in SYSTEM_MATCH
+        assert "bilanci.indicatori.*" in SYSTEM_MATCH
+        assert "NON fare calcoli" in SYSTEM_MATCH
+        # storico incompleto: «almeno N» non diventa mai non_soddisfatto
+        assert "«almeno N»" in SYSTEM_MATCH
+        # organico e fasce dichiarate restano verificabili senza bilanci
+        # (prima di WP1 lo erano: niente regressione a dato_mancante)
+        assert "SOLO i campi `bilanci" not in SYSTEM_MATCH
+        for campo in ("dossier.dipendenti.*", "numero_dipendenti", "fascia_fatturato"):
+            assert campo in SYSTEM_MATCH
+
+    def test_senza_bilanci_organico_dichiarato_nel_pack(self):
+        pack = build_company_pack(
+            PROFILE, {**COMPANY, "numero_dipendenti": 12, "fascia_fatturato": "500k_2m"},
+            None, None, [], bilanci=None,
+        )
+        assert "numero_dipendenti: 12" in pack and "fascia_fatturato: 500k_2m" in pack
+        assert "bilanci: NON DISPONIBILE" in pack

@@ -1193,19 +1193,19 @@ class TestDossierFull:
         assert [op for op in primary.ops if op[0] == "audit_log"] == []
 
     async def test_assegnato_con_audit(self, monkeypatch):
-        async def fake_company(primary, owner_id):
-            assert owner_id == TITOLARE
+        async def fake_company(primary, company_id):
+            assert company_id == COMPANY_ID
             return None
 
-        async def fake_dossier(primary, owner_id, *, editable=False):
-            assert owner_id == TITOLARE
+        async def fake_dossier(primary, company_id, *, editable=False):
+            assert company_id == COMPANY_ID
             return DossierResponse(editable=False, imported=False)
 
         monkeypatch.setattr(
-            consulting_service.company_service, "get_company_for_owner", fake_company
+            consulting_service.company_service, "get_company_for_id", fake_company
         )
         monkeypatch.setattr(
-            consulting_service.openapi_service, "get_dossier_for_owner", fake_dossier
+            consulting_service.openapi_service, "get_dossier_for_company", fake_dossier
         )
         primary = FakePrimary(
             selects={
@@ -1225,6 +1225,78 @@ class TestDossierFull:
         [audit] = [op for op in primary.ops if op[0] == "audit_log"]
         assert audit[2]["action"] == "consulenza.dossier_accessed"
         assert audit[2]["payload"] == {"request_id": REQUEST_ID}
+
+
+class TestDossierFullAdvisorMultiAzienda:
+    """Q23 (ii): un Advisor ha due aziende; il progettista assegnato alla
+    consulenza della SECONDA deve leggere quella, non la più vecchia."""
+
+    AZIENDA_A = "aaaaaaaa-0000-0000-0000-00000000000a"  # la più vecchia dell'Advisor
+    AZIENDA_B = "bbbbbbbb-0000-0000-0000-00000000000b"  # quella della consulenza
+
+    def _primary(self) -> FakePrimary:
+        """Primario che risponde per `id` davvero (i filtri eq sono registrati):
+        company_profiles e company_data per A e per B."""
+        aziende = {
+            self.AZIENDA_A: {"id": self.AZIENDA_A, "ragione_sociale": "Cliente A S.r.l.",
+                             "partita_iva": "11111111111", "beneficiari": []},
+            self.AZIENDA_B: {"id": self.AZIENDA_B, "ragione_sociale": "Cliente B S.r.l.",
+                             "partita_iva": "22222222222", "beneficiari": []},
+        }
+        dati = {
+            self.AZIENDA_A: {"raw": {"companyDetails": {"companyName": "CLIENTE A"}},
+                             "derived": {}, "piva_fetched": "11111111111", "sandbox": False,
+                             "fetch_count": 1, "fetched_at": "2026-07-01T00:00:00+00:00"},
+            self.AZIENDA_B: {"raw": {"companyDetails": {"companyName": "CLIENTE B"}},
+                             "derived": {}, "piva_fetched": "22222222222", "sandbox": False,
+                             "fetch_count": 1, "fetched_at": "2026-07-01T00:00:00+00:00"},
+        }
+        primary = FakePrimary(
+            selects={
+                "consultation_requests": [
+                    request_row(
+                        stato="assegnata",
+                        company_profile_id=self.AZIENDA_B,
+                        assigned_progettista_id=PROGETTISTA,
+                        accepted_proposal_id=PROPOSAL_ID,
+                        assigned_at=tra(0).isoformat(),
+                    )
+                ],
+                "company_people": [],
+            }
+        )
+        original_execute = FakeQuery.execute
+
+        async def execute(query):
+            filtri = {c: v for op, c, v in query.filters if op == "eq"}
+            if query._action == "select" and query._table == "company_profiles":
+                query._owner.ops.append((query._table, "select", None, list(query.filters)))
+                if "id" in filtri:
+                    return SimpleNamespace(data=[aziende[filtri["id"]]])
+                # per owner: la più vecchia, cioè A (il comportamento da evitare)
+                return SimpleNamespace(data=[aziende[self.AZIENDA_A]])
+            if query._action == "select" and query._table == "company_data":
+                query._owner.ops.append((query._table, "select", None, list(query.filters)))
+                return SimpleNamespace(data=[dati[filtri["company_profile_id"]]])
+            return await original_execute(query)
+
+        self._execute = execute
+        return primary
+
+    async def test_progettista_legge_l_azienda_della_richiesta(self, monkeypatch):
+        primary = self._primary()
+        monkeypatch.setattr(FakeQuery, "execute", self._execute)
+        # FakeQuery non ha .is_(): il vecchio percorso per owner lo userebbe
+        monkeypatch.setattr(FakeQuery, "is_", lambda self, *a: self, raising=False)
+        out = await consulting_service.get_full_company(primary, PROG_USER, REQUEST_ID)
+        assert out.company.ragione_sociale == "Cliente B S.r.l."
+        assert out.dossier.imported is True
+        assert out.dossier.dossier["anagrafica"]["denominazione"] == "CLIENTE B"
+        # nessuna lettura per owner: solo per id della richiesta
+        letture = [op for op in primary.ops if op[0] == "company_profiles"]
+        assert letture and all(("eq", "id", self.AZIENDA_B) in op[3] for op in letture)
+        assert not any(("eq", "parent_id", TITOLARE) in op[3] for op in letture)
+        assert "CLIENTE A" not in out.model_dump_json()
 
 
 class TestVisibilitaMembro:

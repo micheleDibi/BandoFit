@@ -22,7 +22,13 @@ from app.core.errors import (
 )
 from app.schemas.ai_check import ExtractionResult, MatchingResult
 from app.services import ai_check_service, entitlement_service
-from app.services.ai_check_prompts import PROMPT_VERSION, build_bando_input
+from app.services.ai_check_prompts import (
+    COMPANY_PACK_VERSION,
+    EXTRACT_PROMPT_VERSION,
+    MATCH_PROMPT_VERSION,
+    PROMPT_VERSION,
+    build_bando_input,
+)
 from app.services.ai_check_scoring import facet_prechecks
 from app.services.bandi_service import normalize_contenuto
 
@@ -32,6 +38,9 @@ USER = {"id": "a0000000-0000-0000-0000-000000000001", "nome": "Michele",
         "role": "cliente", "is_active": True}
 OWNER = USER["id"]
 COMPANY_ID = "c0000000-0000-0000-0000-000000000001"
+LOCK_TOKEN = "70000000-0000-0000-0000-0000000a1c4e"
+ACQUISIZIONE = ("fn_acquire_import_lock_token", {"p_parent_id": OWNER, "p_ttl_seconds": 30})
+RILASCIO = ("fn_release_import_lock_token", {"p_parent_id": OWNER, "p_token": LOCK_TOKEN})
 
 
 def _active(company_id: str | None = COMPANY_ID, editable: bool = True) -> ActiveCompany:
@@ -167,8 +176,8 @@ class FakePrimary:
 
         class _Rpc:
             async def execute(self_inner):
-                if name == "fn_acquire_import_lock":
-                    return SimpleNamespace(data=primary.lock)
+                if name == "fn_acquire_import_lock_token":
+                    return SimpleNamespace(data=LOCK_TOKEN if primary.lock else None)
                 if name == "fn_entitlement_snapshot":
                     return SimpleNamespace(
                         data=primary.entitlement_snapshot(params.get("p_user_id"))
@@ -405,7 +414,7 @@ class TestRequestCheck:
         with pytest.raises(AiQuotaExceededError):
             await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
         # il lock è stato comunque rilasciato
-        assert ("fn_release_import_lock", {"p_parent_id": OWNER}) in primary.rpcs
+        assert RILASCIO in primary.rpcs
 
     async def test_piano_senza_ai_check(self, spawned):
         primary = FakePrimary(base_selects(
@@ -427,7 +436,7 @@ class TestRequestCheck:
         with pytest.raises(AppError) as err:
             await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
         assert err.value.code == "ai_check_in_progress"
-        assert ("fn_release_import_lock", {"p_parent_id": OWNER}) in primary.rpcs
+        assert RILASCIO in primary.rpcs
 
     async def test_happy_path(self, spawned, fake_bando):
         primary = FakePrimary(base_selects())
@@ -444,8 +453,8 @@ class TestRequestCheck:
 
         assert primary.ops_for("audit_log", "insert")
         assert len(spawned) == 1  # pipeline avviata in background
-        assert ("fn_acquire_import_lock", {"p_parent_id": OWNER, "p_ttl_seconds": 30}) in primary.rpcs
-        assert ("fn_release_import_lock", {"p_parent_id": OWNER}) in primary.rpcs
+        assert ACQUISIZIONE in primary.rpcs
+        assert RILASCIO in primary.rpcs
 
     async def test_guasto_db_generico_sull_insert_non_e_un_409(self, spawned):
         # Solo la violazione dell'indice unico (23505) è "analisi in corso":
@@ -456,7 +465,7 @@ class TestRequestCheck:
         primary.insert_fail_generic.add("ai_checks")
         with pytest.raises(PgError):
             await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
-        assert ("fn_release_import_lock", {"p_parent_id": OWNER}) in primary.rpcs
+        assert RILASCIO in primary.rpcs
 
     async def test_failsafe_anche_sulla_post(self, spawned):
         primary = FakePrimary(base_selects())
@@ -702,7 +711,7 @@ class TestBudgetMembro:
             await ai_check_service.request_check(
                 primary, None, FakeAi(), USER, _active(editable=False), SLUG)
         # il lock è stato comunque rilasciato
-        assert ("fn_release_import_lock", {"p_parent_id": OWNER}) in primary.rpcs
+        assert RILASCIO in primary.rpcs
         assert spawned == []
 
     async def test_dentro_budget_avvia(self, monkeypatch, spawned):
@@ -733,3 +742,117 @@ def test_cost_cents():
     # 12k input × $3/MTok + 3.5k output × $15/MTok = 0.036 + 0.0525 $ → 9 cent
     assert ai_check_service.cost_cents(12000, 3500) == 9
     assert ai_check_service.cost_cents(0, 0) == 0
+
+
+# ================================================================ WP1: bilanci
+
+def _riga_fusa(anno: int, fatturato: float, utile: float, **altri) -> dict:
+    """Riga di company_financials come la restituisce PostgREST."""
+    valori = {"fatturato": fatturato, "risultato_esercizio": utile, **altri}
+    return {
+        "anno": anno,
+        "data_chiusura": f"{anno}-12-31",
+        "tipo_bilancio": "ignoto",
+        "fonte_per_campo": {k: "it_advanced" for k in valori},
+        **valori,
+    }
+
+
+def _raw_con_bilanci() -> dict:
+    return json.loads(
+        (Path(__file__).parent / "fixtures" / "openapi" / "it_full_bilanci_sintetico.json")
+        .read_text()
+    )["data"]
+
+
+class TestBilanciNelPack:
+    async def test_pack_con_bilanci_per_esercizio(self, spawned):
+        primary = FakePrimary(base_selects(
+            company_data=[{"raw": _raw_con_bilanci(), "derived": {}}],
+            # versione del mapping aggiornata: nessuna rimappatura
+            company_financials_stato=[{"mapping_versione": 1, "advanced_esito": "ok"}],
+            company_financials=[
+                _riga_fusa(2020, 3712554.0, 312004.0),
+                _riga_fusa(2021, 4432761.0, 469366.0, patrimonio_netto=563473.0),
+                _riga_fusa(2022, 5102233.0, 512004.0),
+                _riga_fusa(2023, 5300000.0, 530000.0),
+            ],
+        ))
+        await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
+        [pipeline] = spawned
+        pack = pipeline.cr_frame.f_locals["company_pack"]
+
+        assert "## Bilanci per esercizio (valori in euro)" in pack
+        assert "bilanci.numero_esercizi: 4\n" in pack  # storico ok: è il totale
+        assert "bilanci.2023.fatturato: 5300000 (fonte: storico bilanci del Registro Imprese)" in pack
+        assert "bilanci.2021.patrimonio_netto: 563473" in pack
+        assert "bilanci.2022.ebitda: NON DISPONIBILE" in pack  # assenza esplicita
+        # solo gli ultimi PACK_BILANCI_ANNI esercizi voce per voce
+        assert "bilanci.2020." not in pack
+        # indicatori GIÀ calcolati: il modello non fa aritmetica
+        assert "bilanci.indicatori.fatturato_medio_2: 5201116.5 euro (esercizi 2022-2023" in pack
+        assert "bilanci.indicatori.crescita_fatturato_pct: 3.88 %" in pack
+        # una sola fonte per i dati economici: il blocco bilanci del dossier resta fuori
+        assert "dossier.bilanci" not in pack
+        assert "dossier.anagrafica.denominazione: ALFA SINTETICA S.R.L." in pack
+        # nessuna scrittura nuova in ai_checks oltre alla riga pending
+        [(inserted, _)] = primary.ops_for("ai_checks", "insert")
+        assert inserted["prompt_version"] == PROMPT_VERSION == EXTRACT_PROMPT_VERSION == 1
+
+    async def test_solo_it_full_numero_esercizi_minimo(self, spawned):
+        """Azienda importata prima di WP1 (o con IT-advanced saltato, in errore,
+        in timeout): un solo esercizio, da IT-full. Il pack non deve dire «1
+        bilancio» come se fosse il totale."""
+        primary = FakePrimary(base_selects(
+            company_data=[{"raw": _raw_con_bilanci(), "derived": {}}],
+            company_financials_stato=[{"mapping_versione": 1, "advanced_esito": "saltato"}],
+            company_financials=[_riga_fusa(2021, 4432761.0, 469366.0)],
+        ))
+        await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
+        pack = spawned[0].cr_frame.f_locals["company_pack"]
+        assert "bilanci.numero_esercizi: almeno 1 (storico dei bilanci non recuperato" in pack
+        assert "bilanci.numero_esercizi: 1\n" not in pack
+
+    async def test_bilanci_non_caricabili_non_bloccano_l_analisi(self, spawned):
+        def guasto(_filters):
+            raise RuntimeError("company_financials non leggibile")
+
+        primary = FakePrimary(base_selects(company_financials=guasto))
+        out = await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
+        assert out.status == "pending"
+        pack = spawned[0].cr_frame.f_locals["company_pack"]
+        # requisiti economici → dato_mancante, mai soddisfatto per assenza
+        assert "bilanci: NON DISPONIBILE" in pack
+
+
+class TestVersioniPrompt:
+    def test_estrazione_invariata_match_nuovo(self):
+        # La chiave della cache estrazioni NON cambia con WP1: nessuna ri-spesa.
+        assert EXTRACT_PROMPT_VERSION == PROMPT_VERSION == 1
+        assert MATCH_PROMPT_VERSION == 2 and COMPANY_PACK_VERSION == 2
+
+    async def test_cache_bando_requirements_ancora_valida(self, fake_bando):
+        # Riga di cache scritta PRIMA di WP1 (prompt_version = 1 letterale).
+        cache = [{
+            "extraction": canned_extraction().model_dump(),
+            "content_hash": "hash-attuale",
+            "prompt_version": 1,
+        }]
+        primary = FakePrimary({"bando_requirements": cache})
+        ai = FakeAi()
+        await ai_check_service._run_pipeline(primary, ai, **pipeline_args(fake_bando, primary, ai))
+        assert ai.extract_calls == []  # hit della cache
+        [(update, _)] = primary.ops_for("ai_checks", "update")
+        assert update["extraction_cached"] is True
+
+    async def test_meta_del_report(self, fake_bando):
+        primary = FakePrimary({"bando_requirements": []})
+        ai = FakeAi()
+        await ai_check_service._run_pipeline(primary, ai, **pipeline_args(fake_bando, primary, ai))
+        [(update, _)] = primary.ops_for("ai_checks", "update")
+        meta = update["report"]["meta"]
+        assert meta["prompt_version"] == 1
+        assert meta["match_prompt_version"] == MATCH_PROMPT_VERSION
+        assert meta["company_pack_version"] == COMPANY_PACK_VERSION
+        # nessuna colonna nuova scritta su ai_checks
+        assert "match_prompt_version" not in update

@@ -11,9 +11,11 @@ from app.api import deps
 from app.api.deps import ActiveCompany
 from app.api.routers import company
 from app.core.errors import register_exception_handlers
+from app.schemas.bilanci import BilanciOut, EsercizioOut, IndicatoreOut
 from app.schemas.company import CompanyOut
 from app.schemas.openapi_data import DossierResponse, PersonOut
 from app.services import (
+    bilanci_service,
     company_service,
     openapi_service,
     pdf_service,
@@ -186,6 +188,104 @@ class TestDossierDoc:
         assert doc.sections == []  # tutto vuoto → nessuna sezione
 
 
+def _bilanci(storico_esito: str | None = "ok") -> BilanciOut:
+    """Sei esercizi 2017-2022: il PDF ne mostra solo gli ultimi cinque."""
+    esercizi = [
+        EsercizioOut(
+            anno=anno,
+            data_chiusura=f"{anno}-12-31",
+            fatturato=1_000_000.0 + anno,
+            risultato_esercizio=-25_000.0 if anno == 2020 else 50_000.0,
+            dipendenti=12.5,
+            fonti={"fatturato": "it_advanced", "risultato_esercizio": "it_advanced",
+                   "dipendenti": "it_advanced"},
+        )
+        for anno in range(2017, 2023)
+    ]
+    esercizi[-1].patrimonio_netto = 400_000.0
+    esercizi[-1].fonti["patrimonio_netto"] = "it_full"
+    return BilanciOut(
+        editable=True,
+        stato="disponibili",
+        storico_esito=storico_esito,
+        esercizi=esercizi,
+        indicatori=[
+            IndicatoreOut(chiave="crescita_fatturato_pct", etichetta="Crescita del fatturato",
+                          valore=0.1, unita="percentuale", anni=[2021, 2022], formula="f"),
+            IndicatoreOut(chiave="copertura_immobilizzazioni",
+                          etichetta="Copertura delle immobilizzazioni", valore=None,
+                          unita="rapporto", anni=[], formula="f", motivo_mancanza="v1"),
+        ],
+    )
+
+
+class TestSezioneBilanci:
+    def _resp(self) -> DossierResponse:
+        return DossierResponse(
+            editable=True, imported=True, people=[], derived={},
+            dossier={
+                "anagrafica": {"denominazione": "Beta S.p.A."},
+                "bilanci": {"fatturato": 1_500_000, "anno": 2021},
+            },
+        )
+
+    def test_voce_per_ultimi_cinque_esercizi(self):
+        doc = build_dossier_doc(self._resp(), _bilanci())
+        headings = [s.heading for s in doc.sections]
+        # subito dopo «Dati economici»
+        assert headings.index("Bilanci per esercizio") == headings.index("Dati economici") + 1
+        sezione = doc.sections[headings.index("Bilanci per esercizio")]
+        tabella, indicatori, nota = sezione.blocks
+        assert tabella.headers == ["Voce", "2018", "2019", "2020", "2021", "2022"]
+        voci = [riga[0] for riga in tabella.rows]
+        assert voci == [
+            "Fatturato", "Utile (perdita) d'esercizio", "Patrimonio netto", "Dipendenti",
+        ]  # righe tutte vuote nascoste (es. debiti, EBITDA)
+        fatturato = tabella.rows[0]
+        assert fatturato[1:] == [
+            "1.002.018 €", "1.002.019 €", "1.002.020 €", "1.002.021 €", "1.002.022 €"
+        ]
+        utile = tabella.rows[1]
+        assert utile[3] == "-25.000 €"  # le perdite restano col segno
+        pn = tabella.rows[2]
+        assert pn[1:] == ["", "", "", "", "400.000 €"]
+        assert tabella.rows[3][1] == "12,5"
+        # indicatori calcolati: solo quelli con valore
+        assert [(kv.label, kv.value) for kv in indicatori.fields] == [
+            ("Crescita del fatturato", "0,1 % (2021–2022)")
+        ]
+        assert "storico bilanci del Registro Imprese" in nota.text
+        assert "Registro Imprese, ultimo bilancio depositato" in nota.text
+        assert "non completo" not in nota.text
+        # «Dati economici» dichiara l'esercizio della fotografia di IT-full
+        economici = doc.sections[headings.index("Dati economici")].blocks[0]
+        assert ("Esercizio", "2021") in [(kv.label, kv.value) for kv in economici.fields]
+
+    def test_fatturato_di_un_altro_anno_etichettato(self):
+        # turnoverYear ≠ anno di chiusura: il fatturato non passa per quello
+        # dell'«Esercizio 2021».
+        resp = self._resp()
+        resp.dossier["bilanci"]["anno_fatturato"] = 2022
+        economici = next(s for s in build_dossier_doc(resp).sections
+                         if s.heading == "Dati economici").blocks[0]
+        etichette = [kv.label for kv in economici.fields]
+        assert "Fatturato (2022)" in etichette and "Fatturato" not in etichette
+        resp.dossier["bilanci"]["anno_fatturato"] = 2021
+        economici = next(s for s in build_dossier_doc(resp).sections
+                         if s.heading == "Dati economici").blocks[0]
+        assert "Fatturato" in [kv.label for kv in economici.fields]
+
+    def test_storico_incompleto_segnalato(self):
+        doc = build_dossier_doc(self._resp(), _bilanci(storico_esito="timeout"))
+        sezione = next(s for s in doc.sections if s.heading == "Bilanci per esercizio")
+        assert "non è completo" in sezione.blocks[-1].text
+
+    def test_senza_bilanci_nessuna_sezione(self):
+        for bilanci in (None, BilanciOut(editable=True, stato="mai_richiesti")):
+            doc = build_dossier_doc(self._resp(), bilanci)
+            assert "Bilanci per esercizio" not in [s.heading for s in doc.sections]
+
+
 # ---------------------------------------------------------------------------
 # Endpoint di download
 # ---------------------------------------------------------------------------
@@ -270,6 +370,52 @@ class TestSchedaEndpoint:
 
 
 class TestDossierEndpoint:
+    @pytest.fixture(autouse=True)
+    def _senza_bilanci(self, monkeypatch):
+        async def fake_get_bilanci(primary, active):
+            return BilanciOut(editable=True, stato="mai_richiesti")
+
+        monkeypatch.setattr(bilanci_service, "get_bilanci", fake_get_bilanci)
+
+    async def test_bilanci_nel_pdf_senza_payload_grezzo(self, monkeypatch, fake_render):
+        async def fake_get_dossier(primary, active):
+            return DossierResponse(
+                editable=True, imported=True, people=[], derived={},
+                dossier={"anagrafica": {"denominazione": "Beta S.p.A."}},
+            )
+
+        async def fake_get_bilanci(primary, active):
+            assert active.company_id == COMPANY  # l'azienda ATTIVA
+            return _bilanci()
+
+        monkeypatch.setattr(openapi_service, "get_dossier", fake_get_dossier)
+        monkeypatch.setattr(bilanci_service, "get_bilanci", fake_get_bilanci)
+        async with _make_client() as client:
+            resp = await client.get("/api/v1/me/company/dossier/pdf")
+        assert resp.status_code == 200
+        [doc] = fake_render
+        testo = _flatten(doc)
+        assert "Bilanci per esercizio" in testo and "1.002.022 €" in testo
+        assert "advanced_raw" not in testo and "balanceSheets" not in testo
+
+    async def test_bilanci_non_leggibili_il_pdf_esce_lo_stesso(self, monkeypatch, fake_render):
+        async def fake_get_dossier(primary, active):
+            return DossierResponse(
+                editable=True, imported=True, people=[], derived={},
+                dossier={"anagrafica": {"denominazione": "Beta S.p.A."}},
+            )
+
+        async def guasto(primary, active):
+            raise RuntimeError("db giù")
+
+        monkeypatch.setattr(openapi_service, "get_dossier", fake_get_dossier)
+        monkeypatch.setattr(bilanci_service, "get_bilanci", guasto)
+        async with _make_client() as client:
+            resp = await client.get("/api/v1/me/company/dossier/pdf")
+        assert resp.status_code == 200
+        [doc] = fake_render
+        assert "Bilanci per esercizio" not in [s.heading for s in doc.sections]
+
     async def test_download_ok_senza_raw(self, monkeypatch, fake_render):
         async def fake_get_dossier(primary, active):
             return DossierResponse(

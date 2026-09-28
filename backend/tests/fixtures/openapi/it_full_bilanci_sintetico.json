@@ -1,0 +1,152 @@
+{
+  "data": {
+    "companyDetails": {
+      "cciaa": "MI",
+      "companyName": "ALFA SINTETICA S.R.L.",
+      "officeType": {
+        "code": "SSL",
+        "description": "Administrative headquarter and registered office"
+      },
+      "reaCode": "0000000",
+      "taxCode": "09876543217",
+      "vatCode": "09876543217",
+      "lastUpdateDate": "2026-01-15T10:00:00.0000000Z"
+    },
+    "legalForm": {
+      "detailedLegalForm": {
+        "code": "SR",
+        "description": "Limited liability company"
+      },
+      "legalForm": {
+        "code": "SC",
+        "description": "Capital company"
+      }
+    },
+    "companyStatus": {
+      "activityStatus": {
+        "code": "A",
+        "description": "Enable"
+      }
+    },
+    "companyDates": {
+      "incorporationDate": "2010-03-14T23:00:00",
+      "startDate": "2010-03-14T23:00:00"
+    },
+    "address": {
+      "streetName": "VIA DI ESEMPIO 1",
+      "town": "MILANO",
+      "province": {
+        "code": "MI"
+      },
+      "zipCode": "20100",
+      "region": {
+        "description": "LOMBARDIA"
+      }
+    },
+    "atecoClassification": {
+      "ateco": {
+        "code": "620100",
+        "description": "Produzione di software non connesso all'edizione"
+      }
+    },
+    "ecofin": {
+      "balanceSheetDate": "2021-12-31T00:00:00",
+      "turnoverRange": {
+        "code": "TR6",
+        "description": "2 - 5 Mln"
+      },
+      "turnoverYear": 2021,
+      "turnover": 4432761.0,
+      "turnoverTrend": 19.4,
+      "shareCapital": 50000.0,
+      "netWorth": 563473.0,
+      "enterpriseSize": {
+        "code": "SE02",
+        "description": "Small"
+      }
+    },
+    "employees": {
+      "employee": 31,
+      "employeeRange": {
+        "code": "ER5",
+        "description": "21 - 50"
+      },
+      "employeeTrend": 3.33
+    },
+    "operatingResults": {
+      "ebitda": 714856.0,
+      "ebitdaL2Y": 284656.0,
+      "ebit": 612345.0,
+      "ebitL2Y": 201234.0,
+      "cashFlow": 571711.0,
+      "cashFlowL2Y": 190210.0
+    },
+    "assetsAggregateValues": [
+      {
+        "code": "IIC074",
+        "value": 2150432.0
+      }
+    ],
+    "netWorth": [
+      {
+        "code": "IIC075",
+        "value": 50000.0
+      },
+      {
+        "code": "IIC077",
+        "value": 27038.0
+      },
+      {
+        "code": "IIC078",
+        "value": 10000.0
+      },
+      {
+        "code": "IIC081",
+        "value": 7069.0
+      },
+      {
+        "code": "IIC083",
+        "value": 469366.0
+      }
+    ],
+    "productionValue": [
+      {
+        "code": "IIC124",
+        "value": 4432761.0
+      },
+      {
+        "code": "IIC130",
+        "value": 4502113.0
+      }
+    ],
+    "productionCosts": [
+      {
+        "code": "IIC149",
+        "value": 3889768.0
+      }
+    ],
+    "incomeStatementAggregateValues": [
+      {
+        "code": "IIC224",
+        "value": 612345.0
+      }
+    ],
+    "annualResult": [
+      {
+        "code": "IIC177",
+        "value": 640000.0
+      },
+      {
+        "code": "IIC178",
+        "value": 170634.0
+      },
+      {
+        "code": "IIC179",
+        "value": 469366.0
+      }
+    ]
+  },
+  "success": true,
+  "message": "",
+  "error": null
+}

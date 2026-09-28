@@ -1,0 +1,479 @@
+{
+  "descrizione": "Casi di precedenza delle fonti dei bilanci (xbrl > it_full > it_advanced, campo per campo). Eseguiti IDENTICI dal test Python di bilanci_mapping.unisci_fonti e dal test DB di fn_bilanci_registra_fonte: i due devono dare lo stesso risultato. valori = stringhe decimali; atteso[anno] = null significa riga fusa assente; i campi non elencati in atteso.valori devono essere null.",
+  "casi": [
+    {
+      "nome": "xbrl_batte_it_full_batte_it_advanced",
+      "passi": [
+        {
+          "fonte": "it_advanced",
+          "riferimento": "import",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2023,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "100",
+                "risultato_esercizio": "10"
+              }
+            }
+          ]
+        },
+        {
+          "fonte": "it_full",
+          "riferimento": "import",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2023,
+              "data_chiusura": "2023-12-31",
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "110",
+                "patrimonio_netto": "50"
+              }
+            }
+          ]
+        },
+        {
+          "fonte": "xbrl",
+          "riferimento": "bilancio:a",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2023,
+              "data_chiusura": "2023-12-31",
+              "tipo_bilancio": "abbreviato",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "120"
+              }
+            }
+          ]
+        }
+      ],
+      "atteso": {
+        "2023": {
+          "valori": {
+            "fatturato": "120",
+            "risultato_esercizio": "10",
+            "patrimonio_netto": "50"
+          },
+          "fonte_per_campo": {
+            "fatturato": "xbrl",
+            "risultato_esercizio": "it_advanced",
+            "patrimonio_netto": "it_full"
+          }
+        }
+      }
+    },
+    {
+      "nome": "ordine_di_arrivo_irrilevante",
+      "passi": [
+        {
+          "fonte": "xbrl",
+          "riferimento": "bilancio:a",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2023,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "120"
+              }
+            }
+          ]
+        },
+        {
+          "fonte": "it_full",
+          "riferimento": "import",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2023,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "110",
+                "patrimonio_netto": "50"
+              }
+            }
+          ]
+        },
+        {
+          "fonte": "it_advanced",
+          "riferimento": "import",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2023,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "100",
+                "risultato_esercizio": "10"
+              }
+            }
+          ]
+        }
+      ],
+      "atteso": {
+        "2023": {
+          "valori": {
+            "fatturato": "120",
+            "risultato_esercizio": "10",
+            "patrimonio_netto": "50"
+          },
+          "fonte_per_campo": {
+            "fatturato": "xbrl",
+            "risultato_esercizio": "it_advanced",
+            "patrimonio_netto": "it_full"
+          }
+        }
+      }
+    },
+    {
+      "nome": "null_non_sovrascrive",
+      "passi": [
+        {
+          "fonte": "it_full",
+          "riferimento": "import",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2023,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "200"
+              }
+            }
+          ]
+        },
+        {
+          "fonte": "xbrl",
+          "riferimento": "bilancio:a",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2023,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": null,
+                "patrimonio_netto": "80"
+              }
+            }
+          ]
+        }
+      ],
+      "atteso": {
+        "2023": {
+          "valori": {
+            "fatturato": "200",
+            "patrimonio_netto": "80"
+          },
+          "fonte_per_campo": {
+            "fatturato": "it_full",
+            "patrimonio_netto": "xbrl"
+          }
+        }
+      }
+    },
+    {
+      "nome": "anni_indipendenti",
+      "passi": [
+        {
+          "fonte": "it_advanced",
+          "riferimento": "import",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2022,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "90"
+              }
+            },
+            {
+              "anno": 2023,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "100"
+              }
+            }
+          ]
+        },
+        {
+          "fonte": "xbrl",
+          "riferimento": "bilancio:a",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2023,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "120"
+              }
+            }
+          ]
+        }
+      ],
+      "atteso": {
+        "2022": {
+          "valori": {
+            "fatturato": "90"
+          },
+          "fonte_per_campo": {
+            "fatturato": "it_advanced"
+          }
+        },
+        "2023": {
+          "valori": {
+            "fatturato": "120"
+          },
+          "fonte_per_campo": {
+            "fatturato": "xbrl"
+          }
+        }
+      }
+    },
+    {
+      "nome": "comparativo_non_sostituisce_corrente",
+      "passi": [
+        {
+          "fonte": "xbrl",
+          "riferimento": "bilancio:a",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2022,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "300"
+              }
+            }
+          ]
+        },
+        {
+          "fonte": "xbrl",
+          "riferimento": "bilancio:b",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2022,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "comparativo",
+              "valori": {
+                "fatturato": "290"
+              }
+            }
+          ]
+        }
+      ],
+      "atteso": {
+        "2022": {
+          "valori": {
+            "fatturato": "300"
+          },
+          "fonte_per_campo": {
+            "fatturato": "xbrl"
+          }
+        }
+      }
+    },
+    {
+      "nome": "corrente_sostituisce_comparativo",
+      "passi": [
+        {
+          "fonte": "xbrl",
+          "riferimento": "bilancio:b",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2022,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "comparativo",
+              "valori": {
+                "fatturato": "290"
+              }
+            }
+          ]
+        },
+        {
+          "fonte": "xbrl",
+          "riferimento": "bilancio:a",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2022,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "300"
+              }
+            }
+          ]
+        }
+      ],
+      "atteso": {
+        "2022": {
+          "valori": {
+            "fatturato": "300"
+          },
+          "fonte_per_campo": {
+            "fatturato": "xbrl"
+          }
+        }
+      }
+    },
+    {
+      "nome": "sostituisci_rimuove_anni_spariti",
+      "passi": [
+        {
+          "fonte": "it_advanced",
+          "riferimento": "import",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2020,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "70"
+              }
+            },
+            {
+              "anno": 2021,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "80"
+              }
+            }
+          ]
+        },
+        {
+          "fonte": "it_advanced",
+          "riferimento": "recupero",
+          "sostituisci": true,
+          "righe": [
+            {
+              "anno": 2021,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "81"
+              }
+            }
+          ]
+        }
+      ],
+      "atteso": {
+        "2020": null,
+        "2021": {
+          "valori": {
+            "fatturato": "81"
+          },
+          "fonte_per_campo": {
+            "fatturato": "it_advanced"
+          }
+        }
+      }
+    },
+    {
+      "nome": "sostituisci_non_tocca_altre_fonti",
+      "passi": [
+        {
+          "fonte": "it_full",
+          "riferimento": "import",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2020,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "patrimonio_netto": "40"
+              }
+            }
+          ]
+        },
+        {
+          "fonte": "it_advanced",
+          "riferimento": "import",
+          "sostituisci": false,
+          "righe": [
+            {
+              "anno": 2020,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "70"
+              }
+            }
+          ]
+        },
+        {
+          "fonte": "it_advanced",
+          "riferimento": "recupero",
+          "sostituisci": true,
+          "righe": [
+            {
+              "anno": 2021,
+              "data_chiusura": null,
+              "tipo_bilancio": "ignoto",
+              "ruolo": "corrente",
+              "valori": {
+                "fatturato": "80"
+              }
+            }
+          ]
+        }
+      ],
+      "atteso": {
+        "2020": {
+          "valori": {
+            "patrimonio_netto": "40"
+          },
+          "fonte_per_campo": {
+            "patrimonio_netto": "it_full"
+          }
+        },
+        "2021": {
+          "valori": {
+            "fatturato": "80"
+          },
+          "fonte_per_campo": {
+            "fatturato": "it_advanced"
+          }
+        }
+      }
+    }
+  ]
+}

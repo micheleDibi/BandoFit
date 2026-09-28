@@ -8,6 +8,7 @@ possibili campi del payload.
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.bilanci import ImportPreviewBilanci
 from app.schemas.company import CompanyResponse
 
 
@@ -90,7 +91,10 @@ class ImportPreview(BaseModel):
     con la stessa funzione che userà la conferma, quindi non possono mentire.
 
     `reused: true` = l'anteprima viene da un payload già pagato (nessun nuovo
-    addebito). `draft_expires_at` è il momento oltre il quale va rifatta."""
+    addebito). `draft_expires_at` è il momento oltre il quale va rifatta.
+
+    `bilanci` riassume lo storico dei bilanci (IT-advanced) che la conferma
+    registrerà; il default vale per i draft senza tentativo («non richiesto»)."""
 
     azienda: ImportPreviewAzienda
     autofill: AutofillOut
@@ -99,6 +103,7 @@ class ImportPreview(BaseModel):
     draft_expires_at: str
     reused: bool = False
     sandbox: bool = False
+    bilanci: ImportPreviewBilanci = Field(default_factory=ImportPreviewBilanci)
 
 
 class DossierResponse(BaseModel):

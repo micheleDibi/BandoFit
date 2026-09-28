@@ -4,9 +4,16 @@ import { Link } from "react-router-dom";
 import { useConfirmImport, usePreviewImport } from "../../hooks/useCompanyDossier";
 import { EMPTY_PREFERENCES, usePreferences, useSavePreferences } from "../../hooks/usePreferences";
 import { apiErrorCode, apiErrorMessage } from "../../lib/api";
-import { IMPORT_COPY } from "../../lib/copy";
+import { intervalloAnni } from "../../lib/bilanci";
+import { BILANCI_COPY, IMPORT_COPY } from "../../lib/copy";
 import { isValidPartitaIva, normalizePartitaIva } from "../../lib/partitaIva";
-import type { ImportPreview, ImportResult } from "../../types";
+import type {
+  ImportPreview,
+  ImportPreviewBilanci,
+  ImportResult,
+  MotivoBilanci,
+} from "../../types";
+import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { TextField } from "../ui/Field";
@@ -51,6 +58,48 @@ function Riga({ etichetta, valore }: { etichetta: string; valore: string | null 
     <div className="flex gap-3 py-1.5">
       <dt className="w-40 shrink-0 text-xs uppercase tracking-wide text-slate-400">{etichetta}</dt>
       <dd className="text-sm text-slate-700">{valore}</dd>
+    </div>
+  );
+}
+
+/** Perché manca lo storico e, se si può, come recuperarlo. `trovati`: almeno
+ *  un esercizio arriva comunque (dalla visura). */
+function notaStorico(motivo: MotivoBilanci, trovati: boolean): string {
+  if (motivo === "nessun_bilancio") {
+    return trovati ? BILANCI_COPY.nessunAltroBilancio : BILANCI_COPY.motivi[motivo];
+  }
+  if (motivo === "forma_senza_bilancio") return BILANCI_COPY.motivi[motivo];
+  if (motivo === "piva_diversa") return `${BILANCI_COPY.motivi[motivo]} ${BILANCI_COPY.correggiPiva}`;
+  const invito = trovati ? IMPORT_COPY.bilanciStoricoRecuperabile : IMPORT_COPY.bilanciRecuperabili;
+  return `${BILANCI_COPY.motivi[motivo]} ${invito}`;
+}
+
+/** Bilanci pluriennali recuperati insieme all'anteprima. Non bloccano mai
+ *  l'import: se lo storico manca, il titolare lo recupera poi dalla pagina
+ *  Azienda (tranne quando la forma giuridica non prevede il deposito o il
+ *  Registro Imprese non ha bilanci). */
+function BloccoBilanci({ bilanci }: { bilanci: ImportPreviewBilanci | undefined }) {
+  const anni = bilanci?.anni ?? [];
+  const trovati = bilanci?.stato === "disponibili" && anni.length > 0;
+  // null = storico recuperato; un blocco assente vale «non richiesto».
+  const motivo = bilanci ? bilanci.motivo : "non_richiesto";
+  return (
+    <div>
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+        {IMPORT_COPY.bilanciTitolo}
+      </p>
+      <div className="mt-1.5">
+        <Badge tone={trovati ? "emerald" : "amber"}>
+          {trovati
+            ? IMPORT_COPY.bilanciTrovati(anni.length, intervalloAnni(anni))
+            : IMPORT_COPY.bilanciNonTrovati}
+        </Badge>
+      </div>
+      <p className="mt-1.5 text-sm text-slate-600">
+        {trovati && IMPORT_COPY.bilanciTrovatiNota}
+        {trovati && motivo && " "}
+        {motivo && notaStorico(motivo, trovati)}
+      </p>
     </div>
   );
 }
@@ -109,6 +158,9 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
       setPreview(await previewImport.mutateAsync(cleaned));
       setStep("anteprima");
     } catch (err) {
+      // Anche `piva_diversa_da_importata` (409: la P.IVA è già legata a
+      // un'altra azienda) e `limite_giornaliero_openapi` (429) arrivano con un
+      // messaggio del server già pensato per l'utente: lo mostriamo com'è.
       setError(apiErrorMessage(err));
     }
   };
@@ -337,6 +389,8 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
               }
             />
           </dl>
+
+          <BloccoBilanci bilanci={preview.bilanci} />
 
           {preview.autofill.applied.length > 0 && (
             <div>

@@ -1,9 +1,18 @@
-"""Import dei dati aziendali certificati (openapi.it IT-full) e dossier.
+"""Import dei dati aziendali certificati (openapi.it IT-full + storico dei
+bilanci IT-advanced) e dossier.
 
 Regole di spesa: ogni import costa credito reale, quindi il flusso è protetto
-tre volte — validazione locale gratuita della P.IVA, cooldown sull'ultimo
-recupero, lock anti-concorrenza per famiglia. Ogni chiamata a pagamento viene
-annotata in api_usage_events QUALUNQUE sia l'esito.
+più volte — validazione locale gratuita della P.IVA, P.IVA legata all'azienda
+dopo il primo import, cooldown sull'ultimo recupero, lock anti-concorrenza per
+owner (con token: rilascia solo chi lo detiene), tetto giornaliero fail-closed
+delle operazioni a pagamento. Ogni chiamata a pagamento viene annotata in
+api_usage_events QUALUNQUE sia l'esito, con la P.IVA mascherata.
+
+IT-advanced (WP1) si chiama nell'anteprima, in sequenza dopo IT-full e sotto
+lo stesso lock, SOLO se serve davvero (vedi `_esito_advanced_anteprima`): non
+blocca mai l'import e il suo esito finisce nel draft. Catena dei tempi:
+server ≤ 277 s (IT-full 240 s + avvio di IT-advanced entro 250 s + 25 s)
+< frontend 290 s < TTL del lock 330 s.
 """
 
 import logging
@@ -20,7 +29,10 @@ from app.core.errors import (
     OpenapiNotConfiguredError,
     OpenapiTimeoutError,
     OpenapiUpstreamError,
+    UpstreamError,
 )
+from app.core.privacy import mask_cf, mask_piva
+from app.schemas.bilanci import ImportPreviewBilanci
 from app.schemas.openapi_data import (
     AutofillOut,
     DossierResponse,
@@ -31,12 +43,14 @@ from app.schemas.openapi_data import (
     SuggestionsOut,
 )
 from app.services import company_service, family_service, lookup_service
+from app.services.bilanci_mapping import da_it_advanced, da_it_full
 from app.services.codice_fiscale import is_valid_cf, normalize_cf
 from app.services.openapi_mapping import (
     build_autofill,
     build_derived,
     build_dossier,
     extract_people,
+    forma_giuridica_codice,
     stato_impresa,
     validate_partita_iva,
 )
@@ -44,11 +58,21 @@ from app.services.openapi_mapping import (
 logger = logging.getLogger("bandofit.openapi")
 
 COST_IT_FULL_CENTS = 30
+COST_IT_ADVANCED_CENTS = 10
 COST_VERIFICA_CF_CENTS = 5
-# Più lungo della deadline complessiva del client (240s, vedi clients/openapi.py):
-# il lock NON deve scadere mentre l'import è ancora in corso, o un secondo
-# import concorrente pagherebbe una seconda chiamata.
-LOCK_TTL_SECONDS = 300
+# Più lungo del caso peggiore dell'anteprima (IT-full 240 s + IT-advanced
+# avviato entro 250 s con tetto di 25 s ≈ 277 s): il lock NON deve scadere
+# mentre l'anteprima è ancora in corso, o un secondo import concorrente
+# pagherebbe una seconda chiamata. Dentro il clamp 1..600 della RPC.
+LOCK_TTL_SECONDS = 330
+# IT-advanced nell'anteprima: parte solo se dall'inizio di IT-full sono
+# passati al massimo 250 s, con un tetto rigido di 25 s.
+IT_ADVANCED_TIMEOUT_SECONDS = 25.0
+PREVIEW_AVVIO_ADVANCED_MAX_SECONDS = 250.0
+# Tetto fail-closed (Q10): operazioni openapi a pagamento per owner al giorno
+# (Europe/Rome), moltiplicato per le aziende gestibili dal piano. Un'anteprima
+# (IT-full + eventuale IT-advanced) o un recupero dei bilanci = 1 operazione.
+OPERAZIONI_OPENAPI_PER_AZIENDA_GIORNO = 3
 # La conferma non aspetta nessuna rete esterna: qualche scrittura PostgREST.
 CONFIRM_LOCK_TTL_SECONDS = 30
 VERIFY_LOCK_TTL_SECONDS = 30
@@ -138,12 +162,24 @@ async def _fetch_company_data(primary, company_profile_id: str) -> dict | None:
     return resp.data[0] if resp.data else None
 
 
+DRAFT_SELECT = (
+    "partita_iva,raw,sandbox,fetched_at,expires_at,company_profile_id,"
+    "advanced_raw,advanced_esito,advanced_motivo,advanced_tentato_at"
+)
+
+
+def _stesso_id(a, b) -> bool:
+    """Confronto di due id azienda (uuid o None) come stringhe."""
+    return (str(a) if a else None) == (str(b) if b else None)
+
+
 async def _fetch_draft(primary, parent_id: str) -> dict | None:
     """Anteprima già pagata e non ancora scaduta. Un draft scaduto è come non
-    esistesse: il payload va richiesto (e ripagato)."""
+    esistesse: il payload va richiesto (e ripagato). Il draft è per owner:
+    `company_profile_id` dice per quale azienda è stato pagato."""
     resp = (
         await primary.table("company_import_drafts")
-        .select("partita_iva,raw,sandbox,fetched_at,expires_at")
+        .select(DRAFT_SELECT)
         .eq("parent_id", str(parent_id))
         .gt("expires_at", datetime.now(timezone.utc).isoformat())
         .limit(1)
@@ -153,10 +189,13 @@ async def _fetch_draft(primary, parent_id: str) -> dict | None:
 
 
 async def _store_draft(
-    primary, parent_id: str, piva: str, payload: dict, *, sandbox: bool
+    primary, parent_id: str, piva: str, payload: dict, *, sandbox: bool,
+    company_profile_id: str | None, advanced,
 ) -> tuple[str, str]:
-    """Mette in staging il payload appena pagato. Una riga per titolare:
-    una nuova anteprima sostituisce la precedente. Ritorna (fetched_at, expires_at)."""
+    """Mette in staging il payload appena pagato, con l'esito di IT-advanced
+    (`advanced`: EsitoAdvanced) e l'azienda per cui è stato pagato. Una riga
+    per titolare: una nuova anteprima sostituisce la precedente (un UNICO
+    upsert). Ritorna (fetched_at, expires_at)."""
     settings = get_settings()
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=settings.company_import_draft_ttl_minutes)
@@ -168,6 +207,12 @@ async def _store_draft(
             "sandbox": sandbox,
             "fetched_at": now.isoformat(),
             "expires_at": expires_at.isoformat(),
+            "company_profile_id": str(company_profile_id) if company_profile_id else None,
+            # Il raw solo con esito ok (CHECK cid_advanced_raw_solo_ok).
+            "advanced_raw": advanced.raw if advanced.esito == "ok" else None,
+            "advanced_esito": advanced.esito,
+            "advanced_motivo": advanced.motivo,
+            "advanced_tentato_at": advanced.tentato_at,
         },
         on_conflict="parent_id",
     ).execute()
@@ -201,21 +246,51 @@ async def _lock_remaining_minutes(primary, parent_id: str) -> int:
     return max(1, int(remaining.total_seconds() // 60) + 1)
 
 
-async def _acquire_lock(primary, parent_id: str, ttl_seconds: int = LOCK_TTL_SECONDS) -> bool:
+async def _acquire_lock(
+    primary, parent_id: str, ttl_seconds: int = LOCK_TTL_SECONDS
+) -> str | None:
+    """Lease lock per owner (import, conferma, verifica CF, AI-check, recupero
+    bilanci). Ritorna il TOKEN del detentore, None se il lock è occupato."""
     resp = await primary.rpc(
-        "fn_acquire_import_lock",
+        "fn_acquire_import_lock_token",
         {"p_parent_id": str(parent_id), "p_ttl_seconds": ttl_seconds},
     ).execute()
-    return bool(resp.data)
+    return str(resp.data) if resp.data else None
 
 
-async def _release_lock(primary, parent_id: str) -> None:
+async def _release_lock(primary, parent_id: str, token: str | None) -> None:
+    """Rilascia il lock SOLO se `token` è ancora quello del detentore: un lock
+    scaduto e ripreso da un'altra operazione resta intatto."""
+    if not token:
+        return
     try:
         await primary.rpc(
-            "fn_release_import_lock", {"p_parent_id": str(parent_id)}
+            "fn_release_import_lock_token",
+            {"p_parent_id": str(parent_id), "p_token": str(token)},
         ).execute()
     except Exception:
         logger.exception("release del lock di import fallita (scadrà da solo)")
+
+
+async def prenota_operazione_openapi(primary, owner_id: str) -> None:
+    """Prenota una operazione openapi a pagamento nel tetto giornaliero
+    dell'owner (Q10). FAIL-CLOSED: tetto esaurito → 429, RPC in errore →
+    UpstreamError; in entrambi i casi il chiamante NON deve chiamare il
+    provider."""
+    try:
+        resp = await primary.rpc(
+            "fn_openapi_prenota_operazione",
+            {"p_owner": str(owner_id), "p_per_azienda": OPERAZIONI_OPENAPI_PER_AZIENDA_GIORNO},
+        ).execute()
+    except Exception as exc:
+        logger.exception("quota giornaliera openapi non verificabile: chiamata bloccata")
+        raise UpstreamError() from exc
+    if not resp.data:
+        raise AppError(
+            429,
+            "limite_giornaliero_openapi",
+            "Hai raggiunto il numero di importazioni di oggi: riprova domani",
+        )
 
 
 def _resolve_piva(partita_iva: str | None, company_row: dict | None) -> str:
@@ -225,6 +300,49 @@ def _resolve_piva(partita_iva: str | None, company_row: dict | None) -> str:
     if not validate_partita_iva(piva):
         raise BadRequestError("La partita IVA non è valida: controlla le 11 cifre")
     return piva
+
+
+def _esito_da_draft(draft: dict):
+    """EsitoAdvanced salvato nel draft. Un draft precedente alla 0032 (colonne
+    null) vale «non richiesto»: la conferma non riprova, la UI propone il
+    recupero."""
+    from app.services.bilanci_service import EsitoAdvanced  # import locale: evita cicli
+
+    return EsitoAdvanced(
+        esito=draft.get("advanced_esito"),
+        motivo=draft.get("advanced_motivo"),
+        raw=draft.get("advanced_raw") if draft.get("advanced_esito") == "ok" else None,
+        tentato_at=draft.get("advanced_tentato_at"),
+    )
+
+
+def _advanced_ok(advanced) -> dict | None:
+    """Il payload IT-advanced, solo se il recupero è riuscito."""
+    if advanced is not None and advanced.esito == "ok" and isinstance(advanced.raw, dict):
+        return advanced.raw
+    return None
+
+
+def _bilanci_anteprima(payload: dict, advanced) -> ImportPreviewBilanci:
+    """Blocco `bilanci` dell'anteprima: `anni` sono gli esercizi che la
+    conferma registrerà (storico IT-advanced, se arrivato, ∪ esercizio di
+    IT-full), quindi `disponibili` appena ce n'è uno — anche il solo
+    esercizio di IT-full finisce nella pagina Azienda. `motivo` dice perché
+    manca lo storico (None = recuperato; `non_richiesto` per un draft
+    precedente alla 0032): la UI propone il recupero dalla pagina Azienda."""
+    esito = advanced.esito if advanced is not None else None
+    raw = _advanced_ok(advanced)
+    anni = {r.anno for r in da_it_full(payload)}
+    if raw is not None:
+        anni |= {r.anno for r in da_it_advanced(raw)}
+        motivo = None if anni else "nessun_bilancio"
+    elif esito is None:
+        motivo = "non_richiesto"
+    else:
+        motivo = advanced.motivo
+    if anni:
+        return ImportPreviewBilanci(stato="disponibili", motivo=motivo, anni=sorted(anni))
+    return ImportPreviewBilanci(stato="non_disponibili", motivo=motivo)
 
 
 def _build_preview(
@@ -237,17 +355,22 @@ def _build_preview(
     expires_at: str,
     sandbox: bool,
     reused: bool,
+    advanced=None,
 ) -> ImportPreview:
     """Anteprima di sola lettura. `build_autofill` è puro: lo chiamiamo qui e
     SCARTIAMO `updates` — così l'anteprima mostra esattamente ciò che la
-    conferma scriverà, senza una seconda implementazione che possa divergere."""
+    conferma scriverà, senza una seconda implementazione che possa divergere.
+    `advanced` (EsitoAdvanced) alimenta il blocco `bilanci` e il ripiego della
+    fascia di fatturato, come nella conferma."""
     dossier = build_dossier(payload)
     anagrafica = dossier.get("anagrafica") or {}
     attivita = dossier.get("attivita") or {}
     sede = dossier.get("sede") or {}
     ateco = attivita.get("ateco") or {}
 
-    _updates, applied, conflicts, suggestions = build_autofill(payload, company_row, lookups)
+    _updates, applied, conflicts, suggestions = build_autofill(
+        payload, company_row, lookups, advanced=_advanced_ok(advanced)
+    )
 
     people = extract_people(payload)
     rappresentante = next(
@@ -288,16 +411,42 @@ def _build_preview(
         draft_expires_at=expires_at,
         reused=reused,
         sandbox=sandbox,
+        bilanci=_bilanci_anteprima(payload, advanced),
+    )
+
+
+async def _esito_advanced_anteprima(
+    primary, openapi: OpenapiClient, *, parent_id: str, piva: str, payload: dict,
+    company_row: dict | None, avvio: float,
+):
+    """Decide se chiamare IT-advanced dopo un IT-full riuscito e coerente.
+    Non si paga quando è inutile: società di persone (non depositano bilanci;
+    solo il codice di PRIMO livello, 'SP' nel dettaglio è la SpA), P.IVA
+    diversa da quella già sull'azienda, tempo insufficiente per restare nella
+    catena dei timeout. Non solleva mai: l'esito finisce nel draft."""
+    from app.services import bilanci_service  # import locale: evita cicli
+
+    if forma_giuridica_codice(payload) == "SP":
+        return bilanci_service.EsitoAdvanced.saltato("forma_senza_bilancio")
+    piva_profilo = (company_row or {}).get("partita_iva")
+    if piva_profilo and piva_profilo != piva:
+        return bilanci_service.EsitoAdvanced.saltato("piva_diversa")
+    if time.monotonic() - avvio > PREVIEW_AVVIO_ADVANCED_MAX_SECONDS:
+        logger.warning("anteprima: IT-advanced saltato, tempo insufficiente dopo IT-full")
+        return bilanci_service.EsitoAdvanced.saltato("tempo_insufficiente")
+    return await bilanci_service.chiama_it_advanced(
+        primary, openapi, owner_id=parent_id, piva=piva, timeout_s=IT_ADVANCED_TIMEOUT_SECONDS
     )
 
 
 async def preview_import(
     primary, secondary, openapi: OpenapiClient, active, partita_iva: str | None
 ) -> ImportPreview:
-    """Fase 1: recupera IT-full (A PAGAMENTO) e mostra cosa si sta per importare.
+    """Fase 1: recupera IT-full (A PAGAMENTO) e, se serve, lo storico dei
+    bilanci IT-advanced; mostra cosa si sta per importare.
 
-    NON scrive nulla sui dati aziendali. Il payload pagato finisce in staging
-    (`company_import_drafts`) e la conferma lo consuma senza ripagarlo. Opera
+    NON scrive nulla sui dati aziendali. I payload pagati finiscono in staging
+    (`company_import_drafts`) e la conferma li consuma senza ripagarli. Opera
     sull'azienda ATTIVA (multi-azienda); il lock/draft restano per owner."""
     if not openapi.enabled:
         raise OpenapiNotConfiguredError()
@@ -315,10 +464,31 @@ async def preview_import(
     settings = get_settings()
     lookups = await lookup_service.get_lookups(secondary)
 
-    # Anteprima già pagata per la STESSA azienda: si riusa, gratis e senza
-    # cooldown. È ciò che rende indolore un «annulla» seguito da un ripensamento.
+    # Q10: dopo il primo import confermato la P.IVA resta legata all'azienda.
+    # Senza, un'azienda qualunque importerebbe (a spese della piattaforma) i
+    # dati di qualsiasi impresa italiana, ogni 10 minuti.
+    existing_data = (
+        await _fetch_company_data(primary, company_row["id"]) if company_row else None
+    )
+    piva_importata = (existing_data or {}).get("piva_fetched")
+    if piva_importata and piva_importata != piva:
+        raise AppError(
+            409,
+            "piva_diversa_da_importata",
+            "Questa azienda è già collegata a un'altra partita IVA: per importarne una "
+            "diversa crea una nuova azienda",
+        )
+
+    # Anteprima già pagata per la STESSA azienda e la stessa P.IVA: si riusa,
+    # gratis e senza cooldown. È ciò che rende indolore un «annulla» seguito da
+    # un ripensamento. Un draft pagato per un'altra azienda dell'owner non si
+    # riusa MAI: i suoi dati finirebbero sull'azienda sbagliata.
     draft = await _fetch_draft(primary, parent_id)
-    if draft and draft["partita_iva"] == piva:
+    if (
+        draft
+        and draft["partita_iva"] == piva
+        and _stesso_id(draft.get("company_profile_id"), active.company_id)
+    ):
         return _build_preview(
             draft["raw"], company_row, lookups,
             piva=piva,
@@ -326,15 +496,13 @@ async def preview_import(
             expires_at=draft["expires_at"],
             sandbox=draft["sandbox"],
             reused=True,
+            advanced=_esito_da_draft(draft),
         )
 
     # Cooldown: l'import costa, un doppio click non deve pagare due volte.
     # Vale sull'ultimo fetch PAGATO, che può essere un import confermato
     # (company_data) o un'anteprima di un'altra P.IVA rimasta in staging —
     # altrimenti si drenerebbe credito cambiando P.IVA a ogni tentativo.
-    existing_data = (
-        await _fetch_company_data(primary, company_row["id"]) if company_row else None
-    )
     timestamps = [
         _parse_ts((existing_data or {}).get("fetched_at")),
         _parse_ts((draft or {}).get("fetched_at")),
@@ -351,8 +519,10 @@ async def preview_import(
         )
 
     cost = 0 if openapi.sandbox else COST_IT_FULL_CENTS
+    meta = {"piva": mask_piva(piva)}
 
-    if not await _acquire_lock(primary, parent_id):
+    token = await _acquire_lock(primary, parent_id)
+    if not token:
         minutes = await _lock_remaining_minutes(primary, parent_id)
         raise AppError(
             409,
@@ -361,36 +531,44 @@ async def preview_import(
             f"un doppio addebito riprova tra circa {minutes} minuti",
         )
 
+    # Tetto giornaliero fail-closed, DOPO il lock: un lock occupato non
+    # consuma la quota. Esaurito o non verificabile → nessuna chiamata.
+    try:
+        await prenota_operazione_openapi(primary, parent_id)
+    except AppError:
+        await _release_lock(primary, parent_id, token)
+        raise
+
+    avvio = time.monotonic()
     try:
         payload = await openapi.it_full(piva)
     except OpenapiInvalidIdError:
         await record_usage(
             primary, user_id=parent_id, family_parent_id=parent_id,
-            service="IT-full", outcome="error", cost_cents=0, meta={"piva": piva},
+            service="IT-full", outcome="error", cost_cents=0, meta=meta,
         )
-        await _release_lock(primary, parent_id)
+        await _release_lock(primary, parent_id, token)
         raise NotFoundError("Partita IVA non trovata nel Registro Imprese") from None
     except OpenapiTimeoutError:
         # Esito (e addebito) ignoto: NESSUN retry automatico, il lock scade da
         # solo così un retry immediato dell'utente non paga due volte al buio.
         await record_usage(
             primary, user_id=parent_id, family_parent_id=parent_id,
-            service="IT-full", outcome="timeout_unknown", cost_cents=cost,
-            meta={"piva": piva},
+            service="IT-full", outcome="timeout_unknown", cost_cents=cost, meta=meta,
         )
         raise
     except AppError:
         await record_usage(
             primary, user_id=parent_id, family_parent_id=parent_id,
-            service="IT-full", outcome="error", cost_cents=0, meta={"piva": piva},
+            service="IT-full", outcome="error", cost_cents=0, meta=meta,
         )
-        await _release_lock(primary, parent_id)
+        await _release_lock(primary, parent_id, token)
         raise
 
     try:
         # Guardia: la risposta deve riguardare l'azienda richiesta (IT-full
         # accetta P.IVA o CF: confrontiamo con entrambi). Un payload che non
-        # combacia non entra MAI in staging.
+        # combacia non entra MAI in staging, e IT-advanced non si paga.
         returned_ids = {
             str((payload.get("companyDetails") or {}).get("vatCode") or ""),
             str((payload.get("companyDetails") or {}).get("taxCode") or ""),
@@ -399,22 +577,33 @@ async def preview_import(
             await record_usage(
                 primary, user_id=parent_id, family_parent_id=parent_id,
                 service="IT-full", outcome="success", cost_cents=cost,
-                meta={"piva": piva, "mismatch": True},
+                meta={**meta, "mismatch": True},
             )
-            logger.error("openapi: risposta per id diversi da %s: %s", piva, returned_ids)
+            logger.error(
+                "openapi: risposta per id diversi da %s: %s",
+                mask_piva(piva), sorted(mask_piva(i) for i in returned_ids if i),
+            )
             raise OpenapiUpstreamError(
                 "La risposta del provider non corrisponde alla partita IVA richiesta"
             )
 
         await record_usage(
             primary, user_id=parent_id, family_parent_id=parent_id,
-            service="IT-full", outcome="success", cost_cents=cost, meta={"piva": piva},
+            service="IT-full", outcome="success", cost_cents=cost, meta=meta,
+        )
+        # Non solleva mai: qualunque esito di IT-advanced lascia valida
+        # l'anteprima IT-full. Anche dopo un suo timeout il lock si rilascia
+        # (sotto): il doppio addebito lo impedisce il cooldown sul tentativo.
+        advanced = await _esito_advanced_anteprima(
+            primary, openapi, parent_id=parent_id, piva=piva, payload=payload,
+            company_row=company_row, avvio=avvio,
         )
         fetched_at, expires_at = await _store_draft(
-            primary, parent_id, piva, payload, sandbox=openapi.sandbox
+            primary, parent_id, piva, payload, sandbox=openapi.sandbox,
+            company_profile_id=active.company_id, advanced=advanced,
         )
     finally:
-        await _release_lock(primary, parent_id)
+        await _release_lock(primary, parent_id, token)
 
     return _build_preview(
         payload, company_row, lookups,
@@ -423,6 +612,7 @@ async def preview_import(
         expires_at=expires_at,
         sandbox=openapi.sandbox,
         reused=False,
+        advanced=advanced,
     )
 
 
@@ -450,10 +640,20 @@ async def confirm_import(
             "draft_mismatch",
             "L'anteprima si riferisce a un'altra partita IVA: riavvia l'importazione",
         )
+    # Il draft è per owner: pagato sull'azienda A e confermato con attiva B
+    # scriverebbe su B i dati (e i bilanci) di A — per un Advisor, clienti
+    # diversi.
+    if not _stesso_id(draft.get("company_profile_id"), active.company_id):
+        raise AppError(
+            409,
+            "draft_mismatch",
+            "L'anteprima si riferisce a un'altra azienda: riavvia l'importazione",
+        )
 
     # Serializza due conferme concorrenti. TTL breve: qui non si aspetta nessuna
     # rete esterna, solo qualche scrittura PostgREST.
-    if not await _acquire_lock(primary, parent_id, CONFIRM_LOCK_TTL_SECONDS):
+    token = await _acquire_lock(primary, parent_id, CONFIRM_LOCK_TTL_SECONDS)
+    if not token:
         raise AppError(
             409,
             "import_in_progress",
@@ -466,20 +666,22 @@ async def confirm_import(
             piva=draft["partita_iva"],
             payload=draft["raw"],
             sandbox=draft["sandbox"],
+            advanced=_esito_da_draft(draft),
         )
         await _delete_draft(primary, parent_id)
     finally:
-        await _release_lock(primary, parent_id)
+        await _release_lock(primary, parent_id, token)
 
     return result
 
 
 async def _persist_import(
-    primary, secondary, active, *, piva: str, payload: dict, sandbox: bool
+    primary, secondary, active, *, piva: str, payload: dict, sandbox: bool, advanced=None
 ) -> ImportResult:
     """Persiste raw + derivati + persone e compila i campi aziendali VUOTI
-    (mai sovrascrivere i valori dell'utente) sull'azienda ATTIVA. Nessuna
-    chiamata esterna."""
+    (mai sovrascrivere i valori dell'utente) sull'azienda ATTIVA; poi, in
+    modo best-effort, i bilanci per esercizio (IT-full e storico IT-advanced
+    del draft). Nessuna chiamata esterna."""
     parent_id = active.owner_id
     company_row = (
         await _fetch_company_row_by_id(primary, active.company_id)
@@ -505,13 +707,16 @@ async def _persist_import(
             raise OpenapiUpstreamError()
     company_id = company_row["id"]
 
-    updates, applied, conflicts, suggestions = build_autofill(payload, company_row, lookups)
+    advanced_raw = _advanced_ok(advanced)
+    updates, applied, conflicts, suggestions = build_autofill(
+        payload, company_row, lookups, advanced=advanced_raw
+    )
     if updates:
         await primary.table("company_profiles").update(updates).eq(
             "id", company_id
         ).execute()
 
-    derived = build_derived(payload, lookups)
+    derived = build_derived(payload, lookups, advanced=advanced_raw)
     fetched_at = datetime.now(timezone.utc).isoformat()
     await primary.table("company_data").upsert(
         {
@@ -530,9 +735,17 @@ async def _persist_import(
         on_conflict="company_profile_id",
     ).execute()
 
+    # Bilanci per esercizio: BEST-EFFORT, non fanno mai fallire la conferma
+    # (una registrazione mancata la recupera la rimappatura pigra, gratis).
+    from app.services import bilanci_service  # import locale: evita cicli
+
+    await bilanci_service.persisti_import(
+        primary, company_id, piva=piva, payload=payload, advanced=advanced, sandbox=sandbox
+    )
+
     # L'import è l'azione che ABILITA il punteggio di compatibilità (ateco +
     # regione + regioni_ids): la cache (per id azienda) va scaduta subito, o il
-    # badge non comparirebbe fino al TTL.
+    # badge non comparirebbe fino al TTL. Dopo i bilanci, che ne fanno parte.
     from app.services.compatibility import invalidate_company_facets  # import locale: evita cicli
 
     invalidate_company_facets(company_id)
@@ -554,7 +767,9 @@ async def _persist_import(
             "family_parent_id": parent_id,
             "payload": {
                 "company_profile_id": company_id,
-                "piva": piva,
+                # Mascherata: per una ditta individuale identifica una persona;
+                # quella completa è in company_data.piva_fetched.
+                "piva": mask_piva(piva),
                 "campi_compilati": applied,
                 "sandbox": sandbox,
             },
@@ -571,11 +786,6 @@ async def _persist_import(
         fetched_at=fetched_at,
         sandbox=sandbox,
     )
-
-
-def _mask_cf(cf: str) -> str:
-    """CF mascherato per i log/registri: mai il dato personale in chiaro."""
-    return cf[:6] + "*" * 7 + cf[13:] if len(cf) == 16 else "***"
 
 
 async def verify_cf(primary, openapi: OpenapiClient, user: dict, codice_fiscale: str) -> dict:
@@ -620,12 +830,13 @@ async def verify_cf(primary, openapi: OpenapiClient, user: dict, codice_fiscale:
         else user_id
     )
     cost = 0 if openapi.sandbox else COST_VERIFICA_CF_CENTS
-    meta = {"cf": _mask_cf(cf)}
+    meta = {"cf": mask_cf(cf)}
 
     # Stesso principio dell'import: la chiamata a pagamento avviene tra
     # statement PostgREST, serve un lock esplicito contro il doppio addebito
     # (doppio click, due tab).
-    if not await _acquire_lock(primary, user_id, VERIFY_LOCK_TTL_SECONDS):
+    token = await _acquire_lock(primary, user_id, VERIFY_LOCK_TTL_SECONDS)
+    if not token:
         raise AppError(
             409,
             "verify_in_progress",
@@ -640,7 +851,7 @@ async def verify_cf(primary, openapi: OpenapiClient, user: dict, codice_fiscale:
             primary, user_id=user_id, family_parent_id=family_parent_id,
             service="IT-verifica_cf", outcome="error", cost_cents=0, meta=meta,
         )
-        await _release_lock(primary, user_id)
+        await _release_lock(primary, user_id, token)
         raise AppError(400, "cf_invalid", "Il codice fiscale non è formalmente valido") from None
     except OpenapiTimeoutError:
         # Esito (e addebito) ignoto: cooldown attivo e lock lasciato scadere.
@@ -655,7 +866,7 @@ async def verify_cf(primary, openapi: OpenapiClient, user: dict, codice_fiscale:
             primary, user_id=user_id, family_parent_id=family_parent_id,
             service="IT-verifica_cf", outcome="error", cost_cents=0, meta=meta,
         )
-        await _release_lock(primary, user_id)
+        await _release_lock(primary, user_id, token)
         raise
 
     try:
@@ -687,7 +898,7 @@ async def verify_cf(primary, openapi: OpenapiClient, user: dict, codice_fiscale:
             "Il codice fiscale non risulta registrato all'Anagrafe Tributaria",
         )
     finally:
-        await _release_lock(primary, user_id)
+        await _release_lock(primary, user_id, token)
 
 
 async def _dossier_from_company_row(
@@ -737,4 +948,16 @@ async def get_dossier_for_owner(
     consulenze)."""
     return await _dossier_from_company_row(
         primary, await _fetch_company_row(primary, owner_id), editable
+    )
+
+
+async def get_dossier_for_company(
+    primary, company_id: str, *, editable: bool = False
+) -> DossierResponse:
+    """Dossier di una specifica azienda per `id`, SENZA regole di visibilità:
+    il chiamante ha già autorizzato l'accesso (progettista assegnato alla
+    consulenza di QUELL'azienda, con audit). Per id, mai per owner: un Advisor
+    ha più aziende e il progettista deve vedere solo quella della richiesta."""
+    return await _dossier_from_company_row(
+        primary, await _fetch_company_row_by_id(primary, company_id), editable
     )

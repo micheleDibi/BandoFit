@@ -1,0 +1,120 @@
+{
+  "data": [
+    {
+      "id": "SINTETICO0000001",
+      "companyName": "ALFA SINTETICA S.R.L.",
+      "vatCode": "09876543217",
+      "taxCode": "09876543217",
+      "detailedLegalForm": {
+        "code": "SR",
+        "description": "Limited liability company"
+      },
+      "balanceSheets": {
+        "last": {
+          "year": 2022,
+          "balanceSheetDate": "2022-12-31",
+          "turnover": 5102233,
+          "netWorth": 512004,
+          "employees": 33,
+          "shareCapital": 50000,
+          "totalStaffCost": 1450221,
+          "totalAssets": 2388710,
+          "avgGrossSalary": 43945.9
+        },
+        "all": [
+          {
+            "year": 2017,
+            "balanceSheetDate": "2017-12-31",
+            "turnover": 2981004,
+            "netWorth": 120455,
+            "employees": 21,
+            "shareCapital": 50000,
+            "totalStaffCost": null,
+            "totalAssets": null,
+            "avgGrossSalary": null
+          },
+          {
+            "year": 2018,
+            "balanceSheetDate": "2018-12-31",
+            "turnover": 3204877,
+            "netWorth": 151233,
+            "employees": 23,
+            "shareCapital": 50000,
+            "totalStaffCost": null,
+            "totalAssets": null,
+            "avgGrossSalary": null
+          },
+          {
+            "year": 2019,
+            "balanceSheetDate": "2019-12-31",
+            "turnover": 3530126,
+            "netWorth": 201877,
+            "employees": 25,
+            "shareCapital": 50000,
+            "totalStaffCost": null,
+            "totalAssets": null,
+            "avgGrossSalary": null
+          },
+          {
+            "year": 2020,
+            "balanceSheetDate": "2020-12-31",
+            "turnover": 3712554,
+            "netWorth": 312004,
+            "employees": 27,
+            "shareCapital": 50000,
+            "totalStaffCost": null,
+            "totalAssets": null,
+            "avgGrossSalary": null
+          },
+          {
+            "year": 2021,
+            "balanceSheetDate": "2021-12-31",
+            "turnover": 4432761,
+            "netWorth": 469366,
+            "employees": 30,
+            "shareCapital": 50000,
+            "totalStaffCost": null,
+            "totalAssets": null,
+            "avgGrossSalary": null
+          },
+          {
+            "year": 2022,
+            "balanceSheetDate": "2022-12-31",
+            "turnover": 5102233,
+            "netWorth": 512004,
+            "employees": 33,
+            "shareCapital": 50000,
+            "totalStaffCost": 1450221,
+            "totalAssets": 2388710,
+            "avgGrossSalary": 43945.9
+          },
+          {
+            "year": 2023,
+            "balanceSheetDate": null,
+            "turnover": null,
+            "netWorth": null,
+            "employees": 34,
+            "shareCapital": null,
+            "totalStaffCost": null,
+            "totalAssets": null,
+            "avgGrossSalary": null
+          },
+          {
+            "year": 2024,
+            "balanceSheetDate": null,
+            "turnover": null,
+            "netWorth": null,
+            "employees": 35,
+            "shareCapital": null,
+            "totalStaffCost": null,
+            "totalAssets": null,
+            "avgGrossSalary": null
+          }
+        ]
+      }
+    }
+  ],
+  "success": true,
+  "message": "",
+  "error": null
+}

@@ -687,6 +687,23 @@ Durante l'esecuzione mi fermo solo per ambiguità che cambiano comportamento o c
 
 ---
 
+## 16. Stato dell'implementazione e scostamenti dal piano
+
+- **WP1 (fatto)** — scostamenti decisi in implementazione o dopo la revisione del diff:
+  - il recupero dei bilanci usa **solo** la P.IVA già importata (`company_data.piva_fetched`): senza import, o con la P.IVA dei dati aziendali diversa, risponde 400;
+  - quota giornaliera: un'anteprima o un recupero valgono **un'operazione** (IT-full + IT-advanced insieme); la quota si prenota **dopo** il lock, così un lock occupato non la consuma;
+  - `ImportPreview.bilanci.stato` è `disponibili` anche con il solo esercizio della visura, con il motivo dello storico mancante;
+  - `dossier.bilanci.anno_fatturato` (nuovo) quando il fatturato della visura è di un anno diverso da quello di chiusura;
+  - nel pack dell'AI-check `bilanci.numero_esercizi` diventa «almeno N» se lo storico non è completo;
+  - un tentativo fallito non declassa uno storico già completo della stessa P.IVA; uno storico di un'altra P.IVA viene scartato;
+  - il mint del token è fuori dalla finestra del timeout della chiamata (un mint lento non diventa un «esito incerto» pagato);
+  - la query key del frontend è `["company-bilanci", activeCompanyId]`;
+  - lock di import con token aggiunto accanto alle vecchie funzioni (niente DROP: le migration girano prima del deploy);
+  - annotato, non corretto: l'anteprima non consulta il cooldown dell'ultimo recupero dei bilanci (impatto massimo 0,10 €, limitato dalla quota giornaliera).
+- **WP2–WP10** — da fare.
+
+---
+
 ## Appendice A — vocabolario v1 (proposta da approvare)
 
 **Tipi soggetto** (→ id `beneficiari`):

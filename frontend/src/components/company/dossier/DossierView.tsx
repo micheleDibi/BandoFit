@@ -36,19 +36,37 @@ const CONTRATTI_LABELS: Record<string, string> = {
 
 /** Rendering a sezioni del dossier certificato. Condiviso tra la pagina
  *  Azienda (il titolare vede il proprio) e l'area progettista (vista full
- *  post-assegnazione, con accesso registrato lato server). */
+ *  post-assegnazione, con accesso registrato lato server).
+ *  `linkBilanci`: solo dove la pagina ha la sezione `#bilanci` (Azienda). */
 export function DossierView({
   dossier,
   people,
+  linkBilanci = false,
 }: {
   dossier: CompanyDossier;
   people: DossierPerson[];
+  linkBilanci?: boolean;
 }) {
   const { anagrafica, attivita, sede, contatti, dipendenti, bilanci, partecipazioni, flags } =
     dossier;
   const contratti = dipendenti.percentuali_contratti;
   const activeFlags = Object.entries(flags ?? {}).filter(([, v]) => v === true);
-  const hasBilanci = Object.values(bilanci ?? {}).some((v) => v !== null);
+  // Anno e data di chiusura da soli non fanno una sezione: servono dei valori.
+  // Un dossier salvato prima dei bilanci per esercizio non ha `anno` né
+  // `data_chiusura`: restano undefined e la riga «Esercizio» non compare.
+  const {
+    anno: annoBilancio,
+    data_chiusura: chiusuraBilancio,
+    anno_fatturato: annoFatturato,
+    ...valoriBilancio
+  } = bilanci ?? ({} as Partial<CompanyDossier["bilanci"]>);
+  const hasBilanci = Object.values(valoriBilancio).some((v) => v !== null && v !== undefined);
+  // Il fatturato della visura può riferirsi a un anno diverso dall'esercizio
+  // (la tabella dei bilanci, per la stessa ragione, non lo mette in quell'anno).
+  const etichettaFatturato =
+    annoFatturato && annoBilancio && annoFatturato !== annoBilancio
+      ? `Fatturato (${annoFatturato})`
+      : "Fatturato";
 
   return (
     <div className="mt-4 space-y-4">
@@ -190,10 +208,18 @@ export function DossierView({
 
       {hasBilanci && (
         <DossierSection title="Dati economici" icon={<FileSpreadsheet className="size-4" aria-hidden />}>
+          {annoBilancio && (
+            <p className="mb-3 text-sm text-slate-500">
+              Esercizio <span className="tabular font-medium text-slate-700">{annoBilancio}</span>
+              {chiusuraBilancio && (
+                <span className="tabular"> · chiuso il {formatDateNumeric(chiusuraBilancio)}</span>
+              )}
+            </p>
+          )}
           <DossierGrid>
             <DossierRow label="Dimensione impresa" value={bilanci.dimensione_impresa} />
             <DossierRow
-              label="Fatturato"
+              label={etichettaFatturato}
               value={bilanci.fatturato !== null ? formatEur(bilanci.fatturato) : null}
             />
             <DossierRow
@@ -213,6 +239,14 @@ export function DossierView({
               value={bilanci.utile !== null ? formatEur(bilanci.utile) : null}
             />
           </DossierGrid>
+          {linkBilanci && (
+            <a
+              href="#bilanci"
+              className="mt-4 inline-block rounded text-sm font-medium text-brand-600 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
+            >
+              Vedi tutti i bilanci ↓
+            </a>
+          )}
         </DossierSection>
       )}
 

@@ -3,10 +3,12 @@ import { api } from "../lib/api";
 import type { DossierResponse, ImportPreview, ImportResult } from "../types";
 import { useAuth } from "./useAuth";
 
-/** Deadline del polling lato server (240s, vedi backend/app/clients/openapi.py)
- *  più un margine. Senza timeout esplicito axios attende all'infinito e una rete
- *  caduta a metà chiamata lascerebbe la modale a girare per sempre. */
-const PREVIEW_TIMEOUT_MS = 255_000;
+/** Catena dei tempi dell'anteprima: il server chiude entro 277 s (IT-full con
+ *  deadline 240 s, poi IT-advanced solo se sono passati al massimo 250 s e con
+ *  un tetto di 25 s) < frontend 290 s < TTL del lock di import 330 s. Senza
+ *  timeout esplicito axios attende all'infinito e una rete caduta a metà
+ *  chiamata lascerebbe la modale a girare per sempre. */
+const PREVIEW_TIMEOUT_MS = 290_000;
 
 export function useCompanyDossier() {
   const { session } = useAuth();
@@ -56,6 +58,8 @@ export function useConfirmImport() {
       queryClient.invalidateQueries({ queryKey: ["company-dossier"] });
       // L'import è l'azione che popola sedi e ATECO secondari: i facet cambiano.
       queryClient.invalidateQueries({ queryKey: ["company-facets"] });
+      // La conferma salva anche i bilanci recuperati con l'anteprima.
+      queryClient.invalidateQueries({ queryKey: ["company-bilanci"] });
     },
   });
 }

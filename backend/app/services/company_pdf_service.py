@@ -4,12 +4,15 @@
   (`company_profiles`) + le preferenze di ricerca seguite. Non certificato.
 - **Dossier** (`export_dossier_pdf`): la visura certificata del Registro Imprese
   importata da openapi.it. Alimentato SOLO da `openapi_service.get_dossier`
-  (`DossierResponse`, già privo del `raw` grezzo): il payload grezzo non esce.
+  (`DossierResponse`, già privo del `raw` grezzo) e, per i bilanci per
+  esercizio, da `bilanci_service.get_bilanci` (`BilanciOut`, già fuso e senza
+  payload del provider): il payload grezzo non esce.
 
 Entrambi costruiscono un `PdfDoc` astratto (puro, testabile) e lo rendono con
 `pdf_service.render` in un thread (il rendering è CPU-bound)."""
 
 import asyncio
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -17,9 +20,25 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from app.core.errors import NotFoundError
+from app.schemas.bilanci import BilanciOut
 from app.schemas.openapi_data import DossierResponse
-from app.services import company_service, openapi_service, pdf_service, preferences_service
-from app.services.pdf_service import PdfDoc, chips_block, fields_block, rows_block, section
+from app.services import (
+    bilanci_service,
+    company_service,
+    openapi_service,
+    pdf_service,
+    preferences_service,
+)
+from app.services.pdf_service import (
+    PdfDoc,
+    chips_block,
+    fields_block,
+    rows_block,
+    section,
+    text_block,
+)
+
+logger = logging.getLogger("bandofit.pdf")
 
 # Etichette leggibili degli enum (il DB tiene i codici; il PDF mostra i nomi).
 _CLASSE_LABELS = {
@@ -44,6 +63,30 @@ _FACET_SEZIONE = {
     "tipologie": "Tipologie di bando",
     "modalita": "Modalità di erogazione",
     "programmi": "Programmi",
+}
+# Voci dei bilanci per esercizio, nell'ordine di CAMPI_BILANCIO.
+_VOCI_BILANCIO = (
+    ("fatturato", "Fatturato"),
+    ("valore_produzione", "Valore della produzione"),
+    ("risultato_esercizio", "Utile (perdita) d'esercizio"),
+    ("patrimonio_netto", "Patrimonio netto"),
+    ("capitale_sociale", "Capitale sociale"),
+    ("totale_attivo", "Totale attivo"),
+    ("debiti_totali", "Debiti totali"),
+    ("disponibilita_liquide", "Disponibilità liquide"),
+    ("ebitda", "MOL (EBITDA)"),
+    ("ebit", "Risultato operativo (EBIT)"),
+    ("cash_flow", "Cash flow"),
+    ("oneri_finanziari", "Oneri finanziari"),
+    ("dipendenti", "Dipendenti"),
+    ("costo_personale", "Costo del personale"),
+    ("retribuzione_media_lorda", "Retribuzione media lorda"),
+)
+_BILANCI_ANNI_PDF = 5
+_FONTI_LABELS = {
+    "xbrl": "bilancio ufficiale (XBRL)",
+    "it_full": "Registro Imprese, ultimo bilancio depositato",
+    "it_advanced": "storico bilanci del Registro Imprese",
 }
 _FLAG_LABELS = {
     "startup_innovativa": "Startup innovativa",
@@ -74,6 +117,17 @@ def _eur(value) -> str | None:
         return f"{float(value):,.0f}".replace(",", ".") + " €"
     except (TypeError, ValueError):
         return None
+
+
+def _numero_it(value, decimali: int = 0) -> str | None:
+    """Numero in formato italiano (1.234,5): per dipendenti e indicatori."""
+    if value is None:
+        return None
+    testo = f"{float(value):,.{decimali}f}".replace(",", "_").replace(".", ",")
+    testo = testo.replace("_", ".")
+    if decimali and "," in testo:
+        testo = testo.rstrip("0").rstrip(",")
+    return testo
 
 
 def _date_it(iso) -> str | None:
@@ -206,10 +260,11 @@ def _sezione_preferenze(preferenze: dict[str, list[str]]):
     return section("Preferenze di ricerca seguite", [fields_block(pairs)])
 
 
-def build_dossier_doc(resp: DossierResponse) -> PdfDoc:
+def build_dossier_doc(resp: DossierResponse, bilanci: BilanciOut | None = None) -> PdfDoc:
     """Dossier certificato. `resp.dossier` è un dict a 8 sezioni (build_dossier),
     `resp.people` le cariche/soci, `resp.derived` i valori calcolati. Nessun dato
-    grezzo: `DossierResponse` non contiene `raw`."""
+    grezzo: `DossierResponse` non contiene `raw`. `bilanci` (facoltativo)
+    aggiunge la sezione «Bilanci per esercizio» dopo «Dati economici»."""
     d = resp.dossier or {}
     ana = d.get("anagrafica") or {}
     att = d.get("attivita") or {}
@@ -217,6 +272,14 @@ def build_dossier_doc(resp: DossierResponse) -> PdfDoc:
     con = d.get("contatti") or {}
     dip = d.get("dipendenti") or {}
     bil = d.get("bilanci") or {}
+    # Il fatturato di IT-full può riferirsi a un anno diverso dall'esercizio
+    # (turnoverYear): in quel caso l'etichetta lo dice.
+    anno_fatturato = bil.get("anno_fatturato")
+    etichetta_fatturato = (
+        f"Fatturato ({anno_fatturato})"
+        if anno_fatturato and bil.get("anno") and anno_fatturato != bil.get("anno")
+        else "Fatturato"
+    )
     part = d.get("partecipazioni") or []
     flags = d.get("flags") or {}
 
@@ -320,7 +383,8 @@ def build_dossier_doc(resp: DossierResponse) -> PdfDoc:
                 fields_block(
                     [
                         ("Dimensione d'impresa", bil.get("dimensione_impresa")),
-                        ("Fatturato", _eur(bil.get("fatturato"))),
+                        ("Esercizio", bil.get("anno")),
+                        (etichetta_fatturato, _eur(bil.get("fatturato"))),
                         ("Capitale sociale", _eur(bil.get("capitale_sociale"))),
                         ("Patrimonio netto", _eur(bil.get("patrimonio_netto"))),
                         ("EBITDA", _eur(bil.get("ebitda"))),
@@ -329,6 +393,7 @@ def build_dossier_doc(resp: DossierResponse) -> PdfDoc:
                 )
             ],
         ),
+        _sezione_bilanci(bilanci),
         section(
             "Partecipazioni",
             [
@@ -361,6 +426,61 @@ def build_dossier_doc(resp: DossierResponse) -> PdfDoc:
         badges=badges,
         sections=[s for s in sezioni if s is not None],
         footer=provenienza,
+    )
+
+
+def _valore_bilancio(campo: str, value) -> str | None:
+    if campo == "dipendenti":
+        return _numero_it(value, 1)
+    return _eur(value)
+
+
+def _valore_indicatore(indicatore) -> str | None:
+    if indicatore.valore is None:
+        return None
+    if indicatore.unita == "percentuale":
+        testo = f"{_numero_it(indicatore.valore, 2)} %"
+    elif indicatore.unita == "euro":
+        testo = _eur(indicatore.valore)
+    else:
+        testo = _numero_it(indicatore.valore, 4)
+    anni = indicatore.anni
+    if anni:
+        periodo = f"{anni[0]}–{anni[-1]}" if len(anni) > 1 else str(anni[0])
+        testo = f"{testo} ({periodo})"
+    return testo
+
+
+def _sezione_bilanci(bilanci: BilanciOut | None):
+    """Voce × ultimi 5 esercizi (righe tutte vuote nascoste), indicatori già
+    calcolati e nota sulle fonti. Nessun esercizio → nessuna sezione."""
+    if bilanci is None or not bilanci.esercizi:
+        return None
+    esercizi = sorted(bilanci.esercizi, key=lambda e: e.anno)[-_BILANCI_ANNI_PDF:]
+    righe = []
+    for campo, etichetta in _VOCI_BILANCIO:
+        valori = [_valore_bilancio(campo, getattr(e, campo)) for e in esercizi]
+        if any(v is not None for v in valori):
+            righe.append([etichetta, *valori])
+    fonti_usate = sorted(
+        {f for e in esercizi for f in e.fonti.values()},
+        key=lambda f: list(_FONTI_LABELS).index(f) if f in _FONTI_LABELS else 99,
+    )
+    nota = (
+        "Valori in euro fusi campo per campo da più fonti, con precedenza al bilancio "
+        "ufficiale, poi all'ultimo bilancio del Registro Imprese, poi allo storico. "
+        f"Fonti usate: {', '.join(_FONTI_LABELS.get(f, f) for f in fonti_usate)}. "
+        "Dati riservati all'azienda: non condividerli con terzi."
+    )
+    if bilanci.storico_esito != "ok":
+        nota += " Lo storico pluriennale non è completo: recuperalo dalla pagina Azienda."
+    return section(
+        "Bilanci per esercizio",
+        [
+            rows_block(["Voce", *[str(e.anno) for e in esercizi]], righe),
+            fields_block([(i.etichetta, _valore_indicatore(i)) for i in bilanci.indicatori]),
+            text_block(nota),
+        ],
     )
 
 
@@ -429,7 +549,13 @@ async def export_dossier_pdf(primary, active) -> PdfResult:
     resp = await openapi_service.get_dossier(primary, active)
     if not resp.imported or not resp.dossier:
         raise NotFoundError("Nessun dossier importato per questa azienda")
-    doc = build_dossier_doc(resp)
+    # Best-effort: il dossier resta scaricabile anche se i bilanci non si leggono.
+    try:
+        bilanci = await bilanci_service.get_bilanci(primary, active)
+    except Exception:
+        logger.exception("bilanci non leggibili per il PDF del dossier")
+        bilanci = None
+    doc = build_dossier_doc(resp, bilanci)
     content = await asyncio.to_thread(pdf_service.render, doc)
     denominazione = (resp.dossier.get("anagrafica") or {}).get("denominazione") or "azienda"
     return PdfResult(content=content, filename=f"dossier-{_slug(denominazione)}.pdf")

@@ -3,14 +3,18 @@
 Funzioni PURE (nessun I/O): ricevono il payload grezzo + le lookup del
 catalogo bandi e producono autofill, persone, dossier e valori derivati.
 I percorsi dei campi sono bloccati sulla risposta reale registrata in
-tests/fixtures/openapi/it_full_sample.json. Ogni accesso è difensivo:
-un blocco mancante produce sezioni/valori nulli, mai un'eccezione.
+tests/fixtures/openapi/it_full_sample.json (un'associazione senza bilanci);
+quelli economici sulla fixture sintetica it_full_bilanci_sintetico.json,
+derivata dagli esempi ufficiali OAS. Ogni accesso è difensivo: un blocco
+mancante produce sezioni/valori nulli, mai un'eccezione.
 """
 
+import math
 import re
 import unicodedata
+from collections.abc import Iterable
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 # ----------------------------------------------------------------- utilità
 
@@ -43,6 +47,29 @@ def _clean(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _numero(value: Any) -> int | float | None:
+    """Numero JSON utilizzabile, oppure None (bool, NaN e infiniti esclusi:
+    `True` è un int per Python ma non un importo)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+def parse_anno(value: Any) -> int | None:
+    """Anno dichiarato dal provider (int, o stringa di cifre)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
 
 
 def parse_openapi_date(value: Any) -> date | None:
@@ -106,6 +133,74 @@ def stato_impresa(payload: dict) -> str | None:
     return _clean(_get(payload, "companyStatus", "activityStatus", "description"))
 
 
+FormaGiuridicaCodice = Literal["SC", "SP", "AL"]
+
+
+def forma_giuridica_codice(payload: dict) -> FormaGiuridicaCodice | None:
+    """Macro-forma giuridica di PRIMO livello: SC (società di capitali), SP
+    (società di persone), AL (altre forme).
+
+    Si legge SOLO `legalForm.legalForm.code`: in `detailedLegalForm` gli
+    stessi due caratteri significano altro ('SP' = SpA, 'SC' = cooperativa),
+    quindi un ripiego sul dettaglio scambierebbe una SpA per una società di
+    persone."""
+    code = (_clean(_get(payload, "legalForm", "legalForm", "code")) or "").upper()
+    if code in ("SC", "SP", "AL"):
+        return code  # type: ignore[return-value]
+    return None
+
+
+# ------------------------------------------------------------ voci di bilancio
+
+# Voci CEE di IT-full: liste {code, value} in vari blocchi di primo livello
+# (annualResult, netWorth, productionValue, assetsAggregateValues…), con
+# prefisso IIC oppure IPL secondo la divisione del bilancio depositato. Si
+# cercano sempre entrambi i prefissi, nell'ordine indicato.
+CODICI_UTILE = ("IIC179", "IPL179")  # 21. utile (perdita) dell'esercizio
+CODICI_UTILE_RIPIEGO = ("IIC083", "IPL083")  # A.IX del patrimonio netto: stesso valore
+CODICI_VALORE_PRODUZIONE = ("IIC130", "IPL130")  # A. totale valore della produzione
+CODICI_TOTALE_ATTIVO = ("IIC074", "IPL074")
+
+
+def _voce_cee(payload: Any, codici: Iterable[str]) -> float | None:
+    """Valore della prima voce CEE trovata tra `codici` (in ordine di
+    preferenza), cercata in OGNI blocco di primo livello che sia una lista di
+    `{code, value}`. Voci non numeriche vengono ignorate."""
+    if not isinstance(payload, dict):
+        return None
+    blocchi = [
+        blocco
+        for blocco in payload.values()
+        if isinstance(blocco, list) and any(isinstance(v, dict) for v in blocco)
+    ]
+    for codice in codici:
+        for blocco in blocchi:
+            for voce in blocco:
+                if not isinstance(voce, dict):
+                    continue
+                if (_clean(voce.get("code")) or "").upper() != codice:
+                    continue
+                valore = _numero(voce.get("value"))
+                if valore is not None:
+                    return valore
+    return None
+
+
+def utile_esercizio(payload: dict) -> float | None:
+    """Utile (o perdita) dell'esercizio di IT-full: voce 21 del conto
+    economico, con ripiego sulla voce A.IX del patrimonio netto."""
+    valore = _voce_cee(payload, CODICI_UTILE)
+    if valore is None:
+        valore = _voce_cee(payload, CODICI_UTILE_RIPIEGO)
+    return valore
+
+
+def data_chiusura_bilancio(payload: dict) -> date | None:
+    """Data di chiusura del bilancio a cui si riferiscono i valori di IT-full
+    (`ecofin.balanceSheetDate`)."""
+    return parse_openapi_date(_get(payload, "ecofin", "balanceSheetDate"))
+
+
 # ------------------------------------------------------------ ateco secondari
 
 def secondary_ateco_codes(payload: dict) -> list[str]:
@@ -163,17 +258,30 @@ _FASCE = (
 )
 
 
-def fascia_fatturato(payload: dict) -> str | None:
-    """Bucket del fatturato più recente, se il payload lo espone (assente per
-    imprese senza bilanci depositati, es. la fixture)."""
-    for path in (("ecofin", "turnover"), ("ecofin", "revenue"), ("balanceSheets", "turnover")):
-        value = _get(payload, *path)
-        if isinstance(value, (int, float)) and value >= 0:
-            for limit, fascia in _FASCE:
-                if value <= limit:
-                    return fascia
-            return "oltre_50m"
-    return None
+def codice_fascia_fatturato(value: Any) -> str | None:
+    """Codice della fascia (enum di company_profiles.fascia_fatturato) per un
+    importo non negativo; None per valori assenti o negativi."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        if value < 0:
+            return None
+        for limit, fascia in _FASCE:
+            if value <= limit:
+                return fascia
+    except TypeError:
+        return None
+    return "oltre_50m"
+
+
+def fascia_fatturato(payload: dict, advanced: dict | None = None) -> str | None:
+    """Bucket del fatturato più recente: `ecofin.turnover` di IT-full, con
+    ripiego sull'ultimo bilancio di IT-advanced (`balanceSheets.last`) se il
+    chiamante lo passa. Assente per imprese senza bilanci depositati."""
+    value = _numero(_get(payload, "ecofin", "turnover"))
+    if value is None and advanced is not None:
+        value = _numero(_get(advanced, "balanceSheets", "last", "turnover"))
+    return codice_fascia_fatturato(value)
 
 
 # ----------------------------------------------------------------- persone
@@ -287,7 +395,7 @@ def extract_people(payload: dict) -> list[dict]:
 # I valori inseriti dall'utente non vengono MAI sovrascritti: le differenze
 # finiscono in `conflicts` e l'utente decide.
 def build_autofill(
-    payload: dict, current: dict | None, lookups
+    payload: dict, current: dict | None, lookups, advanced: dict | None = None
 ) -> tuple[dict, list[str], list[dict], dict]:
     """Ritorna (updates, applied, conflicts, suggestions).
 
@@ -295,6 +403,9 @@ def build_autofill(
     - applied: nomi dei campi compilati;
     - conflicts: campi in cui il valore utente differisce dal certificato;
     - suggestions: es. ATECO secondari da proporre come preferenze.
+
+    `advanced` (data[0] di IT-advanced, facoltativo) serve solo come ripiego
+    per la fascia di fatturato.
     """
     current = current or {}
 
@@ -310,7 +421,7 @@ def build_autofill(
         "telefono": _clean(_get(payload, "contacts", "telephoneNumber")),
         "sito_web": _clean(_get(payload, "webAndSocial", "website")),
         "classe_dimensionale": classe_dimensionale(payload),
-        "fascia_fatturato": fascia_fatturato(payload),
+        "fascia_fatturato": fascia_fatturato(payload, advanced),
     }
 
     cap = _clean(_get(payload, "address", "zipCode"))
@@ -450,9 +561,10 @@ def company_regioni_ids(company: dict | None, derived: dict | None) -> set[int]:
     return {int(i) for i in (company.get("regione_id"), derived.get("regione_id")) if i is not None}
 
 
-def build_derived(payload: dict, lookups) -> dict:
+def build_derived(payload: dict, lookups, advanced: dict | None = None) -> dict:
     """Valori calcolati all'import, salvati in company_data.derived: input
-    pronti per il futuro AI-check senza dover rifare il parsing."""
+    pronti per il futuro AI-check senza dover rifare il parsing. `advanced`
+    serve solo come ripiego per la fascia di fatturato."""
     primary_code = _clean(_get(payload, "atecoClassification", "ateco", "code")) or _clean(
         _get(payload, "atecoClassification", "ateco2022", "code")
     )
@@ -467,7 +579,7 @@ def build_derived(payload: dict, lookups) -> dict:
         # compatibilità e dall'AI-check per l'eleggibilità territoriale.
         "regioni_ids": all_regioni_ids(payload, lookups),
         "classe_dimensionale": classe_dimensionale(payload),
-        "fascia_fatturato": fascia_fatturato(payload),
+        "fascia_fatturato": fascia_fatturato(payload, advanced),
         # Nessun `beneficiari`: le categorie del catalogo (Istituti Scolastici,
         # Enti pubblici…) non si deducono dalla visura. Le dichiara l'utente su
         # `company_profiles.beneficiari`.
@@ -575,14 +687,29 @@ def build_dossier(payload: dict) -> dict:
     }
 
     # Blocco economico: presente solo per imprese con bilanci depositati.
+    # IT-full descrive UN esercizio: `anno`/`data_chiusura` sono quelli di
+    # `ecofin.balanceSheetDate` (ripiego su `turnoverYear` se la data manca).
+    # Il fatturato ha però un anno suo (`turnoverYear`): se è diverso da
+    # quello di chiusura lo dice `anno_fatturato`, così «Esercizio 2022» non
+    # mostra come suo il fatturato 2023 (la tabella dei bilanci, con la
+    # stessa regola, lo esclude da quell'anno).
+    # EBITDA da `operatingResults`, utile dalle voci CEE: `ecofin.ebitda` ed
+    # `ecofin.profit` non esistono nel prodotto.
     ecofin = payload.get("ecofin") or {}
+    chiusura = data_chiusura_bilancio(payload)
+    anno_turnover = parse_anno(ecofin.get("turnoverYear"))
+    anno = chiusura.year if chiusura else anno_turnover
+    fatturato = ecofin.get("turnover") if isinstance(ecofin.get("turnover"), (int, float)) else None
     bilanci = {
         "dimensione_impresa": _clean(_get(ecofin, "enterpriseSize", "description")),
-        "fatturato": ecofin.get("turnover") if isinstance(ecofin.get("turnover"), (int, float)) else None,
+        "fatturato": fatturato,
         "capitale_sociale": ecofin.get("shareCapital") if isinstance(ecofin.get("shareCapital"), (int, float)) else None,
         "patrimonio_netto": ecofin.get("netWorth") if isinstance(ecofin.get("netWorth"), (int, float)) else None,
-        "ebitda": ecofin.get("ebitda") if isinstance(ecofin.get("ebitda"), (int, float)) else None,
-        "utile": ecofin.get("profit") if isinstance(ecofin.get("profit"), (int, float)) else None,
+        "ebitda": _numero(_get(payload, "operatingResults", "ebitda")),
+        "utile": utile_esercizio(payload),
+        "anno": anno,
+        "data_chiusura": chiusura.isoformat() if chiusura else None,
+        "anno_fatturato": anno_turnover if fatturato is not None else None,
     }
 
     partecipazioni = [

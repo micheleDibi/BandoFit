@@ -6,7 +6,7 @@ import pytest
 from app.core.errors import AppError, OpenapiNotConfiguredError
 from app.services import openapi_service
 from app.services.codice_fiscale import is_valid_cf, normalize_cf
-from tests.test_openapi_service import FakePrimary, USER
+from tests.test_openapi_service import LOCK_TOKEN, FakePrimary, USER
 
 CF_OK = "RSSMRA80A01H501U"
 
@@ -147,7 +147,10 @@ class TestVerificaCf:
     async def test_lock_rilasciato_dopo_il_successo(self):
         primary = FakePrimary(selects={"profiles": [PROFILE_EMPTY]})
         await openapi_service.verify_cf(primary, fake_openapi(valid=True), USER, CF_OK)
-        assert ("fn_release_import_lock", {"p_parent_id": USER["id"]}) in primary.rpcs
+        # rilascio condizionato al token del detentore (0032)
+        assert (
+            "fn_release_import_lock_token", {"p_parent_id": USER["id"], "p_token": LOCK_TOKEN}
+        ) in primary.rpcs
 
     async def test_cooldown_tra_tentativi_a_pagamento(self):
         primary = FakePrimary(selects={"profiles": [PROFILE_EMPTY]})

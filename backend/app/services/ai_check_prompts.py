@@ -9,13 +9,35 @@ Il profilo azienda ("company pack") usa NOMI DI CAMPO ESPLICITI: il matching
 deve citare il nome esatto del campo usato per ogni verdetto. I campi assenti
 sono resi come NON DISPONIBILE — mai lasciare che l'assenza passi per un dato.
 
-PROMPT_VERSION invalida la cache delle estrazioni quando i prompt cambiano.
+Versioni separate (WP1):
+- EXTRACT_PROMPT_VERSION (alias storico PROMPT_VERSION) è la chiave della cache
+  delle estrazioni `bando_requirements` e la colonna `ai_checks.prompt_version`:
+  cambia SOLO se cambia il prompt di estrazione (ogni cambio ri-spende lo
+  stadio A su tutti i bandi);
+- MATCH_PROMPT_VERSION e COMPANY_PACK_VERSION descrivono il prompt di matching
+  e il formato del profilo azienda: finiscono solo in `report.meta`, perché il
+  profilo non entra nella chiave della cache.
+
+I bilanci entrano nel pack come righe per esercizio con nomi stabili
+(`bilanci.2024.fatturato`) e con gli indicatori GIÀ calcolati: il modello non
+fa aritmetica. Il blocco `bilanci` del dossier (un solo esercizio) non entra:
+la fonte è una sola.
 """
 
 import hashlib
 import json
+from decimal import Decimal
 
-PROMPT_VERSION = 1
+from app.services.bilanci_indicatori import calcola_indicatori
+from app.services.bilanci_mapping import CAMPI_BILANCIO
+
+EXTRACT_PROMPT_VERSION = 1
+# Alias invariato: chiave della cache bando_requirements e ai_checks.prompt_version.
+PROMPT_VERSION = EXTRACT_PROMPT_VERSION
+MATCH_PROMPT_VERSION = 2
+COMPANY_PACK_VERSION = 2
+# Esercizi più recenti resi voce per voce nel pack.
+PACK_BILANCI_ANNI = 3
 
 # --------------------------------------------------------------- prompt A
 
@@ -76,6 +98,17 @@ esatto sui dati del catalogo: non contraddirle mai.
 - Per i requisiti TERRITORIALI considera TUTTE le sedi dell'azienda (sede \
 legale e ogni unità locale in `dossier.sede.unita_locali`): il vincolo è \
 soddisfatto se ANCHE UNA SOLA sede si trova in una regione ammessa.
+- Per i requisiti sui VALORI DI BILANCIO (fatturato, utile, patrimonio \
+netto, MOL, numero di bilanci approvati, medie e rapporti) usa i campi \
+`bilanci.<anno>.<voce>`, `bilanci.numero_esercizi` e gli indicatori già \
+calcolati `bilanci.indicatori.*`. NON fare calcoli (niente medie, somme o \
+rapporti ricavati da te): se il valore o l'indicatore richiesto non è \
+presente, o è NON DISPONIBILE, l'esito è `dato_mancante`. Per organico, \
+classe dimensionale e fascia di fatturato dichiarata restano validi anche \
+`dossier.dipendenti.*` e i dati aziendali (`numero_dipendenti`, \
+`classe_dimensionale`, `fascia_fatturato`). Se `bilanci.numero_esercizi` è \
+«almeno N», lo storico non è completo: un requisito che chiede più di N \
+bilanci è `dato_mancante`, mai `non_soddisfatto`.
 - `criteri`: usa `parzialmente_soddisfatto` quando l'azienda copre solo in \
 parte il criterio. NON assegnare MAI punteggi numerici: solo verdetti.
 - Compila anche punti di forza, punti di debolezza e l'elenco dei dati \
@@ -264,14 +297,76 @@ def _flatten_dict(prefix: str, value, lines: list[str]) -> None:
         lines.append(f"{prefix}: {value}")
 
 
+_FONTI_PACK = {
+    "xbrl": "bilancio ufficiale XBRL",
+    "it_full": "Registro Imprese, ultimo bilancio depositato",
+    "it_advanced": "storico bilanci del Registro Imprese",
+}
+_UNITA_PACK = {"percentuale": "%", "euro": "euro", "rapporto": ""}
+
+
+def _numero_pack(valore: Decimal) -> str:
+    """Decimale in notazione fissa, senza zeri superflui (4432761, 15.1)."""
+    testo = format(valore, "f")
+    if "." in testo:
+        testo = testo.rstrip("0").rstrip(".")
+    return testo
+
+
+def _blocco_bilanci(esercizi: list | None, storico_completo: bool = False) -> str:
+    """«## Bilanci per esercizio»: gli ultimi PACK_BILANCI_ANNI esercizi voce
+    per voce (con la fonte), il numero di esercizi e gli indicatori già
+    calcolati. `esercizi`: EsercizioBilancio (bilanci_indicatori).
+    `storico_completo` (bilanci_service.storico_completo): senza lo storico
+    del Registro Imprese il numero di esercizi è solo un MINIMO e va detto,
+    o «almeno 2 bilanci» diventerebbe un falso `non_soddisfatto`."""
+    titolo = "## Bilanci per esercizio (valori in euro)"
+    if not esercizi:
+        return f"{titolo}\nbilanci: {NON_DISPONIBILE}"
+    n = len(esercizi)
+    lines = [
+        f"bilanci.numero_esercizi: {n}"
+        if storico_completo
+        else f"bilanci.numero_esercizi: almeno {n} (storico dei bilanci non recuperato: "
+        "il numero reale può essere maggiore)"
+    ]
+    recenti = sorted(esercizi, key=lambda e: e.anno, reverse=True)[:PACK_BILANCI_ANNI]
+    for esercizio in recenti:
+        prefisso = f"bilanci.{esercizio.anno}"
+        if esercizio.data_chiusura:
+            lines.append(f"{prefisso}.data_chiusura: {esercizio.data_chiusura.isoformat()}")
+        for campo in CAMPI_BILANCIO:
+            valore = esercizio.valore(campo)
+            if valore is None:
+                lines.append(f"{prefisso}.{campo}: {NON_DISPONIBILE}")
+                continue
+            fonte = _FONTI_PACK.get(esercizio.fonti.get(campo), "non indicata")
+            lines.append(f"{prefisso}.{campo}: {_numero_pack(valore)} (fonte: {fonte})")
+    for indicatore in calcola_indicatori(esercizi):
+        chiave = f"bilanci.indicatori.{indicatore.chiave}"
+        if indicatore.valore is None:
+            lines.append(f"{chiave}: {NON_DISPONIBILE} ({indicatore.motivo_mancanza})")
+            continue
+        unita = _UNITA_PACK.get(indicatore.unita, "")
+        valore = f"{_numero_pack(indicatore.valore)} {unita}".strip()
+        anni = indicatore.anni
+        periodo = f"{anni[0]}-{anni[-1]}" if len(anni) > 1 else "".join(map(str, anni))
+        lines.append(f"{chiave}: {valore} (esercizi {periodo}; {indicatore.formula})")
+    return f"{titolo}\n" + "\n".join(lines)
+
+
 def build_company_pack(
     profile: dict,
     company: dict | None,
     dossier: dict | None,
     derived: dict | None,
     people: list[dict] | None,
+    bilanci: list | None = None,
+    storico_completo: bool = False,
 ) -> str:
-    """Profilo persona + azienda serializzato con nomi di campo citabili."""
+    """Profilo persona + azienda serializzato con nomi di campo citabili.
+    `bilanci`: esercizi fusi (EsercizioBilancio), resi nel blocco dedicato;
+    `storico_completo`: lo storico IT-advanced è stato recuperato."""
     blocks: list[str] = []
 
     # Il valore del CF personale NON entra nel pack: il report (visibile a
@@ -308,10 +403,15 @@ def build_company_pack(
             blocks.append("## Dati derivati dal Registro Imprese\n" + "\n".join(lines))
 
     if dossier:
+        # Il blocco `bilanci` del dossier (un solo esercizio, visura) resta
+        # fuori: i dati economici hanno UNA fonte, il blocco per esercizio.
+        dossier = {k: v for k, v in dossier.items() if k != "bilanci"}
         lines = []
         _flatten_dict("dossier", dossier, lines)
         if lines:
             blocks.append("## Dossier certificato (Registro Imprese)\n" + "\n".join(lines))
+
+    blocks.append(_blocco_bilanci(bilanci, storico_completo))
 
     if people:
         rows = []

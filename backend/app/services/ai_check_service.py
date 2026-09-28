@@ -37,8 +37,10 @@ from app.schemas.ai_check import (
     AiQuotaOut,
     ExtractionResult,
 )
-from app.services import bandi_service, entitlement_service, link_policy
+from app.services import bandi_service, bilanci_service, entitlement_service, link_policy
 from app.services.ai_check_prompts import (
+    COMPANY_PACK_VERSION,
+    MATCH_PROMPT_VERSION,
     PROMPT_VERSION,
     SYSTEM_EXTRACT,
     SYSTEM_MATCH,
@@ -188,8 +190,11 @@ async def _usati_membro(primary, owner_id: str, member_id: str, quota: AiQuotaOu
 
 # ----------------------------------------------------------------- richiesta
 
-async def _company_context(primary, company_id: str | None) -> tuple[dict, dict | None, list[dict]]:
-    """Profilo aziendale + dati certificati + persone dell'azienda attiva."""
+async def _company_context(
+    primary, company_id: str | None
+) -> tuple[dict, dict | None, list[dict], list, bool]:
+    """Profilo aziendale + dati certificati + persone + bilanci per esercizio
+    dell'azienda attiva (con la completezza dello storico)."""
     _no_company = BadRequestError(
         "Compila prima i dati aziendali (o usa «Importa da P.IVA» dalla pagina Azienda)"
     )
@@ -227,7 +232,17 @@ async def _company_context(primary, company_id: str | None) -> tuple[dict, dict 
         .execute()
     )
 
-    return company, company_data, people_resp.data or []
+    # Bilanci: best-effort. Senza, i requisiti economici restano
+    # `dato_mancante` (mai `soddisfatto`): meglio che bloccare l'analisi.
+    try:
+        esercizi, storico_completo = await bilanci_service.carica_bilanci(
+            primary, company["id"]
+        )
+    except Exception:
+        logger.exception("bilanci non caricabili per l'ai-check (azienda %s)", company["id"])
+        esercizi, storico_completo = [], False
+
+    return company, company_data, people_resp.data or [], esercizi, storico_completo
 
 
 async def request_check(
@@ -253,7 +268,9 @@ async def request_check(
     # bloccare il bando né gonfiare la quota fino alla prossima GET.
     await _close_stale(primary, owner_id)
 
-    company, company_data, people = await _company_context(primary, active.company_id)
+    company, company_data, people, esercizi, storico_completo = await _company_context(
+        primary, active.company_id
+    )
     if not any(company.get(f) for f in ("ateco_id", "settore_id", "regione_id")) and not company_data:
         raise BadRequestError(
             "Servono più dati aziendali per un'analisi utile: compila ATECO, settore o "
@@ -305,10 +322,13 @@ async def request_check(
         dossier=build_dossier(raw) if raw else None,
         derived=(company_data or {}).get("derived"),
         people=people,
+        bilanci=esercizi,
+        storico_completo=storico_completo,
     )
     prechecks = facet_prechecks(bando, company, (company_data or {}).get("derived"))
 
-    if not await _acquire_lock(primary, owner_id, AI_LOCK_TTL_SECONDS):
+    token = await _acquire_lock(primary, owner_id, AI_LOCK_TTL_SECONDS)
+    if not token:
         raise AppError(
             409,
             "ai_check_in_progress",
@@ -359,7 +379,7 @@ async def request_check(
             raise  # altri guasti DB: semantica 502 del gestore generico
         row = insert.data[0]
     finally:
-        await _release_lock(primary, owner_id)
+        await _release_lock(primary, owner_id, token)
 
     _spawn(
         _run_pipeline(
@@ -501,6 +521,8 @@ async def _run_pipeline(
             meta={
                 "model": ai.model,
                 "prompt_version": PROMPT_VERSION,
+                "match_prompt_version": MATCH_PROMPT_VERSION,
+                "company_pack_version": COMPANY_PACK_VERSION,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "bando_hash": content_hash,
                 "extraction_cached": cache_hit,

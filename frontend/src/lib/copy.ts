@@ -6,7 +6,7 @@
  *  (fascia statistiche, hero, FAQ) e bastava aggiornarne due per renderla
  *  incoerente. Non aggiungere qui stringhe usate una volta sola. */
 
-import type { UserRole } from "../types";
+import type { MotivoBilanci, UserRole } from "../types";
 
 /** Il conteggio è un claim di marketing, NON un dato: la landing non interroga
  *  il catalogo. Aggiornarlo qui lo aggiorna in tutti e tre i punti. */
@@ -151,9 +151,9 @@ export const IMPORT_COPY = {
   titoloEsito: "Dati importati",
 
   introForm:
-    "Recuperiamo i dati ufficiali della tua azienda dal Registro Imprese tramite openapi.it: anagrafica, ATECO, sede e unità locali, cariche, dipendenti e altro.",
+    "Recuperiamo i dati ufficiali della tua azienda dal Registro Imprese tramite openapi.it: anagrafica, ATECO, sede e unità locali, cariche, dipendenti, bilanci degli ultimi anni e altro.",
   attesa:
-    "Recupero dei dati ufficiali dal Registro Imprese in corso. L'operazione può richiedere fino a un paio di minuti: non chiudere questa finestra.",
+    "Recupero dei dati ufficiali e dei bilanci dal Registro Imprese in corso. L'operazione può richiedere qualche minuto: non chiudere questa finestra.",
 
   /** L'anteprima non salva nulla: il testo lo dice prima che l'utente lo chieda. */
   anteprimaTrovata: (piva: string, ragioneSociale: string) =>
@@ -184,4 +184,39 @@ export const IMPORT_COPY = {
   pivaInvalida: "La partita IVA non è valida: verifica le 11 cifre.",
   esitoImportato: (ragioneSociale: string) =>
     `Dati ufficiali di «${ragioneSociale}» importati dal Registro Imprese.`,
+
+  /** Blocco «Bilanci» dell'anteprima. */
+  bilanciTitolo: "Bilanci",
+  bilanciTrovati: (n: number, anni: string) =>
+    n === 1 ? `Trovato 1 esercizio (${anni})` : `Trovati ${n} esercizi (${anni})`,
+  bilanciTrovatiNota: "Dopo la conferma li trovi, anno per anno, nella pagina Azienda.",
+  bilanciNonTrovati: "Bilanci non disponibili",
+  bilanciRecuperabili: "Potrai recuperarli dalla pagina Azienda.",
+  bilanciStoricoRecuperabile: "Potrai recuperare lo storico dalla pagina Azienda.",
+} as const;
+
+/** Bilanci per esercizio: i motivi compaiono sia nell'anteprima dell'import
+ *  sia nella sezione «Bilanci» della pagina Azienda. Frasi neutre: l'invito a
+ *  riprovare lo aggiunge chi può farlo (il titolare), non il motivo. */
+export const BILANCI_COPY = {
+  motivi: {
+    nessun_bilancio: "Il Registro Imprese non ha bilanci depositati per questa azienda.",
+    forma_senza_bilancio:
+      "Per la forma giuridica di questa azienda non è previsto il deposito del bilancio al Registro Imprese.",
+    errore_provider: "Il servizio che fornisce i bilanci non ha risposto correttamente.",
+    esito_incerto: "Il servizio che fornisce i bilanci non ha risposto in tempo.",
+    tempo_insufficiente:
+      "L'importazione è durata più del previsto e i bilanci non sono stati recuperati.",
+    dati_non_corrispondenti:
+      "I bilanci ricevuti non corrispondevano alla partita IVA dell'azienda, quindi non li abbiamo salvati.",
+    non_richiesto: "I bilanci degli anni passati non sono ancora stati recuperati.",
+    piva_diversa:
+      "La partita IVA cercata è diversa da quella dei dati aziendali, quindi non abbiamo recuperato i bilanci.",
+  } satisfies Record<MotivoBilanci, string>,
+  /** Al posto di `motivi.nessun_bilancio` quando un esercizio c'è già (dalla
+   *  visura): «nessun bilancio depositato» contraddirebbe la tabella. */
+  nessunAltroBilancio: "Lo storico del Registro Imprese non riporta altri bilanci di questa azienda.",
+  /** Con `piva_diversa` il recupero parte solo dopo la correzione. */
+  correggiPiva: "Correggi la partita IVA nei dati aziendali, poi recupera lo storico.",
+  recupera: "Recupera i bilanci",
 } as const;

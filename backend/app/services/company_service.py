@@ -69,6 +69,14 @@ async def get_company_for_owner(primary, owner_id: str) -> CompanyOut | None:
     return await _fetch_company(primary, owner_id)
 
 
+async def get_company_for_id(primary, company_id: str) -> CompanyOut | None:
+    """Dati di una specifica azienda per `id`, SENZA regole di visibilità: il
+    chiamante ha già autorizzato l'accesso (progettista assegnato alla
+    consulenza di quell'azienda, con audit). Mai per owner: un Advisor ha più
+    aziende."""
+    return await _fetch_company_by_id(primary, company_id)
+
+
 async def get_company(primary, active) -> CompanyResponse:
     """Dati dell'azienda attiva. `editable` viene dal resolver (un figlio
     attivo legge in sola lettura i dati della famiglia); `company_id` è None

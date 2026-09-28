@@ -1366,17 +1366,18 @@ async def get_full_company(
 ) -> FullCompanyOut:
     """Vista FULL (decisione #4): tutti i dati azienda + dossier certificato.
     Doppia guardia nel service (ruolo già garantito dal router, qui
-    l'assegnazione) e log di OGNI accesso in audit_log."""
+    l'assegnazione) e log di OGNI accesso in audit_log.
+
+    Si legge l'azienda DELLA RICHIESTA (`company_profile_id`), mai «la prima
+    azienda dell'owner»: per un Advisor con più aziende il progettista
+    vedrebbe i dati (e i bilanci) di un altro cliente."""
     request = await _fetch_request(primary, str(request_id))
     if request is None or request.get("assigned_progettista_id") != str(progettista["id"]):
         raise ForbiddenError("Il dossier completo è visibile solo al progettista assegnato")
 
-    company = await company_service.get_company_for_owner(
-        primary, request["family_parent_id"]
-    )
-    dossier = await openapi_service.get_dossier_for_owner(
-        primary, request["family_parent_id"]
-    )
+    company_id = str(request["company_profile_id"])
+    company = await company_service.get_company_for_id(primary, company_id)
+    dossier = await openapi_service.get_dossier_for_company(primary, company_id)
 
     await _audit(
         primary,

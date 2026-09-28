@@ -7,6 +7,7 @@ from app.api.deps import (
     PrimaryClient,
     SecondaryClient,
 )
+from app.schemas.bilanci import BilanciOut
 from app.schemas.company import CompanyFacetsOut, CompanyIn, CompanyResponse
 from app.schemas.openapi_data import (
     DossierResponse,
@@ -16,6 +17,7 @@ from app.schemas.openapi_data import (
     ImportResult,
 )
 from app.services import (
+    bilanci_service,
     company_pdf_service,
     company_service,
     compatibility,
@@ -88,10 +90,11 @@ async def preview_import(
     secondary: SecondaryClient,
     openapi: OpenapiDep,
 ) -> ImportPreview:
-    """Recupera IT-full da openapi.it (A PAGAMENTO) per l'azienda attiva e
-    mostra cosa si sta per importare. NON scrive nulla: il payload resta in
-    staging fino alla conferma. Protetto da cooldown e lock; riusa gratis
-    un'anteprima già pagata."""
+    """Recupera IT-full (e, se serve, lo storico dei bilanci IT-advanced) da
+    openapi.it (A PAGAMENTO) per l'azienda attiva e mostra cosa si sta per
+    importare. NON scrive nulla: i payload restano in staging fino alla
+    conferma. Protetto da P.IVA legata all'azienda, cooldown, lock e tetto
+    giornaliero; riusa gratis un'anteprima già pagata per la stessa azienda."""
     return await openapi_service.preview_import(
         primary, secondary, openapi, active, data.partita_iva
     )
@@ -114,6 +117,24 @@ async def get_dossier(active: ActiveCompanyDep, primary: PrimaryClient) -> Dossi
     """Dossier certificato importato da openapi.it: proprio per il titolare,
     in sola lettura per un figlio attivo."""
     return await openapi_service.get_dossier(primary, active)
+
+
+@router.get("/bilanci", response_model=BilanciOut)
+async def get_bilanci(active: ActiveCompanyDep, primary: PrimaryClient) -> BilanciOut:
+    """Bilanci per esercizio dell'azienda attiva (riga fusa per anno, fonte di
+    ogni campo, indicatori e fasce): titolare e membri con visibilità, questi
+    ultimi in sola lettura. Gratis: al più rimappa i payload già pagati."""
+    return await bilanci_service.get_bilanci(primary, active)
+
+
+@router.post("/bilanci/recupera", response_model=BilanciOut)
+async def recupera_bilanci(
+    active: ActiveCompanyDep, primary: PrimaryClient, openapi: OpenapiDep
+) -> BilanciOut:
+    """«Recupera i bilanci»: storico IT-advanced (A PAGAMENTO) per l'azienda
+    attiva. Solo il titolare; stesse guardie dell'import (P.IVA valida, niente
+    società di persone, cooldown, lock, tetto giornaliero)."""
+    return await bilanci_service.recupera_bilanci(primary, openapi, active)
 
 
 @router.get("/export/pdf")

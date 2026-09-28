@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
+import { useFunzioni } from "../../hooks/useFunzioni";
 import { useMe } from "../../hooks/useMe";
 import { hasAreaProgettista } from "../../lib/roles";
+import NotFound from "../../pages/NotFound";
 
 function FullPageSpinner() {
   return (
@@ -36,5 +38,16 @@ export function ProgettistaRoute({ children }: { children: ReactNode }) {
 
   if (isPending) return <FullPageSpinner />;
   if (!hasAreaProgettista(me?.profile.role)) return <Navigate to="/app/bandi" replace />;
+  return <>{children}</>;
+}
+
+/** Pagine del modulo partenariati: a modulo spento la pagina «non esiste»,
+ *  come le rotte del backend (404), invece di un redirect che la
+ *  rivelerebbe. */
+export function PartenariatiRoute({ children }: { children: ReactNode }) {
+  const { partenariatiAttivo, isPending } = useFunzioni();
+
+  if (isPending) return <FullPageSpinner />;
+  if (!partenariatiAttivo) return <NotFound />;
   return <>{children}</>;
 }

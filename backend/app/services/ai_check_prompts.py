@@ -265,6 +265,20 @@ def compute_content_hash(bando: dict, bando_text: str) -> str:
     return hashlib.sha256(bando_text.encode("utf-8")).hexdigest()
 
 
+def serializza_sezioni(contenuto: dict | None) -> list[tuple[str, str]]:
+    """Le sezioni di `contenuto` come coppie (indice, testo): stessi indici
+    ([S1]..[Sn], compresi i salti sulle voci non valide) e stesso testo dei
+    blocchi di `build_bando_input`, che NON cambia (chiave della cache delle
+    estrazioni). Wrapper pubblico per altri serializzatori del bando
+    (regole di partenariato, WP3)."""
+    sezioni: list[tuple[str, str]] = []
+    for i, section in enumerate((contenuto or {}).get("sections") or [], start=1):
+        if not isinstance(section, dict):
+            continue
+        sezioni.append((f"S{i}", _flatten_section(section).strip()))
+    return sezioni
+
+
 # ------------------------------------------------------------ company pack
 
 NON_DISPONIBILE = "NON DISPONIBILE"

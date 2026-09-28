@@ -144,6 +144,46 @@ class Settings(BaseSettings):
     # Minuti minimi tra due generazioni per la stessa coppia azienda × bando.
     ai_check_cooldown_minutes: int = 5
 
+    # Modulo partenariati (docs/partenariati.md). Spento = ogni rotta del modulo
+    # risponde 404 (anche senza token) e il frontend non lo mostra. In
+    # produzione si accende solo aggiungendo PARTENARIATI_ATTIVO a
+    # docker-compose.yml: il default è quello sicuro.
+    partenariati_attivo: bool = False
+    # Scheduler dedicato (claim giornaliero su partenariati_runs, ora locale di
+    # alert_fuso): parte solo se è acceso anche partenariati_attivo.
+    partenariati_scheduler_attivo: bool = True
+    partenariati_ora_esecuzione: str = "05:30"
+    # Estrazione delle regole di partenariato per bando (WP3). Modello separato
+    # dall'AI-check; i prezzi per modello stanno in services/ai_prezzi.py. Il
+    # modello NON entra nella chiave di cache: cambiarlo non rigenera nulla.
+    partenariato_ai_model: str = "claude-sonnet-5"
+    partenariato_ai_timeout_seconds: float = 180.0
+    partenariato_ai_max_tokens: int = 16000
+    # Tetti documentali: documenti per bando, byte e pagine per PDF, tempi di
+    # download e lettura, caratteri totali inviati al modello.
+    partenariato_max_documenti: int = 4
+    partenariato_pdf_max_bytes: int = 15_000_000
+    partenariato_pdf_max_pagine: int = 150
+    partenariato_pdf_timeout_seconds: float = 30.0
+    partenariato_download_timeout_seconds: float = 20.0
+    partenariato_max_caratteri_documenti: int = 180_000
+    # Analisi avviabili da un utente al giorno (Gratuito: serve l'email
+    # verificata), cooldown per bando e riverifica periodica.
+    partenariato_limite_utente_giorno: int = 10
+    partenariato_limite_utente_gratuito_giorno: int = 3
+    partenariato_cooldown_bando_ore: int = 24
+    partenariato_riverifica_giorni: int = 14
+    # Budget giornalieri FAIL-CLOSED della spesa LLM del modulo, in CENTESIMI
+    # DI USD (il listino Anthropic è in dollari): «bando» per le estrazioni
+    # WP3, «altri» per i servizi WP4/WP5/WP10. 0 = nessuna spesa.
+    partenariato_budget_cents_giorno: int = 500
+    partenariati_ai_budget_cents_giorno_altri: int = 200
+    # Batch notturno delle estrazioni: 0 = spento.
+    partenariato_batch_budget_cents_giorno: int = 0
+    # Scadenza del claim di un'estrazione: copre attesa dei semafori, download,
+    # lettura dei PDF e timeout del modello; oltre, il failsafe la chiude.
+    partenariato_claim_ttl_seconds: int = 900
+
     @model_validator(mode="after")
     def _segreti_obbligatori_in_produzione(self) -> "Settings":
         """Impedisce l'avvio in produzione senza i segreti che degradano in muto.

@@ -95,6 +95,7 @@ Profilo dell'utente corrente + abbonamento attivo con il piano.
   "max_aziende": 1 }
 ```
 `max_aziende` è il limite **effettivo** di aziende gestibili (override utente > piano > 1): >1 identifica un Advisor multi-azienda, e il frontend lo usa per mostrare lo switcher azienda. Il piano espone anche `plan.max_aziende` (default del piano, prima dell'override).
+`funzioni` elenca i moduli accesi su questo ambiente: `{partenariati: bool}` (default `false`, segue `PARTENARIATI_ATTIVO`). A modulo spento il frontend non mostra sezioni, filtri né pagine del modulo.
 `job_position` è presente anche se la voce è stata **disattivata** nel frattempo (catalogo soft-disable): chi l'aveva scelta continua a vederla.
 `role` ∈ `admin`/`cliente`/`progettista`. Per i progettisti — e per gli admin che hanno già un codice — la risposta include anche `progettista: {codice}` (il codice `PRG-00001`, assegnato dal sistema alla promozione, o alla prima proposta per gli admin, e immutabile); il progettista conserva tutte le funzionalità cliente.
 
@@ -348,6 +349,7 @@ Parametri query:
 | `importo_min`, `importo_max` | int (€) | su `importo_totale_eur` |
 | `scadenza_da`, `scadenza_a` | date ISO | intervallo su `data_scadenza` |
 | `scade_entro_giorni` | int 1-365 | da oggi a oggi+N |
+| `partenariato` | string | *(modulo partenariati)* `ammesso` (comprende `obbligatorio`) o `obbligatorio`: solo tra i bandi con le regole già analizzate (esito `estratta`, modalità effettiva verificata), i **500** estratti più di recente (gli id viaggiano nell'URL delle due query del catalogo). Nessun bando → pagina vuota senza interrogare il catalogo. A modulo spento, o con un valore ignoto, il parametro è **ignorato** (mai `400`/`404`) |
 
 Item della risposta: `id`, `slug`, `titolo`, `titolo_breve`, `descrizione_breve`, `stato_bando`, `livello`, date, importi, `ente_erogatore`, `tipologia {id,nome}`, `modalita_erogazione {id,nome}`, `regioni [{id,nome}]`, `compatibilita` (vedi sotto).
 
@@ -361,6 +363,22 @@ Item della risposta: `id`, `slug`, `titolo`, `titolo_breve`, `descrizione_breve`
 Dettaglio completo: campi dell'elenco (`compatibilita` compreso) + `area_geografica`, `tematica[]`, `link_bando`, `link_candidatura`, `contenuto` (JSON strutturato a sezioni/segmenti, renderizzato dal frontend), `allegati[]`, `programma`, `settori[]`, `beneficiari[]`, `codici_ateco[]`. `404` se lo slug non esiste o il bando non è pubblicabile.
 
 **Filtro domini esclusi** (`services/link_policy.py`): i rimandi a domini di aggregatori concorrenti (oggi `obiettivoeuropa.com`, sottodomini compresi) non escono mai dall'API — `link_bando`/`link_candidatura` diventano `null`, gli allegati bloccati vengono rimossi, e dentro `contenuto` qualunque segmento col dominio nel testo visibile cade per intero, un segmento «link» bloccato senza menzione visibile perde solo il link (degrada a testo) e le menzioni testuali spariscono anche dai testi fuori dai segmenti. Lo stesso filtro si applica alla riga passata all'AI-check (il modello non deve citare quei link nel report) e, in lettura, ai report AI-check storici — su ogni via: cliente e dettaglio richiesta dei progettisti. Vedi docs/architecture.md, decisione 11.
+
+## Regole di partenariato (modulo partenariati, a flag)
+
+Con `PARTENARIATI_ATTIVO` spento ogni rotta del modulo risponde **`404 not_found`** come una rotta inesistente: anche senza token e anche con un corpo JSON malformato (flag sul router e route class `RottaPartenariati`, che lo controlla prima della lettura del corpo). Piano e regole: `docs/partenariati.md` (R1-R9).
+
+### `GET /bandi/{slug}/partenariato`
+Stato delle regole di partenariato del bando (poll-on-read: applica prima il failsafe dei claim scaduti). Risposta `PartenariatoBandoOut`: `bando_id`, `bando_slug`, `stato` (`non_estratta | in_corso | pronta | errore | nessun_segnale`), `fase` (`documenti | lettura | analisi`, solo in corso), `aggiornamento_in_corso` (in corso con un risultato precedente ancora servito), `aggiornabile`, `regole`, `fonti[]`, `estratta_at`, `verificata_at`, `avviata_at`, `errore` (messaggio dell'ultimo tentativo fallito, anche con le regole precedenti servite), `riprova_dopo`, `puo_avviare`, `motivo_non_avviabile` (`ai_non_configurata | in_corso | cooldown | aggiornata`), `calls_aperte`, `stato_bando`.
+- `regole` (solo con esito `estratta`): modalità, forme ammesse, costituzione, partner min/max con `conteggio_note`, composizione, quote (0–100), vincoli, regole finanziarie (contratto `schemas/regole_finanziarie.py`), documenti richiesti, `fonti_insufficienti`, `note`, `avvisi`. Ogni voce ha `stato` (`verificata | da_verificare`), `avvisi[]` e `citazione {sezione, fonte_etichetta, testo, verificata, url_documento (solo https), pagina}`. `modalita_effettiva` = modalità dichiarata **solo** con una citazione verificata, coerente e abbastanza lunga (almeno 3 parole e 15 caratteri), altrimenti `non_determinabile`: è il valore del filtro della lista. I testi vengono dal modello: vanno mostrati come testo semplice.
+- `fonti[]`: `{n, etichetta, dominio, url, stato, pagine_totali, pagine_incluse, troncato}`; `url` è `null` per i documenti bloccati dalla policy dei link (anche via redirect).
+- Mai il claim né l'output grezzo del modello. Errori: `404` (bando o flag).
+
+### `POST /bandi/{slug}/partenariato/analisi` (202 · 200)
+Body facoltativo `{forza: bool = false}`. Avvia l'estrazione in background, a **carico della piattaforma** (mai una riga in `ai_checks`, non consuma la quota AI-check): `202` se è partita ora, `200` se il risultato è ancora fresco o un'estrazione è già in corso (nessuna nuova spesa). `forza=true` («Analizza comunque») vale solo dopo un esito `nessun_segnale` e una volta sola, e salta il cooldown. Regole di spesa: limite per utente dal piano del titolare (Gratuito o senza abbonamento **3** al giorno e solo con email verificata, altri piani **10**; non contano le esecuzioni chiuse senza chiamare il modello), cooldown di 24 ore per bando e backoff dopo un errore (6 h · 2^(n-1), massimo 72 h), budget giornaliero **fail-closed** del gruppo `bando` con riserva al caso peggiore prenotata prima della chiamata, una sola estrazione per bando alla volta (claim con TTL e heartbeat). Errori: `404`, `403 email_non_verificata`, `409 forza_non_ammessa`, `429 partenariato_cooldown` / `ai_limite_giornaliero` / `ai_sospesa_oggi`, `503 ai_not_configured`.
+
+### `GET /partenariati/vocabolario`
+Vocabolario controllato v1: `{versione, tipi_soggetto: [{codice, etichetta, beneficiari}], competenze: [{codice, etichetta, area}], forme: [{codice, etichetta, responsabilita, costituzione, documenti: [{codice, etichetta}]}], ruoli: [{codice, etichetta}]}`.
 
 ## Bandi salvati
 
@@ -517,6 +535,9 @@ Storico acquisti di **tutti** gli utenti (più recenti prima, `page_size` max 10
 
 ### `POST /admin/payment-anomalies/{audit_id}/resolve`
 Marca l'anomalia come risolta (scrive `payments.orphan_resolved` con l'admin come attore). → `{ok: true}`.
+
+### `GET /admin/partenariati/estrazioni?stato=&esito=&page=&page_size=` · `POST /admin/partenariati/estrazioni/{bando_id}` · `POST /admin/partenariati/run?ripeti=`
+*(admin, modulo partenariati)* Elenco delle estrazioni per bando dalla più recente (`stato` `in_corso|pronta|errore`, `esito` `estratta|nessun_segnale`, `page_size` max 100; mai claim né output grezzo). Forzatura di una nuova estrazione (body facoltativo `{ignora_cooldown}`): paga sempre il modello, senza limite per utente, nello stesso budget giornaliero delle estrazioni; `202`/`200` come la POST utente. Run manuale dello scheduler del modulo: senza `ripeti` `409` se quella di oggi è già stata eseguita → `{giorno, riepilogo}`.
 
 ### `POST /admin/alerts/run` · `GET /admin/alerts/runs?limit=`
 Esegue subito la run giornaliera degli alert (senza `ripeti`: `409` se quella di oggi è già stata eseguita; `ripeti=true` riesegue — il ledger impedisce comunque i doppi invii) e ritorna i contatori `{giorno, esito, bandi_candidati, destinatari, email_inviate, email_fallite, dettagli}`. `GET /runs` = registro delle esecuzioni (osservabilità).

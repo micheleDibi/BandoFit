@@ -106,6 +106,9 @@ class BandiFilters:
     scadenza_da: date | None = None
     scadenza_a: date | None = None
     scade_entro_giorni: int | None = None
+    # Id ammessi (filtro «Ammette partenariato», dal DB primario). None =
+    # nessun filtro; lista vuota = nessun bando (pagina vuota, niente query).
+    bando_ids: list[int] | None = None
 
 
 def sanitize_fts_term(term: str) -> str:
@@ -181,6 +184,8 @@ def apply_filters(query, filters: BandiFilters, today: date | None = None):
         query = query.gte("data_scadenza", today.isoformat()).lte(
             "data_scadenza", (today + timedelta(days=filters.scade_entro_giorni)).isoformat()
         )
+    if filters.bando_ids is not None:
+        query = query.in_("id", filters.bando_ids)
 
     for facet, (alias, _junction, id_col) in JUNCTION_FACETS.items():
         ids = getattr(filters, facet)
@@ -324,6 +329,9 @@ async def fetch_bandi(
     — sempre in coda, qualunque ordinamento. PostgREST non sa ordinare per
     espressioni, quindi il confine è realizzato con due query complementari;
     la pagina a cavallo del confine unisce le due code."""
+    if filters.bando_ids is not None and not filters.bando_ids:
+        # `id=in.()` non va mandato al catalogo: nessun id ammesso = pagina vuota.
+        return Page.build([], 0, page, page_size)
     column, desc_open, desc_closed = SORT_OPTIONS.get(sort, SORT_OPTIONS[DEFAULT_SORT])
     offset = (page - 1) * page_size
     today = today_italy()

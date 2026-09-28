@@ -44,6 +44,13 @@ class ProgettistaOut(BaseModel):
     codice: str
 
 
+class FunzioniOut(BaseModel):
+    """Moduli accesi su questo ambiente (flag di configurazione del backend):
+    il frontend nasconde menu e card dei moduli spenti."""
+
+    partenariati: bool = False
+
+
 class MeOut(BaseModel):
     profile: ProfileOut
     subscription: SubscriptionOut | None = None
@@ -57,6 +64,9 @@ class MeOut(BaseModel):
     # Flag child-aware per lo switcher (0031): per un membro ATTIVO è vero se
     # vede più di un'azienda (visibilità ∩ vive); per gli altri, max_aziende>1.
     multi_azienda: bool = False
+    # Flag dei moduli: con il default (tutto spento) un MeOut costruito altrove
+    # non accende nulla per sbaglio.
+    funzioni: FunzioniOut = Field(default_factory=FunzioniOut)
     # Presente solo nella risposta di un cambio piano che ha causato retrocessioni.
     plan_switch_adjustment: PlanSwitchAdjustment | None = None
 

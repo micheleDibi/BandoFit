@@ -17,6 +17,7 @@ from app.api.routers import (
     addons,
     admin_addons,
     admin_alerts,
+    admin_partenariati,
     admin_payments,
     admin_plans,
     admin_users,
@@ -36,6 +37,8 @@ from app.api.routers import (
     lookups,
     me,
     notifications,
+    partenariati,
+    partenariati_bandi,
     payments,
     plans,
     preferences,
@@ -95,8 +98,19 @@ async def lifespan(app: FastAPI):
         app.state.payment_task = asyncio.create_task(
             payment_scheduler.run_forever(app.state.primary, app.state.revolut)
         )
+    # Scheduler del modulo partenariati (failsafe e batch delle estrazioni):
+    # solo con il modulo acceso. Import locale come gli altri scheduler.
+    app.state.partenariati_task = None
+    if settings.partenariati_attivo and settings.partenariati_scheduler_attivo:
+        from app.services import partenariati_scheduler
+
+        app.state.partenariati_task = asyncio.create_task(
+            partenariati_scheduler.run_forever(
+                app.state.primary, app.state.secondary, app.state.ai
+            )
+        )
     yield
-    for task_attr in ("alert_task", "payment_task"):
+    for task_attr in ("alert_task", "payment_task", "partenariati_task"):
         task = getattr(app.state, task_attr, None)
         if task is not None:
             task.cancel()
@@ -186,6 +200,8 @@ for router in (
     calendar.router,
     lookups.router,
     bandi.router,
+    partenariati_bandi.router,
+    partenariati.router,
     billing.router,
     payments.router,
     webhooks.router,
@@ -194,5 +210,6 @@ for router in (
     admin_addons.router,
     admin_alerts.router,
     admin_payments.router,
+    admin_partenariati.router,
 ):
     app.include_router(router, prefix=API_PREFIX)

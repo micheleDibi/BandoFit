@@ -8,6 +8,7 @@ from uuid import UUID
 
 from postgrest.exceptions import APIError
 
+from app.core.config import get_settings
 from app.core.errors import (
     BadRequestError,
     ForbiddenError,
@@ -22,6 +23,7 @@ from app.schemas.user import (
     AdminFamilyInfo,
     AdminUserOut,
     AdminUserUpdate,
+    FunzioniOut,
     MeOut,
     ProfileOut,
     ProfileUpdate,
@@ -242,6 +244,7 @@ async def get_me(primary, user_id: str) -> MeOut:
         progettista=await _fetch_progettista(primary, user_id, row["role"]),
         max_aziende=max_aziende,
         multi_azienda=multi_azienda,
+        funzioni=FunzioniOut(partenariati=get_settings().partenariati_attivo),
     )
 
 

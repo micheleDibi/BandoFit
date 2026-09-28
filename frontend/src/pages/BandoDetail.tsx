@@ -10,6 +10,7 @@ import {
   FileText,
   Landmark,
 } from "lucide-react";
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AiCheckCard } from "../components/bandi/AiCheckCard";
 import { AiCheckReport } from "../components/bandi/AiCheckReport";
@@ -19,6 +20,9 @@ import { CompatibilitaBadge } from "../components/bandi/CompatibilitaBadge";
 import { CompatibilitaCard } from "../components/bandi/CompatibilitaCard";
 import { ContenutoRenderer } from "../components/bandi/ContenutoRenderer";
 import { SaveBandoButton } from "../components/bandi/SaveBandoButton";
+import { vaiASezionePartenariato } from "../components/partenariati/ancora";
+import { PartenariatoCard } from "../components/partenariati/PartenariatoCard";
+import { PartenariatoSection } from "../components/partenariati/PartenariatoSection";
 import { Badge } from "../components/ui/Badge";
 import { Button, buttonClasses, LinkButton } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -52,6 +56,9 @@ export default function BandoDetail() {
   const { slug } = useParams<{ slug: string }>();
   const { data: bando, isPending, isError, error, refetch } = useBando(slug);
   const addDeadline = useAddBandoDeadline();
+  // Sezione «Regole di partenariato» aperta per QUESTO bando: la pagina resta
+  // montata passando da un bando all'altro, e la sezione riparte chiusa.
+  const [partenariatoApertoPer, setPartenariatoApertoPer] = useState<string | null>(null);
 
   if (isPending) {
     return (
@@ -215,6 +222,15 @@ export default function BandoDetail() {
             <CompatibilitaCard bando={bando} />
             <AiCheckCard slug={bando.slug} />
             <ConsultoCard slug={bando.slug} />
+            {/* Modulo partenariati: la card non si rende a modulo spento. */}
+            <PartenariatoCard
+              key={bando.slug}
+              slug={bando.slug}
+              onVediRegole={() => {
+                setPartenariatoApertoPer(bando.slug);
+                vaiASezionePartenariato();
+              }}
+            />
 
             {linkPrincipale && (
               <Card className="p-5">
@@ -284,6 +300,13 @@ export default function BandoDetail() {
       </div>
 
       <AiCheckReport slug={bando.slug} />
+      {/* key=slug: guardia dell'avvio automatico ed errori ripartono per bando. */}
+      <PartenariatoSection
+        key={bando.slug}
+        slug={bando.slug}
+        open={partenariatoApertoPer === bando.slug}
+        onOpenChange={(aperta) => setPartenariatoApertoPer(aperta ? bando.slug : null)}
+      />
     </div>
   );
 }

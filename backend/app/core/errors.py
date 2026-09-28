@@ -1,7 +1,12 @@
+from typing import TYPE_CHECKING
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+if TYPE_CHECKING:  # solo per l'annotazione: il client importa già questo modulo
+    from app.clients.anthropic_ai import AiUsage
 
 
 class AppError(Exception):
@@ -119,6 +124,11 @@ class AiNotConfiguredError(AppError):
 
 class AiUpstreamError(AppError):
     """Errore dell'API Anthropic (indisponibilità, risposta malformata)."""
+
+    # Token della chiamata quando la risposta HTTP è arrivata ma è inutilizzabile
+    # (output troncato, JSON non valido): la chiamata è addebitata comunque e il
+    # chiamante deve poterla contare. None = nessuna risposta o usage ignoto.
+    usage: "AiUsage | None" = None
 
     def __init__(self, message: str = "Il servizio di analisi non è al momento disponibile, riprova più tardi"):
         super().__init__(502, "ai_upstream_error", message)

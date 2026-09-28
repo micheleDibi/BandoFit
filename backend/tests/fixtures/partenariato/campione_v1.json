@@ -1,6 +1,6 @@
 {
   "versione": 1,
-  "descrizione": "Campione di valutazione delle regole di partenariato (WP3). Solo id, slug troncato ed etichette: nessun testo del catalogo né URL. Estratto dal DB bandi vivo il 2026-09-28 (bandi non chiusi con almeno un PDF ufficiale in bando_link). Le etichette si compilano in WP3 leggendo i documenti ufficiali e vanno validate da Michele.",
+  "descrizione": "Campione di valutazione delle regole di partenariato (WP3): 20 positivi e 5 negativi. Solo id, slug troncato ed etichette: nessun testo del catalogo né URL. Estratto dal DB bandi vivo il 2026-09-28 (bandi non chiusi con almeno un PDF ufficiale in bando_link; positivi = formule di partenariato nel contenuto del catalogo). Etichette compilate il 2026-09-28 leggendo il contenuto e i PDF ufficiali, da validare da Michele. fonte_verificata: 'pdf' = etichetta verificata su un PDF ufficiale; 'solo_catalogo' = solo sul contenuto del catalogo; 'nessuna' = nessuna fonte utile. Le quote sono percentuali 0-100 del costo del progetto. non_raggiungibili (facoltativo) = campi dell'etichetta che poggiano su documenti che la pipeline non può leggere (fuori da bando_link o dietro un redirect non sicuro): la valutazione li misura anche a parte.",
   "campione": [
     {
       "bando_id": 17693,
@@ -8,13 +8,16 @@
       "tipologia_bando_id": 1,
       "gruppo": "positivo",
       "etichetta": {
-        "modalita": null,
-        "partner_min": null,
+        "modalita": "obbligatorio",
+        "partner_min": 5,
         "partner_max": null,
         "quote": [],
-        "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "forme": [
+          "consorzio_ue"
+        ],
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     },
     {
@@ -23,13 +26,16 @@
       "tipologia_bando_id": 1,
       "gruppo": "positivo",
       "etichetta": {
-        "modalita": null,
-        "partner_min": null,
+        "modalita": "obbligatorio",
+        "partner_min": 3,
         "partner_max": null,
         "quote": [],
-        "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "forme": [
+          "consorzio_ue"
+        ],
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     },
     {
@@ -38,13 +44,21 @@
       "tipologia_bando_id": 2,
       "gruppo": "positivo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "ammesso",
         "partner_min": null,
-        "partner_max": null,
+        "partner_max": 5,
         "quote": [],
-        "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "forme": [
+          "rete_contratto",
+          "consorzio",
+          "accordo_partenariato"
+        ],
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf",
+        "non_raggiungibili": [
+          "partner_max"
+        ]
       }
     },
     {
@@ -53,13 +67,42 @@
       "tipologia_bando_id": 2,
       "gruppo": "positivo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "ammesso",
         "partner_min": null,
-        "partner_max": null,
-        "quote": [],
-        "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "partner_max": 5,
+        "quote": [
+          {
+            "ambito": "per_partner",
+            "categoria": null,
+            "min": 10,
+            "max": null
+          },
+          {
+            "ambito": "per_partner",
+            "categoria": null,
+            "min": 5,
+            "max": null
+          },
+          {
+            "ambito": "per_categoria",
+            "categoria": "grande_impresa",
+            "min": 10,
+            "max": null
+          }
+        ],
+        "forme": [
+          "rete_contratto",
+          "consorzio",
+          "accordo_partenariato"
+        ],
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf",
+        "non_raggiungibili": [
+          "partner_max",
+          "quote",
+          "forme"
+        ]
       }
     },
     {
@@ -68,13 +111,14 @@
       "tipologia_bando_id": 2,
       "gruppo": "positivo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "ammesso",
         "partner_min": null,
         "partner_max": null,
         "quote": [],
         "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     },
     {
@@ -83,13 +127,14 @@
       "tipologia_bando_id": 2,
       "gruppo": "positivo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "ammesso",
         "partner_min": null,
         "partner_max": null,
         "quote": [],
         "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     },
     {
@@ -98,13 +143,17 @@
       "tipologia_bando_id": 2,
       "gruppo": "positivo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "ammesso",
         "partner_min": null,
         "partner_max": null,
         "quote": [],
         "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf",
+        "non_raggiungibili": [
+          "modalita"
+        ]
       }
     },
     {
@@ -113,13 +162,35 @@
       "tipologia_bando_id": 2,
       "gruppo": "positivo",
       "etichetta": {
-        "modalita": null,
-        "partner_min": null,
+        "modalita": "obbligatorio",
+        "partner_min": 2,
         "partner_max": null,
-        "quote": [],
-        "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "quote": [
+          {
+            "ambito": "per_partner",
+            "categoria": null,
+            "min": 10,
+            "max": null
+          },
+          {
+            "ambito": "capofila",
+            "categoria": null,
+            "min": 25,
+            "max": null
+          },
+          {
+            "ambito": "per_categoria",
+            "categoria": "organismo_ricerca",
+            "min": null,
+            "max": 33
+          }
+        ],
+        "forme": [
+          "accordo_partenariato"
+        ],
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     },
     {
@@ -128,13 +199,14 @@
       "tipologia_bando_id": 3,
       "gruppo": "positivo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "non_determinabile",
         "partner_min": null,
         "partner_max": null,
         "quote": [],
         "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     },
     {
@@ -143,13 +215,17 @@
       "tipologia_bando_id": 3,
       "gruppo": "positivo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "ammesso",
         "partner_min": null,
         "partner_max": null,
         "quote": [],
-        "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "forme": [
+          "ats",
+          "ati_rti"
+        ],
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     },
     {
@@ -158,13 +234,14 @@
       "tipologia_bando_id": 3,
       "gruppo": "positivo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "ammesso",
         "partner_min": null,
         "partner_max": null,
         "quote": [],
         "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     },
     {
@@ -173,13 +250,14 @@
       "tipologia_bando_id": 3,
       "gruppo": "positivo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "non_determinabile",
         "partner_min": null,
         "partner_max": null,
         "quote": [],
         "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     },
     {
@@ -188,13 +266,16 @@
       "tipologia_bando_id": 3,
       "gruppo": "positivo",
       "etichetta": {
-        "modalita": null,
-        "partner_min": null,
+        "modalita": "obbligatorio",
+        "partner_min": 6,
         "partner_max": null,
         "quote": [],
-        "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "forme": [
+          "consorzio"
+        ],
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     },
     {
@@ -203,13 +284,123 @@
       "tipologia_bando_id": 3,
       "gruppo": "positivo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "non_ammesso",
         "partner_min": null,
         "partner_max": null,
         "quote": [],
         "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 18446,
+      "slug_prefisso": "puglia-trasformazioni-innovazione-digitale-pmi",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [
+          {
+            "ambito": "per_partner",
+            "categoria": null,
+            "min": null,
+            "max": 66.67
+          }
+        ],
+        "forme": [
+          "ats",
+          "rete_contratto",
+          "consorzio"
+        ],
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 907910,
+      "slug_prefisso": "piemonte-voucher-digitalizzazione-pmi-2026",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": 3,
+        "partner_max": 20,
+        "quote": [],
+        "forme": [],
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 18207,
+      "slug_prefisso": "sardegna-aiuti-sportello-ricerca-sviluppo-transizione-energetica-mpmi",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": null,
+        "partner_max": 2,
+        "quote": [
+          {
+            "ambito": "per_categoria",
+            "categoria": "organismo_ricerca",
+            "min": 10,
+            "max": 30
+          }
+        ],
+        "forme": [
+          "ati_rti"
+        ],
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf",
+        "non_raggiungibili": [
+          "quote",
+          "forme"
+        ]
+      }
+    },
+    {
+      "bando_id": 17509,
+      "slug_prefisso": "veneto-distretti-commercio-pmi-fondo-perduto",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": "obbligatorio",
+        "partner_min": 4,
+        "partner_max": null,
+        "quote": [],
+        "forme": [
+          "accordo_partenariato"
+        ],
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 342850,
+      "slug_prefisso": "cciaa-cuneo-contributi-reti-imprese",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": "obbligatorio",
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [
+          "rete_contratto",
+          "rete_soggetto"
+        ],
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     },
     {
@@ -218,13 +409,14 @@
       "tipologia_bando_id": 4,
       "gruppo": "positivo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "obbligatorio",
         "partner_min": null,
         "partner_max": null,
         "quote": [],
         "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "solo_catalogo"
       }
     },
     {
@@ -233,13 +425,14 @@
       "tipologia_bando_id": 3,
       "gruppo": "negativo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "non_determinabile",
         "partner_min": null,
         "partner_max": null,
         "quote": [],
         "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     },
     {
@@ -248,13 +441,14 @@
       "tipologia_bando_id": 3,
       "gruppo": "negativo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "non_determinabile",
         "partner_min": null,
         "partner_max": null,
         "quote": [],
         "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     },
     {
@@ -263,13 +457,14 @@
       "tipologia_bando_id": 3,
       "gruppo": "negativo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "non_determinabile",
         "partner_min": null,
         "partner_max": null,
         "quote": [],
         "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     },
     {
@@ -278,13 +473,14 @@
       "tipologia_bando_id": 3,
       "gruppo": "negativo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "non_determinabile",
         "partner_min": null,
         "partner_max": null,
         "quote": [],
         "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     },
     {
@@ -293,15 +489,15 @@
       "tipologia_bando_id": 3,
       "gruppo": "negativo",
       "etichetta": {
-        "modalita": null,
+        "modalita": "ammesso",
         "partner_min": null,
         "partner_max": null,
         "quote": [],
         "forme": [],
-        "verificato_da": null,
-        "verificato_at": null
+        "verificato_da": "claude (da validare da Michele)",
+        "verificato_at": "2026-09-28",
+        "fonte_verificata": "pdf"
       }
     }
-  ],
-  "da_aggiungere": "5 positivi regionali scelti con la stessa regola all'inizio del WP3"
+  ]
 }

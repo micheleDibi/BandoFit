@@ -1,14 +1,17 @@
 import uuid
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, Response
+from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from supabase import AsyncClient
 
 from app.clients.anthropic_ai import AiCheckClient as _AiCheckClient
 from app.clients.openapi import OpenapiClient as _OpenapiClient
 from app.clients.revolut import RevolutClient as _RevolutClient
+from app.core.config import get_settings
 from app.core.errors import ForbiddenError, NotFoundError, UnauthorizedError
 from app.core.security import decode_supabase_jwt
 from app.services.user_service import PROFILE_SELECT, ensure_profile
@@ -240,3 +243,37 @@ async def require_billing_account(user: CurrentUser, primary: PrimaryClient) -> 
 
 
 BillingAccount = Annotated[dict, Depends(require_billing_account)]
+
+
+async def require_partenariati_attivo() -> None:
+    """Flag del modulo partenariati (docs/partenariati.md, T1).
+
+    A flag spento risponde 404 come una rotta che non esiste: non rivela che la
+    funzione c'è. Sui router NUOVI va a livello di router,
+    `APIRouter(dependencies=[Depends(require_partenariati_attivo)])`: FastAPI
+    risolve le dipendenze del router prima dei parametri della rotta, quindi il
+    404 arriva anche senza token, prima dell'autenticazione. Sulle rotte
+    aggiunte a router ESISTENTI va sulla singola rotta
+    (`@router.get(..., dependencies=[Depends(require_partenariati_attivo)])`),
+    così le rotte che ci sono già non cambiano comportamento.
+
+    I router nuovi usano anche `route_class=RottaPartenariati`: FastAPI legge
+    il corpo JSON PRIMA delle dipendenze, e un corpo malformato darebbe 422
+    invece del 404."""
+    if not get_settings().partenariati_attivo:
+        raise NotFoundError("Risorsa non trovata")
+
+
+class RottaPartenariati(APIRoute):
+    """Rotta dei router del modulo partenariati: il flag si controlla prima
+    di tutto, anche della lettura del corpo (a flag spento un POST con JSON
+    malformato risponde 404 come una rotta inesistente, non 422)."""
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        gestore = super().get_route_handler()
+
+        async def con_flag(request: Request) -> Response:
+            await require_partenariati_attivo()
+            return await gestore(request)
+
+        return con_flag

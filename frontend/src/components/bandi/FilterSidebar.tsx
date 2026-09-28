@@ -1,6 +1,9 @@
 import { SlidersHorizontal } from "lucide-react";
-import type { Lookups } from "../../types";
+import { useId } from "react";
+import type { FiltroPartenariato, Lookups } from "../../types";
 import type { BandiFilterState, FacetKey } from "../../hooks/useBandiFilters";
+import { useFunzioni } from "../../hooks/useFunzioni";
+import { PARTENARIATO_COPY } from "../../lib/copy";
 import { Button } from "../ui/Button";
 import { FacetGroup } from "./FacetGroup";
 import { Skeleton } from "../ui/states";
@@ -9,6 +12,12 @@ const STATI = [
   { id: "aperto", label: "Aperto" },
   { id: "in apertura prossimamente", label: "In apertura prossimamente" },
   { id: "chiuso", label: "Chiuso" },
+];
+
+const OPZIONI_PARTENARIATO: { valore: FiltroPartenariato | null; label: string }[] = [
+  { valore: null, label: PARTENARIATO_COPY.filtroTutti },
+  { valore: "ammesso", label: PARTENARIATO_COPY.filtro.ammesso },
+  { valore: "obbligatorio", label: PARTENARIATO_COPY.filtro.obbligatorio },
 ];
 
 export function FilterSidebar({
@@ -28,6 +37,11 @@ export function FilterSidebar({
   onReset: () => void;
   activeCount: number;
 }) {
+  const { partenariatiAttivo } = useFunzioni();
+  // La sidebar è montata due volte (desktop e drawer mobile): nomi e id unici,
+  // altrimenti i radio delle due copie farebbero un solo gruppo.
+  const partenariatoId = useId();
+
   if (!lookups) {
     return (
       <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-card">
@@ -72,6 +86,38 @@ export function FilterSidebar({
             ))}
           </ul>
         </div>
+
+        {/* Partenariato (modulo partenariati): vale solo sui bandi già
+            analizzati, quindi lo si dice accanto alle opzioni. */}
+        {partenariatiAttivo && (
+          <div className="border-b border-slate-100 px-2 py-3">
+            <fieldset aria-describedby={`${partenariatoId}-nota`}>
+              <legend className="text-sm font-semibold text-slate-800">
+                {PARTENARIATO_COPY.filtroTitolo}
+              </legend>
+              <ul className="mt-2 space-y-0.5">
+                {OPZIONI_PARTENARIATO.map((opzione) => (
+                  <li key={opzione.valore ?? "tutti"}>
+                    <label className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-sm text-slate-600 transition-colors hover:bg-slate-50">
+                      <input
+                        type="radio"
+                        name={`${partenariatoId}-partenariato`}
+                        value={opzione.valore ?? ""}
+                        checked={filters.partenariato === opzione.valore}
+                        onChange={() => onUpdate({ partenariato: opzione.valore })}
+                        className="size-4 cursor-pointer accent-brand-500"
+                      />
+                      {opzione.label}
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <p id={`${partenariatoId}-nota`} className="mt-1.5 px-1.5 text-xs text-slate-500">
+                {PARTENARIATO_COPY.filtroNota}
+              </p>
+            </fieldset>
+          </div>
+        )}
 
         <FacetGroup
           title="Tipologia"

@@ -8,6 +8,8 @@
 
 import type {
   ErroreRichiestaBilancio,
+  FiltroPartenariato,
+  ModalitaPartenariato,
   MotivoBilanci,
   StatoRichiestaBilancio,
   UserRole,
@@ -326,4 +328,35 @@ export const BILANCIO_UFFICIALE_COPY = {
   esitoInviata: "Richiesta inviata. Di solito arriva entro 15 minuti: ti avvisiamo quando è pronto.",
   esitoSenzaConferma:
     "Non abbiamo ricevuto la conferma in tempo. Controlla le richieste qui sotto: se compare, è partita e non devi rifarla.",
+} as const;
+
+/** Regole di partenariato del bando (WP3): card e sezione di BandoDetail,
+ *  filtro e chip della lista bandi. */
+export const PARTENARIATO_COPY = {
+  /** Avvertenza fissa sotto le regole estratte: non riformulare senza il
+   *  legale (docs/partenariati.md §6, testi legali in copy.ts). */
+  disclaimer:
+    "Estratto automaticamente dai documenti ufficiali: verifica sempre sul testo del bando prima di decidere.",
+  /** Badge della modalità: sempre in parole, il colore non basta da solo. */
+  modalita: {
+    obbligatorio: "Partenariato obbligatorio",
+    ammesso: "Partenariato ammesso",
+    non_ammesso: "Solo partecipazione singola",
+    non_determinabile: "Modalità non chiara",
+  } satisfies Record<ModalitaPartenariato, string>,
+  modalitaSpiegazione: {
+    obbligatorio:
+      "Si partecipa solo insieme ad altri soggetti (raggruppamento, rete, consorzio o simili).",
+    ammesso: "Puoi partecipare da solo oppure insieme ad altri soggetti.",
+    non_ammesso: "Il bando non ammette partenariati: si partecipa da soli.",
+    non_determinabile: "Il testo disponibile non basta per stabilirlo: controlla il bando.",
+  } satisfies Record<ModalitaPartenariato, string>,
+  /** Filtro della lista bandi e relativo chip. */
+  filtroTitolo: "Partenariato",
+  filtroTutti: "Tutti",
+  filtro: {
+    ammesso: "Ammette partenariato",
+    obbligatorio: "Richiede partenariato",
+  } satisfies Record<FiltroPartenariato, string>,
+  filtroNota: "Solo tra i bandi già analizzati: l'elenco cresce man mano.",
 } as const;

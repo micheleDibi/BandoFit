@@ -390,7 +390,14 @@ export interface Me {
   /** Flag child-aware per lo switcher (0031): per un membro attivo è vero se
    *  vede più di un'azienda (visibilità ∩ vive); per gli altri max_aziende>1. */
   multi_azienda: boolean;
+  /** Moduli accesi su questo ambiente (flag del backend): un modulo spento non
+   *  compare da nessuna parte (menu, card, filtri). Default tutto spento. */
+  funzioni: Funzioni;
   plan_switch_adjustment?: PlanSwitchAdjustment | null;
+}
+
+export interface Funzioni {
+  partenariati: boolean;
 }
 
 /** Voce dell'elenco aziende gestite (Advisor multi-azienda). */
@@ -1253,4 +1260,377 @@ export interface AddonLedgerEntry {
   delta: number;
   note: string | null;
   created_at: string;
+}
+
+// ---- Partenariati: regole di partenariato per bando (WP3) ------------------
+
+/** Come il bando ammette la partecipazione in aggregazione. */
+export type ModalitaPartenariato =
+  | "obbligatorio"
+  | "ammesso"
+  | "non_ammesso"
+  | "non_determinabile";
+
+/** Filtro della lista bandi (`GET /bandi?partenariato=`): `ammesso` comprende
+ *  anche i bandi che lo rendono obbligatorio. Vale solo sui bandi già
+ *  analizzati. */
+export type FiltroPartenariato = "ammesso" | "obbligatorio";
+
+export type StatoPartenariatoBando =
+  | "non_estratta"
+  | "in_corso"
+  | "pronta"
+  | "errore"
+  | "nessun_segnale";
+
+/** Avanzamento dentro `in_corso`: documenti → lettura → analisi. */
+export type FasePartenariato = "documenti" | "lettura" | "analisi";
+
+export type StatoVoceRegola = "verificata" | "da_verificare";
+
+/** Passaggio del bando da cui viene una voce, già risolto dal server. */
+export interface CitazioneRegola {
+  /** Blocco citato: `META` o `S2` (scheda del bando), `D1-p3` (documento 1,
+   *  pagina 3). */
+  sezione: string;
+  /** «Avviso pubblico — pag. 3» oppure «Scheda del bando». */
+  fonte_etichetta: string;
+  testo: string;
+  /** Il testo è stato ritrovato alla lettera nella fonte. */
+  verificata: boolean;
+  /** Solo https (il server scarta il resto); null per la scheda del bando. */
+  url_documento: string | null;
+  pagina: number | null;
+}
+
+/** Ogni voce delle regole porta il suo stato e la sua citazione: le voci
+ *  `da_verificare` (citazione non ritrovata o valore incoerente) non entrano
+ *  negli usi automatici (filtro, call, matching). */
+export interface VoceRegola {
+  stato: StatoVoceRegola;
+  citazione: CitazioneRegola | null;
+  /** Perché la voce è da verificare (controlli di coerenza del server), in
+   *  parole. */
+  avvisi?: string[];
+}
+
+/** Voce con un solo valore (modalità, costituzione, numero di partner). */
+export interface VoceValoreRegola<T> extends VoceRegola {
+  valore: T;
+}
+
+/** Forme di aggregazione del vocabolario v1 (+ `altra`, residuale). */
+export type FormaAggregazione =
+  | "ats"
+  | "ati_rti"
+  | "rete_contratto"
+  | "rete_soggetto"
+  | "consorzio"
+  | "accordo_partenariato"
+  | "consorzio_ue"
+  | "altra";
+
+/** Tipi di soggetto del vocabolario v1 (il nome `TipoSoggetto` è già preso
+ *  dall'anagrafica di fatturazione). */
+export type TipoSoggettoPartenariato =
+  | "impresa"
+  | "micro_impresa"
+  | "piccola_impresa"
+  | "media_impresa"
+  | "pmi"
+  | "grande_impresa"
+  | "startup_innovativa"
+  | "pmi_innovativa"
+  | "impresa_artigiana"
+  | "cooperativa"
+  | "impresa_sociale"
+  | "libero_professionista"
+  | "organismo_ricerca"
+  | "universita"
+  | "ente_pubblico"
+  | "ente_locale"
+  | "ente_terzo_settore"
+  | "associazione_categoria"
+  | "organismo_formazione"
+  | "istituto_scolastico"
+  | "istituto_cultura"
+  | "fondazione"
+  | "consorzio_rete_imprese"
+  | "intermediario_finanziario"
+  | "ente_sportivo"
+  | "persona_fisica"
+  | "altro";
+
+export type CostituzionePartenariato =
+  | "costituenda_ammessa"
+  | "costituita_richiesta"
+  | "non_indicato";
+
+export type RuoloComposizione =
+  | "capofila"
+  | "partner"
+  | "qualsiasi"
+  | "affiliato"
+  | "partner_associato";
+
+/** Quando va soddisfatto un vincolo o consegnato un documento. */
+export type MomentoRegola = "domanda" | "concessione" | "prima_erogazione" | "non_indicato";
+
+export interface FormaAmmessaRegola extends VoceRegola {
+  forma: FormaAggregazione;
+  /** Etichetta del vocabolario, già risolta dal server. */
+  etichetta?: string;
+  note: string | null;
+}
+
+export interface ComposizioneRegola extends VoceRegola {
+  id: string;
+  tipo_soggetto: TipoSoggettoPartenariato;
+  /** Etichetta del vocabolario, già risolta dal server. */
+  tipo_soggetto_etichetta?: string;
+  /** Descrizione libera quando `tipo_soggetto` è `altro`. */
+  tipo_soggetto_testo: string | null;
+  /** Id della tabella `beneficiari` del catalogo corrispondenti al tipo. */
+  beneficiari?: number[];
+  minimo: number | null;
+  massimo: number | null;
+  ruolo: RuoloComposizione;
+  /** Id del lookup regioni (i nomi non riconosciuti li scarta il server,
+   *  con un avviso sulla voce). */
+  regioni: number[];
+  /** Nomi del catalogo delle regioni riconosciute. */
+  regioni_nomi?: string[];
+  paesi: string[];
+  vincolo_territoriale: string | null;
+}
+
+export interface QuotaRegola extends VoceRegola {
+  id: string;
+  ambito: "per_partner" | "per_categoria" | "capofila";
+  categoria: TipoSoggettoPartenariato | null;
+  /** Percentuali 0–100. */
+  min_percentuale: number | null;
+  max_percentuale: number | null;
+  base_calcolo:
+    | "costo_totale_progetto"
+    | "spese_ammissibili"
+    | "contributo"
+    | "budget_partner"
+    | "non_indicata";
+  effetto_violazione:
+    | "inammissibilita_progetto"
+    | "esclusione_partner"
+    | "perdita_maggiorazione"
+    | "non_indicato";
+}
+
+export type TipoVincoloPartenariato =
+  | "indipendenza"
+  | "esclusivita_partenariato"
+  | "paesi_distinti"
+  | "sede_operativa_regione"
+  | "costituzione_entro"
+  | "requisito_capofila"
+  | "altro";
+
+export interface VincoloRegola extends VoceRegola {
+  id: string;
+  tipo: TipoVincoloPartenariato;
+  descrizione: string;
+  parametro: number | null;
+  momento: MomentoRegola;
+}
+
+/** Contratto unico delle regole finanziarie (backend
+ *  `schemas/regole_finanziarie.py`, WP1). */
+export type VariabileFinanziaria =
+  | "fatturato"
+  | "fatturato_medio_2"
+  | "fatturato_medio_3"
+  | "valore_produzione"
+  | "risultato_esercizio"
+  | "patrimonio_netto"
+  | "capitale_sociale"
+  | "totale_attivo"
+  | "debiti_totali"
+  | "disponibilita_liquide"
+  | "mol"
+  | "ebit"
+  | "oneri_finanziari"
+  | "costo_personale"
+  | "dipendenti"
+  | "bilanci_approvati_n"
+  | "costo_quota"
+  | "contributo_quota"
+  | "costo_progetto_totale";
+
+export type AmbitoRegolaFinanziaria =
+  | "ciascun_partner"
+  | "capofila"
+  | "media_pesata_quote"
+  | "partenariato_totale";
+
+/** Forma: `numeratore [/ denominatore] <operatore> soglia`, dove la soglia è
+ *  un numero (`soglia`, decimale come stringa) OPPURE
+ *  `soglia_coefficiente × soglia_variabile`. */
+export interface RegolaFinanziariaRegola extends VoceRegola {
+  id: string;
+  descrizione: string;
+  ambito: AmbitoRegolaFinanziaria;
+  numeratore: VariabileFinanziaria;
+  denominatore: VariabileFinanziaria | null;
+  operatore: "lt" | "le" | "gt" | "ge";
+  soglia: string | null;
+  soglia_variabile: VariabileFinanziaria | null;
+  soglia_coefficiente: string | null;
+  unita: "rapporto" | "euro" | "numero";
+}
+
+/** Documenti del vocabolario v1 (backend `DocumentoPartenariato`) + `altro`. */
+export type TipoDocumentoRichiesto =
+  | "lettera_intenti"
+  | "nda"
+  | "term_sheet_mou"
+  | "mandato_collettivo"
+  | "atto_costitutivo"
+  | "impegno_costituire"
+  | "accordo_partenariato"
+  | "consortium_agreement"
+  | "contratto_rete"
+  | "programma_rete"
+  | "fondo_patrimoniale"
+  | "organo_comune"
+  | "iscrizione_registro_imprese"
+  | "statuto"
+  | "dichiarazione_sostitutiva"
+  | "dichiarazioni_affiliated_entities"
+  | "lettere_associated_partners"
+  | "altro";
+
+export interface DocumentoRichiestoRegola extends VoceRegola {
+  id: string;
+  tipo: TipoDocumentoRichiesto;
+  descrizione: string;
+  momento: MomentoRegola;
+}
+
+/** Regole post-elaborate dal server (`bando_partenariato.regole`): i testi
+ *  vengono dal modello e vanno mostrati come testo semplice, mai come HTML
+ *  né con link automatici. */
+export interface RegolePartenariato {
+  /** Modalità letta dal modello, con la sua citazione. */
+  modalita: VoceValoreRegola<ModalitaPartenariato>;
+  /** Quella da usare: coincide con `modalita.valore` solo se la citazione è
+   *  verificata e coerente, altrimenti `non_determinabile`. */
+  modalita_effettiva: ModalitaPartenariato;
+  forme_ammesse: FormaAmmessaRegola[];
+  costituzione: VoceValoreRegola<CostituzionePartenariato>;
+  partner_min: VoceValoreRegola<number | null>;
+  partner_max: VoceValoreRegola<number | null>;
+  /** Come si contano i partner (capofila incluso o no, affiliati…). */
+  conteggio_note: string | null;
+  composizione: ComposizioneRegola[];
+  quote: QuotaRegola[];
+  vincoli: VincoloRegola[];
+  regole_finanziarie: RegolaFinanziariaRegola[];
+  documenti_richiesti: DocumentoRichiestoRegola[];
+  /** I documenti letti non bastano per un quadro completo. */
+  fonti_insufficienti: boolean;
+  note: string | null;
+  /** Incoerenze trovate dai controlli automatici, in parole. */
+  avvisi: string[];
+}
+
+/** Esito di un documento ufficiale nella pipeline di lettura. */
+export type StatoFontePartenariato =
+  | "candidato"
+  | "bloccato_policy"
+  | "formato_non_supportato"
+  | "errore_download"
+  | "troppo_grande"
+  | "non_pdf"
+  | "schema_non_https"
+  | "scaricato"
+  | "letto"
+  | "letto_parziale"
+  | "non_leggibile"
+  | "protetto"
+  | "corrotto"
+  | "timeout"
+  | "escluso_tetto";
+
+export interface FontePartenariato {
+  /** Numero del documento nelle citazioni (`D1-p3` → 1). */
+  n: number;
+  etichetta: string;
+  dominio: string | null;
+  /** Solo https. */
+  url: string | null;
+  stato: StatoFontePartenariato;
+  pagine_totali: number | null;
+  /** Numeri delle pagine mandate all'analisi. */
+  pagine_incluse: number[];
+  /** Testo tagliato ai limiti di lettura. */
+  troncato: boolean;
+}
+
+/** `GET /bandi/{slug}/partenariato` e `POST …/partenariato/analisi`. */
+export interface PartenariatoBando {
+  bando_id: number;
+  bando_slug: string;
+  stato: StatoPartenariatoBando;
+  fase: FasePartenariato | null;
+  /** Nuova analisi in corso mentre si servono le regole precedenti. */
+  aggiornamento_in_corso: boolean;
+  /** Le regole andrebbero rilette (catalogo cambiato, riverifica, prompt nuovo). */
+  aggiornabile: boolean;
+  regole: RegolePartenariato | null;
+  fonti: FontePartenariato[];
+  estratta_at: string | null;
+  verificata_at: string | null;
+  avviata_at: string | null;
+  /** Messaggio dell'ultimo errore (anche con regole precedenti ancora valide). */
+  errore: string | null;
+  /** Prima di questo istante una nuova analisi non parte (backoff). */
+  riprova_dopo: string | null;
+  /** L'utente può avviare (o rilanciare) l'analisi adesso. */
+  puo_avviare: boolean;
+  motivo_non_avviabile: string | null;
+  /** Call di partenariato aperte sul bando (dal WP5; oggi 0). */
+  calls_aperte: number;
+  stato_bando: string | null;
+}
+
+/** `GET /partenariati/vocabolario`: vocabolario controllato versionato. */
+export interface VocabolarioTipoSoggetto {
+  codice: TipoSoggettoPartenariato;
+  etichetta: string;
+  /** Id della tabella `beneficiari` del catalogo. */
+  beneficiari: number[];
+}
+
+export interface VocabolarioCompetenza {
+  codice: string;
+  etichetta: string;
+  /** Etichetta dell'area, per raggruppare. */
+  area: string;
+}
+
+export interface VocabolarioForma {
+  codice: FormaAggregazione;
+  etichetta: string;
+  /** Chi risponde verso l'ente; null per `altra`. */
+  responsabilita: "pro_quota" | "solidale" | "singoli_partecipanti" | "consortile" | null;
+  /** Costituzione tipica, in parole. */
+  costituzione: string;
+  /** Checklist completa: prima i documenti di base, poi gli specifici. */
+  documenti: { codice: string; etichetta: string }[];
+}
+
+export interface Vocabolario {
+  versione: number;
+  tipi_soggetto: VocabolarioTipoSoggetto[];
+  competenze: VocabolarioCompetenza[];
+  forme: VocabolarioForma[];
+  ruoli: { codice: "capofila" | "partner"; etichetta: string }[];
 }

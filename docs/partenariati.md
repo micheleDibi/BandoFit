@@ -710,7 +710,22 @@ Durante l'esecuzione mi fermo solo per ambiguità che cambiano comportamento o c
   - notifica «Bilancio ufficiale non utilizzabile» quando mancano sia PDF sia numeri;
   - con l'addon disattivato la card resta visibile se esistono richieste passate;
   - da verificare in sandbox: forma reale della lista delle richieste e nomi dei file nello ZIP; round-trip di un `bytea` da 8 MB via PostgREST (se non regge, bucket privato).
-- **WP3–WP10** — da fare.
+- **WP3 (fatto)** — scostamenti decisi in implementazione o dopo la revisione del diff:
+  - `tipo_soggetto` `altro` → beneficiari 1/5/7/10 del catalogo; la competenza `altro` sta in un'area propria;
+  - `TipoDocumentoRichiesto` = tutti i documenti del vocabolario più `altro` (non solo i documenti base);
+  - errori nuovi: `403 email_non_verificata` (Gratuito senza email verificata) e `409 forza_non_ammessa` («Analizza comunque» fuori dalle condizioni);
+  - `leggi_stato_bandi` legge `bando_pubblico` a blocchi di 100 id;
+  - il download ha un **budget di rete** di 20 s che scorre solo quando il documento ha il turno (1 per portale, 2 in totale): l'attesa in coda non lo consuma; host del link normalizzato come nel browser (IDNA, percent-decoding) prima della denylist; bloccato anche `fec0::/10`; il link di un documento bloccato per policy non si mostra;
+  - la guardia «nessun segnale» vale solo se almeno un documento è stato letto o se i documenti mancano per cause permanenti: con soli errori transitori (timeout, rete, 5xx, lettura oltre il tempo) l'esito è `errore` `documenti_non_raggiungibili`, costo 0, con backoff;
+  - riserva al caso peggiore con **2,5 caratteri per token** (non 3,5): il tokenizer di `claude-sonnet-5` produce fino a ~1,35 volte i token dei modelli precedenti; sul timeout si registra il massimo tra riserva e stima dell'input inviato; da riconfermare con `count_tokens` sui PDF del campione;
+  - claim scaduto o perso **prima** della fase `analisi`: esecuzione chiusa a costo 0 (`fn_partenariato_esecuzione_scaduta`, nuova); in fase `analisi` costo ignoto (la riserva resta) e riga `timeout_unknown` nel registro consumi; il limite per utente non conta le esecuzioni `errore`/`interrotta` a costo 0 senza LLM; su cancellazione del task (spegnimento) la pipeline chiude e registra prima di uscire;
+  - la citazione della **modalità** deve avere almeno 3 parole e 15 caratteri normalizzati per fondare `modalita_effettiva` (le altre voci no: citano spesso numeri brevi);
+  - pulizia dei domini esclusi e numerazione di pagina in tempo lineare (testo dei PDF e output del modello sono input non fidati, sull'event loop);
+  - tetto del filtro «Ammette partenariato» a **500** id (non 1000): con 1000 id l'URL delle query del catalogo supera gli 8 KB; da misurare il limite reale del gateway;
+  - `partner_min`/`partner_max` contano il capofila anche quando il bando lo chiama promotore; etichette 18177 e 17509 del campione riallineate (da validare);
+  - valutazione: `nessun_segnale` vale `non_determinabile`, il recall del pre-classificatore usa l'etichetta (il gruppo solo come strato), campo facoltativo `non_raggiungibili` per i campi che la pipeline non può leggere;
+  - annotati, non risolti: con un «Analizza comunque» finito in errore o timeout la forzatura non si ripete (contratto; la UI ora lo dice), niente link alla conferma dell'email nell'errore `email_non_verificata` (non esiste una pagina in-app), nessun semaforo globale sulle pipeline in volo.
+- **WP4–WP10** — da fare.
 
 ---
 

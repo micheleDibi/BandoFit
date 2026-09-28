@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import ActiveCompanyDep, PrimaryClient, SecondaryClient
+from app.core.config import get_settings
 from app.core.errors import BadRequestError
 from app.schemas.bando import BandoDetail, BandoListItem
 from app.schemas.common import Page
@@ -78,9 +79,27 @@ async def list_bandi(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=50),
     sort: str = Query(default=DEFAULT_SORT),
+    # Nessun vincolo di formato: un valore qualunque si ignora, mai un 422.
+    partenariato: str | None = Query(
+        default=None,
+        description="ammesso | obbligatorio: solo tra i bandi con le regole già analizzate",
+    ),
 ) -> Page[BandoListItem]:
     if sort not in SORT_OPTIONS:
         raise BadRequestError(f"Ordinamento non valido: {sort}")
+    # Filtro del modulo partenariati: a flag spento (o con un valore ignoto)
+    # il parametro si ignora, mai un 400 né un 404 sulla rotta esistente.
+    if partenariato and get_settings().partenariati_attivo:
+        from app.services import partenariato_service  # import locale: modulo a flag
+
+        if partenariato in partenariato_service.MODALITA_FILTRO:
+            filters.bando_ids = await partenariato_service.bando_ids_per_modalita(
+                primary, partenariato
+            )
+            if not filters.bando_ids:
+                # Nessun bando analizzato con quella modalità: pagina vuota
+                # SENZA interrogare il catalogo.
+                return Page.build([], 0, page, page_size)
     lookups = await get_lookups(secondary)
     facets = await get_company_facets(primary, active, lookups)
     return await bandi_service.fetch_bandi(

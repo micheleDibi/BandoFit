@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import type { BandiFilterState, FacetKey } from "../../hooks/useBandiFilters";
+import { PARTENARIATO_COPY } from "../../lib/copy";
 import { formatEur } from "../../lib/format";
 import type { Lookups } from "../../types";
 
@@ -88,6 +89,14 @@ export function ActiveFilterChips({
       key: "scade",
       label: `Scade entro ${filters.scade_entro_giorni} gg`,
       onRemove: () => onUpdate({ scade_entro_giorni: null }),
+    });
+  }
+  // Null anche a modulo partenariati spento (lo decide useBandiFilters).
+  if (filters.partenariato !== null) {
+    chips.push({
+      key: "partenariato",
+      label: PARTENARIATO_COPY.filtro[filters.partenariato],
+      onRemove: () => onUpdate({ partenariato: null }),
     });
   }
 

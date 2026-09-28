@@ -183,6 +183,18 @@ class Settings(BaseSettings):
     # Scadenza del claim di un'estrazione: copre attesa dei semafori, download,
     # lettura dei PDF e timeout del modello; oltre, il failsafe la chiude.
     partenariato_claim_ttl_seconds: int = 900
+    # Bozza AI del profilo partner (WP4): job asincrono sul budget «altri»,
+    # stesso modello delle estrazioni. Limite di bozze al giorno PER AZIENDA e
+    # PER TITOLARE su tutte le sue aziende (un Advisor con molte aziende non
+    # consuma da solo il budget del gruppo; entrambi fail-closed nella RPC),
+    # tetto dei token di output (ragionamento compreso), timeout della
+    # chiamata e minuti dopo i quali una bozza ancora «in corso» è orfana
+    # (failsafe in lettura e nello scheduler).
+    partner_bozza_ai_limite_giorno: int = 3
+    partner_bozza_ai_limite_utente_giorno: int = 10
+    partner_bozza_ai_max_tokens: int = 4000
+    partner_bozza_ai_timeout_seconds: float = 60.0
+    partner_bozza_ai_stale_minuti: int = 10
 
     @model_validator(mode="after")
     def _segreti_obbligatori_in_produzione(self) -> "Settings":

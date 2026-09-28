@@ -1,11 +1,14 @@
-import { CheckCircle2, Loader2, Plus, Sparkles, TriangleAlert } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { CheckCircle2, Handshake, Loader2, Plus, Sparkles, TriangleAlert } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useConfirmImport, usePreviewImport } from "../../hooks/useCompanyDossier";
+import { useFunzioni } from "../../hooks/useFunzioni";
+import { PARTNER_PROFILE_ROOT, usePartnerProfile } from "../../hooks/usePartnerProfile";
 import { EMPTY_PREFERENCES, usePreferences, useSavePreferences } from "../../hooks/usePreferences";
 import { apiErrorCode, apiErrorMessage } from "../../lib/api";
 import { intervalloAnni } from "../../lib/bilanci";
-import { BILANCI_COPY, IMPORT_COPY } from "../../lib/copy";
+import { BILANCI_COPY, IMPORT_COPY, PARTNER_COPY } from "../../lib/copy";
 import { isValidPartitaIva, normalizePartitaIva } from "../../lib/partitaIva";
 import type {
   ImportPreview,
@@ -13,10 +16,12 @@ import type {
   ImportResult,
   MotivoBilanci,
 } from "../../types";
+import { ConsensoPartnerDialog } from "../partenariati/ConsensoPartnerDialog";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { TextField } from "../ui/Field";
+import { Skeleton } from "../ui/states";
 
 const FIELD_LABELS: Record<string, string> = {
   ragione_sociale: "Ragione sociale",
@@ -44,7 +49,9 @@ const fieldLabel = (campo: string) => FIELD_LABELS[campo] ?? campo;
  *  altro stato (cessata, sospesa, in liquidazione) merita un avviso. */
 const isStatoAttivo = (stato: string | null) => !stato || /^attiv/i.test(stato);
 
-type Step = "form" | "anteprima" | "conferma-annulla" | "esito";
+/** `partner` (modulo partenariati): passo facoltativo DOPO l'esito, per
+ *  comparire come partner; c'è solo se il titolare può farlo adesso. */
+type Step = "form" | "anteprima" | "conferma-annulla" | "esito" | "partner";
 
 interface ImportCompanyDialogProps {
   open: boolean;
@@ -113,6 +120,8 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
   const confirmImport = useConfirmImport();
   const { data: preferences } = usePreferences();
   const savePreferences = useSavePreferences();
+  const queryClient = useQueryClient();
+  const { partenariatiAttivo } = useFunzioni();
 
   const [step, setStep] = useState<Step>("form");
   const [piva, setPiva] = useState(defaultPiva ?? "");
@@ -120,6 +129,26 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [addedAteco, setAddedAteco] = useState<number[]>([]);
+  const [partnerAttivato, setPartnerAttivato] = useState(false);
+
+  // Profilo partner: serve solo dall'esito in poi (a modulo acceso), per
+  // sapere se proporre il passo del consenso.
+  const partner = usePartnerProfile(
+    open && partenariatiAttivo && (step === "esito" || step === "partner"),
+  );
+  const profiloPartner = partner.data;
+  // Si propone solo a chi può davvero attivarla adesso: titolare, profilo non
+  // visibile né sospeso, identità verificata dal registro appena importato.
+  // Durante il refetch dopo la conferma i dati in cache sono quelli di prima.
+  const passoPartner =
+    partenariatiAttivo &&
+    !!result?.company.editable &&
+    !!profiloPartner &&
+    !partner.isFetching &&
+    profiloPartner.editable &&
+    !profiloPartner.visibile &&
+    !profiloPartner.sospeso &&
+    profiloPartner.identita.verificata;
 
   // Chiudibile tranne quando chiudere costerebbe qualcosa: durante una chiamata
   // (l'esito, già pagato, andrebbe perso) e sulla domanda di annullamento, dove
@@ -139,6 +168,7 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
       setResult(null);
       setError(null);
       setAddedAteco([]);
+      setPartnerAttivato(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -170,6 +200,8 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
     setError(null);
     try {
       setResult(await confirmImport.mutateAsync(preview.azienda.partita_iva));
+      // L'import cambia l'identità verificata del profilo partner.
+      queryClient.invalidateQueries({ queryKey: PARTNER_PROFILE_ROOT });
       setStep("esito");
     } catch (err) {
       setError(apiErrorMessage(err));
@@ -203,13 +235,15 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
 
   const titolo = previewImport.isPending
     ? IMPORT_COPY.titoloAttesa
-    : step === "esito"
-      ? IMPORT_COPY.titoloEsito
-      : step === "conferma-annulla"
-        ? IMPORT_COPY.annullaTitolo
-        : step === "anteprima"
-          ? IMPORT_COPY.titoloAnteprima
-          : IMPORT_COPY.titoloForm;
+    : step === "partner"
+      ? PARTNER_COPY.consensoTitolo
+      : step === "esito"
+        ? IMPORT_COPY.titoloEsito
+        : step === "conferma-annulla"
+          ? IMPORT_COPY.annullaTitolo
+          : step === "anteprima"
+            ? IMPORT_COPY.titoloAnteprima
+            : IMPORT_COPY.titoloForm;
 
   const erroreBox = error && (
     <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
@@ -219,7 +253,19 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
 
   const footer = () => {
     if (previewImport.isPending) return null; // niente da premere: si aspetta
-    if (step === "esito") return <Button onClick={onClose}>Chiudi</Button>;
+    if (step === "partner")
+      return partnerAttivato ? <Button onClick={onClose}>Chiudi</Button> : null;
+    if (step === "esito")
+      return passoPartner ? (
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Chiudi
+          </Button>
+          <Button onClick={() => setStep("partner")}>{PARTNER_COPY.continua}</Button>
+        </>
+      ) : (
+        <Button onClick={onClose}>Chiudi</Button>
+      );
     if (step === "conferma-annulla")
       return (
         <>
@@ -268,7 +314,7 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
       onClose={onClose}
       title={titolo}
       dismissible={dismissible}
-      size={step === "anteprima" ? "lg" : "md"}
+      size={step === "anteprima" || step === "partner" ? "lg" : "md"}
       footer={footer()}
     >
       {previewImport.isPending ? (
@@ -278,6 +324,24 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
         </div>
       ) : step === "conferma-annulla" ? (
         <p>{IMPORT_COPY.annullaTesto}</p>
+      ) : step === "partner" ? (
+        !profiloPartner ? (
+          <Skeleton className="h-40 w-full" />
+        ) : partnerAttivato ? (
+          <p className="inline-flex items-start gap-2 text-sm text-emerald-700" role="status">
+            <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden />
+            {PARTNER_COPY.attivato}
+          </p>
+        ) : (
+          <ConsensoPartnerDialog
+            inline
+            profilo={profiloPartner}
+            origine="import_piva"
+            onClose={onClose}
+            onAttivato={() => setPartnerAttivato(true)}
+            etichettaAnnulla={PARTNER_COPY.nonOra}
+          />
+        )
       ) : step === "esito" && result ? (
         <div className="space-y-4">
           <p className="inline-flex items-start gap-2 text-sm text-emerald-700">
@@ -340,6 +404,13 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
               Vedi il dossier completo →
             </Link>
           </p>
+
+          {passoPartner && (
+            <p className="flex items-start gap-2 rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-900">
+              <Handshake className="mt-0.5 size-4 shrink-0 text-brand-500" aria-hidden />
+              {PARTNER_COPY.passoImport}
+            </p>
+          )}
         </div>
       ) : step === "anteprima" && preview ? (
         <div className="space-y-4">

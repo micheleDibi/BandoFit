@@ -193,7 +193,7 @@ class TestClaim:
         assert db.ops == []
         dopo = datetime(2026, 9, 28, 6, 0, tzinfo=ZoneInfo("Europe/Rome"))
         esiti = await sched.esegui_se_dovuto(db, SecondarioVietato(), FakeAi(), dopo)
-        assert esiti == {"failsafe_estrazioni": 2,
+        assert esiti == {"failsafe_estrazioni": 2, "failsafe_bozze_profilo": 2,
                          "batch_estrazioni": {"eseguite": 0, "motivo": "spento"}}
         # seconda volta nello stesso giorno: già rivendicata
         assert await sched.esegui_se_dovuto(db, SecondarioVietato(), FakeAi(), dopo) is None
@@ -214,7 +214,8 @@ class TestPassi:
         monkeypatch.setattr(sched, "batch_estrazioni", batch)
         db = FakePrimary()
         esiti = await sched.esegui_run(db, object(), FakeAi(), OGGI)
-        assert esiti == {"failsafe_estrazioni": "errore", "batch_estrazioni": {"eseguite": 0}}
+        assert esiti == {"failsafe_estrazioni": "errore", "failsafe_bozze_profilo": 2,
+                         "batch_estrazioni": {"eseguite": 0}}
         assert chiamato == [OGGI]
         [aggiornamento] = [op for op in db.ops if op[0] == "partenariati_runs" and op[1] == "update"]
         assert aggiornamento[2] == {"riepilogo": esiti}

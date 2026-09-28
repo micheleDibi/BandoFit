@@ -13,6 +13,13 @@ Passi del WP3:
   non fa nulla; altrimenti estrae, in sequenza, i bandi APERTI con segnali
   forti nel catalogo e senza un risultato fresco, dentro il budget del gruppo
   `batch` (fail-closed nella RPC: al primo rifiuto di budget si ferma).
+
+Passo del WP4:
+- `failsafe_bozze_profilo`: le bozze AI del profilo partner rimaste `in_corso`
+  oltre `partner_bozza_ai_stale_minuti` diventano `errore` (`interrotta`) e la
+  loro esecuzione si chiude a costo ignoto con una riga `timeout_unknown` nel
+  registro consumi; lo stesso per le esecuzioni rimaste in corso senza una
+  bozza in corso (`fn_partner_bozza_ai_chiudi_stale`).
 """
 
 import asyncio
@@ -60,6 +67,18 @@ async def failsafe_estrazioni(primary) -> int:
     se non erano arrivate all'analisi, altrimenti la riserva resta nel budget
     del giorno in cui sono partite (`fn_partenariato_esecuzione_scaduta`)."""
     resp = await primary.rpc("fn_partenariato_chiudi_stale", {}).execute()
+    return int(resp.data or 0)
+
+
+async def failsafe_bozze_profilo(primary) -> int:
+    """Bozze AI del profilo partner orfane (job perso in un riavvio) → errore
+    `interrotta`; la riserva della loro esecuzione resta nel budget del giorno
+    in cui sono partite (costo ignoto) e va nel registro consumi come
+    `timeout_unknown`. Ritorna quante bozze ed esecuzioni ha chiuso."""
+    resp = await primary.rpc(
+        "fn_partner_bozza_ai_chiudi_stale",
+        {"p_minuti": get_settings().partner_bozza_ai_stale_minuti},
+    ).execute()
     return int(resp.data or 0)
 
 
@@ -172,6 +191,7 @@ async def esegui_run(primary, secondary, ai, oggi: date) -> dict:
     esiti: dict = {}
     passi = [
         ("failsafe_estrazioni", lambda: failsafe_estrazioni(primary)),
+        ("failsafe_bozze_profilo", lambda: failsafe_bozze_profilo(primary)),
         ("batch_estrazioni", lambda: batch_estrazioni(primary, secondary, ai, oggi)),
     ]
     for nome, fn in passi:

@@ -1634,3 +1634,200 @@ export interface Vocabolario {
   forme: VocabolarioForma[];
   ruoli: { codice: "capofila" | "partner"; etichetta: string }[];
 }
+
+// ---- Partenariati: profilo partner e consensi (WP4) ------------------------
+
+/** Ruolo che un'azienda è disposta a ricoprire in un partenariato. */
+export type RuoloPartner = "capofila" | "partner";
+
+/** Forme che un partner può accettare: le 7 del vocabolario, senza `altra`
+ *  (serve solo alle regole estratte dai bandi). */
+export type FormaProfiloPartner = Exclude<FormaAggregazione, "altra">;
+
+export type EsitoEsperienzaPartner = "finanziato" | "in_valutazione" | "non_finanziato";
+
+/** Da dove parte una scelta di consenso: il client non può inviare altro
+ *  (`admin` e `sistema` li scrivono solo l'area admin e i trigger). */
+export type OrigineConsensoPartner = "import_piva" | "pagina_azienda" | "wizard_call";
+
+/** Esperienza in un programma di finanziamento. `programma_id` rimanda alla
+ *  lookup `programmi` del catalogo; `programma` è il nome (obbligatorio). */
+export interface EsperienzaPartner {
+  programma: string;
+  programma_id: number | null;
+  anno: number | null;
+  ruolo: RuoloPartner | null;
+  titolo: string | null;
+  esito: EsitoEsperienzaPartner | null;
+}
+
+/** Corpo di `PUT /me/partner-profile`: il profilo INTERO (i campi assenti
+ *  tornano ai default). Non contiene visibilità, anonimato, consenso,
+ *  referente né sospensione: cambiano solo con le azioni dedicate. */
+export interface PartnerProfileInput {
+  descrizione_competenze: string | null;
+  competenze: string[];
+  competenze_libere: string[];
+  /** Solo i tipi DICHIARATI: quelli del Registro Imprese non si dichiarano. */
+  tipi_soggetto: TipoSoggettoPartenariato[];
+  ruoli_disponibili: RuoloPartner[];
+  settori_interesse: number[];
+  regioni_interesse: number[];
+  /** ISO 3166-1 alpha-2 maiuscolo. */
+  paesi_interesse: string[];
+  forme_accettate: FormaProfiloPartner[];
+  esperienze: EsperienzaPartner[];
+  certificazioni: string[];
+  infrastrutture: string | null;
+  accetta_inviti: boolean;
+  categorie_bando_escluse: number[];
+}
+
+export type MotivoIdentitaPartner =
+  | "dati_non_importati"
+  | "piva_diversa"
+  | "impresa_non_attiva"
+  | "dati_sandbox";
+
+/** `non_disponibile`: il profilo nominativo è spento in questa versione (si
+ *  compare solo in forma anonima), qualunque sia il titolare. */
+export type MotivoNominativoPartner =
+  | "cf_non_verificato"
+  | "non_rappresentante"
+  | "non_disponibile";
+
+/** Identità dal Registro Imprese: senza, il consenso non si può dare. */
+export interface IdentitaPartner {
+  verificata: boolean;
+  motivo: MotivoIdentitaPartner | null;
+  denominazione_registro: string | null;
+  /** Il titolare risulta legale rappresentante con CF verificato: può
+   *  mostrare il nome dell'azienda. */
+  puo_essere_nominativo: boolean;
+  motivo_nominativo: MotivoNominativoPartner | null;
+}
+
+/** Proposta della bozza AI: diventa visibile solo dopo «Applica» e
+ *  salvataggio del profilo. */
+export interface BozzaProfiloAi {
+  descrizione_competenze: string;
+  competenze: string[];
+  motivazioni: { codice: string; motivo: string }[];
+}
+
+export type StatoBozzaAiPartner = "in_corso" | "pronta" | "errore";
+
+export interface BozzaAiPartner {
+  stato: StatoBozzaAiPartner;
+  avviata_at: string | null;
+  pronta_at: string | null;
+  errore: string | null;
+  proposta: BozzaProfiloAi | null;
+}
+
+export interface ReferentePartner {
+  tipo: "titolare" | "membro";
+  nome: string | null;
+  sei_tu: boolean;
+  /** Proposta in attesa della risposta della persona scelta. */
+  proposto: { nome: string | null; sei_tu: boolean } | null;
+}
+
+/** `GET /me/partner-profile`. Un membro riceve `editable=false`,
+ *  `referenti_possibili=[]` e nessun id di altri utenti. */
+export interface PartnerProfile {
+  editable: boolean;
+  esiste: boolean;
+  visibile: boolean;
+  anonimo: boolean;
+  sospeso: boolean;
+  consenso: { versione: string; at: string } | null;
+  informativa_versione_corrente: string;
+  /** L'informativa è cambiata dopo il consenso: si propone di riconfermarlo
+   *  (il consenso dato resta valido). */
+  riconsenso_suggerito: boolean;
+  identita: IdentitaPartner;
+  profilo: PartnerProfileInput;
+  /** Tipi di soggetto ricavati dal Registro Imprese (non rimovibili). */
+  tipi_soggetto_dedotti: TipoSoggettoPartenariato[];
+  /** 0-100. */
+  completezza: number;
+  /** Parole dei testi che potrebbero far riconoscere un'azienda anonima (non
+   *  bloccano il salvataggio). */
+  avvisi_anonimato: string[];
+  referente: ReferentePartner;
+  referenti_possibili: { user_id: string; nome: string }[];
+  bozza_ai: BozzaAiPartner | null;
+  vocabolario_versione: number;
+  aggiornato_at: string | null;
+}
+
+/** `GET /me/partner-profile/anteprima`: ciò che vedono le altre aziende
+ *  (whitelist del server). Per gli anonimi niente nome né infrastrutture,
+ *  esperienze con il solo programma e fasce solo di fatturato. */
+export interface PartnerPubblico {
+  codice_pubblico: string;
+  anonimo: boolean;
+  denominazione: string | null;
+  regione_sede: string | null;
+  regioni_interesse: string[];
+  paesi_interesse: string[];
+  ateco_sezione: { lettera: string; descrizione: string } | null;
+  classe_dimensionale: string | null;
+  /** Codici di fascia (come `FasceBilancio`), mai importi. */
+  fasce: {
+    fatturato: string | null;
+    patrimonio_netto: string | null;
+    dipendenti: string | null;
+    trend: string | null;
+  };
+  tipi_soggetto: { codice: string; etichetta: string; fonte: "registro" | "dichiarato" }[];
+  competenze: { codice: string; etichetta: string; area: string }[];
+  competenze_libere: string[];
+  descrizione_competenze: string | null;
+  esperienze: {
+    programma: string;
+    anno: number | null;
+    ruolo: string | null;
+    titolo: string | null;
+  }[];
+  certificazioni: string[];
+  infrastrutture: string | null;
+  ruoli_disponibili: RuoloPartner[];
+  forme_accettate: { codice: string; etichetta: string }[];
+  completezza: number;
+  accetta_inviti: boolean;
+}
+
+/** `GET /partenariati/informativa`: testi in markdown semplice (titoli,
+ *  paragrafi, elenchi puntati). */
+export interface InformativaPartner {
+  versione: string;
+  testo: string;
+  referente_versione: string;
+  referente_testo: string;
+}
+
+/** Corpo di `POST /me/partner-profile/consenso`. `anonimo` è obbligatorio
+ *  per `concedi` e `anonimato`. */
+export interface ConsensoPartnerInput {
+  azione: "concedi" | "revoca" | "anonimato";
+  informativa_versione: string;
+  origine: OrigineConsensoPartner;
+  anonimo?: boolean | null;
+}
+
+/** Corpo di `POST /me/partner-profile/referente` (solo il titolare).
+ *  `annulla_proposta` azzera solo la proposta pendente: il referente in
+ *  carica resta. */
+export interface ReferentePartnerInput {
+  azione: "proponi" | "annulla_proposta" | "rimuovi";
+  user_id?: string | null;
+}
+
+/** Corpo di `POST /me/partner-profile/referente/risposta`: il membro
+ *  proposto accetta o rifiuta; il referente rinuncia (`revoca`). */
+export interface RispostaReferenteInput {
+  azione: "accetta" | "rifiuta" | "revoca";
+  informativa_versione?: string | null;
+}

@@ -9,6 +9,7 @@ import { CompanyCard } from "../components/company/CompanyCard";
 import { ImportCompanyDialog } from "../components/company/ImportCompanyDialog";
 import { BilanciSection } from "../components/company/bilanci/BilanciSection";
 import { DossierView } from "../components/company/dossier/DossierView";
+import { PartnerSection } from "../components/partenariati/PartnerSection";
 import { ExportPdfButton } from "../components/shared/ExportPdfButton";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -183,6 +184,14 @@ export default function Azienda() {
           compare solo dopo (prima c'è già la CTA «Importa da P.IVA»). La key
           azzera l'esito di un recupero quando un Advisor cambia azienda. */}
       {data.imported && <BilanciSection key={activeCompanyId ?? "azienda"} />}
+
+      {/* 4. Visibilità come partner (modulo partenariati): la sezione non si
+          rende a modulo spento. C'è anche senza import, perché spiega che
+          per comparire servono i dati ufficiali (con la CTA d'import). */}
+      <PartnerSection
+        key={`partner-${activeCompanyId ?? "azienda"}`}
+        onImporta={data.editable ? () => setImportOpen(true) : undefined}
+      />
 
       <p className="mt-8 pb-2 text-xs text-slate-400">
         Dati provenienti da fonti pubbliche (Registro Imprese) tramite openapi.it, per uso

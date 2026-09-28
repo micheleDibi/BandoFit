@@ -33,6 +33,58 @@ RPC_ERRORS: dict[str, tuple[int, str, str]] = {
         "ai_sospesa_oggi",
         "L'analisi automatica è sospesa per oggi: riprova domani",
     ),
+    # WP4 — profilo partner, consensi, referente e bozza AI (migration 0035)
+    "company_not_found": (404, "not_found", "Azienda non trovata"),
+    "azione_non_valida": (400, "bad_request", "Operazione non valida"),
+    "origine_non_valida": (400, "bad_request", "Origine del consenso non valida"),
+    "versione_non_valida": (400, "bad_request", "Versione dell'informativa non valida"),
+    "attore_non_titolare": (
+        403,
+        "forbidden",
+        "Il profilo partner lo gestisce il titolare dell'azienda",
+    ),
+    "anonimato_obbligatorio": (
+        400,
+        "anonimato_obbligatorio",
+        "Scegli se mostrare il nome dell'azienda o restare anonima",
+    ),
+    "identita_non_verificata": (
+        409,
+        "identita_non_verificata",
+        "Per comparire come partner importa prima i dati ufficiali dell'azienda dalla "
+        "partita IVA: l'impresa deve risultare attiva nel Registro Imprese",
+    ),
+    "rappresentante_non_verificato": (
+        409,
+        "rappresentante_non_verificato",
+        "Per mostrare il nome dell'azienda devi risultarne legale rappresentante: verifica "
+        "il tuo codice fiscale nel profilo. Puoi comunque comparire in forma anonima",
+    ),
+    "profilo_sospeso": (
+        409,
+        "profilo_sospeso",
+        "Il profilo partner è sospeso: per ora non può tornare visibile",
+    ),
+    "referente_non_valido": (
+        400,
+        "referente_non_valido",
+        "La persona scelta deve essere un membro attivo con accesso a questa azienda",
+    ),
+    "nessuna_proposta_referente": (
+        409,
+        "nessuna_proposta_referente",
+        "Non c'è nessuna proposta di referente da confermare",
+    ),
+    "bozza_in_corso": (
+        409,
+        "bozza_in_corso",
+        "La bozza del profilo è già in preparazione: attendi qualche istante",
+    ),
+    "ai_limite_azienda": (
+        429,
+        "ai_limite_giornaliero",
+        "Hai raggiunto le bozze di oggi per questa azienda: riprova domani",
+    ),
 }
 
 

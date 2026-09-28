@@ -1,0 +1,307 @@
+{
+  "versione": 1,
+  "descrizione": "Campione di valutazione delle regole di partenariato (WP3). Solo id, slug troncato ed etichette: nessun testo del catalogo né URL. Estratto dal DB bandi vivo il 2026-09-28 (bandi non chiusi con almeno un PDF ufficiale in bando_link). Le etichette si compilano in WP3 leggendo i documenti ufficiali e vanno validate da Michele.",
+  "campione": [
+    {
+      "bando_id": 17693,
+      "slug_prefisso": "strumento-i3-strand-1-innovazione-interregionale-specializzazione-inte",
+      "tipologia_bando_id": 1,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 18117,
+      "slug_prefisso": "horizon-europe-cluster-3-sicurezza-civile-societa",
+      "tipologia_bando_id": 1,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 18455,
+      "slug_prefisso": "mimit-specializzazione-intelligente-ricerca-industriale-sud",
+      "tipologia_bando_id": 2,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 18351,
+      "slug_prefisso": "mimit-tecnologie-critiche-emergenti-pnrr",
+      "tipologia_bando_id": 2,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 18362,
+      "slug_prefisso": "mimit-contratti-sviluppo-sportello-pn-ric-2021-2027",
+      "tipologia_bando_id": 2,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 18460,
+      "slug_prefisso": "contratti-sviluppo-mimit-sportello-semiconduttori",
+      "tipologia_bando_id": 2,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 18559,
+      "slug_prefisso": "contratti-sviluppo-pnrr-filiere-rinnovabili-batterie-bus-elettrici-aut",
+      "tipologia_bando_id": 2,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 171905,
+      "slug_prefisso": "mase-avviso-idrogeno-mission-innovation-ricerca-sviluppo",
+      "tipologia_bando_id": 2,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 17580,
+      "slug_prefisso": "lombardia-talenti-trasferimento-conoscenze-pmi",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 2242,
+      "slug_prefisso": "welfare-aziendale-abruzzo-conciliazione-vita-lavoro-fse-2025",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 17631,
+      "slug_prefisso": "lombardia-contributi-enti-locali-rimozione-amianto-edifici-pubblici",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 18145,
+      "slug_prefisso": "toscana-sovvenzioni-emissione-obbligazioni-titoli-debito-pmi",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 18177,
+      "slug_prefisso": "emilia-romagna-promozione-sistema-produttivo-mercati-esteri",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 18278,
+      "slug_prefisso": "voucher-digitali-i40-basilicata-cciaa-2025",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 18495,
+      "slug_prefisso": "bando-bilaterale-italia-usa-mur-nsf-intelligenza-artificiale",
+      "tipologia_bando_id": 4,
+      "gruppo": "positivo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 2231,
+      "slug_prefisso": "incentivi-assunzione-disoccupati-over-36-abruzzo",
+      "tipologia_bando_id": 3,
+      "gruppo": "negativo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 18071,
+      "slug_prefisso": "cciaa-maremma-tirreno-contributi-societa-benefit",
+      "tipologia_bando_id": 3,
+      "gruppo": "negativo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 18346,
+      "slug_prefisso": "liguria-contributi-patenti-speciali-guida-disabilita",
+      "tipologia_bando_id": 3,
+      "gruppo": "negativo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 109259,
+      "slug_prefisso": "forestazione-urbana-periurbana-emilia-romagna-enti-pubblici",
+      "tipologia_bando_id": 3,
+      "gruppo": "negativo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    },
+    {
+      "bando_id": 547011,
+      "slug_prefisso": "lombardia-onlus-aps-odv-distaccamenti-volontari-vigili-fuoco",
+      "tipologia_bando_id": 3,
+      "gruppo": "negativo",
+      "etichetta": {
+        "modalita": null,
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": null,
+        "verificato_at": null
+      }
+    }
+  ],
+  "da_aggiungere": "5 positivi regionali scelti con la stessa regola all'inizio del WP3"
+}

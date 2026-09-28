@@ -14,6 +14,7 @@ Sviluppo in locale; produzione con Docker Compose dietro reverse proxy (Cloudfla
 - `backend/app/services/` — logica di business; `app/clients/` — client esterni (supabase, anthropic, openapi, revolut)
 - `backend/app/schemas/` — modelli Pydantic; `app/core/` — config, errori (`AppError`), sicurezza, IP client
 - `backend/tests/` — test unitari/API; `tests/db/` — test delle migration su Postgres usa-e-getta
+- `backend/scripts/` — script di sviluppo lanciati a mano (es. verifica della sandbox openapi); non fanno parte dell'app
 - `frontend/src/pages/`, `components/`, `hooks/` (uno per dominio, TanStack Query), `lib/` (`api.ts` = istanza Axios)
 - `supabase/migrations/` — migration SQL del DB primario, numerate `NNNN_nome.sql`, da applicare in ordine
 - `docs/` — documentazione di progetto (architettura, DB, API, frontend, setup, deploy, changelog)

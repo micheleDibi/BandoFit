@@ -10,6 +10,7 @@ Indice della documentazione del progetto.
 | [frontend.md](frontend.md) | Route, design system (colori, tipografia), pattern (filtri nell'URL, gestione stato) |
 | [setup.md](setup.md) | Creazione del progetto Supabase primario, migrazioni, variabili d'ambiente, primo admin, avvio locale |
 | [deploy.md](deploy.md) | Deploy su server con Docker Compose: porte configurabili, reverse proxy, aggiornamenti |
+| [partenariati.md](partenariati.md) | Modulo bilanci e partenariati: piano approvato, decisioni, modello dati, API, costi, vocabolario |
 | [changelog.md](changelog.md) | Storico delle funzionalità rilasciate |
 
 ## Regola di aggiornamento

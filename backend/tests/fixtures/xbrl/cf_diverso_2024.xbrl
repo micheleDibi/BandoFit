@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Istanza XBRL SINTETICA scritta a mano per i test: società fittizia, valori inventati.
+     Bilancio valido ma di un'ALTRA azienda (CF e P.IVA diversi da quelli attesi):
+     nessuna riga deve essere registrata. -->
+<xbrli:xbrl xmlns:xbrli="http://www.xbrl.org/2003/instance"
+            xmlns:link="http://www.xbrl.org/2003/linkbase"
+            xmlns:xlink="http://www.w3.org/1999/xlink"
+            xmlns:iso4217="http://www.xbrl.org/2003/iso4217"
+            xmlns:itcc-ci="http://www.infocamere.it/itnn/fr/itcc/ci/2018-11-04">
+  <link:schemaRef xlink:type="simple" xlink:href="itcc-ci-ese-2018-11-04.xsd"/>
+
+  <xbrli:context id="i2024">
+    <xbrli:entity><xbrli:identifier scheme="http://www.infocamere.it">00000000000</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:instant>2024-12-31</xbrli:instant></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="d2024">
+    <xbrli:entity><xbrli:identifier scheme="http://www.infocamere.it">00000000000</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:startDate>2024-01-01</xbrli:startDate><xbrli:endDate>2024-12-31</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:unit id="eur"><xbrli:measure>iso4217:EUR</xbrli:measure></xbrli:unit>
+
+  <itcc-ci:DatiAnagraficiCodiceFiscale contextRef="i2024">00000000000</itcc-ci:DatiAnagraficiCodiceFiscale>
+  <itcc-ci:DatiAnagraficiPartitaIva contextRef="i2024">00000000000</itcc-ci:DatiAnagraficiPartitaIva>
+
+  <itcc-ci:ValoreProduzioneRicaviVenditePrestazioni contextRef="d2024" unitRef="eur" decimals="0">640000</itcc-ci:ValoreProduzioneRicaviVenditePrestazioni>
+  <itcc-ci:UtilePerditaEsercizio contextRef="d2024" unitRef="eur" decimals="0">31000</itcc-ci:UtilePerditaEsercizio>
+  <itcc-ci:TotaleAttivo contextRef="i2024" unitRef="eur" decimals="0">720000</itcc-ci:TotaleAttivo>
+</xbrli:xbrl>

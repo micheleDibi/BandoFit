@@ -53,8 +53,10 @@ class AddonCreate(BaseModel):
 class MyAddonOut(BaseModel):
     """Una voce dell'inventario addon dell'utente. Dalla 0030 include anche i
     totali storici dal ledger (per la pagina «I miei addon»): `acquistate` =
-    accrediti (acquisti + grant + rimborsi), `consumate` = soli consumi — le
-    revoche admin riducono `quantita` senza contare come consumo."""
+    accrediti (acquisti + grant), `consumate` = soli consumi — le revoche
+    admin riducono `quantita` senza contare come consumo. Dalla 0033
+    `rimborsate` = unità restituite in automatico (refund), fuori da
+    `acquistate`."""
 
     addon_id: int
     slug: str
@@ -65,6 +67,7 @@ class MyAddonOut(BaseModel):
     quantita: int
     acquistate: int = 0
     consumate: int = 0
+    rimborsate: int = 0
     updated_at: datetime | None = None
 
 

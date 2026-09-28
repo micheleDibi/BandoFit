@@ -5,9 +5,11 @@
  *  codici, e i formati degli importi. */
 
 import type {
+  BilancioRichiesta,
   CampoBilancio,
   FonteBilancio,
   IndicatoreBilancio,
+  StatoRichiestaBilancio,
   TipoBilancio,
 } from "../types";
 import { formatEur } from "./format";
@@ -190,4 +192,98 @@ export function intervalloAnni(anni: number[]): string {
  *  solo allora vale la pena mostrarla accanto all'anno. */
 export function chiusuraNonSolare(dataChiusura: string | null): boolean {
   return !!dataChiusura && !dataChiusura.endsWith("-12-31");
+}
+
+// ---- Bilancio ufficiale on-demand ------------------------------------------
+
+/** Slug stabile dell'addon consumabile che paga una richiesta (lo stesso del
+ *  backend, `BILANCIO_UFFICIALE_ADDON_SLUG`). */
+export const BILANCIO_UFFICIALE_ADDON_SLUG = "bilancio-ufficiale";
+
+/** Stati in cui la richiesta non è ancora conclusa: il server ne ammette una
+ *  sola per azienda. */
+export const STATI_RICHIESTA_APERTI: readonly StatoRichiestaBilancio[] = [
+  "in_invio",
+  "in_lavorazione",
+  "esito_ignoto",
+];
+
+export function richiestaAperta(stato: StatoRichiestaBilancio): boolean {
+  return STATI_RICHIESTA_APERTI.includes(stato);
+}
+
+/** Il bilancio arriva di solito entro 15 minuti e il server lo segue da solo
+ *  per 40: oltre i 45 minuti il polling si spegne (una visita successiva
+ *  alla pagina fa comunque avanzare la richiesta). */
+export const POLLING_BILANCI_FINESTRA_MS = 45 * 60_000;
+export const POLLING_BILANCI_INTERVALLO_MS = 30_000;
+
+/** `refetchInterval` della lista: 30 s finché c'è una richiesta aperta nata
+ *  da meno di 45 minuti, altrimenti niente polling. */
+export function intervalloPollingBilanci(
+  richieste: BilancioRichiesta[] | undefined,
+  adesso: number = Date.now(),
+): number | false {
+  const recenteAperta = richieste?.some(
+    (r) =>
+      richiestaAperta(r.stato) &&
+      adesso - new Date(r.created_at).getTime() < POLLING_BILANCI_FINESTRA_MS,
+  );
+  return recenteAperta ? POLLING_BILANCI_INTERVALLO_MS : false;
+}
+
+export interface ChiusureRichieste {
+  /** Almeno una richiesta è passata a `completata`: i bilanci sono cambiati. */
+  completate: boolean;
+  /** Almeno una richiesta si è conclusa (anche con rimborso): l'inventario
+   *  dell'addon può essere cambiato. */
+  chiuse: boolean;
+}
+
+/** Confronta due letture della lista. Conta come chiusa una richiesta che
+ *  prima era aperta, o che prima non c'era (nata e conclusa tra due letture),
+ *  e ora è in uno stato terminale. `prima` null = prima lettura: nessuna
+ *  transizione. */
+export function chiusureRichieste(
+  prima: ReadonlyMap<string, StatoRichiestaBilancio> | null,
+  dopo: BilancioRichiesta[],
+): ChiusureRichieste {
+  const esito: ChiusureRichieste = { completate: false, chiuse: false };
+  if (!prima) return esito;
+  for (const r of dopo) {
+    const statoPrima = prima.get(r.id);
+    if (statoPrima !== undefined && !richiestaAperta(statoPrima)) continue;
+    if (richiestaAperta(r.stato)) continue;
+    esito.chiuse = true;
+    if (r.stato === "completata") esito.completate = true;
+  }
+  return esito;
+}
+
+/** Esercizi proponibili nel menu, dal più recente: gli ultimi `quanti` anni
+ *  chiusi (mai prima del 2000, come il validator del server), esclusi quelli
+ *  già acquisiti. L'anno in corso non c'è: il suo bilancio non è ancora
+ *  depositato, e «Ultimo disponibile» copre comunque i casi particolari. */
+export function anniRichiedibili(
+  acquisiti: readonly number[],
+  annoCorrente: number,
+  quanti = 10,
+): number[] {
+  const anni: number[] = [];
+  for (let anno = annoCorrente - 1; anno >= Math.max(2000, annoCorrente - quanti); anno--) {
+    if (!acquisiti.includes(anno)) anni.push(anno);
+  }
+  return anni;
+}
+
+/** Esercizio di una richiesta: quello ricevuto, altrimenti quello chiesto;
+ *  null = «ultimo disponibile» non ancora arrivato. */
+export function annoRichiesta(r: BilancioRichiesta): number | null {
+  return r.anno_bilancio ?? r.anno_richiesto;
+}
+
+/** Nome del file scaricato: lo stesso schema del server (`bilancio-<anno>.pdf`). */
+export function nomeFilePdfBilancio(r: BilancioRichiesta): string {
+  const anno = annoRichiesta(r);
+  return anno === null ? "bilancio.pdf" : `bilancio-${anno}.pdf`;
 }

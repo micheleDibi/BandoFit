@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Istanza XBRL SINTETICA scritta a mano per i test: società fittizia, valori inventati.
+     Unità di misura: vale solo iso4217:EUR risolto per NAMESPACE (non per prefisso);
+     dollari, unità composte e prefissi legati a un altro namespace si scartano. -->
+<xbrli:xbrl xmlns:xbrli="http://www.xbrl.org/2003/instance"
+            xmlns:link="http://www.xbrl.org/2003/linkbase"
+            xmlns:xlink="http://www.w3.org/1999/xlink"
+            xmlns:iso4217="http://www.xbrl.org/2003/iso4217"
+            xmlns:valuta="http://www.xbrl.org/2003/iso4217"
+            xmlns:itcc-ci="http://www.infocamere.it/itnn/fr/itcc/ci/2018-11-04">
+  <link:schemaRef xlink:type="simple" xlink:href="itcc-ci-ese-2018-11-04.xsd"/>
+
+  <xbrli:context id="i2024">
+    <xbrli:entity><xbrli:identifier scheme="http://www.infocamere.it">09876543217</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:instant>2024-12-31</xbrli:instant></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="d2024">
+    <xbrli:entity><xbrli:identifier scheme="http://www.infocamere.it">09876543217</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:startDate>2024-01-01</xbrli:startDate><xbrli:endDate>2024-12-31</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+
+  <!-- euro con un prefisso diverso ma legato al namespace giusto: valido -->
+  <xbrli:unit id="u_valuta"><xbrli:measure>valuta:EUR</xbrli:measure></xbrli:unit>
+  <!-- dollari: scartati -->
+  <xbrli:unit id="u_usd"><xbrli:measure>iso4217:USD</xbrli:measure></xbrli:unit>
+  <!-- «iso4217:EUR» ma con il prefisso ridefinito su un altro namespace: scartato -->
+  <xbrli:unit id="u_falso" xmlns:iso4217="http://example.com/non-iso4217"><xbrli:measure>iso4217:EUR</xbrli:measure></xbrli:unit>
+  <!-- unità composta (euro per azione): scartata -->
+  <xbrli:unit id="u_div">
+    <xbrli:divide>
+      <xbrli:unitNumerator><xbrli:measure>iso4217:EUR</xbrli:measure></xbrli:unitNumerator>
+      <xbrli:unitDenominator><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unitDenominator>
+    </xbrli:divide>
+  </xbrli:unit>
+
+  <itcc-ci:DatiAnagraficiCodiceFiscale contextRef="i2024">09876543217</itcc-ci:DatiAnagraficiCodiceFiscale>
+
+  <itcc-ci:ValoreProduzioneRicaviVenditePrestazioni contextRef="d2024" unitRef="u_valuta" decimals="0">330000</itcc-ci:ValoreProduzioneRicaviVenditePrestazioni>
+  <itcc-ci:TotaleAttivo contextRef="i2024" unitRef="u_usd" decimals="0">999000</itcc-ci:TotaleAttivo>
+  <itcc-ci:TotalePatrimonioNetto contextRef="i2024" unitRef="u_falso" decimals="0">888000</itcc-ci:TotalePatrimonioNetto>
+  <itcc-ci:TotaleDebiti contextRef="i2024" unitRef="u_div" decimals="0">777000</itcc-ci:TotaleDebiti>
+  <itcc-ci:TotaleDisponibilitaLiquide contextRef="i2024" unitRef="u_inesistente" decimals="0">666000</itcc-ci:TotaleDisponibilitaLiquide>
+  <!-- dipendenti in euro: unità sbagliata per un numero -->
+  <itcc-ci:TotaleDipendentiNumeroMedio contextRef="i2024" unitRef="u_valuta">4</itcc-ci:TotaleDipendentiNumeroMedio>
+</xbrli:xbrl>

@@ -742,6 +742,86 @@ export interface ImportPreviewBilanci {
   anni: number[];
 }
 
+// ---- Bilancio ufficiale on-demand (GET/POST /me/company/bilanci/ufficiale) --
+
+/** Ciclo di vita di una richiesta. Aperti: `in_invio`, `in_lavorazione`,
+ *  `esito_ignoto` (la risposta del Registro Imprese non è arrivata e si sta
+ *  verificando se la richiesta è partita). Gli altri sono terminali. */
+export type StatoRichiestaBilancio =
+  | "in_invio"
+  | "in_lavorazione"
+  | "esito_ignoto"
+  | "completata"
+  | "non_disponibile"
+  | "annullata"
+  | "errore";
+
+/** Perché una richiesta non è andata a buon fine (vocabolario chiuso). */
+export type ErroreRichiestaBilancio =
+  | "bilancio_non_disponibile"
+  | "forma_non_ammessa"
+  | "identificativo_non_valido"
+  | "credito_provider"
+  | "non_inviata"
+  | "errore_provider"
+  | "scaduta"
+  | "esito_ignoto_scaduto";
+
+/** Esito della lettura dei dati dal bilancio ufficiale (XBRL). Una richiesta
+ *  `completata` con esito diverso da `ok` ha comunque il PDF, se conservato. */
+export type XbrlEsito =
+  | "ok"
+  | "assente"
+  | "firmato_non_leggibile"
+  | "non_valido"
+  | "consolidato"
+  | "cf_non_corrispondente"
+  | "troppo_grande";
+
+/** Una richiesta di bilancio ufficiale. Il server non espone mai
+ *  l'identificativo del fornitore. */
+export interface BilancioRichiesta {
+  id: string;
+  stato: StatoRichiestaBilancio;
+  /** Esercizio scelto; null = «ultimo disponibile». */
+  anno_richiesto: number | null;
+  /** Esercizio effettivamente ricevuto (noto a completamento). */
+  anno_bilancio: number | null;
+  errore_codice: ErroreRichiestaBilancio | null;
+  /** Spiegazione in italiano semplice, già pronta da mostrare. */
+  messaggio: string | null;
+  xbrl_esito: XbrlEsito | null;
+  avvisi_count: number;
+  /** true = l'unità dell'addon è stata restituita automaticamente. */
+  rimborsata: boolean;
+  pdf_disponibile: boolean;
+  created_at: string;
+  completata_at: string | null;
+}
+
+/** Addon collegato, nella forma minima che serve a `prezzoDisplay`. */
+export interface AddonBreve {
+  slug: string;
+  nome: string;
+  tipo_prezzo: TipoPrezzo;
+  etichetta_prezzo: string | null;
+  prezzo: string | number;
+}
+
+export interface BilanciUfficiali {
+  /** true = titolare: può richiedere; gli altri vedono solo lo storico. */
+  editable: boolean;
+  richiedibile: boolean;
+  motivo_non_richiedibile: string | null;
+  addon: AddonBreve | null;
+  /** Unità dell'addon nell'inventario del titolare. */
+  quantita: number;
+  /** Esercizi già acquisiti come bilancio ufficiale. */
+  anni_acquisiti: number[];
+  /** Più recenti prima, al massimo 20. */
+  richieste: BilancioRichiesta[];
+}
+
 // ---- Preferenze per utente -------------------------------------------------
 
 export interface Preferences {
@@ -1151,10 +1231,12 @@ export interface MyAddon {
   /** Risorsa entitlement (0030): seats/companies; null = addon normale. */
   risorsa: "seats" | "companies" | null;
   quantita: number;
-  /** Totali storici dal ledger: accrediti (acquisti+grant+rimborsi) e SOLI
-   *  consumi (le revoche admin riducono quantita senza contare come consumo). */
+  /** Totali storici dal ledger: accrediti (acquisti+grant), SOLI consumi (le
+   *  revoche admin riducono quantita senza contare come consumo) e rimborsi
+   *  automatici (unità restituite dopo un consumo, contate a parte). */
   acquistate: number;
   consumate: number;
+  rimborsate: number;
   updated_at: string | null;
 }
 

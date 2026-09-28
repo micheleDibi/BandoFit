@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from postgrest.exceptions import APIError
 
-from app.core.errors import BadRequestError, ConflictError, NotFoundError
+from app.core.errors import ConflictError, NotFoundError
 from app.schemas.addon import AdminGrantAddonIn, AdminRevokeAddonIn
 from app.services import addon_inventory_service, notification_service
 
@@ -116,6 +116,39 @@ class TestInventario:
         out = await addon_inventory_service.get_inventory(primary, USER)
         assert out[0].quantita == 0 and out[0].risorsa == "seats"
         assert out[0].acquistate == 2 and out[0].consumate == 0
+
+
+    async def test_rimborsi_in_un_contatore_a_parte(self):
+        # 0033: il refund automatico del bilancio ufficiale restituisce
+        # l'unità ma NON è un acquisto: `rimborsate`, fuori da `acquistate`.
+        primary = FakePrimary(rows={
+            "user_addon_inventory": [{
+                "addon_id": 9, "quantita": 2, "updated_at": None,
+                "addons": {"slug": "bilancio-ufficiale", "nome": "Bilancio ufficiale",
+                           "tipo_fruizione": "consumabile"},
+            }],
+            "addon_ledger": [
+                {"addon_id": 9, "tipo": "purchase", "delta": 3},
+                {"addon_id": 9, "tipo": "consume", "delta": -1},
+                {"addon_id": 9, "tipo": "consume", "delta": -1},
+                {"addon_id": 9, "tipo": "refund", "delta": 1},
+            ],
+        })
+        [voce] = await addon_inventory_service.get_inventory(primary, USER)
+        assert (voce.acquistate, voce.consumate, voce.rimborsate) == (3, 2, 1)
+        assert voce.quantita == 2
+
+    async def test_rimborsate_default_zero(self):
+        primary = FakePrimary(rows={
+            "user_addon_inventory": [{
+                "addon_id": 5, "quantita": 1, "updated_at": None,
+                "addons": {"slug": "consulto-esperto", "nome": "Consulto",
+                           "tipo_fruizione": "consumabile"},
+            }],
+            "addon_ledger": [{"addon_id": 5, "tipo": "purchase", "delta": 1}],
+        })
+        [voce] = await addon_inventory_service.get_inventory(primary, USER)
+        assert voce.rimborsate == 0 and voce.model_dump()["rimborsate"] == 0
 
 
 class TestGrant:

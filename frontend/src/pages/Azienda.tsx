@@ -1,67 +1,38 @@
-import { Download, FileDown, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { AlertTriangle, Download, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useActiveCompany } from "../hooks/useActiveCompany";
+import { useAziendaDaLink } from "../hooks/useAziendaDaLink";
 import { useCompany } from "../hooks/useCompany";
 import { useCompanyDossier } from "../hooks/useCompanyDossier";
 import { CompanyCard } from "../components/company/CompanyCard";
 import { ImportCompanyDialog } from "../components/company/ImportCompanyDialog";
 import { BilanciSection } from "../components/company/bilanci/BilanciSection";
 import { DossierView } from "../components/company/dossier/DossierView";
+import { ExportPdfButton } from "../components/shared/ExportPdfButton";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
-import { downloadFile } from "../lib/download";
 import { formatDateNumeric } from "../lib/format";
-
-/** Bottone di export PDF: scarica un blob autenticato con stato di caricamento
- *  e messaggio d'errore inline (con responseType blob l'errore del backend non
- *  è JSON leggibile, quindi il testo è generico). */
-function ExportPdfButton({
-  url,
-  filename,
-  label,
-}: {
-  url: string;
-  filename: string;
-  label: string;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  return (
-    <div className="flex flex-col items-end gap-1">
-      <Button
-        variant="secondary"
-        loading={busy}
-        aria-busy={busy}
-        onClick={async () => {
-          setError(null);
-          setBusy(true);
-          try {
-            await downloadFile(url, filename);
-          } catch (e) {
-            setError(e instanceof Error ? e.message : "Download non riuscito. Riprova.");
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        {!busy && <FileDown className="size-4" aria-hidden />}
-        {busy ? "Esportazione…" : label}
-      </Button>
-      {error && (
-        <span className="text-xs text-red-600" role="alert">
-          {error}
-        </span>
-      )}
-    </div>
-  );
-}
 
 export default function Azienda() {
   const { data, isPending, isError, refetch } = useCompanyDossier();
   const { data: companyData } = useCompany();
   const { activeCompanyId } = useActiveCompany();
   const [importOpen, setImportOpen] = useState(false);
+  // Link delle notifiche (`?azienda=<id>#bilanci`): per un Advisor rende
+  // attiva l'azienda della notifica prima di mostrare i dati.
+  const { avviso } = useAziendaDaLink();
+  const location = useLocation();
+  const imported = data?.imported ?? false;
+
+  // `#bilanci` (link «Vedi tutti i bilanci» e notifiche del bilancio
+  // ufficiale): la sezione esiste solo dopo il caricamento del dossier,
+  // quindi lo scroll si fa quando c'è.
+  useEffect(() => {
+    if (location.hash !== "#bilanci" || !imported) return;
+    document.getElementById("bilanci")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [location.hash, location.key, imported]);
 
   if (isPending) {
     return (
@@ -122,6 +93,16 @@ export default function Azienda() {
           />
         )}
       </div>
+
+      {avviso && (
+        <p
+          role="status"
+          className="mt-4 inline-flex items-start gap-2 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800"
+        >
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+          {avviso}
+        </p>
+      )}
 
       {/* 1. Dati aziendali (compilati dall'utente: riepilogo + modifica) */}
       <div className="mt-6">

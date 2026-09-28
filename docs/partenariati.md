@@ -700,7 +700,17 @@ Durante l'esecuzione mi fermo solo per ambiguità che cambiano comportamento o c
   - la query key del frontend è `["company-bilanci", activeCompanyId]`;
   - lock di import con token aggiunto accanto alle vecchie funzioni (niente DROP: le migration girano prima del deploy);
   - annotato, non corretto: l'anteprima non consulta il cooldown dell'ultimo recupero dei bilanci (impatto massimo 0,10 €, limitato dalla quota giornaliera).
-- **WP2–WP10** — da fare.
+- **WP2 (fatto)** — scostamenti:
+  - la lista delle richieste del provider vale come «nessuna richiesta» solo con 404 **e** codice 270; ogni risposta dubbia è un errore e una lista paginata non prova mai un'assenza;
+  - la riconciliazione cerca prima l'id annotato nel registro consumi, poi la lista; il rimborso «mai inviata» richiede che nessuna voce della stessa P.IVA non attribuita sia nata dopo la richiesta;
+  - failsafe della lavorazione: 72 ore se l'ultimo tentativo è fallito per un guasto, 24 ore negli altri casi; ogni chiusura senza rimborso si logga a livello ERROR;
+  - «ultimo disponibile» rifiutato (409) se l'ultimo esercizio chiuso è già posseduto;
+  - la verifica `/impresa` (forme diverse dalle società di capitali) passa dal tetto giornaliero condiviso con l'import;
+  - PDF conservato: esclusi i nomi con «verbale»/«assemblea», poi il primo con «bilancio» nel nome, altrimenti il più grande;
+  - notifica «Bilancio ufficiale non utilizzabile» quando mancano sia PDF sia numeri;
+  - con l'addon disattivato la card resta visibile se esistono richieste passate;
+  - da verificare in sandbox: forma reale della lista delle richieste e nomi dei file nello ZIP; round-trip di un `bytea` da 8 MB via PostgREST (se non regge, bucket privato).
+- **WP3–WP10** — da fare.
 
 ---
 

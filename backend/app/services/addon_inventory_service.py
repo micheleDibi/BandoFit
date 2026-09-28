@@ -49,7 +49,7 @@ def _raise_from_rpc(exc: APIError) -> NoReturn:
 
 
 def _map_inventory(row: dict, acquistate: dict[int, int],
-                   consumate: dict[int, int]) -> MyAddonOut:
+                   consumate: dict[int, int], rimborsate: dict[int, int]) -> MyAddonOut:
     addon = row.get("addons") or {}
     return MyAddonOut(
         addon_id=row["addon_id"],
@@ -61,6 +61,7 @@ def _map_inventory(row: dict, acquistate: dict[int, int],
         quantita=row["quantita"],
         acquistate=acquistate.get(row["addon_id"], 0),
         consumate=consumate.get(row["addon_id"], 0),
+        rimborsate=rimborsate.get(row["addon_id"], 0),
         updated_at=row.get("updated_at"),
     )
 
@@ -68,7 +69,9 @@ def _map_inventory(row: dict, acquistate: dict[int, int],
 async def get_inventory(primary, user_id: str) -> list[MyAddonOut]:
     """L'inventario dell'utente. Dalla 0030 include ANCHE le voci a quantità 0
     (un consumabile esaurito resta visibile in «I miei addon») e i totali dal
-    ledger — acquistate/consumate; le revoche admin non contano come consumo."""
+    ledger — acquistate/consumate; le revoche admin non contano come consumo.
+    Dalla 0033 i rimborsi automatici (`refund`) hanno un contatore a parte,
+    `rimborsate`: non sono acquisti."""
     resp = (
         await primary.table("user_addon_inventory")
         .select(_INVENTORY_SELECT)
@@ -86,13 +89,16 @@ async def get_inventory(primary, user_id: str) -> list[MyAddonOut]:
     )
     acquistate: dict[int, int] = {}
     consumate: dict[int, int] = {}
+    rimborsate: dict[int, int] = {}
     for m in ledger.data or []:
         aid = m["addon_id"]
-        if m["delta"] > 0:
+        if m["tipo"] == "refund":
+            rimborsate[aid] = rimborsate.get(aid, 0) + m["delta"]
+        elif m["delta"] > 0:
             acquistate[aid] = acquistate.get(aid, 0) + m["delta"]
         elif m["tipo"] == "consume":
             consumate[aid] = consumate.get(aid, 0) - m["delta"]
-    return [_map_inventory(r, acquistate, consumate) for r in rows]
+    return [_map_inventory(r, acquistate, consumate, rimborsate) for r in rows]
 
 
 async def get_ledger(primary, user_id: str, addon_id: int | None = None,

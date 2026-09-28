@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Istanza XBRL SINTETICA scritta a mano per i test: società fittizia, valori inventati.
+     Bilancio delle micro-imprese 2024, una sola annualità, SENZA numero medio dei
+     dipendenti (la nota integrativa micro non lo prevede). -->
+<xbrli:xbrl xmlns:xbrli="http://www.xbrl.org/2003/instance"
+            xmlns:link="http://www.xbrl.org/2003/linkbase"
+            xmlns:xlink="http://www.w3.org/1999/xlink"
+            xmlns:iso4217="http://www.xbrl.org/2003/iso4217"
+            xmlns:itcc-ci="http://www.infocamere.it/itnn/fr/itcc/ci/2018-11-04">
+  <link:schemaRef xlink:type="simple" xlink:href="itcc-ci-micr-2018-11-04.xsd"/>
+
+  <xbrli:context id="i2024">
+    <xbrli:entity><xbrli:identifier scheme="http://www.infocamere.it">09876543217</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:instant>2024-12-31</xbrli:instant></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="d2024">
+    <xbrli:entity><xbrli:identifier scheme="http://www.infocamere.it">09876543217</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:startDate>2024-01-01</xbrli:startDate><xbrli:endDate>2024-12-31</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:unit id="EUR"><xbrli:measure>iso4217:EUR</xbrli:measure></xbrli:unit>
+
+  <itcc-ci:DatiAnagraficiCodiceFiscale contextRef="i2024">09876543217</itcc-ci:DatiAnagraficiCodiceFiscale>
+
+  <itcc-ci:PatrimonioNettoCapitale contextRef="i2024" unitRef="EUR" decimals="0">10000</itcc-ci:PatrimonioNettoCapitale>
+  <itcc-ci:TotalePatrimonioNetto contextRef="i2024" unitRef="EUR" decimals="0">23750</itcc-ci:TotalePatrimonioNetto>
+  <itcc-ci:TotaleDebiti contextRef="i2024" unitRef="EUR" decimals="0">41000</itcc-ci:TotaleDebiti>
+  <itcc-ci:TotaleAttivo contextRef="i2024" unitRef="EUR" decimals="0">69300</itcc-ci:TotaleAttivo>
+  <itcc-ci:TotalePassivo contextRef="i2024" unitRef="EUR" decimals="0">69300</itcc-ci:TotalePassivo>
+  <itcc-ci:PatrimonioNettoUtilePerditaEsercizio contextRef="i2024" unitRef="EUR" decimals="0">4125</itcc-ci:PatrimonioNettoUtilePerditaEsercizio>
+
+  <itcc-ci:ValoreProduzioneRicaviVenditePrestazioni contextRef="d2024" unitRef="EUR" decimals="0">98700</itcc-ci:ValoreProduzioneRicaviVenditePrestazioni>
+  <itcc-ci:TotaleValoreProduzione contextRef="d2024" unitRef="EUR" decimals="0">99100</itcc-ci:TotaleValoreProduzione>
+  <itcc-ci:DifferenzaValoreCostiProduzione contextRef="d2024" unitRef="EUR" decimals="0">6010</itcc-ci:DifferenzaValoreCostiProduzione>
+  <itcc-ci:UtilePerditaEsercizio contextRef="d2024" unitRef="EUR" decimals="0">4125</itcc-ci:UtilePerditaEsercizio>
+</xbrli:xbrl>

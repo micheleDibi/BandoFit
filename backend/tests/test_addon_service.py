@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from postgrest.exceptions import APIError
 
-from app.core.errors import BadRequestError, ConflictError, NotFoundError
+from app.core.errors import AppError, BadRequestError, ConflictError, NotFoundError
 from app.schemas.addon import AddonCreate, AddonUpdate
 from app.services import addon_service
 
@@ -64,6 +64,8 @@ class FakeQuery:
                 })
             return SimpleNamespace(data=[{**ADDON_ROW, **(self._payload or {})}])
         if self._op == "update":
+            if self._owner.update_error is not None:
+                raise self._owner.update_error
             if self._owner.update_returns_empty:
                 return SimpleNamespace(data=[])
             return SimpleNamespace(data=[{**ADDON_ROW, **(self._payload or {})}])
@@ -78,6 +80,7 @@ class FakePrimary:
         self.rpc_result: dict = {}
         self.insert_fail_unique = False
         self.update_returns_empty = False
+        self.update_error: Exception | None = None
 
     def table(self, name: str) -> FakeQuery:
         return FakeQuery(self, name)
@@ -239,3 +242,44 @@ class TestUpdate:
         primary.update_returns_empty = True
         with pytest.raises(NotFoundError):
             await addon_service.update_addon(primary, 999, AddonUpdate(is_active=False))
+
+
+class TestCostoEsterno:
+    """0033: un addon `sempre_a_pagamento` (es. bilancio-ufficiale) non può
+    essere attivo gratis — il CHECK del DB lo respinge (23514) e l'admin
+    riceve un 400 comprensibile invece di un 500."""
+
+    @staticmethod
+    def check_violation(vincolo: str) -> APIError:
+        return APIError({
+            "message": f'new row for relation "addons" violates check constraint "{vincolo}"',
+            "code": "23514", "details": "Failing row contains (...)", "hint": None,
+        })
+
+    @pytest.mark.parametrize(
+        "modifica",
+        [AddonUpdate(is_active=True), AddonUpdate(prezzo=Decimal("0")),
+         AddonUpdate(tipo_prezzo="gratis")],
+        ids=["attivazione", "prezzo_zero", "gratis"],
+    )
+    async def test_attivo_gratis_400(self, modifica):
+        primary = FakePrimary()
+        primary.update_error = self.check_violation("addons_sempre_a_pagamento_coerente")
+        with pytest.raises(AppError) as exc:
+            await addon_service.update_addon(primary, 7, modifica)
+        assert (exc.value.status_code, exc.value.code) == (400, "addon_costo_esterno")
+        assert exc.value.message == "Questo add-on ha un costo esterno: non può essere attivo gratis"
+
+    async def test_altro_check_non_mascherato(self):
+        primary = FakePrimary()
+        primary.update_error = self.check_violation("addons_prezzo_check")
+        with pytest.raises(APIError):
+            await addon_service.update_addon(primary, 7, AddonUpdate(prezzo=Decimal("1")))
+
+    async def test_altro_errore_non_mascherato(self):
+        primary = FakePrimary()
+        primary.update_error = APIError(
+            {"message": "timeout", "code": "57014", "details": None, "hint": None}
+        )
+        with pytest.raises(APIError):
+            await addon_service.update_addon(primary, 7, AddonUpdate(is_active=True))

@@ -6,7 +6,9 @@ sono le fixture registrate dallo spike (tests/fixtures/openapi/).
 """
 
 import json
+import logging
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,10 +16,15 @@ import httpx
 import pytest
 
 from app.clients.openapi import (
+    OpenapiBilancioNonDisponibileError,
     OpenapiClient,
+    OpenapiCreditoProviderError,
+    OpenapiFormaNonAmmessaError,
+    OpenapiIdentificativoNonValidoError,
     OpenapiInvalidIdError,
     OpenapiNessunDatoError,
     OpenapiNonInviataError,
+    OpenapiRispostaTroppoGrandeError,
 )
 from app.core.errors import (
     OpenapiNotConfiguredError,
@@ -84,8 +91,46 @@ class FakeHTTP:
         self.request_kwargs.append(kwargs)
         return self._next()
 
+    def stream(self, method, url, **kwargs):
+        """Come httpx.AsyncClient.stream: un context manager asincrono. Una
+        FakeResponse in coda diventa un corpo JSON a pezzi."""
+        self.requests.append((method.upper(), url))
+        self.request_kwargs.append(kwargs)
+        item = self._next()
+        if isinstance(item, FakeResponse):
+            item = json_stream(item.status_code, item._body)
+
+        @asynccontextmanager
+        async def aperto():
+            yield item
+
+        return aperto()
+
     async def aclose(self):
         pass
+
+
+class FakeStream:
+    """Risposta letta in streaming: pezzi di byte e header (Content-Length
+    opzionale). `letti` conta i pezzi consumati."""
+
+    def __init__(self, status_code: int, pezzi: list[bytes], headers: dict | None = None):
+        self.status_code = status_code
+        self.pezzi = pezzi
+        self.headers = headers or {}
+        self.letti = 0
+
+    async def aiter_bytes(self):
+        for pezzo in self.pezzi:
+            self.letti += 1
+            yield pezzo
+
+
+def json_stream(status: int, body: dict, *, pezzo: int = 64, dichiara: bool = True) -> FakeStream:
+    grezzo = json.dumps(body).encode()
+    pezzi = [grezzo[i:i + pezzo] for i in range(0, len(grezzo), pezzo)] or [b""]
+    headers = {"content-length": str(len(grezzo))} if dichiara else {}
+    return FakeStream(status, pezzi, headers)
 
 
 def token_ok(expire_offset: int = 3600) -> FakeResponse:
@@ -553,3 +598,319 @@ class TestLogSenzaIdentificativi:
         )
         assert _FILTRO_LOG_HTTPX.filter(record) is True
         assert "rest/v1/x?id=eq.1" in record.getMessage()
+
+
+# ------------------------------------------------------------ bilancio ottico
+
+PIVA_BO = "09876543217"
+VISURE = "https://visurecamerali.openapi.it"
+
+
+def envelope(data, *, success: bool = True, error=None, message: str = "") -> dict:
+    return {"data": data, "success": success, "message": message, "error": error}
+
+
+def richiesta_bo(**extra) -> dict:
+    return {
+        "cf_piva_id": PIVA_BO, "anno_chiusura": None, "tipo": "bilancio-ottico",
+        "stato_richiesta": "In ricerca", "timestamp_creation": 1783363351,
+        "timestamp_last_update": 1783363351, "allegati": [], "callback": False,
+        "owner": "account@example.com", "id": "6a4bf7252ba8a578e60896f2", **extra,
+    }
+
+
+class TestBilancioOtticoRichiedi:
+    """POST bilancio-ottico (A PAGAMENTO): gruppo `visure`, rifiuti sincroni
+    classificati, mai un secondo invio dopo la partenza."""
+
+    async def test_accettata_body_url_e_gruppo(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, envelope(richiesta_bo(anno_chiusura="2024"))))
+        data = await client.bilancio_ottico_richiedi(PIVA_BO, 2024)
+        assert data["id"] == "6a4bf7252ba8a578e60896f2"
+        assert http.requests[-1] == ("POST", f"{VISURE}/bilancio-ottico")
+        # anno come STRINGA (OAS), nessuna callback
+        assert http.request_kwargs[-1]["json"] == {"cf_piva_id": PIVA_BO, "anno_chiusura": "2024"}
+        assert http.minted_scopes == [client._scopes("visure")]
+
+    async def test_ultimo_disponibile_anno_null(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, envelope(richiesta_bo())))
+        await client.bilancio_ottico_richiedi(PIVA_BO, None)
+        assert http.request_kwargs[-1]["json"] == {"cf_piva_id": PIVA_BO, "anno_chiusura": None}
+
+    def test_sandbox_host_di_test(self):
+        client, _ = make_client(openapi_env="sandbox")
+        assert client._hosts["visure"] == "https://test.visurecamerali.openapi.it"
+
+    @pytest.mark.parametrize(
+        ("status", "codice", "eccezione"),
+        [
+            (404, 278, OpenapiBilancioNonDisponibileError),
+            (400, 213, OpenapiFormaNonAmmessaError),
+            (400, 275, OpenapiIdentificativoNonValidoError),
+            (406, 222, OpenapiIdentificativoNonValidoError),
+        ],
+        ids=["278", "213", "275", "406_222"],
+    )
+    async def test_rifiuti_sincroni_classificati(self, status, codice, eccezione):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(status, envelope(None, success=False, error=codice, message="no")))
+        with pytest.raises(eccezione):
+            await client.bilancio_ottico_richiedi(PIVA_BO, None)
+
+    @pytest.mark.parametrize(("status", "codice"), [(402, 611), (402, 610), (400, 611)])
+    async def test_credito_provider_critical(self, status, codice, caplog):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(status, envelope(None, success=False, error=codice)))
+        caplog.set_level(logging.CRITICAL, logger="bandofit.openapi")
+        with pytest.raises(OpenapiCreditoProviderError):
+            await client.bilancio_ottico_richiedi(PIVA_BO, None)
+        assert any(r.levelno == logging.CRITICAL for r in caplog.records)
+        assert not any(PIVA_BO in r.getMessage() for r in caplog.records)
+
+    async def test_5xx_esito_ignoto_non_non_inviata(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(503, envelope(None, success=False, error=None)))
+        with pytest.raises(OpenapiUpstreamError) as exc:
+            await client.bilancio_ottico_richiedi(PIVA_BO, None)
+        assert not isinstance(exc.value, OpenapiNonInviataError)
+
+    async def test_successo_senza_id_esito_ignoto(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, envelope({"stato_richiesta": "In ricerca"})))
+        with pytest.raises(OpenapiUpstreamError) as exc:
+            await client.bilancio_ottico_richiedi(PIVA_BO, None)
+        assert not isinstance(exc.value, OpenapiNonInviataError)
+
+    async def test_timeout_mai_ritentato(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(httpx.ReadTimeout("lenta"))
+        with pytest.raises(OpenapiTimeoutError):
+            await client.bilancio_ottico_richiedi(PIVA_BO, None)
+        assert [m for m, _ in http.requests] == ["POST", "POST"]  # mint + UNA sola POST
+
+    async def test_mint_visure_fallito_non_inviata(self):
+        client, http = make_client()
+        http.push(FakeResponse(401, {"success": False, "message": "API non attiva", "error": 120}))
+        with pytest.raises(OpenapiNonInviataError):
+            await client.bilancio_ottico_richiedi(PIVA_BO, None)
+        assert [u for _, u in http.requests] == ["https://oauth.openapi.it/token"]
+
+    async def test_connessione_rifiutata_due_volte_non_inviata(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(httpx.ConnectError("no"))
+        http.push(httpx.ConnectError("ancora no"))
+        with pytest.raises(OpenapiNonInviataError):
+            await client.bilancio_ottico_richiedi(PIVA_BO, None)
+
+
+class TestBilancioOtticoLetture:
+    async def test_stato(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, envelope(richiesta_bo(stato_richiesta="Dati disponibili"))))
+        data = await client.bilancio_ottico_stato("6a4bf7252ba8a578e60896f2")
+        assert data["stato_richiesta"] == "Dati disponibili"
+        assert http.requests[-1] == (
+            "GET", f"{VISURE}/bilancio-ottico/6a4bf7252ba8a578e60896f2"
+        )
+        assert http.minted_scopes == [client._scopes("visure")]
+
+    async def test_stato_payload_inatteso(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, envelope(["x"])))
+        with pytest.raises(OpenapiUpstreamError):
+            await client.bilancio_ottico_stato("id")
+
+    async def test_lista(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, envelope([richiesta_bo(), "rumore", richiesta_bo(id="b")])))
+        voci = await client.bilancio_ottico_lista()
+        assert [v["id"] for v in voci] == ["6a4bf7252ba8a578e60896f2", "b"]
+        assert http.requests[-1] == ("GET", f"{VISURE}/bilancio-ottico")
+
+    async def test_lista_vuota_404_270(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(404, envelope(None, success=False, error=270)))
+        assert await client.bilancio_ottico_lista() == []
+
+    @pytest.mark.parametrize(
+        ("status", "body"),
+        [
+            (404, envelope(None, success=False, error=None)),  # 404 di routing/gateway
+            (404, envelope(None, success=False, error=999)),  # 404 con un altro codice
+            (400, envelope(None, success=False, error=270)),  # 270 con un altro status
+            (200, envelope(None)),  # successo senza data
+            (200, envelope({"richieste": [], "stato": "ok"})),  # oggetto senza id
+        ],
+        ids=["404_senza_codice", "404_altro_codice", "270_non_404", "data_null", "wrapper"],
+    )
+    async def test_lista_dubbia_fallisce_chiusa(self, status, body):
+        # Una lista vuota vale come prova di non invio (e rimborso): ogni
+        # forma dubbia deve sollevare, mai restituire [].
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(status, body))
+        with pytest.raises(OpenapiUpstreamError):
+            await client.bilancio_ottico_lista()
+
+    async def test_lista_oggetto_singolo(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, envelope(richiesta_bo())))
+        assert [v["id"] for v in await client.bilancio_ottico_lista()] == [
+            "6a4bf7252ba8a578e60896f2"
+        ]
+
+    async def test_lista_paginata_parziale_con_le_voci(self):
+        from app.clients.openapi import OpenapiListaParzialeError
+
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, envelope([richiesta_bo()]) | {"next": "/bilancio-ottico?p=2"}))
+        with pytest.raises(OpenapiListaParzialeError) as exc:
+            await client.bilancio_ottico_lista()
+        assert [v["id"] for v in exc.value.voci] == ["6a4bf7252ba8a578e60896f2"]
+
+    async def test_lista_oltre_il_tetto(self, monkeypatch):
+        import app.clients.openapi as modulo
+
+        monkeypatch.setattr(modulo, "_MAX_LISTA_BILANCI_BYTES", 100)
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, envelope([richiesta_bo()] * 5)))
+        with pytest.raises(OpenapiRispostaTroppoGrandeError):
+            await client.bilancio_ottico_lista()
+
+    async def test_impresa(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, envelope([{
+            "id": "x", "denominazione": "ALFA SRL",
+            "chiamate_disponibili": ["visurecamerali.openapi.it/bilancio-ottico"],
+        }])))
+        imprese = await client.impresa(PIVA_BO)
+        assert imprese[0]["chiamate_disponibili"] == ["visurecamerali.openapi.it/bilancio-ottico"]
+        assert http.requests[-1] == ("GET", f"{VISURE}/impresa/{PIVA_BO}")
+
+    async def test_impresa_oggetto_e_404(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, envelope({"id": "x", "chiamate_disponibili": []})))
+        assert await client.impresa(PIVA_BO) == [{"id": "x", "chiamate_disponibili": []}]
+        http.push(FakeResponse(404, envelope(None, success=False, error=None)))
+        assert await client.impresa(PIVA_BO) == []
+
+
+class TestBilancioOtticoAllegati:
+    """Allegati: ZIP in base64 dentro il JSON, letto in STREAMING con un
+    tetto di byte controllato PRIMA del parse."""
+
+    ALLEGATO = {"nome": "x.zip", "dimensione": 3, "file": "UEsF"}
+
+    async def test_allegati_ok(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, envelope(self.ALLEGATO)))
+        data = await client.bilancio_ottico_allegati("pid", max_bytes=10_000)
+        assert data == self.ALLEGATO
+        assert http.requests[-1] == ("GET", f"{VISURE}/bilancio-ottico/pid/allegati")
+
+    async def test_non_ancora_disponibili_422_273(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(422, envelope(None, success=False, error=273)))
+        assert await client.bilancio_ottico_allegati("pid", max_bytes=10_000) is None
+
+    async def test_senza_file_errore(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, envelope({"nome": "x.zip", "dimensione": 0})))
+        with pytest.raises(OpenapiUpstreamError):
+            await client.bilancio_ottico_allegati("pid", max_bytes=10_000)
+
+    async def test_content_length_oltre_il_tetto_senza_leggere(self):
+        client, http = make_client()
+        http.push(token_ok())
+        flusso = json_stream(200, envelope({**self.ALLEGATO, "file": "A" * 5000}))
+        http.push(flusso)
+        with pytest.raises(OpenapiRispostaTroppoGrandeError) as exc:
+            await client.bilancio_ottico_allegati("pid", max_bytes=1000)
+        assert exc.value.motivo == "risposta_troppo_grande"
+        assert flusso.letti == 0  # nessun byte letto: basta l'header
+
+    async def test_corpo_oltre_il_tetto_senza_content_length(self):
+        client, http = make_client()
+        http.push(token_ok())
+        flusso = json_stream(
+            200, envelope({**self.ALLEGATO, "file": "A" * 5000}), pezzo=100, dichiara=False
+        )
+        http.push(flusso)
+        with pytest.raises(OpenapiRispostaTroppoGrandeError):
+            await client.bilancio_ottico_allegati("pid", max_bytes=1000)
+        # lettura interrotta appena superato il tetto, non a fine corpo
+        assert flusso.letti == 11 < len(flusso.pezzi)
+
+    async def test_content_length_falso_non_inganna(self):
+        client, http = make_client()
+        http.push(token_ok())
+        flusso = json_stream(200, envelope({**self.ALLEGATO, "file": "A" * 5000}), pezzo=500)
+        flusso.headers["content-length"] = "10"
+        http.push(flusso)
+        with pytest.raises(OpenapiRispostaTroppoGrandeError):
+            await client.bilancio_ottico_allegati("pid", max_bytes=1000)
+
+    async def test_streaming_con_httpx_vero(self):
+        import base64
+
+        grande = base64.b64encode(b"Z" * 3000).decode()
+
+        def risposta(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/token":
+                return httpx.Response(
+                    200, json=fixture("token_sample") | {"expire": int(time.time()) + 3600}
+                )
+            if request.url.path.endswith("/piccolo/allegati"):
+                return httpx.Response(200, json=envelope(self.ALLEGATO))
+            return httpx.Response(200, json=envelope({**self.ALLEGATO, "file": grande}))
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(risposta))
+        client = OpenapiClient(settings(), http=http)  # type: ignore[arg-type]
+        try:
+            assert (await client.bilancio_ottico_allegati("piccolo", max_bytes=2000)) == (
+                self.ALLEGATO
+            )
+            with pytest.raises(OpenapiRispostaTroppoGrandeError):
+                await client.bilancio_ottico_allegati("grande", max_bytes=2000)
+        finally:
+            await http.aclose()
+
+    async def test_401_rigenera_il_token_anche_in_streaming(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(401, {"success": False, "message": "expired", "error": None}))
+        http.push(token_ok())
+        http.push(FakeResponse(200, envelope(self.ALLEGATO)))
+        assert await client.bilancio_ottico_allegati("pid", max_bytes=10_000) == self.ALLEGATO
+        assert http.minted_scopes == [client._scopes("visure"), client._scopes("visure")]
+
+
+class TestEnvelopeMalformato:
+    async def test_json_non_envelope_errore_upstream(self):
+        client, http = make_client()
+        http.push(token_ok())
+        http.push(FakeResponse(200, ["non", "envelope"]))  # type: ignore[arg-type]
+        with pytest.raises(OpenapiUpstreamError):
+            await client.verifica_cf("RSSMRA80A01H501U")

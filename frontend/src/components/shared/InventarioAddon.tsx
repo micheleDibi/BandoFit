@@ -10,6 +10,13 @@ import { Skeleton } from "../ui/states";
 
 const deltaConSegno = (delta: number) => (delta > 0 ? `+${delta}` : `−${Math.abs(delta)}`);
 
+// La nota dei rimborsi automatici (WP2) porta un codice tecnico: al posto del
+// codice si mostra una frase comprensibile.
+const notaLeggibile = (tipo: string, note: string | null) =>
+  tipo === "refund" && note?.startsWith("rimborso automatico")
+    ? "Unità restituita automaticamente: la richiesta non è andata a buon fine"
+    : (note ?? undefined);
+
 /** Inventario di un addon posseduto: badge «Hai N …» e storico movimenti a
  *  scomparsa. Il ledger (ultimi 20) si carica on-demand alla prima apertura,
  *  via useMyAddonLedger. Usato dal catalogo (Abbonamento) e da «I miei addon»
@@ -67,7 +74,7 @@ export function InventarioAddon({
               {movimenti?.map((m, i) => (
                 <li
                   key={i}
-                  title={m.note ?? undefined}
+                  title={notaLeggibile(m.tipo, m.note)}
                   className="flex items-baseline justify-between gap-2 text-xs"
                 >
                   <div className="min-w-0">

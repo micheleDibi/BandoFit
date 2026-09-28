@@ -15,6 +15,13 @@ Meccanica della piattaforma (verificata sul campo, vedi tests/fixtures/openapi/)
 
 - **IT-advanced**: sincrona, ``data`` è un ARRAY di un elemento (storico dei
   bilanci fino a ~7 anni); 204 o 404/305 = nessun dato per quell'impresa.
+- **Bilancio ottico** (``visure``, WP2): ``POST /bilancio-ottico`` (A PAGAMENTO
+  se accettata, 4,50 €) → stato ``In ricerca``/``In erogazione`` → ``Dati
+  disponibili``/``Visura evasa`` (o ``Annullata``) → ``GET /{id}/allegati``
+  con lo ZIP in base64, letto in streaming con un tetto di byte. Rifiuti
+  sincroni (gratuiti): 278 bilancio assente, 213 forma giuridica non ammessa,
+  275 identificativo non valido. ``GET /impresa/{cf_piva}`` dice se il
+  prodotto è disponibile per quell'impresa (pre-check a 0,001 €).
 
 Token per GRUPPO di scope: ``core`` (i prodotti storici, scope invariati),
 ``advanced`` (IT-advanced) e ``visure`` (bilancio-ottico e impresa, WP2). Un
@@ -31,6 +38,7 @@ ritento): solo per queste un rimborso all'utente è sicuro.
 """
 
 import asyncio
+import json as _json
 import logging
 import time
 
@@ -76,6 +84,18 @@ _POLL_MAX_ATTEMPTS = 25
 # ancora in corso e pagare due volte.
 _TOTAL_DEADLINE_SECONDS = 240.0
 _PENDING_STATES = {"PENDING", "IN_PROGRESS", "RUNNING"}
+# Tetto della lista delle richieste di bilancio ottico (riconciliazione): la
+# risposta cresce con lo storico dell'account e si legge in streaming.
+_MAX_LISTA_BILANCI_BYTES = 5_000_000
+# Codici d'errore dell'envelope per il credito del provider esaurito.
+_ERRORI_CREDITO = frozenset({610, 611})
+# Chiavi dell'envelope che fanno pensare a una lista paginata (la forma della
+# lista non è ancora verificata in sandbox): la lista non è completa.
+_CHIAVI_PAGINAZIONE = frozenset({
+    "next", "next_page", "nextPage", "prev", "page", "pages", "per_page", "total",
+    "totale", "total_count", "count", "has_more", "hasMore", "pagination", "paging",
+    "skip", "limit", "offset", "cursor", "links",
+})
 
 
 def _mask_url(url: str) -> str:
@@ -140,6 +160,72 @@ class OpenapiNonInviataError(OpenapiUpstreamError):
     ritento. Nessun addebito possibile: è l'unico errore dopo cui rimborsare
     l'utente è sicuro. Resta un OpenapiUpstreamError (502) per i chiamanti
     che non lo distinguono."""
+
+
+class OpenapiBilancioNonDisponibileError(Exception):
+    """Bilancio ottico: il Registro Imprese non ha il bilancio richiesto
+    (404/error 278). Rifiuto SINCRONO della POST: la richiesta non è stata
+    accettata."""
+
+
+class OpenapiFormaNonAmmessaError(Exception):
+    """Bilancio ottico: l'impresa non è una società di capitali (error 213,
+    «the cf_piva_id does not belong to a societa capitale»). Rifiuto
+    sincrono, gratuito (verificato sul campo con la vecchia visura)."""
+
+
+class OpenapiIdentificativoNonValidoError(Exception):
+    """Bilancio ottico: identificativo rifiutato (400/error 275, «cf_piva_id
+    not valid»). Rifiuto sincrono della POST."""
+
+
+class OpenapiCreditoProviderError(Exception):
+    """Credito dell'account openapi esaurito (HTTP 402, error 610/611): la
+    richiesta è respinta e non addebitata. Guasto di PIATTAFORMA, loggato a
+    CRITICAL: finché qualcuno non ricarica, nessuna chiamata a pagamento
+    passa."""
+
+
+class OpenapiRispostaTroppoGrandeError(OpenapiUpstreamError):
+    """La risposta supera il tetto di byte del chiamante: letta in streaming
+    e interrotta PRIMA del parse JSON (nessun picco di memoria). `motivo` è
+    un codice stabile per il chiamante."""
+
+    motivo = "risposta_troppo_grande"
+
+
+class OpenapiListaParzialeError(OpenapiUpstreamError):
+    """La lista delle richieste di bilancio ottico ha segni di paginazione:
+    `voci` sono quelle lette, ma l'ASSENZA di una richiesta non prova nulla
+    (potrebbe stare in un'altra pagina)."""
+
+    def __init__(self, voci: list[dict]):
+        super().__init__()
+        self.voci = voci
+
+
+def _codice_errore(body: dict) -> int | None:
+    """Codice `error` dell'envelope come intero (il provider lo manda come
+    numero; una stringa numerica vale lo stesso)."""
+    codice = body.get("error") if isinstance(body, dict) else None
+    if isinstance(codice, bool):
+        return None
+    try:
+        return int(codice) if codice is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+class _RispostaLetta:
+    """Corpo letto in streaming entro il tetto: stessa interfaccia minima di
+    httpx.Response usata da `_request` (status_code, json())."""
+
+    def __init__(self, status_code: int, content: bytes):
+        self.status_code = status_code
+        self.content = content
+
+    def json(self):
+        return _json.loads(self.content)
 
 
 class OpenapiClient:
@@ -235,9 +321,43 @@ class OpenapiClient:
 
     # --------------------------------------------------------------- requests
 
+    async def _invia(
+        self, method: str, url: str, *, headers: dict, json: dict | None, timeout,
+        max_bytes: int | None,
+    ):
+        """Una richiesta HTTP. Con `max_bytes` il corpo si legge in STREAMING
+        e si interrompe appena supera il tetto (anche se Content-Length è
+        assente o falso): OpenapiRispostaTroppoGrandeError, mai un parse di
+        una risposta enorme."""
+        if max_bytes is None:
+            return await self._http.request(
+                method, url, headers=headers, json=json, timeout=timeout
+            )
+        async with self._http.stream(
+            method, url, headers=headers, json=json, timeout=timeout
+        ) as resp:
+            dichiarata = str(resp.headers.get("content-length") or "")
+            if dichiarata.isdigit() and int(dichiarata) > max_bytes:
+                logger.error(
+                    "openapi: risposta oltre il tetto di %s byte da %s (dichiarata)",
+                    max_bytes, _mask_url(url),
+                )
+                raise OpenapiRispostaTroppoGrandeError()
+            corpo = bytearray()
+            async for pezzo in resp.aiter_bytes():
+                corpo += pezzo
+                if len(corpo) > max_bytes:
+                    logger.error(
+                        "openapi: risposta oltre il tetto di %s byte da %s",
+                        max_bytes, _mask_url(url),
+                    )
+                    raise OpenapiRispostaTroppoGrandeError()
+            return _RispostaLetta(resp.status_code, bytes(corpo))
+
     async def _request(
         self, method: str, url: str, *, json: dict | None = None,
-        timeout: float | None = None, gruppo: str = "core", _retry_auth: bool = True
+        timeout: float | None = None, gruppo: str = "core", max_bytes: int | None = None,
+        _retry_auth: bool = True,
     ) -> tuple[int, dict]:
         """Richiesta autenticata con gestione envelope. Ritorna (status, body);
         un 204 ritorna ``(204, {})`` senza leggere il corpo.
@@ -247,6 +367,7 @@ class OpenapiClient:
         non è fatturata). ReadTimeout e 5xx NON vengono ritentati: potrebbero
         essere già stati addebitati. ``timeout`` sovrascrive quello del
         client per le chiamate su percorsi interattivi (es. VIES).
+        ``max_bytes``: tetto del corpo, letto in streaming (vedi `_invia`).
         """
         if not self.enabled:
             raise OpenapiNotConfiguredError()
@@ -254,16 +375,18 @@ class OpenapiClient:
         headers = {"Authorization": f"Bearer {token}"}
         req_timeout = timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT
         try:
-            resp = await self._http.request(
-                method, url, headers=headers, json=json, timeout=req_timeout
+            resp = await self._invia(
+                method, url, headers=headers, json=json, timeout=req_timeout,
+                max_bytes=max_bytes,
             )
         except httpx.ConnectError:
             logger.warning(
                 "openapi: errore di connessione, ritento una volta (%s)", _mask_url(url)
             )
             try:
-                resp = await self._http.request(
-                    method, url, headers=headers, json=json, timeout=req_timeout
+                resp = await self._invia(
+                    method, url, headers=headers, json=json, timeout=req_timeout,
+                    max_bytes=max_bytes,
                 )
             except (httpx.ConnectError, httpx.PoolTimeout) as exc:
                 # Anche il ritento non è partito: nessun addebito possibile.
@@ -286,7 +409,8 @@ class OpenapiClient:
             async with self._token_locks[gruppo]:
                 self._tokens.pop(gruppo, None)  # solo il token di QUESTO gruppo
             return await self._request(
-                method, url, json=json, timeout=timeout, gruppo=gruppo, _retry_auth=False
+                method, url, json=json, timeout=timeout, gruppo=gruppo, max_bytes=max_bytes,
+                _retry_auth=False,
             )
 
         if resp.status_code == 204:
@@ -299,6 +423,12 @@ class OpenapiClient:
                 "openapi: risposta non JSON da %s (HTTP %s)", _mask_url(url), resp.status_code
             )
             raise OpenapiUpstreamError() from exc
+        if not isinstance(body, dict):
+            # Un JSON che non è l'envelope (lista, numero…): risposta malformata.
+            logger.error(
+                "openapi: risposta senza envelope da %s (HTTP %s)", _mask_url(url), resp.status_code
+            )
+            raise OpenapiUpstreamError()
         return resp.status_code, body
 
     async def _get(
@@ -418,3 +548,129 @@ class OpenapiClient:
             logger.error("openapi: payload verifica_cf inatteso: %r", data)
             raise OpenapiUpstreamError()
         return bool(data["validita"])
+
+    # ------------------------------------------------------------- visure
+
+    @staticmethod
+    def _rifiuti_bilancio(status: int, body: dict, url: str) -> None:
+        """Rifiuti classificati della POST bilancio-ottico, prima
+        dell'envelope generico. Non fa nulla su una risposta riuscita."""
+        if body.get("success"):
+            return
+        codice = _codice_errore(body)
+        message = str(body.get("message") or "")
+        if status == 402 or codice in _ERRORI_CREDITO:
+            logger.critical(
+                "openapi: credito del provider esaurito (%s, HTTP %s, error=%s): "
+                "ricaricare il conto openapi",
+                _mask_url(url), status, codice,
+            )
+            raise OpenapiCreditoProviderError(message)
+        if codice == 278:
+            raise OpenapiBilancioNonDisponibileError(message)
+        if codice == 213:
+            raise OpenapiFormaNonAmmessaError(message)
+        if codice in (275, 222):
+            raise OpenapiIdentificativoNonValidoError(message)
+
+    async def bilancio_ottico_richiedi(self, cf_piva: str, anno: int | None) -> dict:
+        """Richiede il bilancio ottico (A PAGAMENTO se accettata). Nessuna
+        callback (v1: poll). ``anno`` None = ultimo bilancio disponibile.
+
+        Mai ritentata dopo la partenza: timeout e 5xx restano a esito ignoto
+        (OpenapiTimeoutError/OpenapiUpstreamError). Rifiuti sincroni:
+        OpenapiBilancioNonDisponibileError (278), OpenapiFormaNonAmmessaError
+        (213), OpenapiIdentificativoNonValidoError (275), credito esaurito
+        OpenapiCreditoProviderError; mint o connessione falliti
+        OpenapiNonInviataError. Ritorna ``data`` (con ``id`` del provider)."""
+        url = f"{self._hosts['visure']}/bilancio-ottico"
+        corpo = {"cf_piva_id": cf_piva, "anno_chiusura": str(anno) if anno is not None else None}
+        status, body = await self._request("POST", url, json=corpo, gruppo="visure")
+        self._rifiuti_bilancio(status, body, url)
+        try:
+            data = self._check_envelope(status, body, url)
+        except OpenapiInvalidIdError as exc:
+            raise OpenapiIdentificativoNonValidoError(str(exc)) from exc
+        if not isinstance(data, dict) or not data.get("id"):
+            # Successo senza id: la richiesta può essere stata accettata.
+            logger.error("openapi: risposta bilancio-ottico senza id (HTTP %s)", status)
+            raise OpenapiUpstreamError()
+        return data
+
+    async def bilancio_ottico_stato(self, provider_id: str) -> dict:
+        """Stato di una richiesta (0,001 €): ``stato_richiesta`` passa da «In
+        ricerca»/«In erogazione» a «Dati disponibili»/«Visura evasa», oppure
+        «Annullata»."""
+        url = f"{self._hosts['visure']}/bilancio-ottico/{provider_id}"
+        status, body = await self._get(url, gruppo="visure")
+        data = self._check_envelope(status, body, url)
+        if not isinstance(data, dict):
+            logger.error("openapi: stato bilancio-ottico inatteso (%r)", type(data).__name__)
+            raise OpenapiUpstreamError()
+        return data
+
+    async def bilancio_ottico_allegati(self, provider_id: str, *, max_bytes: int) -> dict | None:
+        """Allegati della richiesta evasa: ``{nome, dimensione, file}`` con lo
+        ZIP in base64. None se non ancora scaricabili (422/error 273). La
+        risposta si legge in streaming: oltre ``max_bytes`` →
+        OpenapiRispostaTroppoGrandeError, senza parse."""
+        url = f"{self._hosts['visure']}/bilancio-ottico/{provider_id}/allegati"
+        status, body = await self._request("GET", url, gruppo="visure", max_bytes=max_bytes)
+        if not body.get("success") and (status == 422 or _codice_errore(body) == 273):
+            return None
+        data = self._check_envelope(status, body, url)
+        if isinstance(data, list):
+            data = next((d for d in data if isinstance(d, dict) and d.get("file")), None)
+        if not isinstance(data, dict) or not isinstance(data.get("file"), str) or not data["file"]:
+            logger.error("openapi: allegati bilancio-ottico senza file (HTTP %s)", status)
+            raise OpenapiUpstreamError()
+        return data
+
+    async def bilancio_ottico_lista(self) -> list[dict]:
+        """Richieste di bilancio ottico dell'account (0,001 €): serve alla
+        riconciliazione di una POST a esito ignoto. Solo 404 CON error 270 =
+        nessuna richiesta.
+
+        Una lista vuota è la prova che una POST non è partita (e vale un
+        rimborso): ogni altra forma dubbia FALLISCE CHIUSA. Un altro 404, un
+        `data` nullo o senza forma di lista → OpenapiUpstreamError; segni di
+        paginazione → OpenapiListaParzialeError con le voci lette (utili a
+        riconciliare, mai a provare un'assenza)."""
+        url = f"{self._hosts['visure']}/bilancio-ottico"
+        status, body = await self._request(
+            "GET", url, gruppo="visure", max_bytes=_MAX_LISTA_BILANCI_BYTES
+        )
+        if not body.get("success") and status == 404 and _codice_errore(body) == 270:
+            return []
+        data = self._check_envelope(status, body, url)
+        if isinstance(data, dict) and data.get("id"):
+            data = [data]  # una sola richiesta restituita come oggetto
+        if not isinstance(data, list):
+            logger.error("openapi: lista bilancio-ottico inattesa (%r)", type(data).__name__)
+            raise OpenapiUpstreamError()
+        voci = [voce for voce in data if isinstance(voce, dict)]
+        if _CHIAVI_PAGINAZIONE & set(body):
+            logger.warning(
+                "openapi: lista bilancio-ottico con segni di paginazione (%s): letta solo in parte",
+                ", ".join(sorted(_CHIAVI_PAGINAZIONE & set(body))),
+            )
+            raise OpenapiListaParzialeError(voci)
+        return voci
+
+    async def impresa(self, cf_piva: str) -> list[dict]:
+        """Anagrafica Visure dell'impresa (0,001 €): ``chiamate_disponibili``
+        dice se il bilancio ottico è richiedibile. 404 = impresa sconosciuta
+        (lista vuota)."""
+        url = f"{self._hosts['visure']}/impresa/{cf_piva}"
+        status, body = await self._get(url, gruppo="visure")
+        if not body.get("success") and status == 404:
+            return []
+        data = self._check_envelope(status, body, url)
+        if data is None:
+            return []
+        if isinstance(data, dict):
+            return [data]
+        if not isinstance(data, list):
+            logger.error("openapi: payload impresa inatteso (%r)", type(data).__name__)
+            raise OpenapiUpstreamError()
+        return [voce for voce in data if isinstance(voce, dict)]

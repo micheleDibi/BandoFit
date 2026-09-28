@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Istanza XBRL SINTETICA scritta a mano per i test: società fittizia, valori inventati.
+     Bilancio abbreviato 2024 con comparativo 2023, id di contesti e unità diversi
+     dall'ordinario (non sono normativi), perdita d'esercizio (valori negativi). -->
+<xbrli:xbrl xmlns:xbrli="http://www.xbrl.org/2003/instance"
+            xmlns:link="http://www.xbrl.org/2003/linkbase"
+            xmlns:xlink="http://www.w3.org/1999/xlink"
+            xmlns:iso4217="http://www.xbrl.org/2003/iso4217"
+            xmlns:itcc-ci="http://www.infocamere.it/itnn/fr/itcc/ci/2018-11-04">
+  <link:schemaRef xlink:type="simple" xlink:href="http://www.infocamere.it/itnn/fr/itcc/ci/abb/2018-11-04/itcc-ci-abb-2018-11-04.xsd"/>
+
+  <xbrli:context id="i_2024">
+    <xbrli:entity><xbrli:identifier scheme="http://www.infocamere.it">09876543217</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:instant>2024-12-31</xbrli:instant></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="i_2023">
+    <xbrli:entity><xbrli:identifier scheme="http://www.infocamere.it">09876543217</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:instant>2023-12-31</xbrli:instant></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="d_2024">
+    <xbrli:entity><xbrli:identifier scheme="http://www.infocamere.it">09876543217</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:startDate>2024-01-01</xbrli:startDate><xbrli:endDate>2024-12-31</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="d_2023">
+    <xbrli:entity><xbrli:identifier scheme="http://www.infocamere.it">09876543217</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:startDate>2023-01-01</xbrli:startDate><xbrli:endDate>2023-12-31</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:unit id="eur"><xbrli:measure>iso4217:EUR</xbrli:measure></xbrli:unit>
+  <xbrli:unit id="pure"><xbrli:measure>xbrli:pure</xbrli:measure></xbrli:unit>
+
+  <itcc-ci:DatiAnagraficiCodiceFiscale contextRef="i_2024">09876543217</itcc-ci:DatiAnagraficiCodiceFiscale>
+  <itcc-ci:DatiAnagraficiPartitaIva contextRef="i_2024">IT09876543217</itcc-ci:DatiAnagraficiPartitaIva>
+
+  <itcc-ci:PatrimonioNettoCapitale contextRef="i_2024" unitRef="eur" decimals="0">20000</itcc-ci:PatrimonioNettoCapitale>
+  <itcc-ci:PatrimonioNettoUtilePerditaEsercizio contextRef="i_2024" unitRef="eur" decimals="0">-15400</itcc-ci:PatrimonioNettoUtilePerditaEsercizio>
+  <itcc-ci:TotalePatrimonioNetto contextRef="i_2024" unitRef="eur" decimals="0">64600</itcc-ci:TotalePatrimonioNetto>
+  <itcc-ci:TotaleDebiti contextRef="i_2024" unitRef="eur" decimals="0">210300</itcc-ci:TotaleDebiti>
+  <itcc-ci:TotaleDisponibilitaLiquide contextRef="i_2024" unitRef="eur" decimals="0">31250</itcc-ci:TotaleDisponibilitaLiquide>
+  <itcc-ci:TotaleAttivo contextRef="i_2024" unitRef="eur" decimals="0">298900</itcc-ci:TotaleAttivo>
+  <itcc-ci:TotalePassivo contextRef="i_2024" unitRef="eur" decimals="0">298900</itcc-ci:TotalePassivo>
+
+  <itcc-ci:PatrimonioNettoCapitale contextRef="i_2023" unitRef="eur" decimals="0">20000</itcc-ci:PatrimonioNettoCapitale>
+  <itcc-ci:PatrimonioNettoUtilePerditaEsercizio contextRef="i_2023" unitRef="eur" decimals="0">8200</itcc-ci:PatrimonioNettoUtilePerditaEsercizio>
+  <itcc-ci:TotalePatrimonioNetto contextRef="i_2023" unitRef="eur" decimals="0">80000</itcc-ci:TotalePatrimonioNetto>
+  <itcc-ci:TotaleDebiti contextRef="i_2023" unitRef="eur" decimals="0">190000</itcc-ci:TotaleDebiti>
+  <itcc-ci:TotaleDisponibilitaLiquide contextRef="i_2023" unitRef="eur" decimals="0">40100</itcc-ci:TotaleDisponibilitaLiquide>
+  <itcc-ci:TotaleAttivo contextRef="i_2023" unitRef="eur" decimals="0">285000</itcc-ci:TotaleAttivo>
+  <itcc-ci:TotalePassivo contextRef="i_2023" unitRef="eur" decimals="0">285000</itcc-ci:TotalePassivo>
+
+  <itcc-ci:ValoreProduzioneRicaviVenditePrestazioni contextRef="d_2024" unitRef="eur" decimals="0">412000</itcc-ci:ValoreProduzioneRicaviVenditePrestazioni>
+  <itcc-ci:TotaleValoreProduzione contextRef="d_2024" unitRef="eur" decimals="0">418500</itcc-ci:TotaleValoreProduzione>
+  <itcc-ci:CostiProduzionePersonaleTotaleCostiPersonale contextRef="d_2024" unitRef="eur" decimals="0">96000</itcc-ci:CostiProduzionePersonaleTotaleCostiPersonale>
+  <itcc-ci:DifferenzaValoreCostiProduzione contextRef="d_2024" unitRef="eur" decimals="0">-9800</itcc-ci:DifferenzaValoreCostiProduzione>
+  <itcc-ci:ProventiOneriFinanziariInteressiAltriOneriFinanziariTotaleInteressiAltriOneriFinanziari contextRef="d_2024" unitRef="eur" decimals="0">4100</itcc-ci:ProventiOneriFinanziariInteressiAltriOneriFinanziariTotaleInteressiAltriOneriFinanziari>
+  <itcc-ci:UtilePerditaEsercizio contextRef="d_2024" unitRef="eur" decimals="0">-15400</itcc-ci:UtilePerditaEsercizio>
+
+  <itcc-ci:ValoreProduzioneRicaviVenditePrestazioni contextRef="d_2023" unitRef="eur" decimals="0">455000</itcc-ci:ValoreProduzioneRicaviVenditePrestazioni>
+  <itcc-ci:TotaleValoreProduzione contextRef="d_2023" unitRef="eur" decimals="0">460000</itcc-ci:TotaleValoreProduzione>
+  <itcc-ci:CostiProduzionePersonaleTotaleCostiPersonale contextRef="d_2023" unitRef="eur" decimals="0">91000</itcc-ci:CostiProduzionePersonaleTotaleCostiPersonale>
+  <itcc-ci:DifferenzaValoreCostiProduzione contextRef="d_2023" unitRef="eur" decimals="0">14500</itcc-ci:DifferenzaValoreCostiProduzione>
+  <itcc-ci:ProventiOneriFinanziariInteressiAltriOneriFinanziariTotaleInteressiAltriOneriFinanziari contextRef="d_2023" unitRef="eur" decimals="0">3900</itcc-ci:ProventiOneriFinanziariInteressiAltriOneriFinanziariTotaleInteressiAltriOneriFinanziari>
+  <itcc-ci:UtilePerditaEsercizio contextRef="d_2023" unitRef="eur" decimals="0">8200</itcc-ci:UtilePerditaEsercizio>
+
+  <itcc-ci:TotaleDipendentiNumeroMedio contextRef="i_2024" unitRef="pure" decimals="INF">3</itcc-ci:TotaleDipendentiNumeroMedio>
+  <itcc-ci:TotaleDipendentiNumeroMedio contextRef="i_2023" unitRef="pure" decimals="INF">3</itcc-ci:TotaleDipendentiNumeroMedio>
+</xbrli:xbrl>

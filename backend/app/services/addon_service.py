@@ -6,7 +6,7 @@ Gemello di plan_service: gli add-on non si eliminano, si disattivano
 
 from postgrest.exceptions import APIError
 
-from app.core.errors import BadRequestError, ConflictError, NotFoundError
+from app.core.errors import AppError, BadRequestError, ConflictError, NotFoundError
 from app.schemas.addon import AddonCreate, AddonOut, AddonUpdate
 from app.services import entitlement_service, family_service
 
@@ -16,6 +16,10 @@ ADDON_SELECT = (
 )
 
 _UNIQUE_VIOLATION = "23505"
+_CHECK_VIOLATION = "23514"
+# CHECK della 0033: un addon con costo esterno (sempre_a_pagamento) può
+# essere attivo solo se consumabile, a importo e con prezzo > 0.
+_VINCOLO_COSTO_ESTERNO = "addons_sempre_a_pagamento_coerente"
 
 
 async def _applica_acquistabilita(primary, user: dict, addons: list[AddonOut]) -> None:
@@ -79,12 +83,21 @@ async def update_addon(primary, addon_id: int, data: AddonUpdate) -> AddonOut:
     changes = data.model_dump(mode="json", exclude_unset=True)
     if not changes:
         raise BadRequestError("Nessun campo da aggiornare")
-    resp = (
-        await primary.table("addons")
-        .update(changes)
-        .eq("id", addon_id)
-        .execute()
-    )
+    try:
+        resp = (
+            await primary.table("addons")
+            .update(changes)
+            .eq("id", addon_id)
+            .execute()
+        )
+    except APIError as exc:
+        if exc.code == _CHECK_VIOLATION and _VINCOLO_COSTO_ESTERNO in (exc.message or ""):
+            raise AppError(
+                400,
+                "addon_costo_esterno",
+                "Questo add-on ha un costo esterno: non può essere attivo gratis",
+            ) from exc
+        raise
     if not resp.data:
         raise NotFoundError("Add-on non trovato")
     return AddonOut(**resp.data[0])

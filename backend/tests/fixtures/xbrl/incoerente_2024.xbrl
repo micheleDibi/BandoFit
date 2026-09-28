@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Istanza XBRL SINTETICA scritta a mano per i test: società fittizia, valori inventati.
+     Incoerenze che InfoCamere segnala con i controlli TEBENI, qui solo AVVISI:
+     X8 utile di SP diverso da quello di CE (2024), X9 attivo diverso dal passivo
+     (2024), XZ esercizio 2024 di 18 mesi con due annualità (oltre 425 giorni).
+     Esercizio non solare: chiusura 2023-06-30 per il comparativo. -->
+<xbrli:xbrl xmlns:xbrli="http://www.xbrl.org/2003/instance"
+            xmlns:link="http://www.xbrl.org/2003/linkbase"
+            xmlns:xlink="http://www.w3.org/1999/xlink"
+            xmlns:iso4217="http://www.xbrl.org/2003/iso4217"
+            xmlns:itcc-ci="http://www.infocamere.it/itnn/fr/itcc/ci/2018-11-04">
+  <link:schemaRef xlink:type="simple" xlink:href="itcc-ci-ese-2018-11-04.xsd"/>
+
+  <xbrli:context id="i_fine">
+    <xbrli:entity><xbrli:identifier scheme="http://www.infocamere.it">09876543217</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:instant>2024-12-31</xbrli:instant></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="i_prec">
+    <xbrli:entity><xbrli:identifier scheme="http://www.infocamere.it">09876543217</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:instant>2023-06-30</xbrli:instant></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="d_corr">
+    <xbrli:entity><xbrli:identifier scheme="http://www.infocamere.it">09876543217</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:startDate>2023-07-01</xbrli:startDate><xbrli:endDate>2024-12-31</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="d_prec">
+    <xbrli:entity><xbrli:identifier scheme="http://www.infocamere.it">09876543217</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:startDate>2022-07-01</xbrli:startDate><xbrli:endDate>2023-06-30</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:unit id="eur"><xbrli:measure>iso4217:EUR</xbrli:measure></xbrli:unit>
+
+  <itcc-ci:DatiAnagraficiCodiceFiscale contextRef="i_fine">09876543217</itcc-ci:DatiAnagraficiCodiceFiscale>
+
+  <itcc-ci:ValoreProduzioneRicaviVenditePrestazioni contextRef="d_corr" unitRef="eur" decimals="0">900000</itcc-ci:ValoreProduzioneRicaviVenditePrestazioni>
+  <itcc-ci:UtilePerditaEsercizio contextRef="d_corr" unitRef="eur" decimals="0">50000</itcc-ci:UtilePerditaEsercizio>
+  <itcc-ci:PatrimonioNettoUtilePerditaEsercizio contextRef="i_fine" unitRef="eur" decimals="0">49000</itcc-ci:PatrimonioNettoUtilePerditaEsercizio>
+  <itcc-ci:TotaleAttivo contextRef="i_fine" unitRef="eur" decimals="0">1000000</itcc-ci:TotaleAttivo>
+  <itcc-ci:TotalePassivo contextRef="i_fine" unitRef="eur" decimals="0">1000500</itcc-ci:TotalePassivo>
+
+  <itcc-ci:ValoreProduzioneRicaviVenditePrestazioni contextRef="d_prec" unitRef="eur" decimals="0">610000</itcc-ci:ValoreProduzioneRicaviVenditePrestazioni>
+  <itcc-ci:UtilePerditaEsercizio contextRef="d_prec" unitRef="eur" decimals="0">20000</itcc-ci:UtilePerditaEsercizio>
+  <itcc-ci:PatrimonioNettoUtilePerditaEsercizio contextRef="i_prec" unitRef="eur" decimals="0">20000</itcc-ci:PatrimonioNettoUtilePerditaEsercizio>
+  <itcc-ci:TotaleAttivo contextRef="i_prec" unitRef="eur" decimals="0">800000</itcc-ci:TotaleAttivo>
+  <itcc-ci:TotalePassivo contextRef="i_prec" unitRef="eur" decimals="0">800000</itcc-ci:TotalePassivo>
+</xbrli:xbrl>

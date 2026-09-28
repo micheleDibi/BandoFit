@@ -15,6 +15,7 @@ import { Card } from "../../ui/Card";
 import { ErrorState, Skeleton } from "../../ui/states";
 import { BilanciNonDisponibili } from "./BilanciNonDisponibili";
 import { BilanciTabella } from "./BilanciTabella";
+import { BilancioUfficialeCard } from "./BilancioUfficialeCard";
 import { IndicatoriBilancio } from "./IndicatoriBilancio";
 import { TrendFatturato } from "./TrendFatturato";
 
@@ -98,7 +99,8 @@ function SintesiFasce({ fasce }: { fasce: FasceBilancio }) {
 
 /** Sezione «Bilanci» della pagina Azienda (ancora `#bilanci`): tabella per
  *  esercizio, andamento del fatturato, fasce e indicatori, oppure il motivo
- *  per cui mancano e la CTA di recupero (solo titolare). */
+ *  per cui mancano e la CTA di recupero (solo titolare); in fondo la card
+ *  del bilancio ufficiale. */
 export function BilanciSection() {
   const { data, isPending, isError, error, refetch } = useBilanci();
   const recupera = useRecuperaBilanci();
@@ -234,6 +236,11 @@ export function BilanciSection() {
       )}
 
       <div className="mt-4">{corpo}</div>
+
+      {/* Bilancio ufficiale on-demand: dati propri, indipendenti dallo stato
+          dei bilanci qui sopra (serve proprio quando mancano). La card si
+          nasconde da sola se l'addon non è a catalogo. */}
+      <BilancioUfficialeCard className="mt-6" />
     </section>
   );
 }

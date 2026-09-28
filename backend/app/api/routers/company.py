@@ -8,6 +8,11 @@ from app.api.deps import (
     SecondaryClient,
 )
 from app.schemas.bilanci import BilanciOut
+from app.schemas.bilancio_ufficiale import (
+    BilanciUfficialiOut,
+    BilancioRichiestaIn,
+    BilancioRichiestaOut,
+)
 from app.schemas.company import CompanyFacetsOut, CompanyIn, CompanyResponse
 from app.schemas.openapi_data import (
     DossierResponse,
@@ -18,6 +23,7 @@ from app.schemas.openapi_data import (
 )
 from app.services import (
     bilanci_service,
+    bilancio_ufficiale_service,
     company_pdf_service,
     company_service,
     compatibility,
@@ -135,6 +141,59 @@ async def recupera_bilanci(
     attiva. Solo il titolare; stesse guardie dell'import (P.IVA valida, niente
     società di persone, cooldown, lock, tetto giornaliero)."""
     return await bilanci_service.recupera_bilanci(primary, openapi, active)
+
+
+@router.get("/bilanci/ufficiale", response_model=BilanciUfficialiOut)
+async def lista_bilanci_ufficiali(
+    active: ActiveCompanyDep, primary: PrimaryClient, openapi: OpenapiDep
+) -> BilanciUfficialiOut:
+    """Bilanci ufficiali dell'azienda attiva: addon, unità del titolare, anni
+    già acquisiti e ultime richieste. Le richieste aperte avanzano in
+    background (la lettura non aspetta il provider)."""
+    return await bilancio_ufficiale_service.lista(primary, openapi, active)
+
+
+@router.post("/bilanci/ufficiale", response_model=BilancioRichiestaOut, status_code=201)
+async def richiedi_bilancio_ufficiale(
+    data: BilancioRichiestaIn,
+    active: ActiveCompanyDep,
+    primary: PrimaryClient,
+    openapi: OpenapiDep,
+    user: CurrentUser,
+) -> BilancioRichiestaOut:
+    """Richiede il bilancio ufficiale (bilancio ottico, A PAGAMENTO) per
+    l'azienda attiva: consuma 1 unità dell'addon «bilancio-ufficiale» del
+    titolare, restituita in automatico se il Registro Imprese non lo
+    fornisce. Solo il titolare."""
+    return await bilancio_ufficiale_service.richiedi(primary, openapi, active, user, data.anno)
+
+
+@router.get("/bilanci/ufficiale/{richiesta_id}", response_model=BilancioRichiestaOut)
+async def dettaglio_bilancio_ufficiale(
+    richiesta_id: str, active: ActiveCompanyDep, primary: PrimaryClient, openapi: OpenapiDep
+) -> BilancioRichiestaOut:
+    """Una richiesta di bilancio ufficiale dell'azienda attiva (404 altrimenti)."""
+    return await bilancio_ufficiale_service.dettaglio(primary, openapi, active, richiesta_id)
+
+
+@router.get("/bilanci/ufficiale/{richiesta_id}/pdf")
+async def scarica_bilancio_ufficiale(
+    richiesta_id: str, active: ActiveCompanyDep, primary: PrimaryClient, user: CurrentUser
+) -> Response:
+    """PDF del bilancio ufficiale, con autorizzazione live sull'azienda attiva:
+    404 fuori azienda, 409 se il PDF non è conservato. Nome generato dal
+    server; niente sniffing del tipo."""
+    contenuto, nome = await bilancio_ufficiale_service.scarica_pdf(
+        primary, active, richiesta_id, user=user
+    )
+    return Response(
+        content=contenuto,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{nome}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/export/pdf")

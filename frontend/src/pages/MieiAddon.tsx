@@ -50,9 +50,12 @@ function CardAddon({
   const acquistabile =
     !!catalogo && catalogo.tipo_prezzo === "importo" && catalogo.acquistabile;
 
-  const acquistate = Math.max(posseduto.acquistate, posseduto.consumate);
-  const pctConsumo =
-    acquistate > 0 ? Math.min(100, Math.round((posseduto.consumate / acquistate) * 100)) : 0;
+  // Un consumo rimborsato (unità restituita) non conta come usato: i rimborsi
+  // arrivano a parte, non più tra gli accrediti.
+  const rimborsate = posseduto.rimborsate ?? 0;
+  const usate = Math.max(posseduto.consumate - rimborsate, 0);
+  const acquistate = Math.max(posseduto.acquistate, usate);
+  const pctConsumo = acquistate > 0 ? Math.min(100, Math.round((usate / acquistate) * 100)) : 0;
   const inUso = unitaInUso(posseduto, entitlements);
 
   return (
@@ -78,14 +81,16 @@ function CardAddon({
               {acquistate > 0 && (
                 <span className="text-slate-400">
                   {" "}
-                  — usate {posseduto.consumate} su {acquistate}
+                  — usate {usate} su {acquistate}
+                  {rimborsate > 0 &&
+                    ` · ${rimborsate} ${rimborsate === 1 ? "restituita" : "restituite"}`}
                 </span>
               )}
             </p>
             {acquistate > 0 && (
               <div
                 role="img"
-                aria-label={`Usate ${posseduto.consumate} unità su ${acquistate}`}
+                aria-label={`Usate ${usate} unità su ${acquistate}`}
                 className="mt-2 h-1.5 rounded-full bg-slate-100"
               >
                 <div

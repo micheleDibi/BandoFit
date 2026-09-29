@@ -18,7 +18,8 @@ Post-elaborazione DETERMINISTICA (le proposte non si salvano mai da sole):
   mappate sulla lookup del catalogo, paesi ISO, quote e numero nei range,
   riferimenti ai requisiti per etichetta (quelli ignoti si scartano), testi
   senza contatti né identificativi dell'azienda; avvisi sulle quote (somma
-  oltre il 100%, minimi e massimi per partner) e sul numero di partner;
+  oltre il 100%, minimi e massimi per partner, con la categoria solo per i
+  partner di quel tipo) e sul numero di partner;
 - testi: `anonimizza` con gli identificativi dell'azienda (le call sono
   anonime), troncati alle lunghezze della DDL, rilievi rimasti (avvisi).
 
@@ -295,23 +296,85 @@ def _avvisi_composizione(
     for quota in regole.quote:
         if quota.ambito != "per_partner":
             continue
-        valori = [("la tua quota", creatore)] + [
-            (f"«{p.titolo}»", p.quota_ipotizzata_pct) for p in posizioni
+        # Con la categoria la quota vale solo per i partner di quel tipo: nessun
+        # avviso a chi di sicuro non lo è, avviso condizionale a chi forse lo è
+        # (il tipo della tua azienda qui non si conosce).
+        tipo = voc.TIPI_SOGGETTO[quota.categoria].etichetta if quota.categoria else None
+        valori = [("la tua quota", creatore, "la tua azienda è", "forse")] + [
+            (f"«{p.titolo}»", p.quota_ipotizzata_pct, "il partner sarà",
+             _tipo_posizione(p, quota.categoria))
+            for p in posizioni
         ]
-        for nome, valore in valori:
-            if valore is None:
+        for nome, valore, soggetto, stato in valori:
+            if valore is None or (tipo is not None and stato == "no"):
                 continue
+            inizio = f"{nome[0].upper()}{nome[1:]}: "
+            if tipo is None:
+                per_chi = "per partner del bando"
+            elif stato == "si":
+                per_chi = f"del bando per ogni partner di tipo «{tipo}»"
+            else:
+                inizio += f"se {soggetto} di tipo «{tipo}», "
+                per_chi = "del bando per quel tipo di partner"
             if quota.min_percentuale is not None and valore < Decimal(str(quota.min_percentuale)):
                 avvisi.append(
-                    f"{nome[0].upper()}{nome[1:]}: la quota è sotto il minimo per partner del "
-                    f"bando ({quota.min_percentuale:g}%)"
+                    f"{inizio}la quota è sotto il minimo {per_chi} ({quota.min_percentuale:g}%)"
                 )
             if quota.max_percentuale is not None and valore > Decimal(str(quota.max_percentuale)):
                 avvisi.append(
-                    f"{nome[0].upper()}{nome[1:]}: la quota supera il massimo per partner del "
-                    f"bando ({quota.max_percentuale:g}%)"
+                    f"{inizio}la quota supera il massimo {per_chi} ({quota.max_percentuale:g}%)"
                 )
     return avvisi
+
+
+# Tipi che si sovrappongono (una micro impresa è una PMI, un'impresa può essere
+# grande, molti bandi equiparano i liberi professionisti alle PMI, un ente del
+# Terzo settore può essere un'impresa sociale o una cooperativa): tra loro il
+# tipo non si esclude mai.
+_TIPI_IMPARENTATI = frozenset({
+    "impresa", "micro_impresa", "piccola_impresa", "media_impresa", "pmi", "grande_impresa",
+    "pmi_innovativa", "startup_innovativa", "impresa_artigiana", "cooperativa",
+    "impresa_sociale", "libero_professionista", "ente_terzo_settore",
+})
+# Altre sovrapposizioni, fuori dalle imprese (coppie senza ordine): un'università
+# è un organismo di ricerca e un ente pubblico, un ente locale o una scuola sono
+# enti pubblici, una fondazione o un'associazione può essere un ente del Terzo
+# settore.
+_COPPIE_SOVRAPPOSTE = frozenset(frozenset(coppia) for coppia in (
+    ("universita", "organismo_ricerca"),
+    ("universita", "ente_pubblico"),
+    ("ente_locale", "ente_pubblico"),
+    ("istituto_scolastico", "ente_pubblico"),
+    ("fondazione", "ente_terzo_settore"),
+    ("associazione_categoria", "ente_terzo_settore"),
+    ("ente_sportivo", "ente_terzo_settore"),
+))
+
+
+def _sovrapposti(a: str, b: str) -> bool:
+    return (a in _TIPI_IMPARENTATI and b in _TIPI_IMPARENTATI) or (
+        frozenset((a, b)) in _COPPIE_SOVRAPPOSTE
+    )
+
+
+def _tipo_posizione(p: PosizioneProposta, categoria: str | None) -> str:
+    """«si» se la posizione chiede solo il tipo della quota, «no» se chiede solo
+    tipi diversi e non sovrapposti, «forse» altrimenti (nessun tipo, anche
+    altri tipi, «altro» da una delle due parti come in `_ha_tipo` del
+    validatore, oppure tipi che si sovrappongono come «micro_impresa» per una
+    quota «pmi» o «universita» per una quota «ente_pubblico»): nel dubbio
+    l'avviso è condizionale, mai assente."""
+    if categoria is None or not p.tipi_soggetto:
+        return "forse"
+    if categoria == "altro" or "altro" in p.tipi_soggetto:
+        return "forse"
+    if all(t == categoria for t in p.tipi_soggetto):
+        return "si"
+    if categoria in p.tipi_soggetto:
+        return "forse"
+    if any(_sovrapposti(categoria, t) for t in p.tipi_soggetto):
+        return "forse"
+    return "no"
 
 
 # ------------------------------------------------------------ post: testi

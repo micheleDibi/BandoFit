@@ -4,7 +4,9 @@ Metriche PURE (in CI su output sintetici):
 - `metriche_modalita`: accuracy e precision/recall per classe di `modalita`;
 - `exact_match`: partner_min / partner_max;
 - `pr_quote`: precision/recall delle tuple di quota (ambito, categoria, min,
-  max) con tolleranza di 0,5 punti percentuali;
+  max) con tolleranza di 0,5 punti percentuali. Metrica PRINCIPALE:
+  `quote_usate`, sulle sole quote `verificata` (quelle che il prodotto
+  preseleziona nella call); `quote`, su tutte, resta come secondaria;
 - `citazioni_verificate`: quota di voci con la citazione ritrovata nel testo;
 - `costo_latenza`: costo e durata per bando.
 
@@ -174,17 +176,21 @@ def risultato_da_regole(regole: dict | None, esito: str | None = None) -> dict:
     predetta = regole.get("modalita_effettiva") or modalita.get("effettiva")
     if predetta is None and esito == "nessun_segnale":
         predetta = "non_determinabile"
+    quote = regole.get("quote") or []
     return {
         "modalita": predetta,
         "modalita_dichiarata": modalita.get("valore"),
         "partner_min": (regole.get("partner_min") or {}).get("valore"),
         "partner_max": (regole.get("partner_max") or {}).get("valore"),
-        "quote": [
-            {"ambito": q.get("ambito"), "categoria": q.get("categoria"),
-             "min": q.get("min_percentuale"), "max": q.get("max_percentuale")}
-            for q in regole.get("quote") or []
-        ],
+        "quote": [_tupla_quota(q) for q in quote],
+        # Solo le quote che il prodotto preseleziona nella call (verificate).
+        "quote_usate": [_tupla_quota(q) for q in quote if q.get("stato") == "verificata"],
     }
+
+
+def _tupla_quota(q: dict) -> dict:
+    return {"ambito": q.get("ambito"), "categoria": q.get("categoria"),
+            "min": q.get("min_percentuale"), "max": q.get("max_percentuale")}
 
 
 def _etichettata(voce: dict) -> bool:
@@ -214,6 +220,11 @@ def _metriche_campi(voci: list[dict], predetti: dict[int, dict], *, solo_raggiun
         "partner_max": exact_match(
             [(v["etichetta"].get("partner_max"), predetti[v["bando_id"]]["partner_max"])
              for v in voci if tiene(v, "partner_max")]
+        ),
+        # Principale: le sole quote verificate, cioè quelle usate dal prodotto.
+        "quote_usate": pr_quote(
+            [v["etichetta"].get("quote") or [] for v in voci if tiene(v, "quote")],
+            [predetti[v["bando_id"]]["quote_usate"] for v in voci if tiene(v, "quote")],
         ),
         "quote": pr_quote(
             [v["etichetta"].get("quote") or [] for v in voci if tiene(v, "quote")],

@@ -97,9 +97,9 @@ class TestBuildBandoInputInvariato:
 
 class TestPrompt:
     def test_versioni(self):
-        # 2: regole più strette dopo la prima valutazione reale (numeri
-        # assenti, «non_ammesso», quote, citazione della modalità).
-        assert PARTENARIATO_PROMPT_VERSION == 2
+        # 3: quote (frazioni come nel testo, forme negative e distributive,
+        # categoria, esclusioni estese) e citazioni dai documenti ufficiali.
+        assert PARTENARIATO_PROMPT_VERSION == 3
         # 2: schema compatto dopo il 400 «compiled grammar is too large».
         assert SCHEMA_VERSION == 2
 
@@ -166,10 +166,50 @@ class TestPrompt:
         s = " ".join(SYSTEM_PARTENARIATO.split())
         assert "`quote`: SOLO le ripartizioni del costo o del budget del PROGETTO" in s
         for non_quota in ("intensità di aiuto", "cofinanziamento", "massimali di spesa",
-                          "certe regioni", "maggiorazioni", "numero dei membri"):
+                          "certe regioni", "maggiorazioni", "numero dei membri",
+                          "quote di adesione, d'iscrizione o associative", "importi in euro",
+                          "limiti di una voce di spesa",
+                          "anche quando valgono per ciascun piano, progetto o partner"):
             assert non_quota in s, non_quota
-        # la categoria vale solo per le quote per categoria
-        assert 'Con "per_partner" e "capofila" la `categoria` è ""' in s
+        # categoria "" se la regola vale per tutti, anche con «impresa»
+        assert ('La `categoria` è "" quando la regola vale per tutti i partner, anche se il '
+                "testo dice «impresa»") in s
+        assert "ciascun partner di quel tipo" in s
+        assert '"per_categoria" vale per l\'insieme dei soggetti di una categoria' in s
+
+    def test_quote_forme_negative_e_frazioni(self):
+        s = " ".join(SYSTEM_PARTENARIATO.split())
+        assert "mai frazioni" not in s
+        assert "ed è una quota, non un vincolo" in s
+        assert ('«nessun partner (o nessuna impresa) sostiene da solo più di X» → "per_partner" '
+                "con massimo X") in s
+        assert '«ciascun partner sostiene almeno X» → "per_partner" con minimo X' in s
+        assert '"capofila" con minimo X' in s
+        assert 'senza articolo ("due terzi", "2/3", "metà"), e la converte il codice' in s
+        assert "senza calcoli" in s and "«30 per cento»" in s
+
+    def test_frazioni_del_prompt_lette_dal_codice(self):
+        """Le forme che il prompt chiede di riportare così come sono, il codice
+        le converte (non le lascia illeggibili)."""
+        from app.services.partenariato_regole import _percentuale
+
+        for frazione, atteso in (("due terzi", 66.67), ("2/3", 66.67), ("metà", 50.0)):
+            assert _percentuale(frazione) == (atteso, True)
+
+    def test_citazioni_dai_documenti_ufficiali(self):
+        s = " ".join(SYSTEM_PARTENARIATO.split())
+        assert "Sono un riassunto redazionale, NON il bando ufficiale" in s
+        assert ("Fa fede il testo dei documenti ufficiali: cita la pagina di un documento "
+                'ufficiale ("D1-p3") che contiene la regola') in s
+        assert ('Cita la scheda del catalogo ("META", "S2") SOLO se nessun documento '
+                "ufficiale fornito contiene la regola") in s
+        assert "copiata di seguito, da un documento ufficiale quando c'è" in s
+
+    def test_crescita_del_prompt_contenuta(self):
+        """La v3 aggiunge istruzioni sulle quote e sulle citazioni: meno di
+        2.000 caratteri in più della v2 (10.583), cioè poche centinaia di
+        token a chiamata."""
+        assert len(SYSTEM_PARTENARIATO) < 10_583 + 2_000
 
 
 # ------------------------------------------------------------ META

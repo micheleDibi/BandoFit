@@ -468,6 +468,82 @@ def test_quota_capofila_tre_esiti():
     assert voce(valida(regole, senza_capofila), "quota:Q1").esito == "grigio"
 
 
+GRANDE = azienda(classe="grande")
+PICCOLA = azienda(classe="piccola")
+SENZA_REGISTRO = azienda(registro=False)  # dimensione non nota: tipo incerto
+
+
+def test_quota_per_partner_con_categoria_solo_sui_membri_del_tipo():
+    """«Ciascuna grande impresa almeno il 10%»: la quota non si applica agli
+    altri membri (niente falso rosso); tipo incerto → grigio solo se la quota
+    viola i limiti."""
+    regole = snapshot(quote=[quota_voce(minimo=10, categoria="grande_impresa")])
+
+    def q1(capofila, partner):
+        return voce(valida(regole, [membro(A, "capofila", capofila[1], creatore=True,
+                                           profilo=capofila[0]),
+                                    membro(B, "partner", partner[1], profilo=partner[0])]),
+                    "quota:Q1")
+
+    rosso = q1((PICCOLA, "95"), (GRANDE, "5"))
+    assert rosso.esito == "rosso" and set(rosso.per_membro) == {B}
+    assert rosso.titolo == "Quota di ogni partner: Grande impresa"
+    assert "per ogni partner di tipo «Grande impresa»" in rosso.dettaglio_pubblico
+    # la piccola impresa al 5% non è soggetta alla regola
+    verde = q1((PICCOLA, "5"), (GRANDE, "95"))
+    assert verde.esito == "verde" and set(verde.per_membro) == {B}
+    # tipo incerto: grigio se viola, verde se rispetta i limiti
+    assert q1((PICCOLA, "95"), (SENZA_REGISTRO, "5")).esito == "grigio"
+    assert q1((PICCOLA, "50"), (SENZA_REGISTRO, "50")).esito == "verde"
+    # nessun membro del tipo: la regola non si applica
+    nessuno = q1((PICCOLA, "5"), (PICCOLA, "95"))
+    assert nessuno.esito == "verde" and not nessuno.per_membro
+    assert "non ci sono partner di tipo «Grande impresa»" in nessuno.dettaglio_pubblico
+    # esterno dichiarato del tipo: conta
+    v = valida(regole, [membro(A, "capofila", "95", creatore=True, profilo=PICCOLA),
+                        esterno(B, tipi=("grande_impresa",), quota="5")])
+    assert voce(v, "quota:Q1").esito == "rosso"
+    assert vista(v, "quota:Q1", A, True).esito == "rosso"
+    # la violazione che costa solo la maggiorazione resta grigia
+    grigia = snapshot(quote=[{**quota_voce(minimo=10, categoria="grande_impresa"),
+                              "effetto_violazione": "perdita_maggiorazione"}])
+    v = valida(grigia, [membro(A, "capofila", "95", creatore=True, profilo=PICCOLA),
+                        membro(B, "partner", "5", profilo=GRANDE)])
+    assert voce(v, "quota:Q1").esito == "grigio"
+
+
+def test_quota_per_partner_con_categoria_senza_membri_conteggiati_grigia():
+    regole = snapshot(quote=[quota_voce(minimo=10, categoria="grande_impresa")])
+    v = valida(regole, [membro(A, "affiliated_entity", "100", creatore=True)])
+    assert voce(v, "quota:Q1").esito == "grigio"
+
+
+def test_quota_capofila_con_categoria():
+    regole = snapshot(quote=[quota_voce(ambito="capofila", minimo=30,
+                                        categoria="grande_impresa")])
+
+    def q1(profilo, quota):
+        return voce(valida(regole, [membro(A, "capofila", quota, creatore=True,
+                                           profilo=profilo),
+                                    membro(B, "partner", str(100 - int(quota)))]),
+                    "quota:Q1")
+
+    verde = q1(GRANDE, "60")
+    assert verde.esito == "verde" and verde.titolo == "Quota del capofila: Grande impresa"
+    assert q1(GRANDE, "20").esito == "rosso"
+    # capofila di un altro tipo: grigio, anche se la quota rispetta i limiti
+    altro = q1(PICCOLA, "60")
+    assert altro.esito == "grigio" and altro.membri_coinvolti == (A,)
+    assert "non risulta di tipo «Grande impresa»" in altro.dettaglio_pubblico
+    # tipo incerto: sempre grigio con la nota sul tipo, anche nei limiti (la
+    # regola può presupporre un capofila di quel tipo)
+    for quota in ("60", "20"):
+        incerto = q1(SENZA_REGISTRO, quota)
+        assert incerto.esito == "grigio" and incerto.membri_coinvolti == (A,), quota
+        assert "Da verificare se il capofila è di tipo «Grande impresa»" in (
+            incerto.dettaglio_pubblico)
+
+
 @pytest.mark.parametrize("ambito", ["per_partner", "capofila", "per_categoria"])
 def test_quota_che_costa_solo_la_maggiorazione_e_grigia(ambito):
     """Una regola che fa perdere solo una maggiorazione non rende il consorzio

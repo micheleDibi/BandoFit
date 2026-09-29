@@ -4,10 +4,13 @@ download e lettura finti; nessun modello chiamato)."""
 
 import json
 from types import SimpleNamespace
+from typing import get_args
 
 import pytest
 
+from app.schemas.partenariato import AmbitoQuota
 from app.services import partenariato_valutazione as val
+from app.services import partenariato_vocabolario as voc
 from app.services.bando_fonti_service import LinkDocumento
 from app.services.download_sicuro import DocumentoScaricato
 from app.services.pdf_testo import TestoPdf as _TestoPdf
@@ -154,6 +157,59 @@ class TestCalcolaMetriche:
         assert m["raggiungibili"]["quote"]["fn"] == 0
         assert m["raggiungibili"]["modalita"]["n"] == 2
 
+    def test_risultato_da_regole_quote_usate_solo_verificate(self):
+        regole = {"quote": [
+            {"ambito": "per_partner", "categoria": None, "min_percentuale": 10.0,
+             "max_percentuale": None, "stato": "verificata"},
+            {"ambito": "capofila", "categoria": None, "min_percentuale": 30.0,
+             "max_percentuale": None, "stato": "da_verificare"},
+            {"ambito": "per_partner", "categoria": None, "min_percentuale": None,
+             "max_percentuale": 50.0},  # senza stato: non usata
+        ]}
+        predetto = val.risultato_da_regole(regole)
+        assert len(predetto["quote"]) == 3
+        assert predetto["quote_usate"] == [
+            {"ambito": "per_partner", "categoria": None, "min": 10.0, "max": None}]
+        assert val.risultato_da_regole(None)["quote_usate"] == []
+
+    def test_quote_usate_solo_sulle_verificate(self):
+        campione = [
+            {"bando_id": 1, "gruppo": "positivo", "etichetta": {
+                "modalita": "ammesso", "partner_min": None, "partner_max": None,
+                "quote": [
+                    {"ambito": "per_partner", "categoria": None, "min": 10, "max": None},
+                    {"ambito": "capofila", "categoria": None, "min": 30, "max": None},
+                ]}},
+            {"bando_id": 2, "gruppo": "positivo", "etichetta": {
+                "modalita": "ammesso", "partner_min": None, "partner_max": None,
+                "quote": [{"ambito": "per_partner", "categoria": None, "min": 5, "max": None}],
+                "non_raggiungibili": ["quote"]}},
+        ]
+
+        def quota(ambito, categoria, minimo, massimo, stato):
+            return {"ambito": ambito, "categoria": categoria, "min_percentuale": minimo,
+                    "max_percentuale": massimo, "stato": stato}
+
+        regole = {
+            1: {"modalita_effettiva": "ammesso", "quote": [
+                quota("per_partner", None, 10.0, None, "verificata"),
+                # giusta ma da verificare: il prodotto non la preseleziona
+                quota("capofila", None, 30.0, None, "da_verificare"),
+                # sbagliata ma da verificare: non arriva al prodotto
+                quota("per_categoria", "organismo_ricerca", None, 33.0, "da_verificare"),
+            ]},
+            2: {"modalita_effettiva": "ammesso", "quote": []},
+        }
+        m = val.calcola_metriche(campione, {b: {"regole": r} for b, r in regole.items()})
+        assert (m["quote"]["tp"], m["quote"]["fp"], m["quote"]["fn"]) == (2, 1, 1)
+        usate = m["quote_usate"]
+        assert (usate["tp"], usate["fp"], usate["fn"]) == (1, 0, 2)
+        assert usate["precision"] == 1.0 and usate["recall"] == round(1 / 3, 4)
+        # anche senza i campi non raggiungibili, accanto a `quote`
+        ragg = m["raggiungibili"]
+        assert (ragg["quote_usate"]["tp"], ragg["quote_usate"]["fn"]) == (1, 1)
+        assert (ragg["quote"]["tp"], ragg["quote"]["fn"]) == (2, 0)
+
     def test_recall_preclassificatore_sull_etichetta(self):
         analisi = [
             # gruppo «negativo» ma etichetta ammesso: è un positivo
@@ -226,6 +282,47 @@ class TestCampione:
                     yield from stringhe(valore)
 
         assert max(len(t) for t in stringhe(dati["campione"])) <= 80
+
+    def test_campione_di_verifica_v2(self):
+        """Secondo campione (di verifica, etichette congelate prima del
+        modello): stesso formato del v1 più lo strato; tutti i codici nel
+        vocabolario; nessun testo dei documenti né URL."""
+        percorso = val.CAMPIONE_PREDEFINITO.with_name("campione_v2.json")
+        dati = json.loads(percorso.read_text(encoding="utf-8"))
+        assert set(dati) == {"versione", "descrizione", "campione"}
+        campione = val.carica_campione(percorso)
+        assert len(campione) == len(dati["campione"]) == 18
+        assert len({v["bando_id"] for v in campione}) == 18
+        assert {v["gruppo"] for v in campione} == {"positivo"}
+        strati = [v["strato"] for v in campione]
+        assert (strati.count("con_quote"), strati.count("confondente"),
+                strati.count("senza_percentuali")) == (12, 4, 2)
+        ambiti = set(get_args(AmbitoQuota))
+        for voce in campione:
+            assert set(voce) == self.CHIAVI_VOCE | {"strato"}, voce["bando_id"]
+            etichetta = voce["etichetta"]
+            chiavi = set(etichetta)
+            assert self.CHIAVI_ETICHETTA <= chiavi <= (
+                self.CHIAVI_ETICHETTA | self.FACOLTATIVE_ETICHETTA), voce["bando_id"]
+            # non_raggiungibili solo se non è vuoto
+            assert etichetta.get("non_raggiungibili", ["assente"]), voce["bando_id"]
+            assert etichetta["modalita"] in val.MODALITA
+            assert (etichetta["verificato_at"], etichetta["fonte_verificata"]) == (
+                "2026-09-29", "pdf")
+            for campo in ("partner_min", "partner_max"):
+                assert etichetta[campo] is None or isinstance(etichetta[campo], int)
+            for quota in etichetta["quote"]:
+                assert set(quota) == self.CHIAVI_QUOTA
+                assert quota["ambito"] in ambiti
+                assert quota["categoria"] is None or quota["categoria"] in voc.TIPI_SOGGETTO
+            assert all(f in voc.FORME for f in etichetta["forme"]), voce["bando_id"]
+            assert set(etichetta.get("non_raggiungibili") or []) <= {
+                "modalita", "partner_min", "partner_max", "quote", "forme"}
+            assert len(voce["slug_prefisso"]) <= 70
+            assert all(len(t) <= 80 for t in (voce["slug_prefisso"], *etichetta["forme"]))
+        testo = percorso.read_text(encoding="utf-8")
+        for vietato in ("http", "://", "www.", ".pdf", ".it/", ".eu/", ".com/"):
+            assert vietato not in testo.lower(), vietato
 
 
 # ------------------------------------------------------------ CLI senza rete

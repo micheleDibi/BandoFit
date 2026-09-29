@@ -233,14 +233,17 @@ export function titoloQuota(
   >,
   vocabolario: Vocabolario | undefined,
 ): string {
+  const categoria = voce.categoria ? etichettaTipo(voce.categoria, null, vocabolario) : null;
+  // «Grande impresa» → «grande impresa» dentro la parentesi; le sigle («PMI») restano intatte.
+  const tra = (s: string) => (/^.\p{Ll}/u.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s);
   const chi =
-    voce.ambito === "capofila"
-      ? "Quota del capofila"
-      : voce.ambito === "per_categoria"
-        ? voce.categoria
-          ? `Quota della categoria «${etichettaTipo(voce.categoria, null, vocabolario)}»`
-          : "Quota per categoria"
-        : "Quota di ciascun partner";
+    voce.ambito === "per_categoria"
+      ? categoria
+        ? `Quota della categoria «${categoria}»`
+        : "Quota per categoria"
+      : `${voce.ambito === "capofila" ? "Quota del capofila" : "Quota di ciascun partner"}${
+          categoria ? ` (${tra(categoria)})` : ""
+        }`;
   const quanto = intervallo(voce.min_percentuale, voce.max_percentuale, percento);
   const base = BASE_QUOTA[voce.base_calcolo] ?? null;
   if (!quanto) return chi;

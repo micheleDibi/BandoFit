@@ -18,8 +18,21 @@ Il modello estrae, il codice decide che cosa vale. Per ogni voce:
   citato contiene un'esclusione esplicita della forma associata e la sua
   frase non la ammette (`esclusione_esplicita`);
 - una quota la cui frase non nomina il partenariato né chi la sostiene (o
-  parla di aiuti senza nominare il partenariato) resta, da verificare: è
-  probabilmente un'intensità di aiuto o un limite di spesa;
+  parla di aiuti senza nominare il partenariato, o di una quota di adesione,
+  di un cofinanziamento, di un'intensità di aiuto) resta, da verificare: è
+  probabilmente un'intensità di aiuto o un limite di spesa; lo stesso se la
+  sua percentuale non compare nella frase citata (le frazioni «due terzi»,
+  «2/3» si leggono e si convertono, solo per le quote); la frase si
+  ricostruisce con le stesse tolleranze della verifica della citazione, e una
+  citazione ritrovata di cui la frase non si ricostruisce (frammenti di
+  un'ellissi in frasi diverse) resta da verificare;
+- le quote uguali (ambito, categoria, min, max; base ed effetto uguali o non
+  indicati), con percentuali leggibili e una categoria nota, si tengono una
+  volta sola; una quota che il modello ha scritto come vincolo «altro» nella
+  forma «nessun partner sostiene da solo più di X» del costo complessivo del
+  progetto, senza eccezioni, si recupera come quota per partner (frase
+  ricostruita da un documento ufficiale), SEMPRE da verificare, con un avviso
+  globale; il vincolo resta;
 - le regioni si mappano sugli id del catalogo (le ignote si scartano con un
   avviso), i tipi di soggetto sugli id `beneficiari`;
 - `scrub_menzioni` su tutto il testo (domini esclusi dal catalogo), in tempo
@@ -45,6 +58,7 @@ escluse dagli usi deterministici del modulo.
 import math
 import re
 import unicodedata
+from bisect import bisect_left
 from collections.abc import Iterable, Mapping
 from functools import lru_cache
 from typing import Any, get_args
@@ -65,6 +79,7 @@ from app.schemas.partenariato import (
     Momento,
     PartenariatoEstrazione,
     QuotaOut,
+    QuotaVoce,
     RegolaFinanziariaEstratta,
     RegolaFinanziariaOut,
     RegolePartenariatoOut,
@@ -75,7 +90,23 @@ from app.schemas.partenariato import (
 )
 from app.schemas.regole_finanziarie import RegolaFinanziaria, UnitaRegola, VariabileFinanziaria
 from app.services.bilanci_indicatori import valida_regola
-from app.services.citazioni import normalizza_sezione, normalizza_testo, verifica_citazione
+# Le tolleranze della verifica, riusate per ricostruire la frase delle quote
+# (`_trova_frase` tollerante): stessi tentativi, stesso ordine.
+from app.services.citazioni import (
+    _BORDI_AGO,
+    _ELLISSI,
+    _SPAZIO_NON_TRA_CIFRE,
+    _TRATTINO_NON_TRA_CIFRE,
+    _TRATTINO_TRA_PAROLE,
+    MIN_CARATTERI_SENZA_SPAZI,
+    MIN_FRAMMENTO_ELLISSI,
+    _senza_spazi,
+    _varianti_ago,
+    normalizza_caratteri,
+    normalizza_sezione,
+    normalizza_testo,
+    verifica_citazione,
+)
 from app.services.partenariato_preclassificatore import PATTERN as PATTERN_PRECLASSIFICATORE
 from app.services.partenariato_prompts import scrub_menzioni
 from app.services.partenariato_vocabolario import (
@@ -701,17 +732,169 @@ def _fine_frase(testo: str, pos: int, punto_e_virgola: bool) -> bool:
     )
 
 
+def _rimuovi(testo: str, regex: re.Pattern) -> tuple[str, list[int]]:
+    """(testo senza le corrispondenze di `regex`, mappa): `mappa[k]` è la
+    posizione in `testo` del carattere k del risultato. Stesso risultato di
+    `regex.sub("", testo)`."""
+    pezzi: list[str] = []
+    mappa: list[int] = []
+    pos = 0
+    for corrispondenza in regex.finditer(testo):
+        pezzi.append(testo[pos : corrispondenza.start()])
+        mappa.extend(range(pos, corrispondenza.start()))
+        pos = corrispondenza.end()
+    pezzi.append(testo[pos:])
+    mappa.extend(range(pos, len(testo)))
+    return "".join(pezzi), mappa
+
+
+@lru_cache(maxsize=32)
+def _forme_compatte(pagliaio: str) -> tuple[str, list[int], str, list[int]]:
+    """Le forme del testo normalizzato che usa `citazioni` per la verifica,
+    con la mappa verso le posizioni del testo normalizzato: senza trattini tra
+    parole (`_TRATTINO_TRA_PAROLE`) e senza spazi (`citazioni._senza_spazi`)."""
+    compatto, mappa_compatto = _rimuovi(pagliaio, _TRATTINO_TRA_PAROLE)
+    senza_spazi, mappa_spazi = _rimuovi(pagliaio, _SPAZIO_NON_TRA_CIFRE)
+    nudo, mappa_nudo = _rimuovi(senza_spazi, _TRATTINO_NON_TRA_CIFRE)
+    return compatto, mappa_compatto, nudo, [mappa_spazi[k] for k in mappa_nudo]
+
+
+def _cerca(ago: str, pagliaio: str, da: int = 0) -> tuple[int, int] | None:
+    """(inizio, fine) nel testo normalizzato dell'ago (normalizzato), da `da`
+    in poi, con le tolleranze della verifica e nello stesso ordine: alla
+    lettera, le varianti di `_varianti_ago` (bordi, punteggiatura finale,
+    sillabazione), senza trattini tra parole, e infine senza spazi (solo aghi
+    di almeno `MIN_CARATTERI_SENZA_SPAZI` caratteri)."""
+    varianti = _varianti_ago(ago)
+    for variante in varianti:
+        inizio = pagliaio.find(variante, da)
+        if inizio >= 0:
+            return inizio, inizio + len(variante)
+    compatto, mappa_compatto, nudo, mappa_nudo = _forme_compatte(pagliaio)
+    for testo, mappa, forma, minimo in (
+        (compatto, mappa_compatto, lambda v: _TRATTINO_TRA_PAROLE.sub("", v), 1),
+        (nudo, mappa_nudo, _senza_spazi, MIN_CARATTERI_SENZA_SPAZI),
+    ):
+        partenza = bisect_left(mappa, da)
+        for variante in varianti:
+            cercato = forma(variante)
+            if len(variante) < minimo or not cercato:
+                continue
+            k = testo.find(cercato, partenza)
+            if k >= 0:
+                return mappa[k], mappa[k + len(cercato) - 1] + 1
+    return None
+
+
+# Nel testo dei PDF anche gli a capo separano le frasi: una voce di elenco
+# («•», «-», «*», «a)», «1.», «1)») e la riga dopo un titolo senza
+# punteggiatura finale («Art. 6 - Contributo e ripartizione tra i partner»,
+# una riga tutta maiuscola, «2.1 Beneficiari») che inizia con la maiuscola
+# aprono una frase nuova anche senza punto. Solo i titoli riconoscibili: una
+# riga di prosa che va a capo prima di un nome proprio («…richiesta dal
+# \nCapofila…») resta nella stessa frase.
+_MARCATORE_ELENCO = re.compile(r"(?:[•·▪◦‣∙●○■□►▶*-]|[A-Za-z]\)|\d{1,3}[.)])\s")
+_RIGA_TITOLO = re.compile(
+    r"(?:[Aa]rt(?:icolo)?\.?\s*\d+"
+    r"|(?:[Cc]apo|[Tt]itolo|[Ss]ezione|[Pp]aragrafo|[Aa]llegato)\s+[\dIVXLCivxlc]+\b"
+    r"|\d+(?:\.\d+)*[.)]?\s+[A-ZÀ-Ý])"
+)
+
+
+def _titolo(riga: str) -> bool:
+    """True se `riga` (spazi compattati, maiuscole conservate) è un titolo:
+    senza punteggiatura finale, numerata o tutta maiuscola."""
+    if riga[-1] in ".;:,!?":
+        return False
+    lettere = [carattere for carattere in riga if carattere.isalpha()]
+    return bool(_RIGA_TITOLO.match(riga)) or (
+        len(lettere) >= 3 and all(carattere.isupper() for carattere in lettere)
+    )
+
+
+@lru_cache(maxsize=32)
+def _confini_di_riga(candidato: str) -> tuple[int, ...]:
+    """Le posizioni, nel testo normalizzato di `candidato`
+    (`_pagina_normalizzata`), dove una riga apre una frase nuova (voce di
+    elenco, riga dopo un titolo). Si calcolano sul testo che conserva gli a
+    capo; le righe normalizzate, unite da uno spazio, ridanno esattamente il
+    testo normalizzato (se no, per prudenza, nessun confine)."""
+    testo = normalizza_caratteri(candidato).replace("**", "")
+    confini: list[int] = []
+    righe: list[str] = []
+    pos = 0
+    precedente: str | None = None
+    for grezza in testo.split("\n"):
+        riga = " ".join(grezza.split())
+        if not riga:
+            continue
+        inizio = pos + 1 if righe else 0
+        if precedente is not None and (
+            _MARCATORE_ELENCO.match(riga) or (_titolo(precedente) and riga[0].isupper())
+        ):
+            confini.append(inizio)
+        righe.append(riga.casefold())
+        pos = inizio + len(righe[-1])
+        precedente = riga
+    if " ".join(righe) != _pagina_normalizzata(candidato):
+        return ()
+    return tuple(confini)
+
+
+def _posizione_tollerante(
+    ago: str, pagliaio: str, punto_e_virgola: bool, confini: tuple[int, ...] = ()
+) -> tuple[int, int] | None:
+    """(inizio, fine) della citazione con le tolleranze della verifica. Con
+    un'ellissi: una sola iniziale o finale si toglie; con un'ellissi interna i
+    frammenti (ciascuno di almeno `MIN_FRAMMENTO_ELLISSI` caratteri, in
+    ordine) devono stare nella STESSA frase del documento (né un segno di fine
+    frase né un confine di riga, `confini`, tra il primo e l'ultimo),
+    altrimenti None."""
+    trovata = _cerca(ago, pagliaio)
+    if trovata is not None or not _ELLISSI.search(ago):
+        return trovata
+    frammenti = [f.strip(_BORDI_AGO) for f in _ELLISSI.split(ago)]
+    frammenti = [f for f in frammenti if f]
+    if not frammenti or any(len(f) < MIN_FRAMMENTO_ELLISSI for f in frammenti):
+        return None
+    posizioni: list[tuple[int, int]] = []
+    da = 0
+    for frammento in frammenti:
+        posizione = _cerca(frammento, pagliaio, da)
+        if posizione is None:
+            return None
+        posizioni.append(posizione)
+        da = posizione[1]
+    inizio, fine = posizioni[0][0], posizioni[-1][1]
+    if any(inizio < confine < fine for confine in confini) or any(
+        _fine_frase(pagliaio, taglio.start(), punto_e_virgola)
+        for taglio in _CANDIDATO_FINE.finditer(pagliaio, inizio, fine - 1)
+    ):
+        return None
+    return inizio, fine
+
+
 def _trova_frase(
-    citazione: Citazione, sezioni: dict[str, str], *, punto_e_virgola: bool
+    citazione: Citazione,
+    sezioni: dict[str, str],
+    *,
+    punto_e_virgola: bool,
+    tollerante: bool = False,
 ) -> tuple[str, int, int] | None:
     """(frase, inizio, fine): la frase del testo inviato (normalizzato) che
     contiene la citazione, fino a `_CONTESTO_FRASE` caratteri per lato, e la
     posizione della citazione dentro la frase. Una citazione troncata («le
     imprese in forma singola») non nasconde così il seguito («o associata»).
-    None se la citazione non si ritrova ALLA LETTERA (a meno di
-    `normalizza_testo`) nella pagina indicata o a cavallo con la successiva o
-    la precedente: con le tolleranze della verifica (spazi del PDF, ellissi)
-    la frase vera non si ricostruisce, e chi decide non la indovina."""
+    La citazione si cerca nella pagina indicata o a cavallo con la successiva
+    o la precedente:
+    - di default ALLA LETTERA (a meno di `normalizza_testo`), come vuole la
+      modalità: con le tolleranze della verifica (spazi del PDF, ellissi) la
+      frase vera non si ricostruisce, e chi decide non la indovina;
+    - con `tollerante` (le quote) con le stesse tolleranze della verifica
+      (`_posizione_tollerante`): così esclusioni e percentuale si controllano
+      sulla frase intera anche quando la citazione ha uno spazio in più o in
+      meno, la punteggiatura o le virgolette ai bordi.
+    None se non si ritrova."""
     ago = normalizza_testo(citazione.testo[:_MAX_CITAZIONE_ESCLUSIONE])
     if not ago:
         return None
@@ -733,14 +916,20 @@ def _trova_frase(
             candidati.append(testo + "\n" + successiva)
         if precedente:
             candidati.append(precedente + "\n" + testo)
+    confini: tuple[int, ...] = ()
     for candidato in candidati:
         pagliaio = _pagina_normalizzata(candidato)
-        inizio = pagliaio.find(ago)
-        if inizio >= 0:
+        if tollerante:
+            confini = _confini_di_riga(candidato)
+            posizione = _posizione_tollerante(ago, pagliaio, punto_e_virgola, confini)
+        else:
+            inizio = pagliaio.find(ago)
+            posizione = (inizio, inizio + len(ago)) if inizio >= 0 else None
+        if posizione is not None:
+            inizio, fine = posizione
             break
     else:
         return None
-    fine = inizio + len(ago)
     da = max(0, inizio - _CONTESTO_FRASE)
     for taglio in _CANDIDATO_FINE.finditer(pagliaio, da, inizio):
         if _fine_frase(pagliaio, taglio.start(), punto_e_virgola):
@@ -752,16 +941,22 @@ def _trova_frase(
         if _fine_frase(pagliaio, taglio.start(), punto_e_virgola):
             a = taglio.end()
             break
+    # I confini di riga (solo `tollerante`): l'ultimo prima della citazione e
+    # il primo dopo, fuori dalla citazione.
+    da = max([da, *(c for c in confini if c <= inizio)])
+    a = min([a, *(c for c in confini if c >= fine)])
     return pagliaio[da:a], inizio - da, fine - da
 
 
-def _frase_della_citazione(citazione: Citazione, sezioni: dict[str, str]) -> str:
-    """La frase della citazione (con il «;» come fine di frase) o, se non si
-    ritrova alla lettera, la sola citazione normalizzata."""
-    trovata = _trova_frase(citazione, sezioni, punto_e_virgola=True)
+def _frase_della_citazione(citazione: Citazione, sezioni: dict[str, str]) -> tuple[str, bool]:
+    """(frase, ricostruita): la frase della citazione (con il «;» come fine di
+    frase), cercata con le tolleranze della verifica, e True; se non si
+    ricostruisce (frammenti di un'ellissi in frasi diverse, citazione non
+    ritrovata), la sola citazione normalizzata e False."""
+    trovata = _trova_frase(citazione, sezioni, punto_e_virgola=True, tollerante=True)
     if trovata is None:
-        return normalizza_testo(citazione.testo[:_MAX_CITAZIONE_ESCLUSIONE])
-    return trovata[0]
+        return normalizza_testo(citazione.testo[:_MAX_CITAZIONE_ESCLUSIONE]), False
+    return trovata[0], True
 
 
 def _qualificata(testo: str, pos: int) -> bool:
@@ -995,19 +1190,143 @@ _QUOTA_AIUTO = re.compile(
     r"|funding|co-?financ|\bgrants?\b|\baid\b|support\s+to\s+third",
     _I,
 )
+# Esclusioni forti: una quota di adesione, d'iscrizione o associativa, un
+# cofinanziamento o un'intensità di aiuto non ripartiscono il costo del
+# progetto tra i partner, anche quando la frase nomina il partenariato
+# («quota di adesione richiesta alle imprese aderenti»): si valutano PRIMA di
+# `_QUOTA_PARTENARIATO`. La «quota di partecipazione» resta una quota.
+_QUOTA_NON_RIPARTIZIONE = re.compile(
+    r"\bquot[ae]\s+(?:di\s+adesione|d['’]\s*iscrizione|di\s+iscrizione|associativ)"
+    r"|\bco-?finanziament"
+    # il contributo pubblico: «contributo (pubblico) (è/viene) concesso», «a
+    # fondo perduto»
+    r"|\bcontribut[oi]\s+(?:pubblic[oi]\s+)?"
+    r"(?:(?:è|e'|viene|verr[aà]|sar[aà]|sono|vengono)\s+)?concess"
+    r"|\bcontribut[oi]\s+a\s+fondo\s+perduto"
+    # anche con un aggettivo in mezzo («intensità massima dell'aiuto») o con
+    # l'accento scritto come apostrofo («intensita'»)
+    r"|\bintensit(?:[aà]|a['’])(?:\s+\w+){0,2}?\s+d(?:i\s+|ell['’]\s*)(?:\w+\s+){0,2}?aiut",
+    _I,
+)
 _AVVISO_NON_QUOTA = (
     "Il passaggio citato non sembra ripartire il costo del progetto tra i partner: "
     "potrebbe essere un'intensità di aiuto o un limite di spesa"
 )
 
 
-def _sembra_quota(citazione: Citazione, sezioni: dict[str, str]) -> bool:
-    """Sulla frase della citazione: una citazione breve («almeno il 10% dei
-    costi») prende il soggetto dal resto della frase («ciascun partner…»)."""
-    testo = _frase_della_citazione(citazione, sezioni)
-    if _QUOTA_PARTENARIATO.search(testo):
+def _sembra_quota(frase: str) -> bool:
+    """Sulla frase della citazione (`_frase_della_citazione`): una citazione
+    breve («almeno il 10% dei costi») prende il soggetto dal resto della frase
+    («ciascun partner…»)."""
+    if _QUOTA_NON_RIPARTIZIONE.search(frase):
+        return False
+    if _QUOTA_PARTENARIATO.search(frase):
         return True
-    return not _QUOTA_AIUTO.search(testo) and bool(_QUOTA_CHI_SOSTIENE.search(testo))
+    return not _QUOTA_AIUTO.search(frase) and bool(_QUOTA_CHI_SOSTIENE.search(frase))
+
+
+# Frazioni ammesse per le percentuali delle quote, convertite a due decimali
+# (come numeric(5,2)): il bando scrive «due terzi», il codice converte. Solo
+# per min/max delle quote: altrove una frazione resta non leggibile.
+_FRAZIONI = {
+    "1/2": 50.0, "1/3": 33.33, "2/3": 66.67, "1/4": 25.0, "3/4": 75.0, "1/5": 20.0,
+    "metà": 50.0, "un terzo": 33.33, "due terzi": 66.67, "un quarto": 25.0,
+    "tre quarti": 75.0, "un quinto": 20.0,
+}
+# Una frazione, nel valore del modello o nel testo normalizzato (minuscolo,
+# apostrofi dritti): la chiave di `_FRAZIONI` si ricava dal gruppo
+# `frazione`; «3/5» o «due quarti» corrispondono qui ma non sono in tabella.
+# Non sono frazioni l'ordinale seguito da un soggetto o da una sequenza («un
+# terzo soggetto», «un quarto partner», «un quinto lotto»; «un terzo entro…»
+# sì) e la metà in senso temporale («a metà del periodo»).
+_ORDINALE_DI = (
+    r"soggett|part|fornitor|ent[ei]\b|organism|impres|operator|beneficiar|component|membr"
+    r"|lott|fase|livell|anno|annualit|comma|punto|articol|paragraf|rata|tranche|sportell"
+    r"|avvis|bando|grado|posto|classificat"
+)
+_META_TEMPORALE = (
+    r"period|anno|annualit|mes[ei]\b|durat|semestr|trimestr|bienni|trienni|esercizi|percors"
+    r"|giorn|settiman|svolgiment|realizzazion"
+)
+_FORME_FRAZIONE = (
+    r"[1-5]\s*/\s*[1-5]"
+    r"|met(?:à|a')(?!\s+(?:del|dello|della|dell'|dei|degli|delle)\s*(?:" + _META_TEMPORALE + "))"
+    r"|(?:un|due|tre)\s+(?:terz|quart|quint)(?:i|o(?!\s+(?:" + _ORDINALE_DI + ")))"
+)
+_FINE_FRAZIONE = r"(?![\w/])"
+_FRAZIONE = re.compile(
+    r"(?<![\w/.,])(?:la\s+)?(?P<frazione>" + _FORME_FRAZIONE + ")" + _FINE_FRAZIONE
+)
+# Una percentuale scritta in cifre nel testo: «30%», «12,5 %», «10 per cento»,
+# «30 (trenta) per cento».
+_NUMERO_TESTO = r"\d{1,3}(?:[.,]\d{1,6})?"
+_SEGNO_PERCENTUALE = r"\s*(?:\([^()\d]{1,40}\)\s*)?(?:%|per\s*cento\b)"
+_PERCENTUALE_TESTO = re.compile(
+    r"(?<![\w.,])(" + _NUMERO_TESTO + ")" + _SEGNO_PERCENTUALE, _I
+)
+# Un intervallo vale per entrambi i numeri: «tra il 20 e (ed) il 40%», «dal 20
+# al 40%», «20-40%» (anche con il segno sul primo numero).
+# (gli unici gruppi della regex sono i due numeri di ciascuna alternativa)
+_PRIMO = r"(" + _NUMERO_TESTO + r")\s*%?"
+_SECONDO = r"(" + _NUMERO_TESTO + ")" + _SEGNO_PERCENTUALE
+_INTERVALLO_TESTO = re.compile(
+    r"\b(?:tra|fra)\s+(?:il\s+|l')?" + _PRIMO + r"\s+ed?\s+(?:il\s+|l')?" + _SECONDO
+    + r"|\bda(?:l|ll')?\s*" + _PRIMO + r"\s+a(?:l|ll')?\s*" + _SECONDO
+    + r"|(?<![\w.,])" + _PRIMO + r"\s*[-–—]\s*" + _SECONDO,
+    _I,
+)
+_TOLLERANZA_CIFRE = 0.01
+_TOLLERANZA_FRAZIONI = 0.5  # 66.67 per «due terzi»: «66» non basta
+_AVVISO_PERCENTUALE_ASSENTE = "La percentuale non compare nel passaggio citato"
+_AVVISO_PERCENTUALE_ILLEGGIBILE = "Percentuale non leggibile"
+_AVVISO_NON_RICOSTRUIBILE = "Passaggio citato non ricostruibile per intero"
+
+
+def _valore_frazione(corrispondenza: re.Match) -> float | None:
+    chiave = re.sub(r"\s*/\s*", "/", " ".join(corrispondenza.group("frazione").split()))
+    return _FRAZIONI.get("metà" if chiave == "meta'" else chiave)
+
+
+# Un articolo iniziale nel valore del modello («i due terzi», «l'80%»): il
+# prompt chiede la frazione senza articolo, ma non è detto che lo rispetti.
+_ARTICOLO_INIZIALE = re.compile(r"(?:il|lo|la|i)\s+|l'\s*")
+
+
+def _percentuale(valore: Any, *, minimo: bool = False) -> tuple[float | None, bool]:
+    """Come `_numero`, ma accetta anche le frazioni di `_FRAZIONI` («due
+    terzi», «2/3» → 66.67) e un articolo iniziale («i due terzi», «il
+    30%»): solo per le percentuali delle quote."""
+    if isinstance(valore, str) and len(valore) <= _MAX_MARCATORE:
+        testo = normalizza_testo(valore)
+        articolo = _ARTICOLO_INIZIALE.match(testo)
+        if articolo:
+            testo = testo[articolo.end() :]
+        corrispondenza = _FRAZIONE.fullmatch(testo)
+        if corrispondenza:
+            percentuale = _valore_frazione(corrispondenza)
+            if percentuale is not None:
+                return percentuale, True
+        if articolo and testo:
+            return _numero(testo, minimo=minimo)
+    return _numero(valore, minimo=minimo)
+
+
+def _percentuale_nel_testo(valore: float, frase: str) -> bool:
+    """True se `valore` compare nella frase: in cifre seguite da «%» o «per
+    cento» (tolleranza 0,01) o come frazione di `_FRAZIONI` (tolleranza 0,5).
+    Un «0.3» scritto al posto di 30 o un numero inventato con una citazione
+    vera non passano."""
+    cifre = [m.group(1) for m in _PERCENTUALE_TESTO.finditer(frase)]
+    for intervallo in _INTERVALLO_TESTO.finditer(frase):
+        cifre += [numero for numero in intervallo.groups() if numero]
+    for numero in cifre:
+        if abs(valore - float(numero.replace(",", "."))) <= _TOLLERANZA_CIFRE + 1e-9:
+            return True
+    for corrispondenza in _FRAZIONE.finditer(frase):
+        frazione = _valore_frazione(corrispondenza)
+        if frazione is not None and abs(valore - frazione) <= _TOLLERANZA_FRAZIONI + 1e-9:
+            return True
+    return False
 
 
 # Con ambito «per_partner» e «capofila» la quota vale per ogni partner o per il
@@ -1025,12 +1344,22 @@ _CATEGORIA_DEL_RUOLO = {
 def _quota(voce, sezioni, documenti) -> QuotaOut:
     avvisi: list[str] = []
     citazione, verificata = _citazione(voce.citazione, sezioni, documenti, avvisi)
-    if voce.citazione.testo.strip() and not _sembra_quota(voce.citazione, sezioni):
+    # Senza citazione nessun giudizio sul testo: la voce è già da verificare.
+    frase = None
+    if voce.citazione.testo.strip():
+        frase, ricostruita = _frase_della_citazione(voce.citazione, sezioni)
+        # Citazione ritrovata ma frase non ricostruita (i frammenti di
+        # un'ellissi in frasi diverse): esclusioni e percentuale si
+        # controllerebbero solo sul frammento, che può saltare proprio
+        # l'esclusione o il soggetto.
+        if not ricostruita and citazione is not None and citazione.verificata:
+            avvisi.append(_AVVISO_NON_RICOSTRUIBILE)
+    if frase is not None and not _sembra_quota(frase):
         avvisi.append(_AVVISO_NON_QUOTA)
-    minimo, leggibile_min = _numero(voce.min_percentuale, minimo=True)
-    massimo, leggibile_max = _numero(voce.max_percentuale)
+    minimo, leggibile_min = _percentuale(voce.min_percentuale, minimo=True)
+    massimo, leggibile_max = _percentuale(voce.max_percentuale)
     if not (leggibile_min and leggibile_max):
-        avvisi.append("Percentuale non leggibile")
+        avvisi.append(_AVVISO_PERCENTUALE_ILLEGGIBILE)
     for valore in (minimo, massimo):
         if valore is not None and (not _finito(valore) or not 0 <= valore <= 100):
             avvisi.append("Percentuale fuori dall'intervallo 0-100")
@@ -1039,6 +1368,11 @@ def _quota(voce, sezioni, documenti) -> QuotaOut:
         avvisi.append("La percentuale minima supera la massima")
     if minimo is None and massimo is None and leggibile_min and leggibile_max:
         avvisi.append("Quota senza percentuali")
+    if frase is not None and any(
+        _finito(valore) and not _percentuale_nel_testo(valore, frase)
+        for valore in (minimo, massimo)
+    ):
+        avvisi.append(_AVVISO_PERCENTUALE_ASSENTE)
     categoria = None
     if not _vuoto(voce.categoria) and _chiave(voce.categoria) not in _CATEGORIA_DEL_RUOLO.get(
         voce.ambito, ()
@@ -1099,6 +1433,251 @@ def _vincolo(voce, sezioni, documenti) -> VincoloOut:
         citazione=citazione,
         avvisi=avvisi,
     )
+
+
+def _tupla_quota(quota: QuotaOut) -> tuple:
+    return quota.ambito, quota.categoria, quota.min_percentuale, quota.max_percentuale
+
+
+# Base di calcolo ed effetto «non indicati» (o non riconosciuti): compatibili
+# con qualunque valore.
+_NON_INDICATI = frozenset({"non_indicata", "non_indicato"})
+
+
+def _stessa_regola(a: QuotaOut, b: QuotaOut) -> bool:
+    """Stessa tupla (`_tupla_quota`) e base di calcolo ed effetto compatibili:
+    uguali, oppure non indicati in una delle due. Con la stessa soglia, una
+    base o un effetto indicati e diversi (inammissibilità contro perdita della
+    maggiorazione) sono due regole."""
+    return _tupla_quota(a) == _tupla_quota(b) and all(
+        x == y or x in _NON_INDICATI or y in _NON_INDICATI
+        for x, y in ((a.base_calcolo, b.base_calcolo),
+                     (a.effetto_violazione, b.effetto_violazione))
+    )
+
+
+def _preferenza(quota: QuotaOut) -> tuple[bool, int]:
+    """Tra due voci della stessa regola: prima la verificata, poi quella con
+    più campi indicati (base di calcolo, effetto)."""
+    indicati = sum(
+        valore not in _NON_INDICATI for valore in (quota.base_calcolo, quota.effetto_violazione)
+    )
+    return quota.stato == "verificata", indicati
+
+
+def _confrontabile(quota: QuotaOut) -> bool:
+    """True se la tupla della quota la descrive per intero: almeno una
+    percentuale letta, nessuna percentuale illeggibile, una categoria nota
+    quando c'è (e sempre per «per_categoria»). Due quote illeggibili o senza
+    percentuali hanno la stessa tupla ma possono essere regole diverse: non si
+    confrontano, restano entrambe."""
+    return (
+        (quota.min_percentuale is not None or quota.max_percentuale is not None)
+        and _AVVISO_PERCENTUALE_ILLEGGIBILE not in quota.avvisi
+        and quota.categoria != "altro"
+        and not (quota.ambito == "per_categoria" and quota.categoria is None)
+    )
+
+
+# Avvisi globali per l'utente (senza gli id interni delle voci), una volta sola.
+_AVVISO_QUOTA_RIPETUTA = "Una quota compariva in più documenti: è mostrata una volta sola."
+_AVVISO_QUOTA_DA_VINCOLO = (
+    "Una quota è stata ricavata da un vincolo del bando (limite per singolo partner)."
+)
+# Sulla voce recuperata: la rende da verificare (mai preselezionata).
+_AVVISO_RICAVATA = "Ricavata da un vincolo: da confermare"
+
+
+def _senza_quote_ripetute(quote: list[QuotaOut]) -> tuple[list[QuotaOut], list[str]]:
+    """(quote, avvisi globali): le quote confrontabili (`_confrontabile`)
+    della stessa regola si raggruppano, e di ogni gruppo resta una voce sola,
+    al posto della prima: la preferita (`_preferenza`: la verificata, poi la
+    più completa), a parità la prima. È lo stesso passaggio ripetuto in più
+    documenti (un avviso e il suo testo consolidato): due voci uguali nella
+    call sarebbero un doppione. Una quota entra in un gruppo solo se è
+    `_stessa_regola` con TUTTI i membri: la compatibilità con «non indicato»
+    non è transitiva (una base non indicata è compatibile sia con «budget del
+    partner» sia con «contributo», che però sono regole diverse e restano
+    entrambe). Le quote non confrontabili restano tutte."""
+    gruppi: list[list[QuotaOut]] = []
+    for quota in quote:
+        gruppo = None
+        if _confrontabile(quota):
+            gruppo = next(
+                (g for g in gruppi
+                 if _confrontabile(g[0]) and all(_stessa_regola(m, quota) for m in g)),
+                None,
+            )
+        if gruppo is None:
+            gruppi.append([quota])
+        else:
+            gruppo.append(quota)
+    # max restituisce il primo a parità di preferenza
+    tenute = [max(gruppo, key=_preferenza) for gruppo in gruppi]
+    ripetute = len(tenute) < len(quote)
+    return tenute, [_AVVISO_QUOTA_RIPETUTA] if ripetute else []
+
+
+def _quasi_uguali(a: float | None, b: float | None) -> bool:
+    """Stessa percentuale a meno della tolleranza della metrica (0,5 punti:
+    66.67 e 66.66 sono la stessa quota); None solo con None."""
+    if a is None or b is None:
+        return a is b
+    return abs(a - b) <= _TOLLERANZA_FRAZIONI + 1e-9
+
+
+def _gia_presente(quota: QuotaOut, quote: list[QuotaOut]) -> bool:
+    return any(
+        altra.ambito == quota.ambito
+        and altra.categoria == quota.categoria
+        and _quasi_uguali(altra.min_percentuale, quota.min_percentuale)
+        and _quasi_uguali(altra.max_percentuale, quota.max_percentuale)
+        for altra in quote
+    )
+
+
+def _id_libero(base: str, usati: set[str]) -> str:
+    """`base` tagliato a 20 caratteri (come ogni id in uscita), con un suffisso
+    «-2», «-3»… se è già usato."""
+    candidato = base[:20].rstrip()
+    numero = 2
+    while candidato in usati:
+        suffisso = f"-{numero}"
+        candidato = base[: 20 - len(suffisso)].rstrip() + suffisso
+        numero += 1
+    return candidato
+
+
+# Una quota scritta come vincolo: il modello a volte mette «nessuna impresa
+# beneficiaria sostiene da sola più di due terzi del totale delle spese» tra i
+# vincoli di tipo «altro». Si recupera come quota per partner (massimo) SOLO in
+# questa forma stretta, in una frase che parla di spese o costi, senza parole
+# di aiuto né esclusioni forti: la frazione o la percentuale da sole sono
+# rumorose («almeno i due terzi dei soci», «aumentata da un terzo alla metà»).
+# Quantificatori limitati: tempo lineare anche su frasi ostili senza punti.
+_VALORE_QUOTA = (
+    _NUMERO_TESTO + _SEGNO_PERCENTUALE + "|(?:" + _FORME_FRAZIONE + ")" + _FINE_FRAZIONE
+)
+# Tra «nessun…» e «sostiene» nessun altro soggetto distributivo: «nessuna
+# impresa partecipa a più progetti e ciascun partner sostiene più del 10%» è
+# un minimo di un'altra proposizione, non un massimo.
+_QUOTA_DA_VINCOLO = re.compile(
+    r"\bnessun[oa]?\s+(?:impres[ae]|partner|soggett[oi]|beneficiari[oa]?|partecipant[ei]"
+    r"|component[ei]|membr[oi])\b"
+    r"(?:(?!\b(?:ciascun[oa]?|ogni|ognun[oa]|tutt[ie])\b)[^.;]){0,120}?"
+    r"\bsost(?:iene|enere|enga)\s+"
+    r"(?:da\s+sol[oa]\s+)?(?:pi(?:ù|u'?)\s+d(?:i|el|ella|ei)|oltre(?:\s+(?:il|la|i))?)\s+"
+    r"(?P<valore>" + _VALORE_QUOTA + r")",
+    _I,
+)
+_SPESE_O_COSTI = re.compile(r"\b(?:spes[ae]|cost[oi]|budget)\b", _I)
+# Dopo il valore, la base deve essere il costo o le spese COMPLESSIVE del
+# progetto («del totale delle spese», «dei costi ammissibili», «del budget»),
+# non una singola voce di spesa («dei costi per consulenze esterne», «delle
+# spese di personale»): quello è un limite di spesa, non una quota.
+_CODA_BASE = 200
+_BASE_COMPLESSIVA = re.compile(
+    r"\b(?:total\w*|complessiv\w*|ammissibil\w*|progett\w*|budget)\b", _I
+)
+_VOCE_DI_SPESA = re.compile(
+    r"\b(?:consulenz|personale|subappalt|subaffid|attrezzatur|macchinar|impiant|strument"
+    r"|progettazion|viagg|trasfert|missioni|material|brevett|licenz|promozion|pubblicit"
+    r"|formazion|general[ie]\b|indirett|forfettar|investiment|opere\b|lavori\b|immobil"
+    r"|software|servizi|forniture)",
+    _I,
+)
+# Un'eccezione («nessun partner, salvo il capofila, …») o un obbligo negato
+# («nessun partner è tenuto a sostenere più di…», che non è un tetto) tra
+# «nessun…» e il valore: niente recupero. L'eccezione conta anche dopo il
+# valore («…, tranne il capofila»).
+_ECCEZIONE = re.compile(r"\b(?:ad\s+eccezione|salv[oaie]\b|tranne|eccett[oaui]\b)", _I)
+_OBBLIGO_NEGATO = re.compile(
+    r"\b(?:(?:è|e'|sar[aà]|sono|saranno)\s+tenut[oaie]\b|obbligat)", _I
+)
+
+
+def _valore_scritto(testo: str) -> float | None:
+    """Il valore di `_VALORE_QUOTA`: «30%», «10 per cento», «due terzi»."""
+    cifre = _PERCENTUALE_TESTO.fullmatch(testo)
+    if cifre:
+        return float(cifre.group(1).replace(",", "."))
+    frazione = _FRAZIONE.fullmatch(testo)
+    return _valore_frazione(frazione) if frazione else None
+
+
+def _quote_dai_vincoli(
+    estrazione: PartenariatoEstrazione,
+    vincoli: list[VincoloOut],
+    quote: list[QuotaOut],
+    sezioni: dict[str, str],
+    documenti: dict[int, dict],
+) -> tuple[list[QuotaOut], list[str]]:
+    """(quote recuperate, avvisi globali) dai vincoli di tipo «altro» con
+    citazione verificata su un documento ufficiale (la verifica della voce di
+    `_citazione`: una citazione della scheda del catalogo non basta) e frase
+    nella forma di `_QUOTA_DA_VINCOLO`, sul costo complessivo del progetto (non
+    su una singola voce di spesa). La quota (per_partner, nessuna categoria,
+    massimo) nasce con la citazione del vincolo e passa da `_quota` come le
+    altre, ma resta SEMPRE da verificare (`_AVVISO_RICAVATA`): è il codice a
+    leggerla nel testo, non il modello, quindi si mostra e il creatore la può
+    confermare come «modificata», ma non si preseleziona mai. Il vincolo resta
+    com'è. Nessun recupero se c'è già una quota uguale a meno di 0,5 punti.
+    L'id («Q-<vincolo>») è unico anche dopo il taglio a 20 caratteri. In più un
+    avviso globale, una volta sola."""
+    usati = {quota.id for quota in quote}
+    recuperate: list[QuotaOut] = []
+    for numero, (voce, vincolo) in enumerate(zip(estrazione.vincoli, vincoli, strict=True), 1):
+        if vincolo.tipo != "altro" or not voce.citazione.testo.strip():
+            continue
+        if not _citazione(voce.citazione, sezioni, documenti, [])[1]:
+            continue
+        # Solo sulla frase ricostruita dal documento: con un'ellissi i
+        # frammenti possono unire frasi diverse (la soglia di una voce di
+        # spesa e la base complessiva di un'altra frase).
+        frase, ricostruita = _frase_della_citazione(voce.citazione, sezioni)
+        if not ricostruita:
+            continue
+        forma = _QUOTA_DA_VINCOLO.search(frase)
+        if (
+            forma is None
+            or not _SPESE_O_COSTI.search(frase)
+            or _QUOTA_AIUTO.search(frase)
+            or _QUOTA_NON_RIPARTIZIONE.search(frase)
+        ):
+            continue
+        base = frase[forma.end() : forma.end() + _CODA_BASE]
+        if not _BASE_COMPLESSIVA.search(base) or _VOCE_DI_SPESA.search(base):
+            continue
+        prima_del_valore = frase[forma.start() : forma.start("valore")]
+        if (
+            _ECCEZIONE.search(prima_del_valore)
+            or _OBBLIGO_NEGATO.search(prima_del_valore)
+            or _ECCEZIONE.search(base)
+        ):
+            continue
+        valore = _valore_scritto(forma.group("valore"))
+        if valore is None:
+            continue
+        quota = _quota(
+            QuotaVoce(
+                id=_id_libero(f"Q-{vincolo.id or f'V{numero}'}", usati),
+                ambito="per_partner", categoria="",
+                # due decimali: «33.333» per `_numero` sarebbe ambiguo (migliaia)
+                min_percentuale="", max_percentuale=f"{round(valore, 2):g}",
+                base_calcolo="", effetto_violazione="", citazione=voce.citazione,
+            ),
+            sezioni,
+            documenti,
+        )
+        if _gia_presente(quota, quote + recuperate):
+            continue
+        usati.add(quota.id)
+        recuperate.append(
+            quota.model_copy(
+                update={"avvisi": [*quota.avvisi, _AVVISO_RICAVATA], "stato": "da_verificare"}
+            )
+        )
+    return recuperate, [_AVVISO_QUOTA_DA_VINCOLO] if recuperate else []
 
 
 def _regola_finanziaria(
@@ -1261,6 +1840,14 @@ def post_elabora(
         if avviso:
             avvisi_regole.append(_testo(avviso, 500) or "")
 
+    vincoli = [_vincolo(voce, sezioni, documenti) for voce in estrazione.vincoli]
+    quote, avvisi_quote = _senza_quote_ripetute(
+        [_quota(voce, sezioni, documenti) for voce in estrazione.quote]
+    )
+    recuperate, avvisi_recupero = _quote_dai_vincoli(
+        estrazione, vincoli, quote, sezioni, documenti
+    )
+
     regole = RegolePartenariatoOut(
         modalita=modalita,
         modalita_effettiva=modalita.effettiva,
@@ -1273,18 +1860,19 @@ def post_elabora(
             _composizione(voce, sezioni, documenti, indice_regioni)
             for voce in estrazione.composizione
         ],
-        quote=[_quota(voce, sezioni, documenti) for voce in estrazione.quote],
-        vincoli=[_vincolo(voce, sezioni, documenti) for voce in estrazione.vincoli],
+        quote=quote + recuperate,
+        vincoli=vincoli,
         regole_finanziarie=regole_finanziarie,
         documenti_richiesti=documenti_richiesti,
         fonti_insufficienti=bool(estrazione.fonti_insufficienti),
         note=_testo(estrazione.note),
         # Le incoerenze della modalità valgono per tutto il risultato; le
         # regole finanziarie non rappresentabili e le voci che la convalida
-        # tollerante ha scartato o declassato restano visibili solo qui.
+        # tollerante ha scartato o declassato restano visibili solo qui, come
+        # le quote ripetute tolte e quelle ricavate dai vincoli.
         avvisi=[a for a in modalita.avvisi if a.startswith("«")] + avvisi_regole + [
             _testo(a, 500) or "" for a in avvisi_convalida(estrazione)
-        ],
+        ] + avvisi_quote + avvisi_recupero,
     )
     # Ultima rete: nessun rimando ai domini esclusi, in nessun campo.
     return scrub_menzioni(regole.model_dump(mode="json"))

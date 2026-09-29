@@ -20,10 +20,16 @@ CLI (dal backend: `python -m app.services.partenariato_valutazione ...`):
   `valutazione`, tetto N centesimi USD al giorno). Mostra PRIMA la stima;
   senza `--conferma` non spende nulla. Si ferma al tetto. USA IL DB PRIMARIO
   (claim, righe in `bando_partenariato`, registro di spesa; migration 0034);
-- `--reale --locale --tetto-cents N [--conferma] [--out FILE] [--solo ID,ID]`:
+- `--reale --locale --tetto-cents N [--conferma --out FILE] [--solo ID,ID]`:
   la stessa pipeline SENZA DB primario, con la spesa fail-closed in memoria
-  (`partenariato_valutazione_locale`). Serve solo `ANTHROPIC_API_KEY`;
-  `--out` fuori dal repository.
+  (`partenariato_valutazione_locale`). Serve solo `ANTHROPIC_API_KEY`; con
+  `--conferma`, `--out` è obbligatorio e fuori dal repository (il risultato
+  contiene le sezioni inviate al modello);
+- `--rivaluta FILE [--rivaluta FILE2 …] --out FILE3`: SENZA modello, download
+  né configurazione. Ripete convalida tollerante, post-elaborazione e metriche
+  sull'output grezzo salvato da `--reale --locale` (più file: in ordine di
+  lancio), con le etichette di `--campione`. `--out` obbligatorio, fuori dal
+  repository.
 
 Il catalogo si legge con la chiave anon da `SECONDARY_SUPABASE_URL` /
 `SECONDARY_SUPABASE_ANON_KEY` oppure `SUPABASE_URL_BANDI` /
@@ -497,6 +503,9 @@ def _argomenti(argv: list[str] | None) -> argparse.Namespace:
     modo.add_argument("--offline", action="store_true", help="senza modello: recall e stime")
     modo.add_argument("--prepara", metavar="OUT_DIR", help="fogli di lavoro fuori dal repo")
     modo.add_argument("--reale", action="store_true", help="pipeline vera (spende)")
+    modo.add_argument("--rivaluta", metavar="FILE", action="append",
+                      help="senza modello: rivaluta l'output grezzo di --reale --locale "
+                           "(ripetibile, in ordine di lancio; vuole --out)")
     parser.add_argument("--locale", action="store_true",
                         help="con --reale: senza DB primario, spesa in memoria")
     parser.add_argument("--solo", metavar="ID,ID", default=None,
@@ -518,6 +527,14 @@ def _scrivi(risultato: dict, out: str | None) -> None:
 
 async def _esegui(args: argparse.Namespace) -> int:
     campione = carica_campione(args.campione)
+    if args.rivaluta:
+        if args.locale or args.solo is not None or args.tetto_cents is not None or args.conferma:
+            print("--rivaluta non spende: niente --locale, --solo, --tetto-cents, --conferma",
+                  file=sys.stderr)
+            return 2
+        from app.services import partenariato_valutazione_locale as locale
+
+        return await locale.rivaluta_cli(args.rivaluta, campione, out=args.out)
     if args.locale and not args.reale:
         print("--locale vale solo con --reale", file=sys.stderr)
         return 2

@@ -44,7 +44,10 @@ from app.services.ai_check_prompts import _fmt, _junction_names, serializza_sezi
 from app.services.link_policy import BLOCKED_LINK_HOSTS
 from app.services.partenariato_vocabolario import FORME, TIPI_SOGGETTO, VOCABOLARIO_VERSIONE
 
-PARTENARIATO_PROMPT_VERSION = 1
+# 2: numeri assenti solo "", «non_ammesso» solo con un'esclusione esplicita,
+# definizione stretta delle quote, citazione della modalità come frase intera
+# (dopo la prima valutazione reale, 2026-09-29).
+PARTENARIATO_PROMPT_VERSION = 2
 # Versione dello schema di output (schemas/partenariato.PartenariatoEstrazione)
 # e della forma delle regole post-elaborate. 2: schema compatto (codici e
 # numeri come stringhe, niente nullable) dopo il 400 «compiled grammar is too
@@ -142,20 +145,27 @@ passaggio COPIATO ALLA LETTERA da quel blocco, senza riformulare e senza unire t
 diversi. Citazione assente: {{"sezione": "", "testo": ""}}.
 - Compila SEMPRE tutti i campi. Un'informazione che manca è "" (stringa vuota) o una lista \
 vuota, mai testo di riempimento. I campi con un codice vogliono ESATTAMENTE uno dei codici \
-elencati in fondo. I numeri sono cifre dentro una stringa, con il punto per i decimali e \
-senza separatore delle migliaia ("3", "30", "12.5").
+elencati in fondo. I numeri sono SOLO cifre dentro una stringa, con il punto per i decimali \
+e senza separatore delle migliaia ("3", "30", "12.5"). Un numero che il testo non indica è \
+SOLO "": mai parole o simboli al suo posto (niente «non indicato», «nessuno», «n.d.», «-», \
+«illimitato»); le spiegazioni vanno in `conteggio_note` o in `note`.
 - `modalita`:
   - "obbligatorio": la domanda può essere presentata SOLO da un partenariato o da \
 un'aggregazione (es. «almeno due imprese», «esclusivamente in forma associata», «consorzio \
 di almeno tre soggetti indipendenti»);
   - "ammesso": è ammessa sia la domanda singola sia quella in forma associata (es. «in forma \
 singola o associata», «anche in ATS o contratto di rete»);
-  - "non_ammesso": sono ammesse SOLO domande in forma singola, oppure le aggregazioni sono \
-escluse espressamente;
-  - "non_determinabile": il testo non lo dice in modo chiaro, o mancano le pagine che lo \
-direbbero.
-  `modalita_citazione` è il passaggio che la fonda, copiato come FRASE INTERA e non come \
-singola parola (vuota solo con "non_determinabile").
+  - "non_ammesso": SOLO se il testo impone espressamente la forma singola o esclude \
+espressamente le aggregazioni (es. «esclusivamente in forma singola», «non sono ammessi \
+raggruppamenti o reti di imprese», «è esclusa la partecipazione in forma associata»). NON \
+bastano l'elenco dei beneficiari («possono presentare domanda le PMI con sede in ...»), il \
+limite di una domanda per impresa («ciascuna impresa può presentare una sola domanda») o il \
+silenzio del testo sulle aggregazioni: in questi casi è "non_determinabile";
+  - "non_determinabile": il testo non lo dice in modo esplicito (anche quando il bando sembra \
+pensato per singole imprese), o mancano le pagine che lo direbbero.
+  `modalita_citazione` è la FRASE INTERA che contiene la regola, copiata di seguito dall'inizio \
+alla fine: non una parola, non un titolo, senza omissioni e senza unire con «...» frasi o \
+celle di tabella diverse (vuota solo con "non_determinabile").
 - `forme_ammesse`: le forme di aggregazione ammesse, con i codici del vocabolario qui sotto; \
 una forma non in elenco è "altra", descritta in `note`. Lista vuota se il testo non ne nomina.
 - `costituzione`: "costituenda_ammessa" se il raggruppamento può costituirsi dopo la domanda \
@@ -169,8 +179,17 @@ e chi non conta (es. affiliati, partner associati).
 - `composizione`: le categorie di soggetti richieste o ammesse nel partenariato, con \
 `minimo` e `massimo` quando indicati, il ruolo e i vincoli territoriali (`regioni` con il \
 nome della regione italiana, `paesi` con il nome del paese).
-- `quote`: percentuali da 0 a 100 ("30" per «30%»), mai frazioni; indica su cosa si \
-calcolano (`base_calcolo`) e l'effetto se non sono rispettate (`effetto_violazione`).
+- `quote`: SOLO le ripartizioni del costo o del budget del PROGETTO tra i soggetti del \
+partenariato, cioè la percentuale minima o massima che deve sostenere ciascun partner \
+(`ambito` "per_partner"), una categoria di soggetti nel suo insieme ("per_categoria", con la \
+`categoria`) o il capofila ("capofila"). Con "per_partner" e "capofila" la `categoria` è "", \
+salvo che la quota valga solo per i partner di una categoria. NON sono quote: intensità di \
+aiuto; percentuali di contributo, di finanziamento o di cofinanziamento; soglie o massimali \
+di spesa ammissibile; percentuali di costi da sostenere in certe regioni o per certe voci di \
+spesa (es. consulenze, subappalto); riserve della dotazione per una categoria di \
+beneficiari; maggiorazioni e premialità; percentuali sul numero dei membri. Percentuali da 0 \
+a 100 ("30" per «30%»), mai frazioni; indica su cosa si calcolano (`base_calcolo`) e \
+l'effetto se non sono rispettate (`effetto_violazione`).
 - `vincoli`: indipendenza o assenza di collegamenti tra i partner, partecipazione a un solo \
 partenariato, paesi distinti (`parametro` = numero di paesi), sede operativa in una regione, \
 termine per costituire il raggruppamento (`parametro` = giorni), requisiti del capofila, altro; \

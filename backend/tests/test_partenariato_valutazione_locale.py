@@ -12,10 +12,13 @@ download, fedeltà a `_pipeline` sui finti di test_partenariato_service,
 `--solo`, `--locale` senza `--reale`, errori fuori dalle metriche di campo,
 ripresa col tetto residuo e unione delle esecuzioni, arresto al primo errore
 non transitorio del provider (400 compreso, col costo probabile 0) e dopo tre
-errori di fila."""
+errori di fila, input grezzo dello strumento salvato e `--rivaluta` (stesse
+metriche a codice invariato, nessuna chiamata, nessun download)."""
 
 import asyncio
 import base64
+import copy
+import inspect
 import json
 import sys
 from contextlib import contextmanager
@@ -590,6 +593,10 @@ async def _locale(catalogo, ai) -> loc.BandoValutato:
     return b
 
 
+def _convalida_originale(chiamate: list[dict]) -> list[dict]:
+    return [{**c, "convalida": inspect.unwrap(c["convalida"])} for c in chiamate]
+
+
 def _fonti(fonti: list[dict]) -> list[tuple]:
     return [(f["n"], f["stato"], f["pagine_totali"], f["pagine_incluse"], f["troncato"])
             for f in fonti]
@@ -612,8 +619,10 @@ class TestFedelta:
         assert esito == b.esito == "estratta"
         assert b.regole == riga["regole"]
         assert b.regole["modalita_effettiva"] == riga["modalita_effettiva"] == "ammesso"
-        # stesso input, modello, max_tokens, timeout e schema
-        assert ai_loc.chiamate == ai_prod.chiamate
+        # stesso input, modello, max_tokens, timeout, schema e convalida: la
+        # locale la avvolge solo per registrare l'input grezzo
+        assert ai_loc.chiamate[0]["convalida"] is not ai_prod.chiamate[0]["convalida"]
+        assert _convalida_originale(ai_loc.chiamate) == ai_prod.chiamate
         assert _fonti(b.fonti) == _fonti(riga["fonti_usate"])
         assert (b.costo_cents, b.input_tokens, b.output_tokens) == (
             riga["cost_cents"], riga["input_tokens"], riga["output_tokens"])
@@ -671,9 +680,23 @@ class TestCli:
         # i documenti si leggono per la stima esatta: nessuna spesa
         assert len(cat.download) == 3
 
+    def test_conferma_senza_out_rifiutata(self, cat, tmp_path, monkeypatch, capsys):
+        # il risultato contiene le sezioni inviate (testi dei documenti e del
+        # catalogo): mai su stdout, da dove finirebbe in un file del repo
+        def vietato(settings):
+            raise AssertionError("senza --out il modello non si crea")
+
+        monkeypatch.setattr(loc, "crea_ai", vietato)
+        assert cli(tmp_path, "--conferma") == 2
+        assert cat.download == [] and cat.secondari == 0
+        errori = capsys.readouterr()
+        assert "--out" in errori.err and errori.out == ""
+        # senza --conferma (solo la stima, nessuna sezione in uscita) resta facoltativo
+        assert cli(tmp_path) == 0
+
     def test_chiave_mancante_prima_dei_download(self, cat, tmp_path, monkeypatch, capsys):
         monkeypatch.delenv("ANTHROPIC_API_KEY")
-        assert cli(tmp_path, "--conferma") == 2
+        assert cli(tmp_path, "--conferma", "--out", str(tmp_path / "x.json")) == 2
         assert cat.download == [] and cat.secondari == 0
         errori = capsys.readouterr().err
         assert "ANTHROPIC_API_KEY" in errori and ANON not in errori
@@ -735,7 +758,9 @@ class TestCli:
         assert metriche["quote"]["tp"] == 1
         assert metriche["citazioni"]["percentuale"] is not None
         assert metriche["costi"]["costo_totale_cents"] == 2 * REALE
-        # mai le pagine intere dei documenti
+        # AiFinta non passa dalla convalida: nessun input grezzo, quindi niente
+        # `rivalutazione` e mai le pagine intere dei documenti
+        assert all("rivalutazione" not in b for b in risultato["bandi"])
         for pagina in (PAGINA_1, PAGINA_2, NEUTRA_1, NEUTRA_2):
             assert pagina not in testo
 
@@ -748,7 +773,8 @@ class TestCli:
         assert [b["bando_id"] for b in risultato["bandi"]] == [2]
         assert cat.download == ["https://ente.example.it/2.pdf"] and len(ai.chiamate) == 1
         for sbagliato in ("99", "x", ","):
-            assert cli(tmp_path, "--conferma", "--solo", sbagliato) == 2
+            assert cli(tmp_path, "--conferma", "--solo", sbagliato,
+                       "--out", str(tmp_path / "x.json")) == 2
         assert len(cat.download) == 1
 
     def test_errori_fuori_dalle_metriche_di_campo(self, cat, tmp_path, monkeypatch):
@@ -829,3 +855,418 @@ class TestCli:
         assert risultato["spesa"]["speso_cents"] == REALE + riserva
         assert [b["esito"] for b in risultato["bandi"]] == ["estratta", "errore",
                                                              "non_valutato"]
+
+
+# ------------------------------------------------------------ rivalutazione
+
+
+def input_grezzo(**modifiche) -> dict:
+    """L'input dello strumento come arriverebbe dal modello, prima della
+    convalida tollerante: un numero al posto della stringa di cifre, un
+    codice in maiuscolo e un campo ignoto."""
+    grezzo = servizio.estrazione_valida().model_dump()
+    grezzo.update(partner_min=2, modalita="Ammesso", campo_ignoto="x")
+    # una regione: la post-elaborazione la mappa con le lookup del catalogo
+    grezzo["composizione"] = [{
+        "id": "C1", "tipo_soggetto": "pmi", "tipo_soggetto_testo": "", "minimo": "2",
+        "massimo": "", "ruolo": "qualsiasi", "regioni": ["Piemonte"], "paesi": [],
+        "vincolo_territoriale": "",
+        "citazione": {"sezione": "D1-p2", "testo": "almeno 2 imprese"},
+    }]
+    grezzo.update(modifiche)
+    return grezzo
+
+
+class AiGrezza(AiFinta):
+    """Come il client vero: l'input del blocco tool_use passa per la
+    convalida data dal chiamante; se la convalida lo respinge, errore con
+    l'usage (risposta pagata)."""
+
+    def __init__(self, errori: list | None = None, grezzi: list | None = None):
+        super().__init__(errori)
+        self.grezzi = list(grezzi or [])
+
+    async def estrai_con_strumento(self, system, user_message, output_model, *,
+                                   nome_strumento, descrizione, convalida=None, model=None,
+                                   max_tokens=None, timeout=None):
+        self.chiamate.append({"testo": user_message, "convalida": convalida})
+        self.in_volo += 1
+        self.max_in_volo = max(self.max_in_volo, self.in_volo)
+        try:
+            await asyncio.sleep(0)
+            errore = self.errori.pop(0) if self.errori else None
+            if errore is not None:
+                raise errore
+            grezzo = self.grezzi.pop(0) if self.grezzi else input_grezzo()
+            usage = AiUsage(input_tokens=30_000, output_tokens=6_000)
+            try:
+                return convalida(grezzo), usage
+            except (ValueError, TypeError):
+                errore = AiUpstreamError("input respinto")
+                errore.usage = usage
+                raise errore from None
+        finally:
+            self.in_volo -= 1
+
+
+def _vietati(monkeypatch) -> list:
+    """Nella rivalutazione niente modello, catalogo, download, lettura dei
+    PDF, configurazione. Ogni tentativo si registra nella lista restituita,
+    che il test verifica vuota: `ps._lookups` inghiotte le eccezioni (anche
+    l'AssertionError), quindi sollevare non basterebbe."""
+    tentativi: list = []
+
+    def mai(*a, **k):
+        tentativi.append("chiamata")
+        raise AssertionError("la rivalutazione non chiama modello, rete o configurazione")
+
+    async def mai_async(*a, **k):
+        mai()
+
+    async def lookup_vietate(*a, **k):
+        tentativi.append("lookup")
+        raise AssertionError("la rivalutazione non legge il catalogo")
+
+    monkeypatch.setattr(loc, "crea_ai", mai)
+    monkeypatch.setattr(loc, "crea_secondario", mai_async)
+    monkeypatch.setattr(loc, "impostazioni_locali", mai)
+    monkeypatch.setattr("app.services.download_sicuro.scarica_pdf", mai_async)
+    monkeypatch.setattr("app.services.pdf_testo.estrai_testo", mai_async)
+    monkeypatch.setattr("app.services.lookup_service.get_lookups", lookup_vietate)
+    monkeypatch.setattr(ps, "_lookups", lookup_vietate)
+    return tentativi
+
+
+def rivaluta(tmp_path, *origini: Path, out: Path, campione: str | None = None) -> int:
+    argomenti = []
+    for origine in origini:
+        argomenti += ["--rivaluta", str(origine)]
+    return val.main([*argomenti, "--campione", campione or scrivi_campione(tmp_path),
+                     "--out", str(out)])
+
+
+def _esegui_con_grezzi(cat, tmp_path, monkeypatch, nome="locale.json", *extra, ai=None,
+                       tetto="800") -> dict:
+    ai = ai or AiGrezza()
+    monkeypatch.setattr(loc, "crea_ai", lambda settings: ai)
+    out = tmp_path / nome
+    assert cli(tmp_path, "--conferma", "--out", str(out), *extra, tetto=tetto) == 0
+    return json.loads(out.read_text())
+
+
+CAMPI_DI_CONFRONTO = ("bando_id", "esito", "errore_codice", "modalita", "modalita_effettiva",
+                      "modalita_citazione_verificata", "partner_min", "partner_max", "quote",
+                      "forme", "regole", "costo_cents", "latenza_s", "atteso", "gruppo")
+
+
+class TestInputGrezzo:
+    async def test_registra_input_grezzo_e_sezioni_inviate(self, cat):
+        settings, secondary, [b] = await preparati(cat, ids=(1,))
+        sezioni = dict(b.ingresso.sezioni)
+        ai = AiGrezza()
+        await loc.valuta_con_modello(secondary, ai, b, loc.Spesa(tetto_cents=1000),
+                                     settings=settings)
+        assert b.esito == "estratta" and b.input_registrato is True
+        # grezzo: prima della convalida tollerante
+        assert b.input_grezzo == input_grezzo()
+        assert b.input_grezzo["partner_min"] == 2 and "campo_ignoto" in b.input_grezzo
+        assert b.regole["partner_min"]["valore"] == 2
+        uscita = loc._uscita_bando(b)["rivalutazione"]
+        assert uscita["input_strumento"] == input_grezzo()
+        assert uscita["sezioni"] == sezioni
+        assert any(PAGINA_1 in testo for testo in uscita["sezioni"].values())
+        assert uscita["fonti"][0]["url"] == "https://ente.example.it/1.pdf"
+        # la convalida è quella di produzione, avvolta
+        assert inspect.unwrap(ai.chiamate[0]["convalida"]) is ps.convalida_tollerante
+
+    async def test_input_respinto_registrato(self, cat):
+        settings, secondary, [b] = await preparati(cat, ids=(1,))
+        ai = AiGrezza(grezzi=[{"nessun_campo": 1}])
+        await loc.valuta_con_modello(secondary, ai, b, loc.Spesa(tetto_cents=1000),
+                                     settings=settings)
+        assert (b.esito, b.errore_codice) == ("errore", "ai_risposta_non_valida")
+        assert loc._uscita_bando(b)["rivalutazione"]["input_strumento"] == {"nessun_campo": 1}
+
+    @pytest.mark.parametrize("errore", [AiTimeoutError(), AiUpstreamError()])
+    async def test_senza_risposta_nessun_dato(self, cat, errore):
+        settings, secondary, [b] = await preparati(cat, ids=(1,))
+        await loc.valuta_con_modello(secondary, AiGrezza([errore]), b,
+                                     loc.Spesa(tetto_cents=1000), settings=settings)
+        assert b.esito == "errore" and b.input_registrato is False
+        assert "rivalutazione" not in loc._uscita_bando(b)
+
+    def test_regioni_da_lookups(self):
+        from app.schemas.common import LookupItem
+
+        oggetto = SimpleNamespace(regioni=[LookupItem(id=1, nome="Piemonte")])
+        assert loc.regioni_da_lookups(oggetto) == [{"id": 1, "nome": "Piemonte"}]
+        assert loc.regioni_da_lookups({"regioni": [{"id": 2, "nome": "Lazio"}]}) == [
+            {"id": 2, "nome": "Lazio"}]
+        assert loc.regioni_da_lookups(None) is None
+        assert loc.regioni_da_lookups(SimpleNamespace()) is None
+
+    def test_risultato_con_versioni_e_regioni_per_bando(self, cat, tmp_path, monkeypatch):
+        cat.aggiungi(3, neutro=True)
+        risultato = _esegui_con_grezzi(cat, tmp_path, monkeypatch)
+        assert risultato["rivalutazione"] == {"formato": 2}
+        assert risultato["versioni"] == loc.versioni_attuali() == {
+            "prompt": ps.PARTENARIATO_PROMPT_VERSION, "schema": ps.SCHEMA_VERSION,
+            "vocabolario": loc.VOCABOLARIO_VERSIONE}
+        uno, _, tre = risultato["bandi"]
+        assert uno["rivalutazione"]["input_strumento"] == input_grezzo()
+        assert uno["rivalutazione"]["regioni"] == [{"id": 1, "nome": "Piemonte"}]
+        assert uno["regole"]["composizione"][0]["regioni"] == [1]
+        assert "rivalutazione" not in tre  # nessun segnale: nessun modello
+
+    def test_regioni_del_bando_quelle_della_sua_post_elaborazione(self, cat, tmp_path,
+                                                                  monkeypatch):
+        # Il catalogo non risponde a una lettura su due: ogni bando registra
+        # le regioni che la SUA post-elaborazione ha usato (anche None), e la
+        # rivalutazione ridà le stesse regole.
+        letture = []
+
+        async def lookups(secondary):
+            letture.append(1)
+            if len(letture) % 2:
+                raise RuntimeError("catalogo non disponibile")
+            return SimpleNamespace(regioni=[{"id": 1, "nome": "Piemonte"}])
+
+        monkeypatch.setattr("app.services.lookup_service.get_lookups", lookups)
+        originale = _esegui_con_grezzi(cat, tmp_path, monkeypatch)
+        uno, due, _ = originale["bandi"]
+        assert uno["rivalutazione"]["regioni"] is None
+        assert "Regioni non verificabili sul catalogo" in uno["regole"]["composizione"][0][
+            "avvisi"]
+        assert due["rivalutazione"]["regioni"] == [{"id": 1, "nome": "Piemonte"}]
+        assert due["regole"]["composizione"][0]["regioni"] == [1]
+        tentativi = _vietati(monkeypatch)
+        out = tmp_path / "rivalutato.json"
+        assert rivaluta(tmp_path, tmp_path / "locale.json", out=out) == 0
+        nuovo = json.loads(out.read_text())
+        for prima, dopo in zip(originale["bandi"], nuovo["bandi"], strict=True):
+            assert dopo["regole"] == prima["regole"], prima["bando_id"]
+        assert tentativi == []
+
+
+class TestRivaluta:
+    def test_stesse_metriche_a_codice_invariato(self, cat, tmp_path, monkeypatch, capsys):
+        cat.aggiungi(3, neutro=True)
+        ai = AiGrezza(errori=[None, AiTimeoutError()])
+        originale = _esegui_con_grezzi(cat, tmp_path, monkeypatch, ai=ai)
+        assert [b["esito"] for b in originale["bandi"]] == [
+            "estratta", "errore", "nessun_segnale"]
+        tentativi = _vietati(monkeypatch)
+        chiamate = len(ai.chiamate)
+        out = tmp_path / "rivalutato.json"
+        assert rivaluta(tmp_path, tmp_path / "locale.json", out=out) == 0
+        assert len(ai.chiamate) == chiamate
+        nuovo = json.loads(out.read_text())
+        assert nuovo["modalita"] == "rivalutazione"  # la sua spesa non si somma
+        assert nuovo["origini"] == [str(tmp_path / "locale.json")]
+        assert tentativi == []  # nessuna lettura del catalogo, del modello o della rete
+        assert nuovo["versioni"] == nuovo["versioni_codice"] == loc.versioni_attuali()
+        # le regioni salvate del bando: la regione della composizione è mappata
+        assert nuovo["bandi"][0]["regole"]["composizione"][0]["regioni"] == [1]
+        assert nuovo["metriche"] == originale["metriche"] == nuovo["metriche_origine"]
+        assert nuovo["esiti"] == originale["esiti"]
+        for prima, dopo in zip(originale["bandi"], nuovo["bandi"], strict=True):
+            for campo in CAMPI_DI_CONFRONTO:
+                assert dopo[campo] == prima[campo], (prima["bando_id"], campo)
+            assert "rivalutazione" not in dopo  # le sezioni restano nel file originale
+        testo = out.read_text()
+        for pagina in (PAGINA_1, PAGINA_2):
+            assert pagina not in testo
+        errori = capsys.readouterr().err
+        assert "Rivalutazione senza modello: 3 bandi" in errori
+        assert "Prima:" in errori and "Dopo:" in errori
+        assert "Nota:" not in errori  # stesse versioni del codice
+
+    def test_usa_le_regioni_salvate_del_bando(self, cat, tmp_path, monkeypatch):
+        originale = _esegui_con_grezzi(cat, tmp_path, monkeypatch)
+        tentativi = _vietati(monkeypatch)
+        for regioni, attese, avviso in (
+            ([{"id": 7, "nome": "Piemonte"}], [7], None),  # non quelle di oggi (id 1)
+            (None, [], "Regioni non verificabili sul catalogo"),
+        ):
+            modificato = copy.deepcopy(originale)
+            modificato["bandi"][0]["rivalutazione"]["regioni"] = regioni
+            origine = tmp_path / f"regioni_{attese}.json"
+            origine.write_text(json.dumps(modificato))
+            out = tmp_path / f"rivalutato_{attese}.json"
+            assert rivaluta(tmp_path, origine, out=out) == 0
+            composizione = json.loads(out.read_text())["bandi"][0]["regole"]["composizione"][0]
+            assert composizione["regioni"] == attese
+            assert (avviso in composizione["avvisi"]) if avviso else composizione["avvisi"] == []
+        assert tentativi == []
+
+    def test_misura_una_modifica_delle_regole(self, cat, tmp_path, monkeypatch):
+        originale = _esegui_con_grezzi(cat, tmp_path, monkeypatch)
+        assert originale["metriche"]["modalita"]["accuracy"] == round(2 / 3, 4)
+        _vietati(monkeypatch)
+        post_elabora = ps.post_elabora
+
+        def piu_prudente(*args, **kwargs):
+            regole = post_elabora(*args, **kwargs)
+            regole["modalita"]["effettiva"] = regole["modalita_effettiva"] = "non_determinabile"
+            return regole
+
+        monkeypatch.setattr(ps, "post_elabora", piu_prudente)
+        out = tmp_path / "modificato.json"
+        assert rivaluta(tmp_path, tmp_path / "locale.json", out=out) == 0
+        nuovo = json.loads(out.read_text())
+        assert [b["modalita_effettiva"] for b in nuovo["bandi"]] == ["non_determinabile"] * 3
+        assert nuovo["metriche"]["modalita"]["accuracy"] == round(1 / 3, 4)
+        assert nuovo["metriche_origine"] == originale["metriche"]
+
+    def test_usa_la_convalida_attuale(self, cat, tmp_path, monkeypatch):
+        _esegui_con_grezzi(cat, tmp_path, monkeypatch)
+        _vietati(monkeypatch)
+
+        def respinge(dati):
+            raise ValueError("convalida più severa")
+
+        monkeypatch.setattr(ps, "convalida_tollerante", respinge)
+        out = tmp_path / "severa.json"
+        assert rivaluta(tmp_path, tmp_path / "locale.json", out=out) == 0
+        nuovo = json.loads(out.read_text())
+        assert {(b["esito"], b["errore_codice"]) for b in nuovo["bandi"]} == {
+            ("errore", "ai_risposta_non_valida")}
+        assert nuovo["metriche"]["errori"]["n"] == 3
+
+    def test_input_prima_respinto_poi_accettato(self, cat, tmp_path, monkeypatch):
+        ai = AiGrezza(grezzi=[{"nessun_campo": 1}])
+        originale = _esegui_con_grezzi(cat, tmp_path, monkeypatch, ai=ai)
+        assert originale["bandi"][0]["errore_codice"] == "ai_risposta_non_valida"
+        _vietati(monkeypatch)
+        convalida = ps.convalida_tollerante
+
+        def con_involucro(dati):  # una convalida corretta che ora lo capisce
+            return convalida(input_grezzo() if dati == {"nessun_campo": 1} else dati)
+
+        monkeypatch.setattr(ps, "convalida_tollerante", con_involucro)
+        out = tmp_path / "corretta.json"
+        assert rivaluta(tmp_path, tmp_path / "locale.json", out=out) == 0
+        primo = json.loads(out.read_text())["bandi"][0]
+        assert (primo["esito"], primo["errore_codice"]) == ("estratta", None)
+        assert primo["modalita_effettiva"] == "ammesso"
+
+    def test_etichette_attuali_del_campione(self, cat, tmp_path, monkeypatch):
+        _esegui_con_grezzi(cat, tmp_path, monkeypatch)
+        _vietati(monkeypatch)
+        percorso = Path(scrivi_campione(tmp_path))
+        dati = json.loads(percorso.read_text())
+        dati["campione"][2]["etichetta"]["modalita"] = "ammesso"  # etichetta corretta
+        percorso.write_text(json.dumps(dati))
+        tentativi = _vietati(monkeypatch)
+        out = tmp_path / "etichette.json"
+        assert rivaluta(tmp_path, tmp_path / "locale.json", out=out,
+                        campione=str(percorso)) == 0
+        nuovo = json.loads(out.read_text())
+        assert nuovo["bandi"][2]["atteso"]["modalita"] == "ammesso"
+        assert nuovo["metriche"]["modalita"]["accuracy"] == 1.0
+        assert nuovo["metriche_origine"]["modalita"]["accuracy"] == 1.0
+        assert tentativi == []
+
+    def test_piu_esecuzioni_come_una(self, cat, tmp_path, monkeypatch):
+        cat.aggiungi(3, neutro=True)
+        intera = _esegui_con_grezzi(cat, tmp_path, monkeypatch, "unica.json")
+        riserva = intera["bandi"][0]["riserva_cents"]
+        parziale = _esegui_con_grezzi(cat, tmp_path, monkeypatch, "prima.json",
+                                      tetto=str(riserva))
+        assert loc.da_rifare(parziale) == [2]
+        _esegui_con_grezzi(cat, tmp_path, monkeypatch, "seconda.json", "--solo", "2")
+        tentativi = _vietati(monkeypatch)
+        out = tmp_path / "unite.json"
+        assert rivaluta(tmp_path, tmp_path / "prima.json", tmp_path / "seconda.json",
+                        out=out) == 0
+        nuovo = json.loads(out.read_text())
+        assert [b["esito"] for b in nuovo["bandi"]] == ["estratta", "estratta",
+                                                         "nessun_segnale"]
+        for chiave in ("etichettate", "modalita", "partner_min", "partner_max", "quote",
+                       "raggiungibili", "citazioni", "errori"):
+            assert nuovo["metriche"][chiave] == intera["metriche"][chiave], chiave
+        assert tentativi == []
+
+    def test_versioni_diverse_non_si_uniscono(self, cat, tmp_path, monkeypatch, capsys):
+        cat.aggiungi(3, neutro=True)
+        _esegui_con_grezzi(cat, tmp_path, monkeypatch, "prima.json", "--solo", "1")
+        seconda = _esegui_con_grezzi(cat, tmp_path, monkeypatch, "seconda.json", "--solo", "2")
+        _vietati(monkeypatch)
+        seconda["versioni"]["prompt"] = ps.PARTENARIATO_PROMPT_VERSION - 1
+        (tmp_path / "seconda.json").write_text(json.dumps(seconda))
+        out = tmp_path / "unite.json"
+        assert rivaluta(tmp_path, tmp_path / "prima.json", tmp_path / "seconda.json",
+                        out=out) == 2
+        assert "versioni diverse" in capsys.readouterr().err and not out.exists()
+        # da sola si rivaluta, con una nota: le versioni del codice sono altre
+        assert rivaluta(tmp_path, tmp_path / "seconda.json", out=out) == 0
+        nuovo = json.loads(out.read_text())
+        assert nuovo["versioni"] == seconda["versioni"] != nuovo["versioni_codice"]
+        assert "Nota:" in capsys.readouterr().err
+
+
+class TestRivalutaCli:
+    @pytest.fixture
+    def originale(self, cat, tmp_path, monkeypatch) -> Path:
+        _esegui_con_grezzi(cat, tmp_path, monkeypatch)
+        _vietati(monkeypatch)
+        return tmp_path / "locale.json"
+
+    def test_out_obbligatorio_fuori_dal_repo_e_nuovo(self, originale, tmp_path, capsys):
+        campione = scrivi_campione(tmp_path)
+        assert val.main(["--rivaluta", str(originale), "--campione", campione]) == 2
+        assert "--out" in capsys.readouterr().err
+        dentro = val._REPO / "rivalutazione_non_creare.json"
+        assert rivaluta(tmp_path, originale, out=dentro) == 2
+        assert not dentro.exists()
+        assert "fuori dal repository" in capsys.readouterr().err
+        assert rivaluta(tmp_path, originale, out=originale) == 2  # esiste già
+        assert json.loads(originale.read_text())["modalita"] == "locale"
+
+    def test_argomenti_che_spendono_rifiutati(self, originale, tmp_path):
+        campione = scrivi_campione(tmp_path)
+        out = str(tmp_path / "x.json")
+        for extra in (["--conferma"], ["--tetto-cents", "10"], ["--locale"], ["--solo", "1"]):
+            assert val.main(["--rivaluta", str(originale), "--campione", campione,
+                             "--out", out, *extra]) == 2
+        with pytest.raises(SystemExit) as uscita:
+            val.main(["--rivaluta", str(originale), "--reale", "--out", out])
+        assert uscita.value.code == 2
+        assert not Path(out).exists()
+
+    def test_file_senza_output_grezzo(self, originale, tmp_path, capsys):
+        vecchio = json.loads(originale.read_text())
+        for b in vecchio["bandi"]:
+            b.pop("rivalutazione", None)
+        vecchio.pop("rivalutazione")
+        percorso = tmp_path / "vecchio.json"
+        percorso.write_text(json.dumps(vecchio))
+        out = tmp_path / "x.json"
+        assert rivaluta(tmp_path, percorso, out=out) == 2
+        errori = capsys.readouterr().err
+        assert "non contiene l'output grezzo" in errori and "[1, 2, 3]" in errori
+        assert not out.exists()
+
+    @pytest.mark.parametrize("modifica", ["senza_versioni", "formato_1"])
+    def test_formato_precedente_rifiutato(self, originale, tmp_path, capsys, modifica):
+        # formato 1: regioni globali e nessuna versione
+        vecchio = json.loads(originale.read_text())
+        if modifica == "senza_versioni":
+            vecchio.pop("versioni")
+        else:
+            vecchio["rivalutazione"] = {"formato": 1, "regioni": None}
+        percorso = tmp_path / "vecchio.json"
+        percorso.write_text(json.dumps(vecchio))
+        assert rivaluta(tmp_path, percorso, out=tmp_path / "x.json") == 2
+        assert "non contiene l'output grezzo" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("contenuto", ["non json", "[]", '{"modalita": "rivalutazione"}'])
+    def test_file_non_valido(self, originale, tmp_path, capsys, contenuto):
+        percorso = tmp_path / "strano.json"
+        percorso.write_text(contenuto)
+        assert rivaluta(tmp_path, percorso, out=tmp_path / "x.json") == 2
+        assert "--rivaluta" in capsys.readouterr().err
+
+    def test_file_mancante(self, originale, tmp_path, capsys):
+        assert rivaluta(tmp_path, tmp_path / "manca.json", out=tmp_path / "x.json") == 2
+        assert "illeggibile" in capsys.readouterr().err

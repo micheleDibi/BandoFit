@@ -97,7 +97,9 @@ class TestBuildBandoInputInvariato:
 
 class TestPrompt:
     def test_versioni(self):
-        assert PARTENARIATO_PROMPT_VERSION == 1
+        # 2: regole più strette dopo la prima valutazione reale (numeri
+        # assenti, «non_ammesso», quote, citazione della modalità).
+        assert PARTENARIATO_PROMPT_VERSION == 2
         # 2: schema compatto dopo il 400 «compiled grammar is too large».
         assert SCHEMA_VERSION == 2
 
@@ -137,6 +139,37 @@ class TestPrompt:
         assert '{"sezione": "", "testo": ""}' in s
         assert '"" (stringa vuota)' in s and '"12.5"' in s
         assert "testo_esatto" not in s and "null" not in s
+
+    def test_numeri_assenti_solo_stringa_vuota(self):
+        """Il modello scriveva l'assenza a parole e il codice la leggeva come
+        conteggio illeggibile (modalità declassata): il prompt lo vieta."""
+        s = " ".join(SYSTEM_PARTENARIATO.split())
+        assert 'Un numero che il testo non indica è SOLO ""' in s
+        for marcatore in ("«non indicato»", "«nessuno»", "«n.d.»", "«-»"):
+            assert marcatore in s
+        assert "`conteggio_note`" in s
+
+    def test_non_ammesso_solo_con_esclusione_esplicita(self):
+        s = " ".join(SYSTEM_PARTENARIATO.split())
+        assert '"non_ammesso": SOLO se il testo impone espressamente la forma singola' in s
+        # controesempi: elenco dei beneficiari e una domanda per impresa
+        assert "NON bastano l'elenco dei beneficiari" in s
+        assert "una sola domanda" in s
+        assert 'in questi casi è "non_determinabile"' in s
+
+    def test_citazione_della_modalita_frase_intera(self):
+        s = " ".join(SYSTEM_PARTENARIATO.split())
+        assert "`modalita_citazione` è la FRASE INTERA che contiene la regola" in s
+        assert "senza unire con «...»" in s
+
+    def test_definizione_stretta_delle_quote(self):
+        s = " ".join(SYSTEM_PARTENARIATO.split())
+        assert "`quote`: SOLO le ripartizioni del costo o del budget del PROGETTO" in s
+        for non_quota in ("intensità di aiuto", "cofinanziamento", "massimali di spesa",
+                          "certe regioni", "maggiorazioni", "numero dei membri"):
+            assert non_quota in s, non_quota
+        # la categoria vale solo per le quote per categoria
+        assert 'Con "per_partner" e "capofila" la `categoria` è ""' in s
 
 
 # ------------------------------------------------------------ META
@@ -350,7 +383,7 @@ class TestHash:
         _, sel_pagine = self._input([(1, "uno"), (3, "due")])
         assert calcola_content_hash(testo, sel_pagine, self.LIMITI) != base
         assert calcola_content_hash(testo, sel, {**self.LIMITI, "max_pagine": 10}) != base
-        monkeypatch.setattr(pp, "PARTENARIATO_PROMPT_VERSION", 2)
+        monkeypatch.setattr(pp, "PARTENARIATO_PROMPT_VERSION", PARTENARIATO_PROMPT_VERSION + 1)
         assert calcola_content_hash(testo, sel, self.LIMITI) != base
 
     def test_mai_i_byte_del_pdf(self):

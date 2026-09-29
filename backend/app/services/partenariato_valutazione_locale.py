@@ -2,7 +2,8 @@
 produzione senza il DB primario.
 
 Dal backend: `python -m app.services.partenariato_valutazione --reale --locale
---tetto-cents N [--conferma] [--out FILE] [--solo ID,ID]`.
+--tetto-cents N [--conferma --out FILE] [--solo ID,ID]` (con `--conferma`,
+`--out` è obbligatorio).
 
 A differenza di `--reale` (che usa il primario: claim, righe in
 `bando_partenariato`, registro di spesa, migration 0034) qui NON c'è nessun
@@ -41,10 +42,20 @@ Due fasi:
    anche `costo_probabile_cents` 0: la richiesta è rifiutata prima della
    generazione.
 
-Uscita: JSON su stdout o in `--out` (FUORI dal repository: contiene brani dei
-documenti nelle citazioni), scritto anche se l'esecuzione si interrompe. Le
-metriche di campo contano solo le risposte del sistema, gli errori a parte
-(`metriche_locali`, che unisce anche i risultati di più esecuzioni).
+Uscita: JSON in `--out`, OBBLIGATORIO con `--conferma` e FUORI dal repository
+(contiene i testi dei documenti e del catalogo: le sezioni inviate al modello,
+oltre alle citazioni), scritto anche se l'esecuzione si interrompe. Le metriche
+di campo contano solo le risposte del sistema, gli errori a parte
+(`metriche_locali`, che unisce anche i risultati di più esecuzioni). In cima,
+`versioni`: prompt, schema e vocabolario che hanno prodotto l'output.
+
+Per ogni bando con una risposta del modello il JSON conserva in
+`rivalutazione` l'input GREZZO dello strumento (prima della convalida
+tollerante), le sezioni esattamente come inviate, le fonti e le regioni del
+catalogo usate dalla SUA post-elaborazione. Con `--rivaluta FILE --out FILE2`
+(`rivaluta_cli`) si ripetono convalida tollerante, post-elaborazione e metriche
+su quei dati, SENZA modello, download né catalogo: le modifiche alle regole si
+misurano gratis. Più file si uniscono solo se hanno le stesse versioni.
 
 Il tetto vale per UNA esecuzione: più esecuzioni (prova, ripresa dopo
 un'interruzione) vanno lanciate col tetto residuo.
@@ -53,6 +64,8 @@ un'interruzione) vanno lanciate col tetto residuo.
 import asyncio
 import base64
 import binascii
+import copy
+import functools
 import json
 import logging
 import math
@@ -60,6 +73,8 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -70,7 +85,11 @@ from app.services import bandi_service, bando_fonti_service
 from app.services import partenariato_service as ps
 from app.services.ai_prezzi import CARATTERI_PER_TOKEN, costo_cents
 from app.services.partenariato_preclassificatore import preclassifica
-from app.services.partenariato_prompts import SYSTEM_PARTENARIATO
+from app.services.partenariato_prompts import (
+    PARTENARIATO_PROMPT_VERSION,
+    SCHEMA_VERSION,
+    SYSTEM_PARTENARIATO,
+)
 from app.services.partenariato_service import non_transitorio, stato_http
 from app.services.partenariato_valutazione import (
     OUTPUT_TIPICO_TOKEN,
@@ -78,6 +97,7 @@ from app.services.partenariato_valutazione import (
     calcola_metriche,
     risultato_da_regole,
 )
+from app.services.partenariato_vocabolario import VOCABOLARIO_VERSIONE
 
 logger = logging.getLogger("bandofit.partenariati")
 
@@ -97,6 +117,9 @@ MSG_PRIMARIO = "Valutazione locale: il DB primario non si usa, per nessun motivo
 
 MAX_ERRORI_CONSECUTIVI = 3
 NOTA_RICHIESTA_RIFIUTATA = "richiesta rifiutata prima della generazione"
+# Versione del formato dei dati per `--rivaluta` salvati nel risultato (2:
+# regioni per bando e versioni in cima).
+FORMATO_RIVALUTAZIONE = 2
 
 
 class PrimarioVietatoError(RuntimeError):
@@ -270,6 +293,14 @@ class BandoValutato:
     output_tokens: int = 0
     latenza_preparazione_s: float = 0.0
     latenza_modello_s: float | None = None
+    # Per `--rivaluta`: l'input grezzo dello strumento (registrato solo se la
+    # convalida è stata chiamata, cioè se la risposta aveva il blocco
+    # tool_use utilizzabile), le sezioni esattamente come inviate e le regioni
+    # del catalogo passate alla post-elaborazione.
+    input_registrato: bool = False
+    input_grezzo: Any = None
+    sezioni_inviate: dict | None = None
+    regioni: list[dict] | None = None
 
     @property
     def bando_id(self) -> int:
@@ -317,23 +348,64 @@ async def prepara_bando(secondary, voce: dict, *, settings) -> BandoValutato:
     return b
 
 
+def _registra_convalida(convalida, b: BandoValutato):
+    """La convalida che la pipeline passa al client, preceduta dalla
+    registrazione dell'input GREZZO dello strumento in `b` (copia: la
+    convalida non deve poterlo alterare). La convalida resta quella."""
+    if convalida is None:
+        return None
+
+    @functools.wraps(convalida)
+    def registra(dati):
+        b.input_grezzo, b.input_registrato = copy.deepcopy(dati), True
+        return convalida(dati)
+
+    return registra
+
+
+class _AiRegistrante:
+    """Il client AI della valutazione con l'input grezzo dello strumento
+    registrato nel bando: stessa chiamata, stessi argomenti, stessa
+    convalida (avvolta da `_registra_convalida`)."""
+
+    def __init__(self, ai, b: BandoValutato):
+        self._ai, self._b = ai, b
+
+    def __getattr__(self, nome: str):
+        return getattr(self._ai, nome)
+
+    async def estrai_con_strumento(self, *args, convalida=None, **kwargs):
+        return await self._ai.estrai_con_strumento(
+            *args, convalida=_registra_convalida(convalida, self._b), **kwargs
+        )
+
+
 async def valuta_con_modello(secondary, ai, b: BandoValutato, spesa: Spesa, *, settings) -> bool:
     """Una chiamata al modello per un bando preparato. False = rifiutata dal
     tetto (nessuna chiamata). Il costo si chiude SEMPRE, anche su errore o
-    cancellazione: reale, max(reale, riserva) o la riserva se ignoto."""
+    cancellazione: reale, max(reale, riserva) o la riserva se ignoto. Se la
+    risposta ha un input dello strumento, lo registra con le sezioni inviate e
+    le regioni del catalogo (per `--rivaluta`)."""
     riserva = b.riserva_cents
-    if b.ingresso is None or not spesa.prenota(riserva):
+    if b.ingresso is None:
+        return False
+    # Le lookup della post-elaborazione, lette per QUESTO bando prima della
+    # chiamata (nessuna spesa): le stesse vanno a `post_elabora` e, come
+    # regioni, nel risultato. `ps._lookups` non solleva (None se il catalogo
+    # non risponde). Come `regole_da_estrazione`, che le legge dopo.
+    lookups = await ps._lookups(secondary)
+    if not spesa.prenota(riserva):
         return False
     modello = settings.partenariato_ai_model
     usage = None
     costo, ignoto = riserva, True  # finché non si sa altro: mai 0
     inizio = time.monotonic()
     try:
-        estrazione, usage = await ps.genera_estrazione(ai, b.ingresso.testo, settings=settings)
-        costo, ignoto = costo_cents(modello, usage.input_tokens, usage.output_tokens), False
-        b.regole = await ps.regole_da_estrazione(
-            secondary, estrazione, b.ingresso.sezioni, b.ingresso.fonti
+        estrazione, usage = await ps.genera_estrazione(
+            _AiRegistrante(ai, b), b.ingresso.testo, settings=settings
         )
+        costo, ignoto = costo_cents(modello, usage.input_tokens, usage.output_tokens), False
+        b.regole = ps.post_elabora(estrazione, b.ingresso.sezioni, b.ingresso.fonti, lookups)
         b.esito = "estratta"
     except AiTimeoutError:
         b.errore_codice = "timeout"
@@ -372,7 +444,9 @@ async def valuta_con_modello(secondary, ai, b: BandoValutato, spesa: Spesa, *, s
         b.input_tokens = usage.input_tokens if usage is not None else 0
         b.output_tokens = usage.output_tokens if usage is not None else 0
         b.latenza_modello_s = round(time.monotonic() - inizio, 2)
-        b.ingresso = None  # testo dei documenti: non serve più
+        if b.input_registrato:  # per la rivalutazione
+            b.sezioni_inviate, b.regioni = b.ingresso.sezioni, regioni_da_lookups(lookups)
+        b.ingresso = None  # testo dell'input: non serve più
         spesa.chiudi(riserva, costo)
     return True
 
@@ -384,33 +458,46 @@ def _costo_probabile(b: BandoValutato) -> int:
     return b.costo_cents if b.costo_probabile_cents is None else b.costo_probabile_cents
 
 
-def _uscita_bando(b: BandoValutato) -> dict:
-    """Una voce del risultato: mai i testi dei documenti (salvo le citazioni
-    dentro `regole`)."""
-    esito = b.esito or "non_valutato"
-    predetto = risultato_da_regole(b.regole, esito)
-    etichetta = b.voce.get("etichetta") or {}
-    citazione = ((b.regole or {}).get("modalita") or {}).get("citazione")
+def _atteso(voce: dict) -> dict:
+    etichetta = voce.get("etichetta") or {}
+    return {k: etichetta.get(k) for k in ("modalita", "partner_min", "partner_max")}
+
+
+def _campi_predetti(regole: dict | None, esito: str) -> dict:
+    """I campi di una voce del risultato che derivano dalle regole: gli
+    stessi per l'esecuzione e per `--rivaluta`."""
+    predetto = risultato_da_regole(regole, esito)
+    citazione = ((regole or {}).get("modalita") or {}).get("citazione")
     return {
-        "bando_id": b.bando_id,
-        "slug": b.slug,
-        "gruppo": b.voce.get("gruppo"),
-        "atteso": {k: etichetta.get(k) for k in ("modalita", "partner_min", "partner_max")},
-        "esito": esito,
-        "errore_codice": b.errore_codice,
-        "errore_http": b.errore_http,
-        "errore_tipo": b.errore_tipo,
-        "livello_preclassificatore": b.livello,
         "modalita": predetto["modalita_dichiarata"],
         "modalita_effettiva": predetto["modalita"],
         "modalita_citazione_verificata": (
-            None if b.regole is None
+            None if regole is None
             else bool(citazione.get("verificata")) if isinstance(citazione, dict) else False
         ),
         "partner_min": predetto["partner_min"],
         "partner_max": predetto["partner_max"],
         "quote": predetto["quote"],
-        "forme": [f.get("forma") for f in (b.regole or {}).get("forme_ammesse") or []],
+        "forme": [f.get("forma") for f in (regole or {}).get("forme_ammesse") or []],
+    }
+
+
+def _uscita_bando(b: BandoValutato) -> dict:
+    """Una voce del risultato: i testi dei documenti solo nelle citazioni
+    dentro `regole` e, se il modello ha risposto, nelle sezioni inviate di
+    `rivalutazione`."""
+    esito = b.esito or "non_valutato"
+    uscita = {
+        "bando_id": b.bando_id,
+        "slug": b.slug,
+        "gruppo": b.voce.get("gruppo"),
+        "atteso": _atteso(b.voce),
+        "esito": esito,
+        "errore_codice": b.errore_codice,
+        "errore_http": b.errore_http,
+        "errore_tipo": b.errore_tipo,
+        "livello_preclassificatore": b.livello,
+        **_campi_predetti(b.regole, esito),
         "fonti": [
             {k: f.get(k) for k in ("n", "etichetta", "dominio", "stato", "pagine_totali",
                                    "pagine_incluse", "troncato")}
@@ -428,6 +515,14 @@ def _uscita_bando(b: BandoValutato) -> dict:
         "latenza_modello_s": b.latenza_modello_s,
         "regole": b.regole,
     }
+    if b.input_registrato:
+        uscita["rivalutazione"] = {
+            "input_strumento": b.input_grezzo,
+            "sezioni": b.sezioni_inviate,
+            "fonti": b.fonti,  # complete: etichetta e url servono alle citazioni
+            "regioni": b.regioni,
+        }
+    return uscita
 
 
 # Le risposte del sistema: solo su queste si misurano i campi.
@@ -501,6 +596,166 @@ def unisci_esecuzioni(risultati: list[dict]) -> list[dict]:
     return list(bandi.values())
 
 
+# ------------------------------------------------------------ rivalutazione
+
+
+def regioni_da_lookups(lookups) -> list[dict] | None:
+    """Le regioni delle lookup del catalogo (oggetto con `.regioni` o dict)
+    come JSON [{id, nome}]; None se le lookup non ci sono. Bastano alla
+    post-elaborazione (`post_elabora` usa solo le regioni)."""
+    if lookups is None:
+        return None
+    regioni = (lookups.get("regioni") if isinstance(lookups, dict)
+               else getattr(lookups, "regioni", None))
+    if regioni is None:
+        return None
+
+    def campo(voce, nome):
+        return voce.get(nome) if isinstance(voce, dict) else getattr(voce, nome, None)
+
+    return [{"id": campo(v, "id"), "nome": campo(v, "nome")} for v in regioni]
+
+
+class RivalutazioneError(ValueError):
+    """Risultato non rivalutabile (il messaggio dice perché, senza testi)."""
+
+
+class _AiRegistrata:
+    """Il «modello» della rivalutazione, senza chiamate: restituisce l'input
+    grezzo salvato passato per la convalida che la pipeline dà al client
+    (`genera_estrazione`), come fa `AiCheckClient.estrai_con_strumento`."""
+
+    def __init__(self, input_grezzo):
+        self._input = input_grezzo
+
+    async def estrai_con_strumento(self, system, user_message, output_model, *,
+                                   convalida=None, **_):
+        if convalida is None:
+            from pydantic import TypeAdapter
+
+            convalida = TypeAdapter(output_model).validate_python
+        return convalida(copy.deepcopy(self._input)), None
+
+
+def versioni_attuali() -> dict:
+    """Le versioni che determinano l'output del modello: prompt, schema dello
+    strumento e vocabolario (i codici del prompt)."""
+    return {"prompt": PARTENARIATO_PROMPT_VERSION, "schema": SCHEMA_VERSION,
+            "vocabolario": VOCABOLARIO_VERSIONE}
+
+
+async def rivaluta_voce(voce: dict, *, modello: str | None, campione: dict[int, dict]) -> dict:
+    """La voce di un bando con convalida tollerante e post-elaborazione
+    ripetute sui dati salvati (nessuna chiamata, nessun download, nessuna
+    lettura del catalogo: le regioni sono quelle salvate per il bando). Senza
+    dati da rivalutare (nessun segnale, errore senza risposta, non valutato)
+    restano esito e regole; i campi derivati e l'etichetta si ricalcolano
+    sempre. Un input che la convalida respinge è `ai_risposta_non_valida`
+    come nel client; un guasto della post-elaborazione `errore_interno`."""
+    dati = voce.get("rivalutazione")
+    nuova = {k: v for k, v in voce.items() if k != "rivalutazione"}
+    riferimento = campione.get(voce.get("bando_id"))
+    if riferimento is not None:
+        nuova["atteso"], nuova["gruppo"] = _atteso(riferimento), riferimento.get("gruppo")
+    if isinstance(dati, dict):
+        regole, codice = None, "ai_risposta_non_valida"
+        # Solo i parametri che la chiamata legge: il modello non si crea.
+        settings = SimpleNamespace(partenariato_ai_model=modello,
+                                   partenariato_ai_max_tokens=None,
+                                   partenariato_ai_timeout_seconds=None)
+        try:
+            estrazione, _ = await ps.genera_estrazione(
+                _AiRegistrata(dati.get("input_strumento")), "", settings=settings
+            )
+        except (ValueError, TypeError):
+            pass  # come l'input respinto dal client: risposta non valida
+        else:
+            regioni = dati.get("regioni")
+            try:
+                regole = ps.post_elabora(
+                    estrazione, dati.get("sezioni") or {}, dati.get("fonti") or [],
+                    None if regioni is None else {"regioni": regioni},
+                )
+                codice = None
+            except Exception as exc:  # noqa: BLE001 — come nella valutazione
+                logger.warning("rivalutazione: post-elaborazione fallita (bando %s, %s)",
+                               voce.get("bando_id"), type(exc).__name__)
+                codice = "errore_interno"
+        nuova.update(esito="estratta" if regole is not None else "errore",
+                     errore_codice=codice, regole=regole)
+    esito = nuova.get("esito") or "non_valutato"
+    nuova.update(_campi_predetti(nuova.get("regole"), esito))
+    return nuova
+
+
+def controlla_rivalutabile(risultato: Any, nome: str) -> None:
+    """Solleva `RivalutazioneError` se `risultato` non è un risultato della
+    valutazione locale con i dati per la rivalutazione."""
+    if not isinstance(risultato, dict) or risultato.get("modalita") != "locale" or not (
+        isinstance(risultato.get("bandi"), list)
+    ):
+        raise RivalutazioneError(
+            f"--rivaluta: {nome} non è il risultato di una valutazione --reale --locale")
+    formato = (risultato.get("rivalutazione") or {}).get("formato")
+    senza = [b.get("bando_id") for b in risultato["bandi"]
+             if b.get("esito") == "estratta" and not isinstance(b.get("rivalutazione"), dict)]
+    if formato != FORMATO_RIVALUTAZIONE or senza or not isinstance(risultato.get("versioni"), dict):
+        raise RivalutazioneError(
+            f"--rivaluta: {nome} non contiene l'output grezzo del modello (esecuzione "
+            f"precedente al salvataggio, o formato {formato!r} diverso da "
+            f"{FORMATO_RIVALUTAZIONE}); bandi estratti senza dati: {senza}")
+
+
+async def rivaluta(risultati: list[dict], campione: list[dict], *,
+                   origini: list[str] | None = None) -> dict:
+    """Rivalutazione di uno o più risultati della valutazione locale (in
+    ordine di lancio: di ogni bando vale l'ultima esecuzione che l'ha
+    valutato, come `unisci_esecuzioni`), con le etichette di `campione`.
+    Nessuna chiamata al modello, nessun download, nessuna lettura del
+    catalogo. Costi e latenze restano quelli delle esecuzioni originali.
+    Esecuzioni con versioni diverse (prompt, schema, vocabolario) non si
+    uniscono: sarebbero output di richieste diverse in un'unica metrica.
+    `metriche_origine`: le metriche dei risultati così come salvati, con le
+    stesse etichette, per il confronto."""
+    nomi = [origini[i] if origini else f"#{i + 1}" for i in range(len(risultati))]
+    for risultato, nome in zip(risultati, nomi, strict=True):
+        controlla_rivalutabile(risultato, nome)
+    versioni = risultati[0]["versioni"] if risultati else None
+    diverse = [nome for risultato, nome in zip(risultati, nomi, strict=True)
+               if risultato["versioni"] != versioni]
+    if diverse:
+        raise RivalutazioneError(
+            f"--rivaluta: versioni diverse da {nomi[0]} ({versioni}) in {diverse}: "
+            "le esecuzioni non si uniscono")
+    # Ogni bando con il modello della SUA esecuzione.
+    annotati = [
+        {**r, "bandi": [{**b, "_modello": r.get("modello")} for b in r["bandi"]]}
+        for r in risultati
+    ]
+    per_id = {v["bando_id"]: v for v in campione}
+    originali, nuove = [], []
+    for voce in unisci_esecuzioni(annotati):
+        modello = voce.pop("_modello")
+        originali.append(voce)
+        nuove.append(await rivaluta_voce(voce, modello=modello, campione=per_id))
+    esiti: dict[str, int] = {}
+    for b in nuove:
+        esito = b.get("esito") or "non_valutato"
+        esiti[esito] = esiti.get(esito, 0) + 1
+    return {
+        "modalita": "rivalutazione",  # non «locale»: la sua spesa non si somma
+        "origini": list(origini or []),
+        "modelli": sorted({r.get("modello") for r in risultati if r.get("modello")}),
+        # Chi ha prodotto l'output grezzo, e con che cosa lo si rielabora.
+        "versioni": versioni,
+        "versioni_codice": versioni_attuali(),
+        "esiti": esiti,
+        "bandi": nuove,
+        "metriche": metriche_locali(campione, nuove),
+        "metriche_origine": metriche_locali(campione, originali),
+    }
+
+
 class ValutazioneLocale:
     """Stato di un'esecuzione: bandi preparati, spesa e motivo dell'arresto."""
 
@@ -555,6 +810,7 @@ class ValutazioneLocale:
         return {
             "modalita": "locale",
             "modello": self.settings.partenariato_ai_model,
+            "versioni": versioni_attuali(),
             "tetto_cents": self.spesa.tetto_cents,
             "fermato": self.fermato or (None if self.completata else "interrotta"),
             "stima": self.stima,
@@ -570,6 +826,7 @@ class ValutazioneLocale:
             "bandi": uscite,
             # Un `non_valutato` non è un errore del sistema; gli errori a parte.
             "metriche": metriche_locali([b.voce for b in self.bandi], uscite),
+            "rivalutazione": {"formato": FORMATO_RIVALUTAZIONE},
         }
 
 
@@ -599,7 +856,8 @@ def controlla_out(out: str | None) -> str | None:
         return None
     percorso = Path(out).expanduser()
     if _dentro_repo(percorso):
-        return "--out deve stare fuori dal repository (il risultato contiene brani dei documenti)"
+        return ("--out deve stare fuori dal repository (il risultato contiene i testi dei "
+                "documenti e del catalogo)")
     if percorso.exists():
         return "--out esiste già: scegli un altro file (un risultato non si sovrascrive)"
     if not percorso.parent.is_dir():
@@ -641,7 +899,14 @@ async def esegui_cli(
     solo: str | None,
 ) -> int:
     """`--reale --locale`: controlli (uscita, filtro, configurazione e chiave)
-    PRIMA di qualunque download, preparazione e stima, poi le chiamate."""
+    PRIMA di qualunque download, preparazione e stima, poi le chiamate. Con
+    `--conferma` serve `--out`: il risultato contiene le sezioni inviate al
+    modello (testi dei documenti e del catalogo) e non va su stdout, da dove
+    finirebbe facilmente in un file del repository."""
+    if conferma and not out:
+        _err("--conferma vuole --out FILE (fuori dal repository, non ancora esistente): il "
+             "risultato contiene i testi dei documenti e del catalogo")
+        return 2
     motivo = controlla_out(out)
     if motivo:
         _err(motivo)
@@ -703,4 +968,55 @@ async def esegui_cli(
                 else "."))
         if ai is not None:
             await ai.aclose()
+    return 0
+
+
+def _leggi_risultato(percorso: str) -> dict:
+    try:
+        return json.loads(Path(percorso).expanduser().read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:  # ValueError: anche JSON e codifica
+        raise RivalutazioneError(
+            f"--rivaluta: {percorso} illeggibile o non JSON ({type(exc).__name__})") from None
+
+
+def _sintesi_metriche(metriche: dict | None) -> str:
+    if not metriche:
+        return "nessuna"
+    quote = metriche.get("quote") or {}
+    citazioni = metriche.get("citazioni") or {}
+    return (
+        f"modalità {(metriche.get('modalita') or {}).get('accuracy')}, "
+        f"partner_min {(metriche.get('partner_min') or {}).get('exact_match')}, "
+        f"partner_max {(metriche.get('partner_max') or {}).get('exact_match')}, "
+        f"quote P {quote.get('precision')} R {quote.get('recall')}, "
+        f"citazioni {citazioni.get('percentuale')}"
+    )
+
+
+async def rivaluta_cli(origini: list[str], campione: list[dict], *, out: str | None) -> int:
+    """`--rivaluta FILE [--rivaluta FILE2 …] --out FILE3`: nessuna chiamata
+    al modello, nessun download, nessuna configurazione letta. `--out` è
+    obbligatorio e fuori dal repository (le regole contengono citazioni)."""
+    if not out:
+        _err("--rivaluta vuole --out FILE (fuori dal repository, non ancora esistente)")
+        return 2
+    motivo = controlla_out(out)
+    if motivo:
+        _err(motivo)
+        return 2
+    try:
+        risultati = [_leggi_risultato(p) for p in origini]
+        risultato = await rivaluta(risultati, campione, origini=list(origini))
+    except RivalutazioneError as exc:
+        _err(str(exc))
+        return 2
+    _scrivi(risultato, out)
+    _err(f"Rivalutazione senza modello: {len(risultato['bandi'])} bandi, "
+         f"esiti {risultato['esiti']}.")
+    if risultato["versioni"] != risultato["versioni_codice"]:
+        _err(f"Nota: output grezzo prodotto con {risultato['versioni']}, codice attuale "
+             f"{risultato['versioni_codice']}: si misurano le regole di oggi su risposte "
+             "a una richiesta diversa.")
+    _err(f"Prima: {_sintesi_metriche(risultato['metriche_origine'])}")
+    _err(f"Dopo:  {_sintesi_metriche(risultato['metriche'])}")
     return 0

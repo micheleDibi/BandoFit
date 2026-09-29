@@ -5,6 +5,8 @@ regioni e dei tipi di soggetto, scrub dei domini esclusi."""
 
 import copy
 
+import pytest
+
 from app.schemas.partenariato import PartenariatoEstrazione, RegolePartenariatoOut
 from app.services.partenariato_regole import mappa_regioni, post_elabora
 
@@ -640,3 +642,425 @@ class TestSchemaCompatto:
         assert regole["partner_min"]["valore"] is None
         assert regole["composizione"][0]["tipo_soggetto"] == "altro"
         assert regole["regole_finanziarie"] == []
+
+
+class TestAssenzaScrittaNeiNumeri:
+    """Il modello scrive a volte l'assenza a parole al posto di "": vale
+    assente (non «non leggibile»), altrimenti una modalità corretta si
+    declassa per un conteggio che il bando semplicemente non fissa."""
+
+    MARCATORI = (
+        "null", "NULL", "N/A", "n/a", "NA", "nd",
+        "n.d.", "N.D.", "n. d.", "Non indicato", "non indicata", "non specificato",
+        "Non specificata.", "non previsto", "non prevista", "non presente", "assente",
+        "non applicabile", "non definito", "nessun limite", "Senza limite", "illimitato",
+        "Illimitata", "-", "–", "—", " - ", "--",
+    )
+    NON_MARCATORI = (
+        "almeno 2", "nessun massimo indicato", "non indicato nel bando", "tre", "?", "/",
+        "n", "limite", "0 (nessuno)", "- 3", "2-5",
+        # JSON di un valore strutturato (convalida tollerante): presente, non assente
+        "[null]", "{}", "(nessuno)",
+    )
+
+    @pytest.mark.parametrize("marcatore", MARCATORI)
+    def test_marcatore_vale_assente(self, marcatore):
+        dati = estrazione_base(partner_min=marcatore, partner_max=marcatore,
+                               partner_min_citazione=NESSUNA, partner_max_citazione=NESSUNA)
+        dati["composizione"][0].update(minimo=marcatore, massimo="4", regioni=[])
+        dati["quote"][0].update(max_percentuale=marcatore)
+        dati["vincoli"][0]["parametro"] = marcatore
+        regole = elabora(dati)
+        for chiave in ("partner_min", "partner_max"):
+            assert regole[chiave]["valore"] is None
+            assert regole[chiave]["avvisi"] == [], marcatore
+        comp = regole["composizione"][0]
+        assert comp["minimo"] is None and comp["stato"] == "verificata", marcatore
+        quota = regole["quote"][0]
+        assert (quota["min_percentuale"], quota["max_percentuale"]) == (10.0, None)
+        assert quota["stato"] == "verificata", marcatore
+        vincolo = regole["vincoli"][0]
+        assert vincolo["parametro"] is None and vincolo["stato"] == "verificata", marcatore
+
+    @pytest.mark.parametrize("valore", NON_MARCATORI)
+    def test_il_resto_resta_non_leggibile(self, valore):
+        regole = elabora(estrazione_base(partner_max=valore))
+        assert regole["partner_max"]["valore"] is None
+        assert regole["partner_max"]["avvisi"] == ["Numero massimo di partner non leggibile"]
+
+    @pytest.mark.parametrize("marcatore", ["nessuno", "Nessuna", "nessun", "None"])
+    def test_nessuno_assente_solo_sui_minimi(self, marcatore):
+        """«Nessuno» su un minimo è «nessun minimo»; su un massimo può voler
+        dire zero («grandi imprese: nessuna»): non leggibile, da verificare."""
+        dati = estrazione_base(partner_min=marcatore, partner_max=marcatore,
+                               partner_min_citazione=NESSUNA, partner_max_citazione=NESSUNA)
+        dati["composizione"][0].update(minimo=marcatore, massimo="4", regioni=[])
+        dati["quote"][0].update(min_percentuale=marcatore, max_percentuale="30")
+        regole = elabora(dati)
+        assert regole["partner_min"]["valore"] is None
+        assert regole["partner_min"]["avvisi"] == []
+        comp = regole["composizione"][0]
+        assert comp["minimo"] is None and comp["stato"] == "verificata"
+        quota = regole["quote"][0]
+        assert (quota["min_percentuale"], quota["stato"]) == (None, "verificata")
+        # sui massimi (e sui parametri) resta non leggibile
+        assert regole["partner_max"]["avvisi"] == ["Numero massimo di partner non leggibile"]
+        dati["composizione"][0].update(minimo="1", massimo=marcatore)
+        dati["quote"][0].update(min_percentuale="10", max_percentuale=marcatore)
+        dati["vincoli"][0]["parametro"] = marcatore
+        regole = elabora(dati)
+        comp = regole["composizione"][0]
+        assert comp["massimo"] is None and comp["stato"] == "da_verificare"
+        assert "Numero massimo non leggibile" in comp["avvisi"]
+        quota = regole["quote"][0]
+        assert quota["stato"] == "da_verificare" and "Percentuale non leggibile" in quota["avvisi"]
+        assert "Parametro non leggibile" in regole["vincoli"][0]["avvisi"]
+
+    def test_obbligatorio_con_massimo_scritto_a_parole_resta_obbligatorio(self):
+        """Il caso della prima valutazione reale: «obbligatorio» giusto, ma il
+        massimo «non indicato» lo declassava a non determinabile."""
+        sezioni = {**SEZIONI, "S2": "La domanda è presentata esclusivamente in forma associata."}
+        for marcatore in ("non indicato", "N/A", "—"):
+            dati = estrazione_base(
+                modalita="obbligatorio",
+                modalita_citazione=cit("S2", "esclusivamente in forma associata"),
+                partner_max=marcatore, partner_max_citazione=NESSUNA,
+            )
+            regole = elabora(dati, sezioni)
+            assert regole["modalita_effettiva"] == "obbligatorio", marcatore
+            assert regole["avvisi"] == [], marcatore
+
+    def test_marcatore_lungo_o_ostile_non_rallenta(self):
+        import time
+
+        dati = estrazione_base(partner_max="non indicato " * 5000, partner_min="-" * 60_000)
+        inizio = time.perf_counter()
+        regole = elabora(dati)
+        assert time.perf_counter() - inizio < 1.0
+        assert "Numero massimo di partner non leggibile" in regole["partner_max"]["avvisi"]
+        assert "Numero minimo di partner non leggibile" in regole["partner_min"]["avvisi"]
+
+
+def _non_ammesso(frase: str, citazione: str | None = None) -> dict:
+    """Regole di un'estrazione «non_ammesso» che cita `citazione` (di default
+    la frase intera) dalla sezione S2 = `frase`, senza conteggi né forme."""
+    sezioni = {**SEZIONI, "S2": frase}
+    dati = estrazione_base(
+        modalita="non_ammesso", forme_ammesse=[],
+        modalita_citazione=cit("S2", citazione or frase),
+        partner_min="", partner_min_citazione=NESSUNA,
+        partner_max="", partner_max_citazione=NESSUNA,
+    )
+    return elabora(dati, sezioni)
+
+
+AVVISO_ESCLUSIONE = "Manca un'esclusione esplicita della forma associata nel passaggio citato"
+
+
+class TestNonAmmessoSoloConEsclusioneEsplicita:
+    """«Non ammesso» toglie il bando dal filtro e blocca le call: vale solo
+    con un'esclusione esplicita della forma associata (o l'obbligo della forma
+    singola) nel passaggio citato, e se la sua frase non ammette l'aggregazione."""
+
+    ESCLUSIONI = (
+        "La domanda può essere presentata esclusivamente in forma singola.",
+        "Le imprese partecipano al bando in forma singola.",
+        "La domanda è presentata in forma individuale.",
+        "Ciascuna impresa partecipa singolarmente.",
+        "Il bando finanzia progetti presentati da singole imprese.",
+        "Possono partecipare esclusivamente singole imprese.",
+        "Non sono ammesse domande presentate in forma associata.",
+        "Non sono ammessi raggruppamenti, consorzi o reti di imprese.",
+        "Non è ammessa la partecipazione in forma aggregata.",
+        "Non è possibile presentare domanda in forma congiunta.",
+        "Non è ammessa la presentazione di domande da parte di raggruppamenti temporanei.",
+        "Non sono ammesse ATI o ATS.",
+        "Non è ammessa la partecipazione in forma associata (ATI, ATS, reti).",
+        "Il bando non prevede la partecipazione in forma aggregata.",
+        "È esclusa la partecipazione in forma associata.",
+        "Sono esclusi i raggruppamenti temporanei di imprese.",
+        "Le domande presentate in forma associata non sono ammesse.",
+        "I raggruppamenti di imprese sono esclusi.",
+        "Le imprese non possono associarsi.",
+        "Le imprese non possono associarsi tra loro.",
+        "La domanda è presentata in forma singola: non sono ammesse domande in forma associata.",
+        "Non sono ammessi raggruppamenti: le imprese partecipano in forma singola.",
+        "La domanda deve essere presentata in forma singola.",
+        "Ciascuna impresa si candida singolarmente.",
+        "Only single applicants are eligible under this call.",
+        "Consortia are not eligible for funding.",
+        "Proposals must be submitted by a single applicant.",
+        "The proposal must be submitted individually.",
+        "This is a mono-beneficiary action.",
+    )
+    NON_ESCLUSIONI = (
+        # le quattro forme della prima valutazione reale, riscritte
+        "Possono presentare domanda di agevolazione le PMI con sede nel territorio regionale.",
+        "Sono destinatari del contributo le imprese in forma singola o associata.",
+        "Possono richiedere il contributo le imprese e i datori di lavoro privati.",
+        "È ammessa per ciascuna impresa una sola domanda di contributo.",
+        # altri elenchi e limiti che non escludono l'aggregazione
+        "Ogni impresa può presentare una sola domanda.",
+        "Possono partecipare le imprese in forma singola, o associata.",
+        "Le imprese possono partecipare singolarmente o in forma congiunta.",
+        "Sia in forma singola, sia in forma collaborativa con altre imprese.",
+        "Le PMI, anche in forma singola o costituite in ATI/ATS.",
+        "Le imprese in forma singola possono partecipare anche in ATS.",
+        "Applicants may apply individually or as a consortium.",
+        # vincoli che presuppongono l'aggregazione, non la escludono
+        "Non sono ammesse modifiche della composizione del raggruppamento.",
+        "Non è ammessa la partecipazione dello stesso soggetto a più raggruppamenti.",
+        "Il bando non prevede un numero massimo di partner nel raggruppamento.",
+        "Sono esclusi dal raggruppamento i soggetti in difficoltà.",
+        "Le spese del raggruppamento non sono ammissibili.",
+        "Le imprese non possono partecipare ad altri raggruppamenti.",
+        "Il capofila del raggruppamento non può presentare altre domande.",
+        # «in forma singola», «singolarmente», «a titolo individuale» senza
+        # un obbligo, o in una frase che presuppone l'aggregazione
+        "Non è ammessa la partecipazione contemporanea in forma singola e associata.",
+        "In caso di partecipazione in forma singola, il contributo massimo è di 50.000 euro.",
+        "Il soggetto proponente in forma singola deve avere sede in Puglia.",
+        "Possono presentare domanda le PMI, in forma singola e associata, con sede in Puglia.",
+        "Possono presentare domanda le imprese in forma singola.",
+        "Ciascuna impresa aderente alla rete presenta singolarmente la propria domanda.",
+        "Le spese devono essere sostenute singolarmente da ciascun partner del raggruppamento.",
+        "Il soggetto può partecipare a titolo individuale o in qualità di componente di un "
+        "raggruppamento.",
+        "Proposals must be submitted by a single applicant or by a consortium.",
+        "Le imprese non devono partecipare in forma singola.",
+        # negazioni di un TIPO di aggregazione: la regolano, non la escludono
+        "Non sono ammessi raggruppamenti tra imprese collegate o controllate ai sensi "
+        "dell'art. 2359 c.c.",
+        "Non è ammesso il partenariato con soggetti aventi sede al di fuori del territorio "
+        "regionale.",
+        "Non sono ammesse aggregazioni tra imprese appartenenti al medesimo gruppo.",
+        "Non è previsto un partenariato minimo.",
+        "Non sono ammesse domande in forma associata per la linea A.",
+        "Consortia with more than ten partners are not eligible.",
+    )
+
+    @pytest.mark.parametrize("frase", ESCLUSIONI)
+    def test_esclusione_esplicita_conferma(self, frase):
+        regole = _non_ammesso(frase)
+        assert regole["modalita_effettiva"] == "non_ammesso"
+        assert regole["modalita"]["stato"] == "verificata"
+        assert regole["modalita"]["avvisi"] == []
+
+    @pytest.mark.parametrize("frase", NON_ESCLUSIONI)
+    def test_senza_esclusione_non_determinabile(self, frase):
+        regole = _non_ammesso(frase)
+        modalita = regole["modalita"]
+        assert modalita["valore"] == "non_ammesso"
+        assert regole["modalita_effettiva"] == "non_determinabile"
+        assert modalita["stato"] == "da_verificare"
+        assert AVVISO_ESCLUSIONE in modalita["avvisi"]
+        # la citazione resta verificata: il problema è ciò che dice
+        assert modalita["citazione"]["verificata"] is True
+
+    def test_citazione_troncata_letta_nella_sua_frase(self):
+        """«le imprese in forma singola» esclude solo se la frase del testo non
+        continua con «o associata»."""
+        frase = "Possono partecipare le imprese in forma singola o associata mediante ATS."
+        regole = _non_ammesso(frase, citazione="Possono partecipare le imprese in forma singola")
+        assert regole["modalita_effettiva"] == "non_determinabile"
+        assert AVVISO_ESCLUSIONE in regole["modalita"]["avvisi"]
+
+        frase = ("Le imprese partecipano in forma singola. Le imprese associate "
+                 "possono partecipare in forma aggregata al bando collegato.")
+        for citazione in ("Le imprese partecipano in forma singola",
+                          # la citazione chiude la sua frase: la successiva non conta
+                          "Le imprese partecipano in forma singola."):
+            regole = _non_ammesso(frase, citazione=citazione)
+            assert regole["modalita_effettiva"] == "non_ammesso", citazione
+
+    def test_frase_oltre_le_abbreviazioni_e_il_punto_e_virgola(self):
+        """La frase non si ferma a «Reg.», «n.», «art.» né al «;» di un elenco:
+        il seguito «o in forma associata» conta."""
+        for frase in (
+            "Le imprese partecipano in forma singola, come definite dall'Allegato I del Reg. "
+            "(UE) n. 651/2014, o in forma associata mediante ATS.",
+            "Le imprese partecipano in forma singola ai sensi dell'art. 3; in alternativa, in "
+            "forma associata mediante ATS.",
+        ):
+            regole = _non_ammesso(frase, citazione="Le imprese partecipano in forma singola")
+            assert regole["modalita"]["citazione"]["verificata"] is True
+            assert regole["modalita_effettiva"] == "non_determinabile", frase
+            assert AVVISO_ESCLUSIONE in regole["modalita"]["avvisi"]
+
+    def test_le_altre_modalita_non_cambiano(self):
+        sezioni = {**SEZIONI, "S2": "Possono presentare domanda le PMI con sede in Piemonte."}
+        dati = estrazione_base(modalita_citazione=cit("S2", "Possono presentare domanda le PMI"))
+        regole = elabora(dati, sezioni)
+        assert regole["modalita_effettiva"] == "ammesso"
+        assert AVVISO_ESCLUSIONE not in regole["modalita"]["avvisi"]
+
+    def test_senza_citazione_un_solo_avviso(self):
+        dati = estrazione_base(modalita="non_ammesso", forme_ammesse=[],
+                               modalita_citazione=NESSUNA, partner_min="",
+                               partner_min_citazione=NESSUNA)
+        modalita = elabora(dati)["modalita"]
+        assert modalita["avvisi"] == ["Manca il passaggio del bando che lo stabilisce"]
+
+    def test_citazione_ostile_in_tempo_lineare(self):
+        import time
+
+        ostile = ("non sono ammesse " + "la " * 20_000 + "partecipazione ") * 3
+        ostile += "in forma singola " * 3000 + "o" * 50_000
+        inizio = time.perf_counter()
+        regole = _non_ammesso(ostile * 2, citazione=ostile)
+        assert time.perf_counter() - inizio < 1.0
+        RegolePartenariatoOut.model_validate(regole)
+
+
+def _non_ammesso_su(sezioni: dict, sezione: str, citazione: str) -> dict:
+    dati = estrazione_base(
+        modalita="non_ammesso", forme_ammesse=[],
+        modalita_citazione=cit(sezione, citazione),
+        partner_min="", partner_min_citazione=NESSUNA,
+        partner_max="", partner_max_citazione=NESSUNA,
+    )
+    return elabora(dati, {**SEZIONI, **sezioni})
+
+
+class TestNonAmmessoSoloSullaFraseAllaLettera:
+    """Le tolleranze della verifica (spazi del PDF, pagina precedente,
+    ellissi) rendono verificate citazioni che non si ritrovano alla lettera: di
+    quelle la frase vera non si ricostruisce, e «non ammesso» non vale (nel
+    dubbio non determinabile). A cavallo di pagina, se si ritrova alla lettera,
+    vale sulla sua frase intera."""
+
+    def _nd(self, regole):
+        assert regole["modalita"]["citazione"]["verificata"] is True
+        assert regole["modalita_effettiva"] == "non_determinabile"
+        assert AVVISO_ESCLUSIONE in regole["modalita"]["avvisi"]
+
+    def test_spazi_spuri_del_pdf(self):
+        self._nd(_non_ammesso_su(
+            {"S2": "La domanda è presen tata in forma singola o associata in ATS."},
+            "S2", "La domanda è presentata in forma singola"))
+
+    def test_ellissi(self):
+        self._nd(_non_ammesso_su(
+            {"S2": "La domanda è presentata in forma singola o associata in ATS dalle imprese "
+                   "aventi sede operativa in Puglia."},
+            "S2", "La domanda è presentata in forma singola [...] dalle imprese aventi sede "
+                  "operativa in Puglia"))
+
+    def test_a_cavallo_con_la_pagina_precedente(self):
+        pagine = {"D2-p1": "Art. 3 - Beneficiari\nLe imprese partecipano",
+                  "D2-p2": "in forma singola o associata mediante ATS. Art. 4 - Spese"}
+        self._nd(_non_ammesso_su(pagine, "D2-p2", "Le imprese partecipano in forma singola"))
+        # la stessa esclusione, senza il seguito, vale
+        pagine["D2-p2"] = "in forma singola. Art. 4 - Spese"
+        regole = _non_ammesso_su(pagine, "D2-p2", "Le imprese partecipano in forma singola")
+        assert regole["modalita_effettiva"] == "non_ammesso"
+
+
+AVVISO_NON_QUOTA = "Il passaggio citato non sembra ripartire il costo del progetto tra i partner"
+
+
+def _quota(frase: str, **campi) -> dict:
+    sezioni = {**SEZIONI, "S2": frase}
+    dati = estrazione_base()
+    dati["quote"][0].update(citazione=cit("S2", frase), **campi)
+    return elabora(dati, sezioni)["quote"][0]
+
+
+class TestQuoteNonDiPartenariato:
+    """Una quota ripartisce il costo del PROGETTO tra i soggetti del
+    partenariato: se il passaggio non nomina il partenariato né chi sostiene la
+    quota, o parla di aiuti senza nominare il partenariato, la voce resta ma è
+    da verificare (mai scartata in silenzio)."""
+
+    NON_QUOTE = (
+        "Il contributo è concesso nella misura del 50% delle spese ammissibili.",
+        "L'intensità di aiuto è pari al 40% dei costi ammissibili per ciascuna impresa.",
+        "La percentuale di finanziamento è aumentata di 5 punti percentuali per i progetti "
+        "con soggetti aggregatori.",
+        "Il 60% delle risorse è riservato alle micro, piccole e medie imprese.",
+        "Le spese di progettazione non possono superare il 10% del totale.",
+        "Le spese sostenute per consulenze non possono superare il 20% delle spese ammissibili.",
+        "At least 60% of the eligible costs must be incurred in less developed regions.",
+        "Subcontracting beyond 30% of the eligible costs must be justified.",
+        "Up to 20% of the EU funding may be used for financial support to third parties.",
+    )
+    QUOTE = (
+        "Ciascun partner deve sostenere almeno il 10% del costo totale del progetto.",
+        "Il costo delle attività del capofila deve essere superiore al 25% del costo totale.",
+        "Nessuna impresa beneficiaria sostiene da sola più di due terzi delle spese ammissibili.",
+        "Il costo delle attività svolte complessivamente dagli organismi di ricerca non può "
+        "eccedere il 30% del costo totale del progetto.",
+        "Le PMI devono sostenere almeno il 40% dei costi del progetto.",
+        "La quota di partecipazione delle grandi imprese non può superare il 30% del costo.",
+        "Each beneficiary must carry at least 10% of the eligible costs.",
+        "Il contributo di ciascun partner al budget non può superare il 70%.",
+    )
+
+    @pytest.mark.parametrize("frase", NON_QUOTE)
+    def test_non_quota_resta_da_verificare(self, frase):
+        quota = _quota(frase)
+        assert quota["stato"] == "da_verificare"
+        assert any(a.startswith(AVVISO_NON_QUOTA) for a in quota["avvisi"])
+        assert quota["citazione"]["verificata"] is True
+        assert quota["min_percentuale"] == 10.0  # la voce resta com'è
+
+    @pytest.mark.parametrize("frase", QUOTE)
+    def test_quota_di_partenariato_non_segnalata(self, frase):
+        quota = _quota(frase)
+        assert not any(a.startswith(AVVISO_NON_QUOTA) for a in quota["avvisi"]), frase
+        assert quota["stato"] == "verificata"
+
+    def test_la_frase_finisce_col_punto_della_citazione(self):
+        """Una citazione che chiude la sua frase non prende il soggetto dalla
+        frase successiva."""
+        sezioni = {**SEZIONI, "S2": "Il contributo è pari al 50% delle spese ammissibili. "
+                                    "Ciascun partner sostiene almeno il 10% del costo."}
+        dati = estrazione_base()
+        dati["quote"][0].update(citazione=cit(
+            "S2", "Il contributo è pari al 50% delle spese ammissibili."))
+        quota = elabora(dati, sezioni)["quote"][0]
+        assert any(a.startswith(AVVISO_NON_QUOTA) for a in quota["avvisi"])
+
+    def test_frammento_con_il_soggetto_nella_frase(self):
+        # la citazione di base è «almeno il 10% delle spese ammissibili»: il
+        # soggetto («Ciascun partner») è nel resto della frase
+        quota = elabora(estrazione_base())["quote"][0]
+        assert quota["stato"] == "verificata" and quota["avvisi"] == []
+
+    def test_senza_citazione_nessun_giudizio_sul_testo(self):
+        for citazione in (NESSUNA, cit("S2", "  ")):
+            dati = estrazione_base()
+            dati["quote"][0]["citazione"] = citazione
+            quota = elabora(dati)["quote"][0]
+            assert quota["stato"] == "da_verificare"
+            assert not any(a.startswith(AVVISO_NON_QUOTA) for a in quota["avvisi"])
+
+
+class TestCategoriaDellaQuota:
+    """Con ambito «per_partner» o «capofila» un ruolo scritto al posto della
+    categoria («qualsiasi», «capofila») vale «nessuna categoria», non un tipo
+    di soggetto ignoto che manda la quota da verificare."""
+
+    FRASE = "Ciascun partner e il capofila sostengono almeno il 10% del costo del progetto."
+
+    @pytest.mark.parametrize(("ambito", "categoria"), [
+        ("per_partner", "qualsiasi"), ("per_partner", "Tutti i partner"),
+        ("per_partner", "partner"), ("capofila", "capofila"), ("capofila", "Mandataria"),
+    ])
+    def test_ruolo_come_categoria_vale_nessuna(self, ambito, categoria):
+        quota = _quota(self.FRASE, ambito=ambito, categoria=categoria)
+        assert quota["categoria"] is None
+        assert quota["stato"] == "verificata" and quota["avvisi"] == []
+
+    @pytest.mark.parametrize(("ambito", "categoria"), [
+        ("per_categoria", "qualsiasi"), ("per_partner", "capofila"), ("capofila", "qualsiasi"),
+    ])
+    def test_ruolo_fuori_posto_resta_ignoto(self, ambito, categoria):
+        quota = _quota(self.FRASE, ambito=ambito, categoria=categoria)
+        assert quota["categoria"] == "altro"
+        assert quota["stato"] == "da_verificare"
+        assert any("non riconosciuto" in a for a in quota["avvisi"])
+
+    def test_categoria_vera_resta(self):
+        quota = _quota(self.FRASE, ambito="per_partner", categoria="PMI")
+        assert quota["categoria"] == "pmi" and quota["stato"] == "verificata"

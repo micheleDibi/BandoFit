@@ -424,3 +424,19 @@ class TestCitazioniSoloTesto:
         estrazione = convalida_tollerante(dati)
         assert estrazione.partner_min_citazione.sezione == ""
         assert elabora(estrazione)["partner_min"]["stato"] == "da_verificare"
+
+
+class TestVirgoletteComeVuoto:
+    """Il prompt chiede «""» per un valore assente e il modello a volte scrive
+    proprio le virgolette: valgono vuoto, non un valore illeggibile (misura
+    reale del 2026-09-29: «Obbligatorio» declassato per un massimo «""»)."""
+
+    @pytest.mark.parametrize("valore", ['""', "''", " \"\" ", "“”", "«»", "``"])
+    def test_solo_virgolette_vale_vuoto(self, valore):
+        estrazione = convalida_tollerante({"modalita": "obbligatorio", "partner_max": valore,
+                                           "partner_min": "3"})
+        assert estrazione.partner_max == ""
+        assert estrazione.partner_min == "3"
+
+    def test_virgolette_attorno_a_un_valore_restano(self):
+        assert convalida_tollerante({"partner_min": '"3"'}).partner_min == '"3"'

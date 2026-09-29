@@ -266,9 +266,20 @@ def _da_json(valore: Any) -> Any:
     return valore
 
 
+# Il prompt chiede «""» per un valore assente e il modello a volte scrive
+# proprio le virgolette (la stringa di due caratteri `""`): un testo fatto
+# solo di virgolette o apici (anche tipografici) vale vuoto.
+_SOLO_VIRGOLETTE = re.compile(r"[\s\"'\u201c\u201d\u201e\u00ab\u00bb\u2018\u2019`]*")
+
+
+def _solo_virgolette(testo: str) -> bool:
+    return _SOLO_VIRGOLETTE.fullmatch(testo) is not None
+
+
 def _assente(valore: Any) -> bool:
-    """Il valore assente del modello: campo mancante, null o testo vuoto."""
-    return valore is None or (isinstance(valore, str) and not valore.strip())
+    """Il valore assente del modello: campo mancante, null, testo vuoto o fatto
+    di sole virgolette («""»)."""
+    return valore is None or (isinstance(valore, str) and _solo_virgolette(valore))
 
 
 def _grezzo(valore: Any, limite: int = _MAX_GREZZO) -> str:
@@ -293,7 +304,7 @@ def _testo_tollerante(valore: Any) -> str:
     if valore is None:
         return ""
     if isinstance(valore, str):
-        return valore
+        return "" if _solo_virgolette(valore) else valore
     if isinstance(valore, list) and len(valore) == 1 and _semplice(valore[0]):
         return _testo_tollerante(valore[0])
     if isinstance(valore, int) and not isinstance(valore, bool):

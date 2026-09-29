@@ -139,10 +139,52 @@ class TestVerificaCitazione:
             "D1-p3", "Il partenariato deve essere composto da almeno tre imprese", SEZIONI
         )
 
-    def test_cavallo_solo_verso_la_pagina_successiva(self):
-        assert not verifica_citazione(
+    def test_cavallo_indicato_con_la_pagina_dove_finisce(self):
+        # Il modello indica la pagina dove la citazione FINISCE: inizia in
+        # fondo alla precedente.
+        assert verifica_citazione(
             "D1-p4", "Il partenariato deve essere composto da almeno tre imprese", SEZIONI
         )
+
+    def test_citazione_tutta_nella_pagina_precedente_non_vale(self):
+        # Non tocca la pagina indicata: la pagina citata è sbagliata.
+        assert not verifica_citazione(
+            "D1-p4", "L'impresa capofila deve essere un'impresa attiva.", SEZIONI
+        )
+        assert not verifica_citazione(
+            "D1-p4", "Soggetti beneficiari ... L'impresa capofila deve essere", SEZIONI
+        )
+
+    def test_ellissi_a_cavallo_indicata_con_la_pagina_finale(self):
+        # Due tratti uniti da «...», il primo nella pagina precedente (una
+        # tabella che continua), indicati con la pagina del secondo.
+        assert verifica_citazione(
+            "D1-p4",
+            "Art. 4 – Soggetti beneficiari ... almeno tre imprese indipendenti tra loro",
+            SEZIONI,
+        )
+        # In ordine inverso no.
+        assert not verifica_citazione(
+            "D1-p4",
+            "almeno tre imprese indipendenti tra loro ... Art. 4 – Soggetti beneficiari",
+            SEZIONI,
+        )
+
+    def test_pagine_non_adiacenti_non_si_uniscono(self):
+        sezioni = {
+            "D1-p2": "Il partenariato deve essere composto da",
+            "D1-p4": "almeno tre imprese indipendenti tra loro.",
+        }
+        for chiave in ("D1-p2", "D1-p4"):
+            assert not verifica_citazione(
+                chiave, "Il partenariato deve essere composto da almeno tre imprese", sezioni
+            )
+
+    def test_prima_pagina_senza_precedente(self):
+        sezioni = {"D1-p1": "Testo della prima pagina del documento", "D1-p0": "prima di"}
+        assert verifica_citazione("D1-p1", "prima pagina del documento", sezioni)
+        # «D1-p0» non è una pagina precedente valida.
+        assert not verifica_citazione("D1-p1", "prima di Testo della prima pagina", sezioni)
 
     def test_nessun_cavallo_senza_pagina_successiva(self):
         assert not verifica_citazione("D2-p1", "la partecipazione. Altro testo", SEZIONI)
@@ -188,6 +230,97 @@ class TestVerificaCitazione:
 
     def test_sezione_vuota(self):
         assert not verifica_citazione("S9", "qualcosa", {"S9": ""})
+
+
+# Spazi del testo dei PDF: il lettore li deduce dalla distanza tra i glifi, e
+# ne aggiunge dentro le parole o attorno alla punteggiatura.
+SEZIONI_SPAZI = {
+    "D1-p8": (
+        "5.1 L’aggregazione è formata con la firma dell’”A ccordo operativo” ( Allegato B) e\n"
+        "deve contare almeno n. 3 imprese  aderenti."
+    ),
+    "D1-p1": (
+        "Beneficiari: Micro, Piccole e Medie Imprese (MPMI) , come definite dal Reg. (UE) "
+        "n. 651/ 2014,\nin forma singola o aggregata con un Organismo di Ricerca."
+    ),
+    "D1-p2": "Il capofi la presenta la domanda. Gli altri par tner firmano il mandato.",
+    "D2-p1": "Sono ammessi almeno 2 5 partner diversi tra loro nel progetto comune.",
+    "D3-p1": "Sono ammessi almeno 25 partner diversi tra loro nel progetto comune.",
+}
+
+
+class TestSpaziDelPdf:
+    def test_spazio_dentro_una_parola_e_dopo_la_parentesi(self):
+        assert verifica_citazione(
+            "D1-p8",
+            "L'aggregazione è formata con la firma dell'\"Accordo operativo\" (Allegato B) "
+            "e deve contare almeno n. 3 imprese",
+            SEZIONI_SPAZI,
+        )
+
+    def test_spazio_prima_della_virgola_e_dopo_la_barra(self):
+        assert verifica_citazione(
+            "D1-p1",
+            "Micro, Piccole e Medie Imprese (MPMI), come definite dal Reg. (UE) n. 651/2014, "
+            "in forma singola o aggregata",
+            SEZIONI_SPAZI,
+        )
+
+    def test_spazio_mancante_nel_pdf(self):
+        sezioni = {"D1-p5": "La domanda è presentata dal capofila(mandatario)entro il 30 giugno."}
+        assert verifica_citazione(
+            "D1-p5", "presentata dal capofila (mandatario) entro il 30 giugno", sezioni
+        )
+
+    def test_le_lettere_devono_restare_le_stesse(self):
+        assert not verifica_citazione(
+            "D1-p8", "la firma dell'\"Accordo operativa\" (Allegato B)", SEZIONI_SPAZI
+        )
+        assert not verifica_citazione(
+            "D1-p1", "Medie Imprese (MPMI), come definite dal Reg. (UE) n. 651/2015",
+            SEZIONI_SPAZI,
+        )
+
+    def test_gli_spazi_tra_cifre_contano(self):
+        # «2 5» non è «25» (due celle di una tabella, un numero spezzato): in
+        # entrambe le direzioni.
+        assert not verifica_citazione(
+            "D2-p1", "almeno 25 partner diversi tra loro", SEZIONI_SPAZI
+        )
+        assert not verifica_citazione(
+            "D3-p1", "almeno 2 5 partner diversi tra loro", SEZIONI_SPAZI
+        )
+        assert verifica_citazione("D2-p1", "almeno 2 5 partner diversi tra loro", SEZIONI_SPAZI)
+
+    @pytest.mark.parametrize("intervallo", ["2 - 5", "2 -5", "2 – 5"])
+    def test_un_intervallo_con_spazi_non_diventa_un_numero(self, intervallo):
+        # senza spazi il trattino tra due cifre resta: «2 - 5» non è «25»
+        sezioni = {"D1-p1": f"Il partenariato composto da {intervallo} imprese è ammesso."}
+        assert not verifica_citazione("D1-p1", "partenariato composto da 25 imprese", sezioni)
+        assert verifica_citazione("D1-p1", "partenariato composto da 2-5 imprese", sezioni)
+        assert verifica_citazione("D1-p1", "partenariato composto da 2 - 5 imprese", sezioni)
+
+    def test_citazione_corta_senza_tolleranza_sugli_spazi(self):
+        assert not verifica_citazione("D1-p2", "capofila presenta", SEZIONI_SPAZI)  # < 20
+        assert verifica_citazione("D1-p2", "Il capofila presenta la domanda", SEZIONI_SPAZI)
+
+    def test_frammenti_con_ellissi(self):
+        assert verifica_citazione(
+            "D1-p2", "Il capofila presenta la domanda ... gli altri partner firmano",
+            SEZIONI_SPAZI,
+        )
+        assert not verifica_citazione(
+            "D1-p2", "gli altri partner firmano ... Il capofila presenta la domanda",
+            SEZIONI_SPAZI,
+        )
+
+    def test_a_cavallo_di_pagina(self):
+        sezioni = {"D1-p6": "Il partenariato è compo sto da", "D1-p7": "almeno tre im prese."}
+        assert verifica_citazione("D1-p6", "Il partenariato è composto da almeno tre imprese",
+                                  sezioni)
+        assert verifica_citazione("D1-p7", "Il partenariato è composto da almeno tre imprese",
+                                  sezioni)
+        assert not verifica_citazione("D1-p7", "Il partenariato è composto da", sezioni)
 
 
 # ------------------------------------------------------------ proprietà

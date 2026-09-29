@@ -1,19 +1,26 @@
-import { CalendarClock, Eye, Flag, Handshake, Lock, Pencil } from "lucide-react";
+import { CalendarClock, Eye, Flag, Handshake, Lock, Pencil, Scale } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { BannerOptIn } from "../components/partenariati/BannerOptIn";
 import { CallPubblicaCard } from "../components/partenariati/CallPubblicaCard";
 import { CallStatoBadge } from "../components/partenariati/CallStatoBadge";
 import { descriviCriterio, linkCall, mostraDecimale, percentuale } from "../components/partenariati/callDati";
 import { CoperturaBadge } from "../components/partenariati/PassoGap";
 import { NotaAnonima } from "../components/partenariati/PassoBando";
+import { paginaDa } from "../components/partenariati/FiltriBacheca";
+import { AttenzioneBadge, MatchBadge } from "../components/partenariati/MatchBadge";
+import { MatchSpiegazione } from "../components/partenariati/MatchSpiegazione";
 import { etichettaForma } from "../components/partenariati/PartenariatoRegole";
+import { SalvaCallButton } from "../components/partenariati/SalvaCallButton";
 import { Schede } from "../components/partenariati/Schede";
 import { SegnalaDialog } from "../components/partenariati/SegnalaDialog";
+import { SuggeritoCard } from "../components/partenariati/SuggeritoCard";
 import { useNomiCall } from "../components/partenariati/useNomiCall";
 import { Badge } from "../components/ui/Badge";
 import { Button, LinkButton } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Dialog } from "../components/ui/Dialog";
+import { Pagination } from "../components/ui/Pagination";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
 import { useAziendaDaLink } from "../hooks/useAziendaDaLink";
 import {
@@ -22,14 +29,37 @@ import {
   useChiudiCall,
   useVersioniCall,
 } from "../hooks/useCallPartenariato";
+import { useCompany } from "../hooks/useCompany";
+import { useSuggeriti } from "../hooks/usePartenariati";
 import { usePartenariatiVocabolario } from "../hooks/usePartenariatiVocabolario";
 import { apiErrorCode, apiErrorMessage } from "../lib/api";
 import { CALL_COPY, PARTENARIATO_COPY } from "../lib/copy";
 import { formatDate, formatDateTime, formatEur } from "../lib/format";
-import type { CallVistaCreatore } from "../types";
+import type { CallPubblica, CallPubblicaDettaglio, CallVistaCreatore, MatchOut } from "../types";
 
-type Tab = "panoramica";
-const SCHEDE: Array<{ id: Tab; etichetta: string }> = [{ id: "panoramica", etichetta: "Panoramica" }];
+type Tab = "panoramica" | "suggeriti";
+
+/** Schede per l'azienda che ha creato la call: i suggeriti solo quando la
+ *  call è pubblicata (prima nessuna azienda la vede, dopo non si propone). */
+function schedeCreatore(call: CallVistaCreatore): Array<{ id: Tab; etichetta: string }> {
+  const schede: Array<{ id: Tab; etichetta: string }> = [{ id: "panoramica", etichetta: "Panoramica" }];
+  if (call.stato === "pubblicata") schede.push({ id: "suggeriti", etichetta: "Aziende suggerite" });
+  return schede;
+}
+
+/** I campi della vista pubblica per l'azienda attiva (`CallPubblicaDettaglio`:
+ *  confronto, «salvata», visibilità come partner); l'hook del dettaglio la
+ *  tipizza come `CallPubblica`, che serve anche all'anteprima. */
+function perLaTuaAzienda(call: CallPubblica): Pick<CallPubblicaDettaglio, "match" | "salvata"> & {
+  opt_in: boolean | undefined;
+} {
+  const dettaglio = call as Partial<CallPubblicaDettaglio>;
+  return {
+    match: dettaglio.match ?? null,
+    salvata: dettaglio.salvata === true,
+    opt_in: dettaglio.opt_in,
+  };
+}
 
 function Voce({ titolo, children }: { titolo: string; children: ReactNode }) {
   return (
@@ -353,14 +383,123 @@ function Panoramica({ call }: { call: CallVistaCreatore }) {
   );
 }
 
-/** Pagina della call (`?tab=panoramica`; dal WP6 anche suggeriti, candidature,
- *  consorzio…). Per l'azienda che l'ha creata: vista completa; per le altre
- *  (dal WP6) la proiezione pubblica con «Segnala». */
+/** Scheda «Aziende suggerite» (solo per l'azienda che ha creato la call; i
+ *  membri la leggono): aziende visibili come partner che coprono qualcosa di
+ *  ciò che cerchi, con un riferimento valido solo per questa call. */
+function Suggeriti({ call }: { call: CallVistaCreatore }) {
+  const [params, setParams] = useSearchParams();
+  const pagina = paginaDa(params);
+  const suggeriti = useSuggeriti(call.id, pagina);
+  // Testo dei requisiti cercati per etichetta, per spiegare «A», «C»…
+  const testi = new Map(
+    call.gap.requisiti.flatMap((r) => (r.etichetta ? [[r.etichetta, r.testo] as const] : [])),
+  );
+  const vaiA = (n: number) => {
+    setParams((prima) => {
+      const dopo = new URLSearchParams(prima);
+      if (n > 1) dopo.set("page", String(n));
+      else dopo.delete("page");
+      return dopo;
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  if (suggeriti.isPending) {
+    return (
+      <div className="space-y-3" aria-hidden>
+        <Skeleton className="h-40 w-full" />
+        <Skeleton className="h-40 w-full" />
+      </div>
+    );
+  }
+  if (suggeriti.isError) {
+    return (
+      <ErrorState
+        message={apiErrorMessage(suggeriti.error, "Impossibile caricare le aziende suggerite.")}
+        onRetry={() => void suggeriti.refetch()}
+      />
+    );
+  }
+  const dati = suggeriti.data;
+  if (dati.items.length === 0) {
+    return (
+      <EmptyState
+        title="Nessuna azienda suggerita per ora"
+        description="Nessuna azienda visibile come partner copre i requisiti che cerchi. Prova ad allargare le posizioni o i requisiti: i suggerimenti si aggiornano da soli."
+      />
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-slate-500">
+        Aziende che hanno scelto di farsi trovare come partner e coprono qualcosa di ciò che
+        cerchi, dalle più adatte. Non sanno che le stai guardando. Le aziende collegate alla tua
+        non compaiono.
+      </p>
+      <p className="text-sm text-slate-500" role="status" aria-live="polite">
+        {suggeriti.isPlaceholderData
+          ? "Aggiornamento…"
+          : dati.total === 1
+            ? "1 azienda suggerita"
+            : `${dati.total} aziende suggerite`}
+      </p>
+      <ul
+        className={`space-y-3 transition-opacity ${suggeriti.isPlaceholderData ? "opacity-60" : ""}`}
+        aria-busy={suggeriti.isPlaceholderData}
+      >
+        {dati.items.map((s) => (
+          <SuggeritoCard key={s.pseudonimo} suggerito={s} testi={testi} />
+        ))}
+      </ul>
+      <Pagination page={dati.page} totalPages={dati.total_pages} onChange={vaiA} />
+    </div>
+  );
+}
+
+/** Il confronto della tua azienda con la call di un'altra azienda: arriva
+ *  con il dettaglio della call (vista «proprio», con i tuoi numeri). */
+function Confronto({ call, match }: { call: CallPubblica; match: MatchOut | null }) {
+  const testi = new Map(call.requisiti.map((r) => [r.etichetta, r.testo] as const));
+  let corpo: ReactNode;
+  if (!match) {
+    corpo = (
+      <p className="text-sm text-slate-600">
+        La tua azienda non risulta tra quelle adatte a questa call. Controlla i requisiti e le
+        posizioni cercate.
+      </p>
+    );
+  } else {
+    corpo = (
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <MatchBadge match={match} />
+          <AttenzioneBadge match={match} />
+        </div>
+        <MatchSpiegazione match={match} testi={testi} />
+      </div>
+    );
+  }
+  return (
+    <Card className="p-5">
+      <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
+        <Scale className="size-4 text-brand-500" aria-hidden />
+        La tua azienda e questa call
+      </h2>
+      <div className="mt-3">{corpo}</div>
+    </Card>
+  );
+}
+
+/** Pagina della call (`?tab=panoramica|suggeriti`; poi candidature,
+ *  consorzio…). Per l'azienda che l'ha creata: vista completa e aziende
+ *  suggerite; per le altre la proiezione pubblica con il proprio confronto,
+ *  «Salva» (titolare) e «Segnala». */
 export default function CallPartenariato() {
   const { id } = useParams();
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const { avviso } = useAziendaDaLink();
+  const { data: azienda } = useCompany();
   const callQ = useCall(id);
   const [segnala, setSegnala] = useState(false);
   const annuncioArrivo = (location.state as { annuncio?: string } | null)?.annuncio ?? null;
@@ -373,7 +512,8 @@ export default function CallPartenariato() {
     const timer = window.setTimeout(() => setAnnuncio(annuncioArrivo), 150);
     return () => window.clearTimeout(timer);
   }, [annuncioArrivo, location.key]);
-  const tab: Tab = SCHEDE.some((s) => s.id === params.get("tab")) ? (params.get("tab") as Tab) : "panoramica";
+  const schede = isVistaCreatore(callQ.data) ? schedeCreatore(callQ.data) : [];
+  const tab: Tab = schede.some((s) => s.id === params.get("tab")) ? (params.get("tab") as Tab) : "panoramica";
 
   let corpo: ReactNode;
   if (callQ.isPending) {
@@ -389,8 +529,8 @@ export default function CallPartenariato() {
       apiErrorCode(callQ.error) === "not_found" ? (
         <EmptyState
           title="Call non trovata"
-          description="Non esiste, è stata chiusa oppure riguarda un'azienda che non gestisci."
-          action={<LinkButton to="/app/partenariati?vista=mie">Le tue call</LinkButton>}
+          description="Non esiste, non è più aperta oppure non è visibile alla tua azienda."
+          action={<LinkButton to="/app/partenariati?vista=tutte">Tutte le call</LinkButton>}
         />
       ) : (
         <ErrorState
@@ -400,15 +540,28 @@ export default function CallPartenariato() {
       );
   } else if (!isVistaCreatore(callQ.data)) {
     const pubblica = callQ.data;
+    const tua = perLaTuaAzienda(pubblica);
     corpo = (
-      <div className="space-y-4">
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <h1 className="sr-only">{pubblica.titolo || "Call di partenariato"}</h1>
         <CallPubblicaCard call={pubblica} />
-        <div className="flex justify-end">
-          <Button variant="ghost" size="sm" onClick={() => setSegnala(true)}>
-            <Flag className="size-4" aria-hidden />
-            Segnala
-          </Button>
-        </div>
+        <aside className="space-y-4" aria-label="Per la tua azienda">
+          <Confronto call={pubblica} match={tua.match} />
+          <BannerOptIn optIn={tua.opt_in} />
+          <div className="flex flex-wrap items-start justify-end gap-2">
+            {azienda?.editable && (
+              <SalvaCallButton
+                id={pubblica.id}
+                titolo={pubblica.titolo || "Call senza titolo"}
+                salvata={tua.salvata}
+              />
+            )}
+            <Button variant="ghost" size="sm" onClick={() => setSegnala(true)}>
+              <Flag className="size-4" aria-hidden />
+              Segnala
+            </Button>
+          </div>
+        </aside>
         <SegnalaDialog open={segnala} onClose={() => setSegnala(false)} oggettoTipo="call" oggettoId={pubblica.id} />
       </div>
     );
@@ -439,13 +592,15 @@ export default function CallPartenariato() {
         </div>
         <Schede
           etichetta="Sezioni della call"
-          schede={SCHEDE}
+          schede={schede}
           attiva={tab}
           onCambia={(t) =>
             setParams(
               (p) => {
                 const nuovi = new URLSearchParams(p);
                 nuovi.set("tab", t);
+                // La pagina è della scheda: si riparte dalla prima.
+                nuovi.delete("page");
                 return nuovi;
               },
               { replace: true },
@@ -453,6 +608,7 @@ export default function CallPartenariato() {
           }
         >
           {tab === "panoramica" && <Panoramica call={call} />}
+          {tab === "suggeriti" && <Suggeriti call={call} />}
         </Schede>
       </div>
     );
@@ -462,7 +618,7 @@ export default function CallPartenariato() {
     <div className="mx-auto max-w-5xl space-y-4">
       <p className="text-sm text-slate-500">
         <Link
-          to="/app/partenariati?vista=mie"
+          to={isVistaCreatore(callQ.data) ? "/app/partenariati?vista=mie" : "/app/partenariati"}
           className="inline-flex items-center gap-1.5 font-medium text-brand-600 hover:text-brand-700"
         >
           <Handshake className="size-4" aria-hidden />

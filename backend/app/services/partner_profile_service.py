@@ -8,7 +8,8 @@ Scritture:
 - `salva_profilo`: upsert a WHITELIST dei soli campi liberi (+ chiavi e
   completezza); visibilità, anonimato, consenso, referente e sospensione non ci
   sono MAI (il trigger con GUC della 0035 li rifiuterebbe comunque). Ogni testo
-  libero passa da `trova_rilievi`: contatti sempre bloccanti, identificativi
+  libero si salva senza caratteri invisibili e passa da `trova_rilievi` (sulla
+  forma canonica, come le call): contatti sempre bloccanti, identificativi
   dell'azienda bloccanti se il profilo è anonimo, cognomi delle persone del
   registro solo come avvisi;
 - `consenso` → `fn_partner_consenso` (registro append-only + audit nella
@@ -70,7 +71,7 @@ from app.schemas.partner_profile import (
     ReferentePropostoOut,
     ReferenteRispostaIn,
 )
-from app.services import bilanci_service, lookup_service
+from app.services import bilanci_service, lookup_service, partenariato_indice
 from app.services import partenariato_vocabolario as voc
 from app.services.ai_prezzi import costo_cents, stima_cents
 from app.services.bilanci_indicatori import calcola_fasce
@@ -81,6 +82,7 @@ from app.services.partenariato_anonimato import (
     ETICHETTE_RILIEVO,
     Identificativi,
     identificativi_azienda,
+    senza_invisibili,
     trova_rilievi,
 )
 from app.services.partenariato_errori import raise_from_rpc
@@ -550,6 +552,35 @@ def _rilievi(profilo, ident: Identificativi | None, *, anonima: bool):
             yield etichetta, rilievo, ETICHETTE_RILIEVO.get(rilievo.tipo, "un dato non ammesso")
 
 
+def testi_senza_invisibili(dati: PartnerProfileIn) -> PartnerProfileIn:
+    """Il profilo con i testi liberi senza caratteri di formato invisibili
+    (`senza_invisibili`), come i testi delle call: nel DB, e quindi verso
+    terzi, non finisce mai un carattere invisibile; i caratteri visibili
+    restano quelli dell'utente (la forma canonica serve solo ai controlli).
+    Se un testo cambia lo schema si riapplica: spazi ai bordi, voci rimaste
+    vuote scartate, doppioni e obblighi (un programma fatto solo di caratteri
+    invisibili è un programma mancante)."""
+    cambiato = False
+
+    def pulisci(valore):
+        nonlocal cambiato
+        if not isinstance(valore, str):
+            return valore
+        pulito = senza_invisibili(valore)
+        cambiato = cambiato or pulito != valore
+        return pulito
+
+    grezzo = dati.model_dump()
+    for campo in ("descrizione_competenze", "infrastrutture"):
+        grezzo[campo] = pulisci(grezzo[campo])
+    for campo in ("competenze_libere", "certificazioni"):
+        grezzo[campo] = [pulisci(voce) for voce in grezzo[campo]]
+    for esperienza in grezzo["esperienze"]:
+        for campo in ("programma", "titolo"):
+            esperienza[campo] = pulisci(esperienza[campo])
+    return PartnerProfileIn.model_validate(grezzo) if cambiato else dati
+
+
 def controlla_testi(profilo, ident: Identificativi | None, *, anonima: bool) -> None:
     """Nessun contatto prima dell'accettazione, in ogni profilo; se anonimo,
     nemmeno gli identificativi dell'azienda. Il primo rilievo bloccante →
@@ -693,10 +724,12 @@ def payload_upsert(dati: PartnerProfileIn, active, user: dict, punteggio: int) -
 async def salva_profilo(
     primary, secondary, active, user: dict, dati: PartnerProfileIn
 ) -> PartnerProfileOut:
-    """PUT del profilo (titolare): lookup, controlli dei testi, upsert a
-    whitelist, completezza ricalcolata."""
+    """PUT del profilo (titolare): testi senza caratteri invisibili, lookup,
+    controlli dei testi (sulla forma canonica), upsert a whitelist,
+    completezza ricalcolata."""
     _richiedi_titolare(active)
     _richiedi_azienda(active)
+    dati = testi_senza_invisibili(dati)
     if (
         dati.settori_interesse
         or dati.regioni_interesse
@@ -716,6 +749,7 @@ async def salva_profilo(
         # Mai il detail nei log: una violazione di vincolo riporta la riga.
         logger.error("partner: salvataggio del profilo non riuscito (code=%s)", exc.code)
         raise UpstreamError() from exc
+    partenariato_indice.invalida()  # WP6: il matching usa il profilo salvato
     ctx.profilo = await _profilo(primary, ctx.company_id)
     return await _componi(primary, active, user, ctx)
 
@@ -778,6 +812,15 @@ async def consenso(
         ).execute()
     except APIError as exc:
         raise_from_rpc(exc)
+    # WP6 (M2, M4): la visibilità cambia il matching; le chiavi dei
+    # collegamenti si calcolano per chi entra e si cancellano per chi esce
+    # senza call non chiuse. Best-effort: mai un errore al consenso.
+    if dati.azione == "concedi":
+        await partenariato_indice.ricostruisci_collegamenti(primary, company_id)
+    elif dati.azione == "revoca":
+        await partenariato_indice.rimuovi_collegamenti_se_non_idonea(primary, company_id)
+    else:
+        partenariato_indice.invalida()
     return await get_profilo(primary, secondary, active, user)
 
 

@@ -562,6 +562,141 @@ class TestVistaTerzi:
         assert esito.esito == "soddisfatto" and esito.spiegazione_titolare is None
 
 
+# --------------------------------------------------- intervalli aperti (WP6)
+
+INF = Decimal("Infinity")
+# Fascia di budget senza tetto (`oltre_5m`), quota del 30%: [1,5 M€, ∞).
+COSTO_APERTO = (D(1_500_000), INF)
+
+
+def _medio(valore) -> list[EsercizioBilancio]:
+    return [es(2022, fatturato=valore), es(2023, fatturato=valore)]
+
+
+def _pn(valore) -> list[EsercizioBilancio]:
+    return [es(2023, patrimonio_netto=valore, fatturato=1)]
+
+
+def _valuta_entrambe(r, esercizi, costo):
+    """Terzi e proprio: nessuna eccezione, e un esito determinato verso i
+    terzi coincide con quello sui valori esatti (le fasce contengono il
+    valore esatto)."""
+    terzi = valuta_regola_finanziaria(r, esercizi, costo, vista="terzi")
+    proprio = valuta_regola_finanziaria(r, esercizi, costo, vista="proprio")
+    if terzi.esito != "dato_mancante":
+        assert terzi.esito == proprio.esito
+    assert terzi.spiegazione_titolare is None
+    assert isinstance(proprio.spiegazione_titolare, str)
+    return terzi, proprio
+
+
+class TestIntervalliAperti:
+    """Budget senza tetto (massimo `Infinity`) e fasce aperte sopra o sotto:
+    ∞ − ∞ non deve mai sollevare `decimal.InvalidOperation` (prerequisito del
+    WP6: il matching valuta ogni candidato in vista «terzi»)."""
+
+    def test_budget_aperto_e_fascia_aperta_sopra(self):
+        # fatturato medio 65 M€ → oltre_50m = (50 M€, ∞)
+        terzi, proprio = _valuta_entrambe(COSTO_SU_FATTURATO, _medio(65_000_000), COSTO_APERTO)
+        assert (terzi.esito, terzi.motivo) == ("dato_mancante", bi.MOTIVO_DIPENDE_FASCIA)
+        assert (proprio.esito, proprio.motivo) == ("dato_mancante", bi.MOTIVO_DIPENDE_BUDGET)
+        assert "65.000.000" not in terzi.spiegazione_terzi
+        assert "almeno 1.500.000 €" in proprio.spiegazione_titolare
+
+    def test_budget_aperto_e_fascia_chiusa(self):
+        # 500k_2m: già il minimo del costo supera 0,6 × 2 M€ → certo su tutta la fascia
+        terzi, _ = _valuta_entrambe(COSTO_SU_FATTURATO, _medio(1_250_000), (D(1_300_000), INF))
+        assert terzi.esito == "non_soddisfatto"
+        # minimo sotto la soglia della fascia, massimo illimitato: dipende dal budget
+        terzi, _ = _valuta_entrambe(COSTO_SU_FATTURATO, _medio(1_250_000), (D(100_000), INF))
+        assert (terzi.esito, terzi.motivo) == ("dato_mancante", bi.MOTIVO_DIPENDE_BUDGET)
+
+    def test_soglia_variabile_con_budget_aperto(self):
+        # PN oltre_10m contro metà di un costo senza tetto
+        terzi, proprio = _valuta_entrambe(PN_META_COSTO, _pn(20_000_000), COSTO_APERTO)
+        assert terzi.esito == "dato_mancante" and proprio.esito == "dato_mancante"
+        # fascia aperta SOTTO (PN negativo = (−∞, 0)): mai > metà di un costo positivo
+        terzi, proprio = _valuta_entrambe(PN_META_COSTO, _pn(-20_000), COSTO_APERTO)
+        assert terzi.esito == proprio.esito == "non_soddisfatto"
+
+    def test_fascia_aperta_sotto_al_numeratore(self):
+        r = regola("risultato_esercizio", "ge", soglia_variabile="costo_quota",
+                   coefficiente="0.1")
+        esercizi = [es(2023, risultato_esercizio=-5_000, fatturato=1)]
+        terzi, _ = _valuta_entrambe(r, esercizi, COSTO_APERTO)
+        assert terzi.esito == "non_soddisfatto"
+        # risultato oltre_10m, budget aperto: né sempre né mai
+        esercizi = [es(2023, risultato_esercizio=50_000_000, fatturato=1)]
+        terzi, _ = _valuta_entrambe(r, esercizi, COSTO_APERTO)
+        assert terzi.esito == "dato_mancante"
+
+    def test_costo_come_denominatore_da_zero_a_infinito(self):
+        r = regola("patrimonio_netto", "ge", denominatore="costo_quota", soglia="0.5")
+        terzi, proprio = _valuta_entrambe(r, _pn(1_000_000), (D(0), INF))
+        # il costo può essere 0: il rapporto non si decide
+        assert terzi.esito == proprio.esito == "dato_mancante"
+
+    @pytest.mark.parametrize(
+        "costo",
+        [(INF, INF), (-INF, INF), (-INF, D(100)), (D("NaN"), D(1)), (D(1), D("NaN")),
+         ("x", D(1))],
+        ids=["piu_infinito", "tutto_ignoto", "minimo_meno_infinito", "nan_minimo",
+             "nan_massimo", "non_numerico"],
+    )
+    def test_estremi_non_utilizzabili_come_costo_mancante(self, costo):
+        for vista in ("terzi", "proprio"):
+            esito = valuta_regola_finanziaria(
+                COSTO_SU_FATTURATO, _medio(1_000_000), costo, vista=vista
+            )
+            assert (esito.esito, esito.motivo) == ("dato_mancante", "manca il costo della quota")
+
+    def test_zero(self):
+        # costo nullo: soddisfatto su qualsiasi fascia positiva
+        terzi, proprio = _valuta_entrambe(COSTO_SU_FATTURATO, _medio(65_000_000), punto(0))
+        assert terzi.esito == proprio.esito == "soddisfatto"
+        # da zero a infinito su una fascia aperta: nessuna eccezione, non decide
+        terzi, _ = _valuta_entrambe(COSTO_SU_FATTURATO, _medio(65_000_000), (D(0), INF))
+        assert terzi.esito == "dato_mancante"
+        # PN esattamente 0 (fascia fino_100k, che include lo zero) contro costo aperto
+        terzi, proprio = _valuta_entrambe(PN_META_COSTO, _pn(0), COSTO_APERTO)
+        assert terzi.esito == proprio.esito == "non_soddisfatto"
+
+    def test_trenta_budget_anche_aperti_esito_solo_dalla_fascia(self):
+        """Test d'inferenza: 30 budget (un terzo senza tetto) × valori esatti
+        diversi in ogni fascia di fatturato (anche `oltre_50m`, aperta). Verso i
+        terzi l'esito, il motivo e il testo dipendono SOLO dalla fascia: al
+        variare del valore esatto cambiano soltanto quando si passa il bordo
+        di una fascia, quindi chi controlla il budget non ricava più della
+        fascia."""
+        valori: list[Decimal] = []
+        for _codice, lo, lo_incl, hi, hi_incl in FASCE_FATTURATO:
+            base = lo if lo is not None else D(0)
+            inizio = base if lo_incl else base + D(1)
+            valori.append(inizio)
+            if hi is None:
+                valori += [base * 3, base * 1000]
+            else:
+                valori += [(base + hi) / 2, hi if hi_incl else hi - D(1)]
+        valori = [v for v in valori if v > 0]  # fatturato 0: denominatore non positivo
+        budget = []
+        for k in range(1, 31):
+            minimo = D(60_000) * k * k
+            budget.append((minimo, INF if k % 3 == 0 else minimo * D("1.4")))
+        for costo in budget:
+            per_fascia: dict[str, set] = {}
+            for valore in valori:
+                terzi, _ = _valuta_entrambe(COSTO_SU_FATTURATO, _medio(valore), costo)
+                codice = codice_fascia_fatturato(valore)
+                per_fascia.setdefault(codice, set()).add(
+                    (terzi.esito, terzi.motivo, terzi.spiegazione_terzi)
+                )
+                assert _numeri_esatti(valore).isdisjoint(
+                    re.findall(r"\d[\d.,]*", terzi.spiegazione_terzi)
+                )
+            for codice, esiti in per_fascia.items():
+                assert len(esiti) == 1, (costo, codice, esiti)
+
+
 # ---------------------------------------------------------------- validità
 
 class TestValidaRegola:

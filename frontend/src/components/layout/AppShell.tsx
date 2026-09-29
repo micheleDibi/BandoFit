@@ -4,6 +4,7 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { useFunzioni } from "../../hooks/useFunzioni";
 import { useMe } from "../../hooks/useMe";
+import { useRiepilogoPartenariati } from "../../hooks/usePartenariati";
 import { cn } from "../../lib/cn";
 import { hasAreaProgettista } from "../../lib/roles";
 import { InviteBanner } from "../shared/InviteBanner";
@@ -26,8 +27,44 @@ const directLinks: NavItem[] = [
 ];
 
 // Modulo partenariati: link diretto, solo a modulo acceso (a modulo spento la
-// pagina «non esiste», come le rotte del backend).
+// pagina «non esiste», come le rotte del backend), con il badge delle novità.
 const partenariatiLink: NavItem = { to: "/app/partenariati", label: "Partenariati" };
+
+/** Link «Partenariati» con il numero delle call «Per te» pubblicate negli
+ *  ultimi 7 giorni (dal riepilogo; non è un contatore di non lette: scende da
+ *  solo quando una call esce dalla settimana): numero visibile e, per i
+ *  lettori di schermo, in parole. */
+function PartenariatiNavLink({
+  className,
+  onClick,
+}: {
+  className: (stato: { isActive: boolean }) => string;
+  onClick?: () => void;
+}) {
+  const { data: riepilogo } = useRiepilogoPartenariati();
+  const nuove = riepilogo?.per_te_nuove ?? 0;
+  return (
+    <NavLink to={partenariatiLink.to} className={className} onClick={onClick}>
+      {partenariatiLink.label}
+      {nuove > 0 && (
+        <>
+          <span
+            className="ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full bg-brand-500 px-1.5 text-xs font-semibold text-white tabular"
+            title="Call per te pubblicate negli ultimi 7 giorni"
+            aria-hidden
+          >
+            {nuove > 99 ? "99+" : nuove}
+          </span>
+          <span className="sr-only">
+            {nuove === 1
+              ? ", 1 call per te pubblicata negli ultimi 7 giorni"
+              : `, ${nuove} call per te pubblicate negli ultimi 7 giorni`}
+          </span>
+        </>
+      )}
+    </NavLink>
+  );
+}
 
 // Voci di ACCOUNT (te + fatturazione): vivono nel menu avatar (UserMenu). I dati
 // azienda e la gestione portafoglio stanno nel CompanyMenu, non qui. La voce
@@ -77,7 +114,6 @@ export function AppShell() {
   const accountLinks: NavItem[] = isParent
     ? [...accountBase, { to: "/app/collegati", label: "Account collegati" }]
     : accountBase;
-  const mainLinks: NavItem[] = partenariatiAttivo ? [...directLinks, partenariatiLink] : directLinks;
 
   const handleSignOut = async () => {
     await signOut();
@@ -110,8 +146,8 @@ export function AppShell() {
             <Logo />
           </Link>
 
-          {/* Solo navigazione: 5 link diretti (6 con i partenariati) + i menu
-              dei ruoli. L'azienda vive
+          {/* Solo navigazione: 5 link diretti (6 con i partenariati, con il
+              badge delle novità) + i menu dei ruoli. L'azienda vive
               nel CompanyMenu e l'account (profilo/preferenze/abbonamento/uscita)
               nell'UserMenu, a destra. La nav per esteso entra da lg, sotto
               resta l'hamburger. */}
@@ -119,11 +155,12 @@ export function AppShell() {
             className="ml-3 hidden items-center gap-0.5 lg:flex"
             aria-label="Navigazione principale"
           >
-            {mainLinks.map((item) => (
+            {directLinks.map((item) => (
               <NavLink key={item.to} to={item.to} className={navLinkClasses}>
                 {item.label}
               </NavLink>
             ))}
+            {partenariatiAttivo && <PartenariatiNavLink className={navLinkClasses} />}
             {isProgettista && (
               <NavMenu label="Progettista" items={progettistaLinks} />
             )}
@@ -161,7 +198,10 @@ export function AppShell() {
             className="flex flex-col gap-1 border-t border-slate-200 px-4 py-3 lg:hidden"
             aria-label="Navigazione mobile"
           >
-            {mainLinks.map(mobileLink)}
+            {directLinks.map(mobileLink)}
+            {partenariatiAttivo && (
+              <PartenariatiNavLink className={navLinkClasses} onClick={() => setMobileOpen(false)} />
+            )}
             {isProgettista && (
               <>
                 <p className={mobileSectionLabel}>Progettista</p>

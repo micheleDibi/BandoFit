@@ -210,6 +210,32 @@ class Settings(BaseSettings):
     partner_call_scadenza_default_giorni: int = 60
     partner_segnalazioni_limite_giorno: int = 10
     partner_call_ai_stale_minuti: int = 10
+    # Matching delle call (WP6, docs/partenariati.md M3, M5, Q17; formule in
+    # services/partenariato_matching.py). Pesi del punteggio (somma 1):
+    # copertura dei requisiti cercati, affinità, complementarità, completezza
+    # del profilo, rotazione; penalità per ogni voce «attenzione» (dato
+    # mancante o incerto su un filtro), con un massimo. Suggeriti per pagina.
+    # Notifiche proattive alla pubblicazione: le prime K aziende con almeno un
+    # requisito cercato coperto e punteggio minimo, con un tetto di notifiche a
+    # settimana per azienda.
+    partenariato_peso_copertura: float = 0.50
+    partenariato_peso_affinita: float = 0.20
+    partenariato_peso_complementarita: float = 0.10
+    partenariato_peso_completezza: float = 0.10
+    partenariato_peso_rotazione: float = 0.10
+    partenariato_penalita_dato_mancante: int = 5
+    partenariato_penalita_max: int = 20
+    partenariato_suggeriti_pagina: int = 20
+    partenariato_notifiche_top_k: int = 20
+    partenariato_notifiche_soglia: int = 50
+    partenariato_notifiche_tetto_settimana: int = 3
+    # Indice in-process del matching (M4): secondi di validità, oltre a
+    # l'invalidazione dai servizi del modulo. Digest settimanale delle call
+    # «per te» (Q6): giorno (0 = lunedì) e ora locale (alert_fuso) da cui si
+    # invia, con claim per settimana su partner_digest_runs.
+    partenariato_indice_ttl_seconds: int = 60
+    partenariato_digest_giorno: int = 0
+    partenariato_digest_ora: str = "08:30"
 
     @model_validator(mode="after")
     def _segreti_obbligatori_in_produzione(self) -> "Settings":

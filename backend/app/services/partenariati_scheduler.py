@@ -35,6 +35,18 @@ Passi del WP5:
   un'assenza: salta solo i motivi del bando. Snapshot del bando aggiornato
   quando cambia. A ogni chiusura una notifica al creatore e al titolare
   (dedup per call).
+
+Passi del WP6:
+- `backfill_collegamenti`: chiavi HMAC dei collegamenti societari delle
+  aziende idonee senza marker aggiornato e pulizia di quelle non più idonee
+  (`partenariato_collegamenti.backfill`); se cambia qualcosa l'indice del
+  matching si invalida;
+- `fanout_pendenti`: riprende i fan-out delle notifiche proattive non
+  completati (processo morto a metà, claim scaduto);
+- `digest_settimanale`: il digest delle call «per te», solo dal giorno e
+  dall'ora configurati (lunedì 08:30), con claim per settimana su
+  `partner_digest_runs`. Il loop si sveglia anche all'ora del digest, oltre
+  che a quella della run giornaliera.
 """
 
 import asyncio
@@ -49,6 +61,9 @@ from app.core.errors import AppError
 from app.services import (
     bandi_service,
     bando_fonti_service,
+    partenariato_collegamenti,
+    partenariato_indice,
+    partenariato_notifiche,
     partenariato_service,
     partner_call_service,
 )
@@ -69,8 +84,9 @@ _CODICI_STOP = {"ai_sospesa_oggi"}
 # Call aperte lette per pagina (sotto il max-rows 1000 del PostgREST).
 CALL_PAGINA = 500
 CALL_SELECT_SCHEDULER = (
-    "id,company_profile_id,family_parent_id,creato_da,bando_id,stato,scadenza_call,"
-    "bando_mancante_dal,bando_stato_effettivo,bando_scadenza"
+    "id,company_profile_id,family_parent_id,creato_da,bando_id,bando_titolo,stato,"
+    "visibilita,sospesa_at,scadenza_call,bando_mancante_dal,bando_stato_effettivo,"
+    "bando_scadenza"
 )
 
 
@@ -337,6 +353,34 @@ async def batch_estrazioni(primary, secondary, ai, oggi: date) -> dict:
     }
 
 
+async def backfill_collegamenti(primary) -> dict:
+    """Chiavi dei collegamenti (solo con il flag, solo aziende idonee)."""
+    esito = await partenariato_collegamenti.backfill(primary)
+    if esito.get("ricalcolate") or esito.get("rimosse"):
+        partenariato_indice.invalida()
+    return esito
+
+
+async def fanout_pendenti(primary, secondary) -> dict:
+    """Fan-out delle notifiche proattive rimasti a metà."""
+    return await partenariato_notifiche.fanout_pendenti(primary, secondary)
+
+
+async def digest_settimanale(primary, adesso: datetime) -> dict:
+    """Il digest della settimana se è il suo momento (altrimenti nulla)."""
+    esito = await partenariato_notifiche.digest_se_dovuto(primary, adesso)
+    return esito if esito is not None else {"esito": "non_dovuto"}
+
+
+async def _digest_isolato(primary, adesso: datetime) -> None:
+    """Il digest fuori dalla run giornaliera (il loop si sveglia alla sua
+    ora): mai un errore che fermi lo scheduler."""
+    try:
+        await partenariato_notifiche.digest_se_dovuto(primary, adesso)
+    except Exception:
+        logger.error("partenariati scheduler: digest settimanale fallito", exc_info=True)
+
+
 # ------------------------------------------------------------ orchestrazione
 
 
@@ -349,15 +393,19 @@ async def _salva_riepilogo(primary, oggi: date, esiti: dict) -> None:
         logger.error("partenariati scheduler: riepilogo non salvato", exc_info=True)
 
 
-async def esegui_run(primary, secondary, ai, oggi: date) -> dict:
+async def esegui_run(primary, secondary, ai, oggi: date, adesso: datetime | None = None) -> dict:
     """Esegue i passi in ordine, ciascuno isolato."""
     esiti: dict = {}
+    istante = adesso or datetime.now(ZoneInfo("UTC"))
     passi = [
         ("failsafe_estrazioni", lambda: failsafe_estrazioni(primary)),
         ("failsafe_bozze_profilo", lambda: failsafe_bozze_profilo(primary)),
         ("failsafe_ai_call", lambda: failsafe_ai_call(primary)),
         ("chiusura_call", lambda: chiusura_call(primary, secondary, oggi)),
         ("batch_estrazioni", lambda: batch_estrazioni(primary, secondary, ai, oggi)),
+        ("backfill_collegamenti", lambda: backfill_collegamenti(primary)),
+        ("fanout_pendenti", lambda: fanout_pendenti(primary, secondary)),
+        ("digest_settimanale", lambda: digest_settimanale(primary, istante)),
     ]
     for nome, fn in passi:
         try:
@@ -379,7 +427,7 @@ async def esegui_se_dovuto(primary, secondary, ai, adesso: datetime) -> dict | N
     oggi = locale.date()
     if not await claim_run(primary, oggi):
         return None
-    return await esegui_run(primary, secondary, ai, oggi)
+    return await esegui_run(primary, secondary, ai, oggi, adesso)
 
 
 async def run_forever(primary, secondary, ai) -> None:
@@ -387,10 +435,15 @@ async def run_forever(primary, secondary, ai) -> None:
     while True:
         try:
             await esegui_se_dovuto(primary, secondary, ai, datetime.now(ZoneInfo("UTC")))
-            prossima = prossima_esecuzione(
-                datetime.now(ZoneInfo("UTC")),
-                get_settings().partenariati_ora_esecuzione,
-                ZoneInfo(get_settings().alert_fuso),
+            await _digest_isolato(primary, datetime.now(ZoneInfo("UTC")))
+            adesso = datetime.now(ZoneInfo("UTC"))
+            prossima = min(
+                prossima_esecuzione(
+                    adesso,
+                    get_settings().partenariati_ora_esecuzione,
+                    ZoneInfo(get_settings().alert_fuso),
+                ),
+                partenariato_notifiche.prossimo_digest(adesso),
             )
             while True:
                 resta = (prossima - datetime.now(ZoneInfo("UTC"))).total_seconds()

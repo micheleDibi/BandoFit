@@ -215,6 +215,28 @@ class TestFallbackLog:
             assert await send_bandi_digest_email("dest@test.it", [bando()], CTA, UNSUB)
         assert any("email dev fallback" in r.message for r in caplog.records)
 
+    async def test_mai_l_indirizzo_in_chiaro_nei_log(self, caplog, monkeypatch):
+        # Digest periodici (anche quello dei partenariati): una riga di log per
+        # destinatario, con il solo dominio; nemmeno dal messaggio d'errore.
+        import aiosmtplib
+
+        async def rifiuta(message, **kwargs):
+            raise aiosmtplib.SMTPRecipientsRefused(
+                [aiosmtplib.SMTPRecipientRefused(550, "no such user", "mario.rossi@azienda.it")])
+
+        with caplog.at_level(logging.INFO, logger="bandofit.email"):
+            assert await send_bandi_digest_email("mario.rossi@azienda.it", [bando()], CTA, UNSUB)
+            monkeypatch.setenv("SMTP_HOST", "smtp.test")
+            from app.core.config import get_settings
+
+            get_settings.cache_clear()
+            monkeypatch.setattr(aiosmtplib, "send", rifiuta)
+            assert not await send_bandi_digest_email(
+                "mario.rossi@azienda.it", [bando()], CTA, UNSUB)
+        testo = "\n".join(r.getMessage() for r in caplog.records)
+        assert "m***@azienda.it" in testo and "SMTPRecipientsRefused" in testo
+        assert "mario.rossi" not in testo
+
 
 class TestSanificazioneHeader:
     async def test_newline_negli_header_rimossi(self, monkeypatch):

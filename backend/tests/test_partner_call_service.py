@@ -1352,14 +1352,15 @@ class TestDettaglio:
     async def test_pubblicata_di_b_non_scrivibile_con_a_attiva(self, spawned):
         """Con A attiva la call PUBBLICATA di B ha il ruolo «pubblico»: nessuna
         scrittura arriva nemmeno alla RPC (che comunque risponderebbe
-        call_not_found). Nel WP5 il dettaglio ammette solo l'azienda
-        creatrice: anche la lettura è 404 (la vista pubblica arriva nel WP6)."""
+        call_not_found). Dal WP6 la lettura è la vista PUBBLICA (niente
+        riservati, niente `editable`)."""
         db = FakeDb()
         call_b = db.call_pronta(company_profile_id=COMPANY_B, stato="pubblicata",
                                 pubblicata_at=_iso(),
                                 scadenza_call=(oggi() + timedelta(days=9)).isoformat())
-        with pytest.raises(NotFoundError):
-            await leggi(db, call_b, titolare())
+        vista = await leggi(db, call_b, titolare())
+        assert not hasattr(vista, "editable")
+        assert CANARY_RISERVATI not in vista.model_dump_json()
         scritture = [
             pcs.aggiorna(db, FakeSecondary(), titolare(), USER_OWNER, call_b["id"],
                          CallAggiornaIn(descrizione_pubblica="Altro")),
@@ -1381,11 +1382,18 @@ class TestDettaglio:
             await pcs.anteprima(db, FakeSecondary(), titolare(), USER_OWNER, call_b["id"])
 
     async def test_un_altro_owner_non_vede_nemmeno_la_pubblicata_come_creatore(self):
+        # Dal WP6 vede la vista pubblica, mai quella del creatore.
         db = FakeDb()
         call = db.call_pronta(stato="pubblicata", pubblicata_at=_iso(),
                               scadenza_call=(oggi() + timedelta(days=30)).isoformat())
+        vista = await leggi(db, call, altro_owner(), USER_ALTRO)
+        testo = vista.model_dump_json()
+        assert not hasattr(vista, "editable") and not hasattr(vista, "budget_progetto_eur")
+        assert CANARY_RISERVATI not in testo and COMPANY not in testo and OWNER not in testo
+        # la bozza di un altro owner resta 404
+        bozza = db.call_pronta(bando_id=333)
         with pytest.raises(NotFoundError):
-            await leggi(db, call, altro_owner(), USER_ALTRO)
+            await leggi(db, bozza, altro_owner(), USER_ALTRO)
 
     @pytest.mark.parametrize("identificativo", ["non-un-uuid", "", "urn:uuid:x"])
     async def test_id_malformato_404(self, identificativo):
@@ -2659,6 +2667,112 @@ class TestPubblica:
 
 
 # ------------------------------------------------------------ chiusura e versioni
+
+
+class TestWp6DopoLeScritture:
+    """WP6: dopo la pubblicazione l'indice si invalida e parte (in background)
+    il fan-out; dopo una modifica della call pubblicata o la sua chiusura, chi
+    l'ha salvata riceve una notifica (dedup per versione / chiusura)."""
+
+    @staticmethod
+    def _seguita_da_altri(db, call) -> None:
+        db.tabelle["profiles"][1].update(email="anna@example.test", is_active=True)
+        db.tabelle.setdefault("partner_call_salvate", []).append(
+            {"company_profile_id": ALTRA_COMPANY, "partner_call_id": call["id"],
+             "user_id": ALTRO_OWNER})
+
+    @staticmethod
+    def _notifiche(db, tipo):
+        return [n for n in db.tabelle["notifications"] if n["tipo"] == tipo]
+
+    async def test_pubblica_invalida_e_avvia_il_fan_out(self, spawned):
+        from app.services import partenariato_indice
+
+        db = FakeDb()
+        call = db.call_pronta()
+        generazione = partenariato_indice._STATO.generazione
+        await pcs.pubblica(db, FakeSecondary(), titolare(), USER_OWNER, call["id"])
+        assert partenariato_indice._STATO.generazione > generazione
+        [job] = spawned
+        assert job.cr_code.co_name == "dopo_pubblicazione"
+        assert job.cr_frame.f_locals["call_id"] == call["id"]
+        assert job.cr_frame.f_locals["company_id"] == COMPANY
+
+    async def test_modifica_e_chiusura_notificano_chi_segue(self, spawned):
+        db = FakeDb()
+        call = db.call_pronta()
+        await pcs.pubblica(db, FakeSecondary(), titolare(), USER_OWNER, call["id"])
+        self._seguita_da_altri(db, call)
+        await pcs.aggiorna(db, FakeSecondary(), titolare(), USER_OWNER, call["id"],
+                           CallAggiornaIn(descrizione_pubblica="Descrizione aggiornata"))
+        [modifica] = self._notifiche(db, "partenariato.call_seguita_modificata")
+        assert modifica["user_id"] == ALTRO_OWNER
+        assert modifica["company_profile_id"] == ALTRA_COMPANY
+        assert modifica["dedup_key"] == f"partner-seguita:{call['id']}:v2:{ALTRA_COMPANY}"
+        assert "Rossi" not in f"{modifica['titolo']} {modifica['corpo']}"
+        await pcs.chiudi(db, FakeSecondary(), titolare(), USER_OWNER, call["id"],
+                         ChiudiIn(esito="completata"))
+        [chiusura] = self._notifiche(db, "partenariato.call_seguita_chiusa")
+        assert chiusura["dedup_key"] == f"partner-seguita-chiusa:{call['id']}:{ALTRA_COMPANY}"
+
+    @pytest.mark.parametrize(
+        "modifica",
+        [
+            # nessun cambiamento: la RPC non scrive e non crea una versione
+            {"descrizione_pubblica": "Progetto di innovazione nella logistica sostenibile."},
+            # soli campi riservati: versione nuova, proiezione pubblica identica
+            {"dettagli_riservati": "Altro accordo riservato con il cliente"},
+            {"budget_progetto_eur": Decimal("700000")},
+            {"quota_creatore_pct": Decimal("55")},
+        ],
+        ids=["senza_modifiche", "dettagli_riservati", "budget_esatto", "quota_creatore"],
+    )
+    async def test_modifiche_invisibili_ai_terzi_non_notificano(self, spawned, modifica):
+        db = FakeDb()
+        call = db.call_pronta()
+        await pcs.pubblica(db, FakeSecondary(), titolare(), USER_OWNER, call["id"])
+        self._seguita_da_altri(db, call)
+        await pcs.aggiorna(db, FakeSecondary(), titolare(), USER_OWNER, call["id"],
+                           CallAggiornaIn(**modifica))
+        assert self._notifiche(db, "partenariato.call_seguita_modificata") == []
+
+    async def test_call_passata_solo_su_invito_nessun_segnale(self, spawned):
+        # Chi la segue non la vede più (404): né «modificata» né «chiusa».
+        db = FakeDb()
+        call = db.call_pronta()
+        await pcs.pubblica(db, FakeSecondary(), titolare(), USER_OWNER, call["id"])
+        self._seguita_da_altri(db, call)
+        await pcs.aggiorna(db, FakeSecondary(), titolare(), USER_OWNER, call["id"],
+                           CallAggiornaIn(visibilita="solo_invitati"))
+        await pcs.chiudi(db, FakeSecondary(), titolare(), USER_OWNER, call["id"],
+                         ChiudiIn(esito="completata"))
+        assert self._notifiche(db, "partenariato.call_seguita_modificata") == []
+        assert self._notifiche(db, "partenariato.call_seguita_chiusa") == []
+
+    async def test_chiusura_automatica_di_una_call_solo_su_invito_non_notifica(self):
+        db = FakeDb()
+        call = db.call_pronta(stato="pubblicata", pubblicata_at=_iso(), visibilita="solo_invitati",
+                              scadenza_call=(oggi() - timedelta(days=1)).isoformat())
+        self._seguita_da_altri(db, call)
+        assert await pcs.chiudi_automaticamente(db, call, "scaduta", "scadenza_call")
+        assert self._notifiche(db, "partenariato.call_seguita_chiusa") == []
+
+    async def test_una_bozza_modificata_non_notifica(self):
+        db = FakeDb()
+        call = db.call_pronta()
+        self._seguita_da_altri(db, call)
+        await pcs.aggiorna(db, FakeSecondary(), titolare(), USER_OWNER, call["id"],
+                           CallAggiornaIn(descrizione_pubblica="Descrizione aggiornata"))
+        assert self._notifiche(db, "partenariato.call_seguita_modificata") == []
+
+    async def test_chiusura_automatica_notifica_chi_segue(self):
+        db = FakeDb()
+        call = db.call_pronta(stato="pubblicata", pubblicata_at=_iso(),
+                              scadenza_call=(oggi() - timedelta(days=1)).isoformat())
+        self._seguita_da_altri(db, call)
+        assert await pcs.chiudi_automaticamente(db, call, "scaduta", "scadenza_call")
+        [chiusura] = self._notifiche(db, "partenariato.call_seguita_chiusa")
+        assert chiusura["user_id"] == ALTRO_OWNER
 
 
 class TestChiudiEVersioni:

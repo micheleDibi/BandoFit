@@ -178,6 +178,30 @@ def riga_bando(id_, forte: bool) -> dict:
             "contenuto": {"sections": [{"type": "paragraph", "text": testo}]}}
 
 
+# Passi del WP6 (test propri in test_partenariato_notifiche): qui sostituiti
+# da esiti fissi, per verificare solo l'orchestrazione.
+ESITI_WP6 = {
+    "backfill_collegamenti": {"ricalcolate": 0, "rimosse": 0, "errori": 0},
+    "fanout_pendenti": {"call": 0, "completate": 0, "notificate": 0, "errori": 0},
+    "digest_settimanale": {"esito": "non_dovuto"},
+}
+
+
+def passi_wp6(monkeypatch):
+    async def backfill(primary):
+        return ESITI_WP6["backfill_collegamenti"]
+
+    async def fanout(primary, secondary):
+        return ESITI_WP6["fanout_pendenti"]
+
+    async def digest(primary, adesso):
+        return ESITI_WP6["digest_settimanale"]
+
+    monkeypatch.setattr(sched, "backfill_collegamenti", backfill)
+    monkeypatch.setattr(sched, "fanout_pendenti", fanout)
+    monkeypatch.setattr(sched, "digest_settimanale", digest)
+
+
 class TestClaim:
     async def test_claim_una_volta_al_giorno(self):
         db = FakePrimary()
@@ -201,6 +225,7 @@ class TestClaim:
 
     async def test_esegui_se_dovuto_rispetta_l_ora(self, monkeypatch):
         imposta(monkeypatch, PARTENARIATI_ORA_ESECUZIONE="05:30")
+        passi_wp6(monkeypatch)
         db = FakePrimary()
         prima = datetime(2026, 9, 28, 5, 0, tzinfo=ZoneInfo("Europe/Rome"))
         assert await sched.esegui_se_dovuto(db, SecondarioVietato(), FakeAi(), prima) is None
@@ -209,7 +234,8 @@ class TestClaim:
         esiti = await sched.esegui_se_dovuto(db, SecondarioVietato(), FakeAi(), dopo)
         assert esiti == {"failsafe_estrazioni": 2, "failsafe_bozze_profilo": 2,
                          "failsafe_ai_call": 2, "chiusura_call": NESSUNA_CALL,
-                         "batch_estrazioni": {"eseguite": 0, "motivo": "spento"}}
+                         "batch_estrazioni": {"eseguite": 0, "motivo": "spento"},
+                         **ESITI_WP6}
         # seconda volta nello stesso giorno: già rivendicata
         assert await sched.esegui_se_dovuto(db, SecondarioVietato(), FakeAi(), dopo) is None
 
@@ -227,11 +253,12 @@ class TestPassi:
 
         monkeypatch.setattr(sched, "failsafe_estrazioni", esplode)
         monkeypatch.setattr(sched, "batch_estrazioni", batch)
+        passi_wp6(monkeypatch)
         db = FakePrimary()
         esiti = await sched.esegui_run(db, object(), FakeAi(), OGGI)
         assert esiti == {"failsafe_estrazioni": "errore", "failsafe_bozze_profilo": 2,
                          "failsafe_ai_call": 2, "chiusura_call": NESSUNA_CALL,
-                         "batch_estrazioni": {"eseguite": 0}}
+                         "batch_estrazioni": {"eseguite": 0}, **ESITI_WP6}
         assert chiamato == [OGGI]
         [aggiornamento] = [op for op in db.ops if op[0] == "partenariati_runs" and op[1] == "update"]
         assert aggiornamento[2] == {"riepilogo": esiti}
@@ -428,6 +455,29 @@ class TestChiusuraCall:
         assert [a for a in db.audit if a["action"] == "partenariato.call_chiusa"] == [
             {"action": "partenariato.call_chiusa", "actor": None, "call_id": scaduta["id"],
              "motivo": "scadenza_call"}]
+
+    @pytest.mark.parametrize(("visibilita", "avvisate"), [("pubblica", 1), ("solo_invitati", 0)])
+    async def test_chi_segue_la_call_riceve_la_chiusura(self, visibilita, avvisate):
+        # WP6: il select dello scheduler porta visibilità e sospensione. Chi
+        # segue una call visibile a tutti riceve «chiusa»; una call solo su
+        # invito (404 per chi la segue) non manda segnali.
+        from tests.test_partner_call_service import ALTRA_COMPANY, ALTRO_OWNER
+
+        # il primario finto non proietta le colonne: senza queste, in
+        # produzione la call sembrerebbe non visibile
+        assert {"visibilita", "sospesa_at", "bando_titolo"} <= set(
+            sched.CALL_SELECT_SCHEDULER.split(","))
+        db, Secondary, riga = _call_db()
+        db.tabelle["profiles"][1].update(email="anna@example.test", is_active=True)
+        scaduta = _pubblicata(db, OGGI - timedelta(days=1), visibilita=visibilita)
+        db.tabelle.setdefault("partner_call_salvate", []).append(
+            {"company_profile_id": ALTRA_COMPANY, "partner_call_id": scaduta["id"],
+             "user_id": ALTRO_OWNER})
+        await sched.chiusura_call(db, Secondary(pubblici=[riga()]), OGGI)
+        chiuse = [n for n in db.tabelle["notifications"]
+                  if n["tipo"] == "partenariato.call_seguita_chiusa"]
+        assert len(chiuse) == avvisate
+        assert all(n["user_id"] == ALTRO_OWNER for n in chiuse)
 
     async def test_creatore_diverso_dal_titolare(self):
         db, Secondary, riga = _call_db()

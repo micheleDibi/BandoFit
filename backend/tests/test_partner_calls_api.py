@@ -57,6 +57,10 @@ ROTTE = [
     ("POST", f"/api/v1/partenariati/call/{CALL_FINTA}/pubblica"),
     ("POST", f"/api/v1/partenariati/call/{CALL_FINTA}/chiudi"),
     ("GET", f"/api/v1/partenariati/call/{CALL_FINTA}/versioni"),
+    ("GET", f"/api/v1/partenariati/call/{CALL_FINTA}/suggeriti"),
+    ("GET", f"/api/v1/partenariati/call/{CALL_FINTA}/match"),
+    ("POST", f"/api/v1/partenariati/call/{CALL_FINTA}/salva"),
+    ("DELETE", f"/api/v1/partenariati/call/{CALL_FINTA}/salva"),
     ("POST", "/api/v1/partenariati/segnalazioni"),
 ]
 
@@ -76,6 +80,8 @@ CAMPI_CARD = {
     "id", "stato", "titolo", "bando", "creatore", "ruolo_creatore", "budget_fascia",
     "scadenza_call", "pubblicata_at", "posizioni_n", "requisiti_cercati_n", "mia",
     "wizard_passo", "updated_at",
+    # WP6: contatori della bacheca, match e salvataggio (null/0 per le proprie)
+    "match", "salvata", "candidature_ricevute", "posti",
 }
 
 
@@ -272,13 +278,14 @@ class TestForme:
         db.call_pronta()
         async with _http(mini_app(db)) as client:
             resp = await client.get("/api/v1/partenariati/call?vista=mie")
-            sbagliata = await client.get("/api/v1/partenariati/call?vista=tutte")
+            sbagliata = await client.get("/api/v1/partenariati/call?vista=altre")
         assert resp.status_code == 200
         corpo = resp.json()
         assert set(corpo) == {"items", "total", "page", "page_size", "total_pages"}
         assert set(corpo["items"][0]) == CAMPI_CARD
         assert CANARY_RISERVATI not in resp.text and COMPANY not in resp.text
-        assert sbagliata.status_code == 422  # le altre viste arrivano con il WP6
+        assert corpo["items"][0]["match"] is None and corpo["items"][0]["posti"] == 1
+        assert sbagliata.status_code == 422  # vista sconosciuta
 
     async def test_gap_e_202_dei_job(self, flag, spawned):
         flag(True)

@@ -4,8 +4,17 @@ Regola del modulo partenariati: prima dell'accettazione nessun contatto
 diretto. Vale per TUTTI i testi liberi che altre aziende possono leggere
 (profilo partner in WP4, call in WP5, bozze in WP10), anonimi o no.
 
+Tutti i controlli si fanno sulla FORMA CANONICA del testo (`forma_canonica`:
+NFKC e niente caratteri di formato invisibili), così un contatto non passa
+grazie a spazi a larghezza zero, controlli di direzione o cifre e simboli a
+larghezza piena; la ragione sociale di più parole si cerca anche scritta
+attaccata («RossiMeccanica»). La difesa è la stessa per profilo partner,
+call e (WP7) messaggi di candidatura. I testi si SALVANO senza caratteri
+invisibili (`senza_invisibili`), ma con i caratteri visibili dell'utente: la
+forma canonica serve solo ai controlli.
+
 `trova_rilievi(testo, ident, anonima=...)` restituisce i rilievi in ordine di
-posizione, uno per coppia (tipo, estratto):
+posizione sulla forma canonica, uno per coppia (tipo, estratto):
 - sempre BLOCCANTI: `email` (anche offuscate: «nome [at] dominio», «(at)»,
   «chiocciola», «[dot]», «punto it», « . it»), `telefono` (italiani e
   internazionali, con separatori — spazio, trattino, barra, punto, trattino
@@ -15,7 +24,8 @@ posizione, uno per coppia (tipo, estratto):
   il checksum torna; CF di persona fisica), `iban` (checksum mod 97 o forma
   italiana), `dominio_bloccato` (`link_policy.is_blocked_link`);
 - solo se `anonima` e `ident` è dato, in più: BLOCCANTI `ragione_sociale`
-  (ragione sociale senza forma legale e denominazione del registro),
+  (ragione sociale senza forma legale e denominazione del registro, anche
+  scritte attaccate se lunghe almeno `MIN_NOME_COMPATTO` caratteri),
   `piva_cf` (P.IVA e CF dell'azienda anche spezzati da separatori) e
   `dominio_azienda` (dominio del sito); AVVISI non bloccanti `persona` (cognomi
   di `company_people` come parole singole: «Ferro» o «Costa» sono anche parole
@@ -23,7 +33,9 @@ posizione, uno per coppia (tipo, estratto):
 
 `anonimizza(testo, ident)` sostituisce con «[rimosso]» tutto ciò che
 `trova_rilievi(..., anonima=True)` considera bloccante (con `ident=None` solo i
-contatti): dopo, il testo non ha più rilievi bloccanti. Gli avvisi restano.
+contatti): dopo, il testo non ha più rilievi bloccanti. Gli avvisi restano. Il
+testo restituito non ha mai caratteri invisibili ed è nella forma canonica
+solo se è lì che c'era qualcosa da togliere.
 
 Falsi positivi esclusi per costruzione: anni e intervalli di anni («2021-2027»),
 date, importi con separatore delle migliaia («€ 250.000», «1.250.000»),
@@ -129,6 +141,36 @@ _PRIORITA = {
 
 
 # ------------------------------------------------------------ normalizzazione
+
+
+def senza_invisibili(testo: str) -> str:
+    """Il testo senza caratteri di formato invisibili (categoria Unicode Cf:
+    spazi a larghezza zero, controlli di direzione, trattino morbido, …), con
+    ogni spazio Unicode (Zs) reso uno spazio normale e i separatori di riga e
+    di paragrafo (Zl, Zp) resi a capo. Nessun carattere visibile cambia."""
+    uscita: list[str] = []
+    for ch in testo:
+        if ch.isascii():
+            uscita.append(ch)
+            continue
+        categoria = unicodedata.category(ch)
+        if categoria == "Cf":
+            continue
+        if categoria == "Zs":
+            uscita.append(" ")
+        elif categoria in ("Zl", "Zp"):
+            uscita.append("\n")
+        else:
+            uscita.append(ch)
+    return "".join(uscita)
+
+
+def forma_canonica(testo: str) -> str:
+    """La forma su cui si fanno i controlli anti-contatti (C7): NFKC (cifre e
+    simboli a larghezza piena, varianti di compatibilità → forma di base) e
+    poi `senza_invisibili`. Un contatto scritto con caratteri equivalenti o
+    spezzato da caratteri invisibili qui torna leggibile."""
+    return senza_invisibili(unicodedata.normalize("NFKC", testo))
 
 
 def _normalizza_con_mappa(testo: str) -> tuple[str, list[int]]:
@@ -941,9 +983,27 @@ def _regex_con_separatori(valore: str) -> re.Pattern:
     )
 
 
+# Ragione sociale o denominazione di più parole: si cerca anche scritta tutta
+# attaccata («RossiMeccanica»), se lunga almeno così (sotto, troppe parole
+# comuni).
+MIN_NOME_COMPATTO = 8
+
+
+def _nomi(ident: Identificativi) -> tuple[str, ...]:
+    """Ragione sociale e denominazione e, per un nome di più parole, lo stesso
+    nome senza spazi."""
+    nomi = _unici((ident.ragione_sociale, ident.denominazione))
+    compatti = (
+        nome.replace(" ", "")
+        for nome in nomi
+        if " " in nome and len(nome.replace(" ", "")) >= MIN_NOME_COMPATTO
+    )
+    return _unici((*nomi, *compatti))
+
+
 def _identificativi(testo: str, ident: Identificativi) -> Iterator[_Occorrenza]:
     norm, mappa = _normalizza_con_mappa(testo)
-    for nome in _unici((ident.ragione_sociale, ident.denominazione)):
+    for nome in _nomi(ident):
         for a, b in _cerca_normalizzato(testo, norm, mappa, nome):
             yield _Occorrenza("ragione_sociale", a, b, True)
     for cognome in ident.cognomi:
@@ -1023,10 +1083,12 @@ def trova_rilievi(
     testo: str | None, ident: Identificativi | None, *, anonima: bool
 ) -> list[Rilievo]:
     """Rilievi del testo in ordine di posizione, senza doppioni (tipo,
-    estratto). `ident` conta solo se `anonima`: un profilo nominativo può
+    estratto), cercati sulla forma canonica (`forma_canonica`): gli estratti
+    vengono da lì. `ident` conta solo se `anonima`: un profilo nominativo può
     citare il proprio nome, mai i contatti."""
     if not isinstance(testo, str) or not testo.strip():
         return []
+    testo = forma_canonica(testo)
     rilievi: list[Rilievo] = []
     visti: set[tuple[str, str]] = set()
     for o in _trova(testo, ident if anonima else None):
@@ -1051,9 +1113,18 @@ def anonimizza(testo: str | None, ident: Identificativi | None) -> tuple[str, li
     dell'azienda se `ident` è dato, contatti sempre). Restituisce il testo e
     i brani rimossi, senza doppioni, nell'ordine in cui compaiono: sono dati
     identificativi, da mostrare all'utente e MAI da loggare. Gli avvisi
-    (cognomi) restano: sono ambigui e li decide l'utente."""
+    (cognomi) restano: sono ambigui e li decide l'utente.
+
+    Come `trova_rilievi`, guarda la forma canonica: il testo esce sempre senza
+    caratteri invisibili e, se nella forma canonica c'è qualcosa da togliere
+    (un contatto a larghezza piena, un nome spezzato da un carattere
+    invisibile), esce in forma canonica, ripulito."""
     if not isinstance(testo, str) or not testo:
         return testo or "", []
+    testo = senza_invisibili(testo)
+    canonico = forma_canonica(testo)
+    if canonico != testo and any(o.bloccante for o in _trova(canonico, ident)):
+        testo = canonico
     rimossi: list[str] = []
     for _ in range(_PASSATE_ANONIMIZZA):
         bloccanti = [o for o in _trova(testo, ident) if o.bloccante]

@@ -21,7 +21,6 @@ Le call sono per ora SOLO anonime (WP4, `NOMINATIVO_DISPONIBILE = False`):
 """
 
 import math
-import unicodedata
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal
@@ -65,6 +64,9 @@ from app.schemas.partenariato_vocabolario import (
 )
 from app.schemas.partner_profile import PAESI_ISO2, AtecoSezioneOut
 from app.schemas.regole_finanziarie import RegolaFinanziaria
+# Forma canonica e testi senza caratteri invisibili: definiti con i controlli
+# anti-contatti (stessa difesa per profilo, call e messaggi), riesportati qui.
+from app.services.partenariato_anonimato import forma_canonica, senza_invisibili  # noqa: F401
 
 # ------------------------------------------------------------------ domini
 
@@ -181,36 +183,6 @@ _ALIAS_PAESI = {"EL": "GR", "UK": "GB"}
 
 def _cifre(n: int) -> str:
     return f"{n:,}".replace(",", ".")
-
-
-def senza_invisibili(testo: str) -> str:
-    """Il testo senza caratteri di formato invisibili (categoria Unicode Cf:
-    spazi a larghezza zero, controlli di direzione, trattino morbido, …), con
-    ogni spazio Unicode (Zs) reso uno spazio normale e i separatori di riga e
-    di paragrafo (Zl, Zp) resi a capo. Nessun carattere visibile cambia."""
-    uscita: list[str] = []
-    for ch in testo:
-        if ch.isascii():
-            uscita.append(ch)
-            continue
-        categoria = unicodedata.category(ch)
-        if categoria == "Cf":
-            continue
-        if categoria == "Zs":
-            uscita.append(" ")
-        elif categoria in ("Zl", "Zp"):
-            uscita.append("\n")
-        else:
-            uscita.append(ch)
-    return "".join(uscita)
-
-
-def forma_canonica(testo: str) -> str:
-    """La forma su cui si fanno i controlli anti-contatti (C7): NFKC (cifre e
-    simboli a larghezza piena, varianti di compatibilità → forma di base) e
-    poi `senza_invisibili`. Un contatto scritto con caratteri equivalenti o
-    spezzato da caratteri invisibili qui torna leggibile."""
-    return senza_invisibili(unicodedata.normalize("NFKC", testo))
 
 
 def _testo(

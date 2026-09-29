@@ -43,6 +43,17 @@ Segnalazioni (C7, DSA): `segnala` con rate limit anti-abuso, contenuto
 visibile al segnalante (404 altrimenti), snapshot della proiezione pubblica e
 conferma di ricezione in-app.
 
+WP6 (bacheca, «Per te», suggeriti, call salvate): le letture passano
+dall'indice in-process (`partenariato_indice`) e dal matching puro
+(`partenariato_matching`); ogni pagina restituita è ricontrollata live
+(call ancora pubblicate, candidati ancora con l'opt-in). Il dettaglio di una
+call di un altro owner apre la vista PUBBLICA (ruolo `pubblico`: pubblicata,
+visibile a tutti, non sospesa) con il match dell'azienda attiva. Dopo la
+pubblicazione: indice invalidato e, in background, chiavi dei collegamenti
+del creatore e fan-out delle notifiche proattive; dopo una modifica della
+call pubblicata o la sua chiusura: indice invalidato e notifica a chi l'ha
+salvata.
+
 Log: mai testi, P.IVA, nomi o importi; solo id e codici.
 """
 
@@ -107,9 +118,12 @@ from app.services import (
     bilanci_service,
     entitlement_service,
     lookup_service,
+    partenariato_indice,
+    partenariato_notifiche,
     partner_call_ai,
     rate_limit_service,
 )
+from app.services import partenariato_matching as pm
 from app.services import partner_profile_service as pps
 from app.services.bilanci_indicatori import calcola_fasce
 from app.services.notification_service import notify
@@ -121,13 +135,21 @@ from app.services.partenariato_accesso import (
     REQUISITO_SELECT,
     RUOLI_AZIENDA,
     RUOLI_SCRITTURA,
+    CallBachecaOut,
+    CallPubblicaDettaglioOut,
+    PerTeOut,
+    RiepilogoOut,
+    SuggeritiOut,
+    call_bacheca,
     call_card,
     call_pubblica,
+    candidato_suggerito,
     carica_call_autorizzata,
     creatore_pubblico,
     nomi_regioni,
     normalizza_id,
     proietta_versione,
+    pubblicamente_visibile,
     requisito_visibile,
     rilievi_testo,
 )
@@ -562,13 +584,19 @@ async def chiudi_automaticamente(primary, call: Mapping, nuovo_stato: str, motiv
     """Chiusura d'ufficio condizionata (`fn_partner_call_chiudi_auto`: solo da
     bozza o pubblicata) e, se è avvenuta ora, notifica al creatore e al
     titolare (dedup per call: un solo avviso anche se scheduler e lettura
-    concorrono)."""
+    concorrono) e, per una call che era visibile a tutti, a chi l'ha salvata
+    (WP6: chi non la vedeva più non riceve segnali); indice del matching
+    invalidato."""
+    visibile = pubblicamente_visibile(call)
     resp = await primary.rpc(
         "fn_partner_call_chiudi_auto",
         {"p_call": str(call["id"]), "p_nuovo_stato": nuovo_stato, "p_motivo": motivo},
     ).execute()
     if resp.data is not True:
         return False
+    partenariato_indice.invalida()
+    if visibile:
+        await partenariato_notifiche.notifica_salvate(primary, call, "chiusa")
     destinatari = list(dict.fromkeys(
         str(u) for u in (call.get("family_parent_id"), call.get("creato_da")) if u
     ))
@@ -1054,8 +1082,9 @@ def _parametri(active, user: dict, call: Mapping | None = None) -> dict:
 
 async def lista_mie(
     primary, secondary, active, user: dict, *, page: int = 1, page_size: int = 20
-) -> Page[CallCardOut]:
-    """Le call dell'azienda attiva (titolare e membri), dalla più recente."""
+) -> Page[CallBachecaOut]:
+    """Le call dell'azienda attiva (titolare e membri), dalla più recente,
+    con i contatori della bacheca (senza match: sono le proprie)."""
     if not active.company_id:
         return Page.build([], 0, page, page_size)
     offset = (page - 1) * page_size
@@ -1076,30 +1105,50 @@ async def lista_mie(
     cercati, posizioni, lookups = await asyncio.gather(
         primary.table("partner_call_requisiti").select("call_id").in_("call_id", ids)
         .eq("cercato", True).execute(),
-        primary.table("partner_call_posizioni").select("call_id").in_("call_id", ids).execute(),
+        primary.table("partner_call_posizioni").select("call_id,numero").in_("call_id", ids)
+        .execute(),
         _lookups(secondary),
     )
     conta_cercati: dict[str, int] = {}
     for riga in cercati.data or []:
         conta_cercati[str(riga["call_id"])] = conta_cercati.get(str(riga["call_id"]), 0) + 1
     conta_posizioni: dict[str, int] = {}
+    conta_posti: dict[str, int] = {}
     for riga in posizioni.data or []:
-        conta_posizioni[str(riga["call_id"])] = conta_posizioni.get(str(riga["call_id"]), 0) + 1
+        chiave = str(riga["call_id"])
+        conta_posizioni[chiave] = conta_posizioni.get(chiave, 0) + 1
+        conta_posti[chiave] = conta_posti.get(chiave, 0) + _posti(riga)
     creatore = creatore_pubblico(az.dati_registro, az.dossier, nomi_regioni(lookups))
     items = [
-        call_card(
-            c, creatore, posizioni_n=conta_posizioni.get(str(c["id"]), 0),
-            requisiti_cercati_n=conta_cercati.get(str(c["id"]), 0), mia=True, ident=az.ident,
+        call_bacheca(
+            call_card(
+                c, creatore, posizioni_n=conta_posizioni.get(str(c["id"]), 0),
+                requisiti_cercati_n=conta_cercati.get(str(c["id"]), 0), mia=True,
+                ident=az.ident,
+            ),
+            posti=conta_posti.get(str(c["id"]), 0),
         )
         for c in calls
     ]
     return Page.build(items, resp.count or len(items), page, page_size)
 
 
-async def dettaglio(primary, secondary, active, user: dict, call_id: Any) -> CallVistaCreatoreOut:
-    """GET della call per l'azienda creatrice, con il failsafe dei job AI e il
-    controllo in lettura delle chiusure automatiche."""
-    call, _ = await carica_call_autorizzata(primary, call_id, active, user, ammessi=RUOLI_AZIENDA)
+def _posti(posizione: Mapping) -> int:
+    """Partner cercati da una posizione (`numero`, almeno 1)."""
+    numero = posizione.get("numero")
+    return numero if isinstance(numero, int) and not isinstance(numero, bool) and numero > 0 else 1
+
+
+async def dettaglio(
+    primary, secondary, active, user: dict, call_id: Any
+) -> CallVistaCreatoreOut | CallPubblicaDettaglioOut:
+    """GET della call. Per l'azienda creatrice (titolare e membri) la vista
+    completa, con il failsafe dei job AI e il controllo in lettura delle
+    chiusure automatiche; per le altre aziende (WP6) la vista PUBBLICA con il
+    proprio match (`_dettaglio_pubblico`)."""
+    call, ruolo = await carica_call_autorizzata(primary, call_id, active, user)
+    if ruolo not in RUOLI_AZIENDA:
+        return await _dettaglio_pubblico(primary, secondary, active, call)
     call = await _failsafe_ai(primary, call)
     call, stato_bando, letto = await _controlla_in_lettura(primary, secondary, call)
     return await _vista(primary, active, call, stato_bando=stato_bando, bando_letto=letto)
@@ -1268,8 +1317,72 @@ async def aggiorna(primary, secondary, active, user: dict, call_id: Any, dati: C
         raise BadRequestError("Il budget del progetto non rientra nella fascia scelta")
     await _rpc(primary, "fn_partner_call_aggiorna", {**_parametri(active, user, call),
                                                      "p_campi": campi})
-    return await _vista(primary, active, await _ricarica(primary, call["id"]), az=az,
-                        secondary=secondary)
+    aggiornata = await _ricarica(primary, call["id"])
+    await _dopo_modifica(primary, call, aggiornata)
+    return await _vista(primary, active, aggiornata, az=az, secondary=secondary)
+
+
+async def _dopo_modifica(primary, prima: Mapping, dopo: Mapping) -> None:
+    """Dopo una scrittura riuscita su una call PUBBLICATA: indice del
+    matching invalidato e, solo se chi la segue può accorgersi della modifica,
+    notifica «modificata» (WP6). Niente notifica se la RPC non ha creato una
+    nuova versione (salvataggio senza modifiche), se la call non è visibile a
+    tutti prima e dopo (solo su invito o sospesa: chi la segue non la vede)
+    o se la proiezione pubblica non è cambiata (modifiche dei soli campi
+    riservati o dei requisiti che i terzi non vedono): la notifica non deve
+    rivelare ciò che la call nasconde. Best-effort."""
+    if prima.get("stato") != "pubblicata":
+        return
+    partenariato_indice.invalida()
+    if dopo.get("versione") == prima.get("versione"):
+        return
+    if not (pubblicamente_visibile(prima) and pubblicamente_visibile(dopo)):
+        return
+    if not await _proiezione_cambiata(
+        primary, dopo["id"], prima.get("versione"), dopo.get("versione")
+    ):
+        return
+    await partenariato_notifiche.notifica_salvate(primary, dopo, "modificata")
+
+
+def _pubblica_da_versione(snapshot: Any) -> dict | None:
+    """La proiezione pubblica (`call_pubblica`, la stessa verso terzi) dello
+    snapshot di una versione; il creatore è lo stesso nelle due versioni e
+    non entra nel confronto."""
+    snapshot = snapshot if isinstance(snapshot, Mapping) else {}
+    call = snapshot.get("call")
+    if not isinstance(call, Mapping) or call.get("id") is None:
+        return None
+    try:
+        return call_pubblica(
+            call,
+            [r for r in snapshot.get("requisiti") or [] if isinstance(r, Mapping)],
+            [p for p in snapshot.get("posizioni") or [] if isinstance(p, Mapping)],
+            creatore_pubblico(None, None, {}),
+            ident=None,
+            regioni={},
+        ).model_dump(mode="json")
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+async def _proiezione_cambiata(primary, call_id: Any, prima: Any, dopo: Any) -> bool:
+    """La proiezione pubblica è cambiata tra le versioni `prima` e `dopo`
+    (snapshot di `partner_call_versioni`)? Nel dubbio (snapshot mancanti o
+    illeggibili) no: meglio una notifica in meno che un segnale su un dato
+    riservato."""
+    try:
+        resp = await (
+            primary.table("partner_call_versioni").select("versione,snapshot")
+            .eq("call_id", str(call_id)).in_("versione", [prima, dopo]).execute()
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        logger.warning("call: versioni non lette per la notifica (call %s, %s)", call_id,
+                       getattr(exc, "code", None) or type(exc).__name__)
+        return False
+    snapshot = {r.get("versione"): r.get("snapshot") for r in resp.data or []}
+    vecchia, nuova = (_pubblica_da_versione(snapshot.get(v)) for v in (prima, dopo))
+    return vecchia is not None and nuova is not None and vecchia != nuova
 
 
 async def conferma_regole(primary, secondary, active, user: dict, call_id: Any,
@@ -1474,7 +1587,9 @@ async def salva_requisiti(primary, secondary, active, user: dict, call_id: Any,
     await _rpc(primary, "fn_partner_call_sostituisci_requisiti", {
         **_parametri(active, user, call), "p_requisiti": payload,
     })
-    call = await _ricarica(primary, call["id"])
+    aggiornata = await _ricarica(primary, call["id"])
+    await _dopo_modifica(primary, call, aggiornata)
+    call = aggiornata
     righe = await _requisiti(primary, call["id"])
     return await _gap_out(primary, call, active, _gap_requisiti(righe, profilo, call))
 
@@ -1505,8 +1620,9 @@ async def salva_posizioni(primary, secondary, active, user: dict, call_id: Any,
     await _rpc(primary, "fn_partner_call_sostituisci_posizioni", {
         **_parametri(active, user, call), "p_posizioni": payload,
     })
-    return await _vista(primary, active, await _ricarica(primary, call["id"]), az=az,
-                        secondary=secondary)
+    aggiornata = await _ricarica(primary, call["id"])
+    await _dopo_modifica(primary, call, aggiornata)
+    return await _vista(primary, active, aggiornata, az=az, secondary=secondary)
 
 
 async def pubblica(primary, secondary, active, user: dict, call_id: Any,
@@ -1548,6 +1664,13 @@ async def pubblica(primary, secondary, active, user: dict, call_id: Any,
         "p_scadenza_call": scadenza.isoformat(),
         "p_richiedi_non_sandbox": pps.richiedi_non_sandbox(),
     })
+    # WP6: la call entra subito nell'indice; in background le chiavi dei
+    # collegamenti del creatore e il fan-out delle notifiche proattive
+    # (ripreso dallo scheduler se il processo muore a metà).
+    partenariato_indice.invalida()
+    _spawn(partenariato_notifiche.dopo_pubblicazione(
+        primary, secondary, str(call["id"]), str(active.company_id)
+    ))
     call = await _ricarica(primary, call["id"])
     return await _vista(primary, active, call, stato_bando=stato_bando, bando_letto=True, az=az)
 
@@ -1559,7 +1682,14 @@ async def chiudi(primary, secondary, active, user: dict, call_id: Any, dati: Chi
     await _rpc(primary, "fn_partner_call_chiudi", {
         **_parametri(active, user, call), "p_esito": dati.esito,
     })
-    return await _vista(primary, active, await _ricarica(primary, call["id"]))
+    chiusa = await _ricarica(primary, call["id"])
+    if call.get("stato") == "pubblicata":
+        partenariato_indice.invalida()
+        # Solo a chi la vedeva: una call solo su invito o sospesa è già 404
+        # per chi la segue, e la notifica ne rivelerebbe l'esistenza.
+        if pubblicamente_visibile(call):
+            await partenariato_notifiche.notifica_salvate(primary, chiusa, "chiusa")
+    return await _vista(primary, active, chiusa)
 
 
 # ------------------------------------------------------------ proposte AI
@@ -1732,3 +1862,429 @@ async def segnala(primary, secondary, active, user: dict, dati: SegnalazioneIn
         dedup_key=f"segnalazione:{identificativo}",
     )
     return SegnalazioneOut(id=identificativo, stato="ricevuta", created_at=creata)
+
+
+# ------------------------------------------------ bacheca e scoperta (WP6)
+
+MSG_AZIENDA_MANCANTE = "Importa o crea prima la tua azienda"
+MSG_CALL_PROPRIA = "Le call della tua azienda le trovi in «Le mie call»"
+# Ricontrolli live di una pagina prima di arrendersi a una pagina più corta.
+_TENTATIVI_PAGINA = 3
+FINESTRA_NUOVE = timedelta(days=7)
+
+
+def _pesi() -> pm.PesiMatching:
+    return pm.PesiMatching.da_settings(get_settings())
+
+
+def _richiedi_azienda_per_te(active) -> str:
+    if not active.company_id:
+        raise AppError(409, "azienda_mancante", MSG_AZIENDA_MANCANTE)
+    return str(active.company_id)
+
+
+async def _salvate(primary, company_id: str | None) -> set[str]:
+    if not company_id:
+        return set()
+    resp = (
+        await primary.table("partner_call_salvate")
+        .select("partner_call_id")
+        .eq("company_profile_id", str(company_id))
+        .execute()
+    )
+    return {str(r["partner_call_id"]) for r in resp.data or []}
+
+
+async def _opt_in(primary, company_id: str | None) -> bool:
+    """L'azienda ha l'opt-in visibile e il profilo non è sospeso."""
+    if not company_id:
+        return False
+    riga = await _una(
+        primary.table("company_partner_profiles").select("visibile_come_partner,sospeso_at")
+        .eq("company_profile_id", str(company_id))
+    )
+    return bool(riga and riga.get("visibile_come_partner") is True
+                and riga.get("sospeso_at") is None)
+
+
+def _in_bacheca(ci, snapshot, active, oggi: date) -> bool:
+    """Una call che la bacheca mostra all'azienda attiva: visibile a tutti,
+    di un altro owner, attiva (non scaduta, creatore vivo)."""
+    if not pubblicamente_visibile(ci.riga) or snapshot is None:
+        return False
+    if ci.owner_id == str(active.owner_id):
+        return False
+    for scadenza in (snapshot.scadenza_call, snapshot.bando_scadenza):
+        if scadenza is not None and scadenza < oggi:
+            return False
+    return snapshot.creatore.viva
+
+
+def _card(ci, idx, regioni: Mapping[int, str]) -> CallCardOut:
+    vetrina = idx.vetrine.get(ci.company_id) or partenariato_indice.Vetrina()
+    creatore = creatore_pubblico(vetrina.registro, vetrina.dossier, regioni)
+    return call_card(ci.riga, creatore, posizioni_n=ci.posizioni_n,
+                     requisiti_cercati_n=ci.requisiti_cercati_n, mia=False, ident=None)
+
+
+async def _pagina_viva(elementi: list, numero: int, *, chiave, controlla, impagina):
+    """Pagina `numero` di `elementi` ricontrollata live: gli elementi che non
+    passano (`controlla` → insieme dei vivi) escono e la pagina si
+    ricompone, al più `_TENTATIVI_PAGINA` volte (poi resta più corta). Un
+    elemento morto rende vecchio l'indice: si invalida. → (pagina, restanti,
+    numero di pagine)."""
+    esclusi: set[str] = set()
+    pagina: list = []
+    restanti = elementi
+    pagine: list[list] = []
+    for _ in range(_TENTATIVI_PAGINA):
+        restanti = [e for e in elementi if chiave(e) not in esclusi]
+        pagine = impagina(restanti)
+        pagina = pagine[numero - 1] if 1 <= numero <= len(pagine) else []
+        vivi = await controlla([chiave(e) for e in pagina]) if pagina else set()
+        morti = {chiave(e) for e in pagina} - set(vivi)
+        if not morti:
+            return pagina, restanti, len(pagine)
+        esclusi |= morti
+        partenariato_indice.invalida()
+    pagina = [e for e in pagina if chiave(e) not in esclusi]
+    return pagina, [e for e in restanti if chiave(e) not in esclusi], len(pagine)
+
+
+def _a_fette(dimensione: int):
+    def impagina(elementi: list) -> list[list]:
+        return [elementi[i : i + dimensione] for i in range(0, len(elementi), dimensione)]
+    return impagina
+
+
+async def bacheca(
+    primary, secondary, active, user: dict, *, vista: str = "tutte", bando: str | None = None,
+    regione: int | None = None, forma: str | None = None, ruolo: str | None = None,
+    ordine: str = "affinita", page: int = 1, page_size: int = 20,
+) -> Page[CallBachecaOut]:
+    """GET /partenariati/call: `mie` (le call dell'azienda attiva), `tutte`
+    (call pubblicate e visibili a tutti di ALTRI owner) o `salvate` (quelle
+    seguite, ancora visibili). Filtri: bando (slug o id), regione (sede del
+    creatore o regioni richieste), forma prevista, ruolo offerto (capofila o
+    partner); ordine per affinità (il proprio match prima, per requisiti
+    coperti e punteggio), recenti o scadenza. Ogni pagina è ricontrollata
+    live (call ancora pubblicate, creatore vivo)."""
+    if vista == "mie":
+        return await lista_mie(primary, secondary, active, user, page=page, page_size=page_size)
+    oggi = _oggi()
+    idx = await partenariato_indice.indice(primary, secondary)
+    salvate = await _salvate(primary, active.company_id)
+    elenco = []
+    for ci in idx.bacheca.values():
+        snapshot = idx.matching.calls.get(ci.id)
+        if not _in_bacheca(ci, snapshot, active, oggi):
+            continue
+        if vista == "salvate" and ci.id not in salvate:
+            continue
+        if bando and bando not in (str(ci.riga.get("bando_id")), ci.riga.get("bando_slug")):
+            continue
+        if regione is not None and regione not in ci.regioni_ids:
+            continue
+        if forma and ci.riga.get("forma_aggregazione_prevista") != forma:
+            continue
+        if ruolo and ruolo not in ci.ruoli:
+            continue
+        elenco.append((ci, snapshot))
+    profilo = (
+        await partenariato_indice.profilo_azienda(primary, idx, active.company_id)
+        if active.company_id else None
+    )
+    pesi = _pesi()
+    match = {
+        ci.id: pm.valuta_coppia(snapshot, profilo, oggi=oggi, pesi=pesi, direzione="per_te")
+        for ci, snapshot in elenco
+    } if profilo is not None else {}
+
+    def recente(ci) -> str:
+        return str(ci.riga.get("pubblicata_at") or "")
+
+    if ordine == "scadenza":
+        elenco.sort(key=lambda e: (e[1].scadenza_call is None, e[1].scadenza_call or oggi,
+                                   e[0].id))
+    else:
+        elenco.sort(key=lambda e: recente(e[0]), reverse=True)
+        if ordine == "affinita":
+            elenco.sort(key=lambda e: (
+                match.get(e[0].id) is None,
+                -(match[e[0].id].coperti if match.get(e[0].id) else 0),
+                -(match[e[0].id].punteggio if match.get(e[0].id) else 0),
+            ))
+    pagina, restanti, _ = await _pagina_viva(
+        elenco, page,
+        chiave=lambda e: e[0].id,
+        controlla=lambda ids: partenariato_indice.ricontrollo_call_live(primary, ids, oggi=oggi),
+        impagina=_a_fette(page_size),
+    )
+    regioni = nomi_regioni(await _lookups(secondary))
+    items = [
+        call_bacheca(
+            _card(ci, idx, regioni),
+            match=pm.proietta_match(match[ci.id], vista="proprio") if match.get(ci.id) else None,
+            salvata=ci.id in salvate,
+            posti=ci.posti,
+        )
+        for ci, _snapshot in pagina
+    ]
+    return Page.build(items, len(restanti), page, page_size)
+
+
+async def per_te(primary, secondary, active, user: dict, *, page: int = 1,
+                 page_size: int = 20) -> PerTeOut:
+    """«Per te»: le call che l'azienda attiva completerebbe (almeno un
+    requisito cercato o una posizione coperti), ordinate come i suggeriti e
+    con al massimo 2 call dello stesso owner per pagina. Anche senza opt-in
+    (solo scoperta, Q25: `opt_in` false e CTA); per candidarsi serve."""
+    company_id = _richiedi_azienda_per_te(active)
+    oggi = _oggi()
+    idx = await partenariato_indice.indice(primary, secondary)
+    profilo = await partenariato_indice.profilo_azienda(primary, idx, company_id)
+    opt_in = await _opt_in(primary, company_id)
+    if profilo is None:
+        return PerTeOut(items=[], total=0, page=page, page_size=page_size, total_pages=0,
+                        opt_in=opt_in)
+    pesi = _pesi()
+    risultati = pm.per_te(idx.matching, profilo, oggi=oggi, pesi=pesi)
+    pagina, restanti, n_pagine = await _pagina_viva(
+        risultati, page,
+        chiave=lambda m: m.call_id,
+        controlla=lambda ids: partenariato_indice.ricontrollo_call_live(primary, ids, oggi=oggi),
+        impagina=lambda elementi: pm.impagina(
+            elementi, dimensione=page_size, max_per_owner=pesi.max_per_owner_pagina,
+            owner=pm.owner_call,
+        ),
+    )
+    salvate = await _salvate(primary, company_id)
+    regioni = nomi_regioni(await _lookups(secondary))
+    items = [
+        call_bacheca(
+            _card(idx.bacheca[m.call_id], idx, regioni),
+            match=pm.proietta_match(m, vista="proprio"),
+            salvata=m.call_id in salvate,
+            posti=idx.bacheca[m.call_id].posti,
+        )
+        for m in pagina
+        if m.call_id in idx.bacheca
+    ]
+    return PerTeOut(items=items, total=len(restanti), page=page, page_size=page_size,
+                    total_pages=n_pagine, opt_in=opt_in)
+
+
+async def suggeriti(primary, secondary, active, user: dict, call_id: Any, *, page: int = 1,
+                    posizione_id: str | None = None) -> SuggeritiOut:
+    """Aziende suggerite al creatore della call (titolare e membri in
+    lettura): solo call pubblicate; pseudonimo per call, mai
+    `company_profile_id`; match in vista «terzi»; al massimo 2 aziende dello
+    stesso owner per pagina; ricontrollo live di opt-in, sospensione,
+    azienda viva (e `accetta_inviti` per le call solo su invito) su ogni
+    pagina, anche con l'indice fresco (revoca immediata)."""
+    call, _ = await carica_call_autorizzata(primary, call_id, active, user, ammessi=RUOLI_AZIENDA)
+    dimensione = max(1, get_settings().partenariato_suggeriti_pagina)
+    vuota = SuggeritiOut(items=[], total=0, page=page, page_size=dimensione, total_pages=0)
+    if call.get("stato") != "pubblicata":
+        return vuota
+    idx = await partenariato_indice.indice(primary, secondary)
+    cid = str(call["id"])
+    if cid not in idx.matching.calls:
+        return vuota
+    pesi = _pesi()
+    risultati = pm.suggeriti_per_call(
+        idx.matching, cid, pm.FiltriSuggeriti(posizione_id=posizione_id),
+        oggi=_oggi(), pesi=pesi,
+    )
+    solo_invitati = call.get("visibilita") == "solo_invitati"
+
+    async def controlla(ids: list[str]) -> set[str]:
+        vivi = await partenariato_indice.ricontrollo_live(primary, ids)
+        return {c for c, dati in vivi.items() if not solo_invitati or dati["accetta_inviti"]}
+
+    pagina, restanti, n_pagine = await _pagina_viva(
+        risultati, page,
+        chiave=lambda m: m.company_id,
+        controlla=controlla,
+        impagina=lambda elementi: pm.impagina(
+            elementi, dimensione=dimensione, max_per_owner=pesi.max_per_owner_pagina,
+        ),
+    )
+    profili = await _profili_pubblici(
+        primary, secondary, [m.company_id for m in pagina], idx.matching.candidati
+    )
+    items = [
+        candidato_suggerito(m, call_id=cid, profilo=profili[m.company_id])
+        for m in pagina
+        if m.company_id in profili
+    ]
+    return SuggeritiOut(items=items, total=len(restanti), page=page, page_size=dimensione,
+                        total_pages=n_pagine)
+
+
+PROFILO_PUBBLICO_SELECT = (
+    "company_profile_id,codice_pubblico,anonimo,accetta_inviti,descrizione_competenze,"
+    "competenze,competenze_libere,tipi_soggetto,ruoli_disponibili,regioni_interesse,"
+    "paesi_interesse,forme_accettate,esperienze,certificazioni,infrastrutture"
+)
+
+
+async def _profili_pubblici(primary, secondary, ids: list[str], candidati: Mapping) -> dict:
+    """Profili pubblici (WP4, whitelist) delle aziende di una pagina di
+    suggeriti, letti a blocco (profilo, azienda, registro, persone: quattro
+    letture per pagina). Le fasce vengono dal profilo di matching (stessi
+    bilanci); gli identificativi dell'azienda tolgono i riferimenti dai testi
+    liberi degli anonimi. Un'azienda sparita nel frattempo manca."""
+    if not ids:
+        return {}
+    profili, aziende, dati, persone, lookups = await asyncio.gather(
+        primary.table("company_partner_profiles").select(PROFILO_PUBBLICO_SELECT)
+        .in_("company_profile_id", ids).execute(),
+        primary.table("company_profiles").select(AZIENDA_SELECT).in_("id", ids).execute(),
+        primary.table("company_data").select(f"company_profile_id,{COMPANY_DATA_SELECT}")
+        .in_("company_profile_id", ids).execute(),
+        primary.table("company_people").select(f"company_profile_id,{PERSONE_SELECT}")
+        .in_("company_profile_id", ids).execute(),
+        _lookups(secondary),
+    )
+    per_id = {str(r["company_profile_id"]): r for r in profili.data or []}
+    registri = {str(r["company_profile_id"]): r for r in dati.data or []}
+    nomi: dict[str, list[dict]] = {}
+    for riga in persone.data or []:
+        nomi.setdefault(str(riga["company_profile_id"]), []).append(riga)
+    uscita: dict = {}
+    for company in aziende.data or []:
+        cid = str(company["id"])
+        riga = per_id.get(cid)
+        if riga is None or cid not in candidati:
+            continue
+        az = Azienda(company_id=cid, company=company, company_data=registri.get(cid),
+                     persone=nomi.get(cid, []), profilo_partner=riga)
+        uscita[cid] = profilo_pubblico(riga, az.dati_registro, az.dossier,
+                                       candidati[cid].fasce, lookups, ident=az.ident)
+    return uscita
+
+
+async def _match_proprio(primary, secondary, active, call: Mapping):
+    """Il match dell'azienda attiva con una call di altri (vista «proprio»,
+    con i propri valori nelle regole finanziarie). None se l'azienda manca,
+    se la coppia è esclusa o se l'indice non è disponibile (best-effort: la
+    vista pubblica non dipende dal matching)."""
+    if not active.company_id:
+        return None
+    try:
+        idx = await partenariato_indice.indice(primary, secondary)
+        snapshot = idx.matching.calls.get(str(call["id"]))
+        if snapshot is None:
+            return None
+        profilo = await partenariato_indice.profilo_azienda(primary, idx, active.company_id)
+        if profilo is None:
+            return None
+        m = pm.valuta_coppia(snapshot, profilo, oggi=_oggi(), pesi=_pesi(),
+                             direzione="per_te", dettaglio_proprio=True)
+    except Exception as exc:  # noqa: BLE001 — il match è un di più
+        logger.warning("call: match non calcolato (call %s, %s)", call.get("id"),
+                       getattr(exc, "code", None) or type(exc).__name__)
+        return None
+    return pm.proietta_match(m, vista="proprio") if m is not None else None
+
+
+def _visibile_ora(call: Mapping) -> bool:
+    scadenza = _data(call.get("scadenza_call"))
+    return pubblicamente_visibile(call) and not (scadenza is not None and scadenza < _oggi())
+
+
+async def _dettaglio_pubblico(primary, secondary, active, call: dict) -> CallPubblicaDettaglioOut:
+    """La call di un'altra azienda: proiezione pubblica (whitelist del WP5),
+    il proprio match, se è salvata e se l'azienda attiva ha l'opt-in. Solo
+    call visibili adesso (una call scaduta ma non ancora chiusa dallo
+    scheduler è 404, senza scritture); l'admin qui è un visitatore come gli
+    altri."""
+    if not _visibile_ora(call):
+        raise NotFoundError("Call di partenariato non trovata")
+    pubblica = await _proiezione_pubblica(primary, secondary, call)
+    salvate = await _salvate(primary, active.company_id)
+    return CallPubblicaDettaglioOut(
+        **pubblica.model_dump(),
+        match=await _match_proprio(primary, secondary, active, call),
+        salvata=str(call["id"]) in salvate,
+        opt_in=await _opt_in(primary, active.company_id),
+    )
+
+
+async def match_call(primary, secondary, active, user: dict, call_id: Any):
+    """GET /partenariati/call/{id}/match: il match dell'azienda attiva con
+    la call (vista «proprio»); null per le call della propria azienda o se
+    la coppia è esclusa."""
+    call, ruolo = await carica_call_autorizzata(primary, call_id, active, user)
+    if ruolo in RUOLI_AZIENDA:
+        return None
+    if not _visibile_ora(call):
+        raise NotFoundError("Call di partenariato non trovata")
+    return await _match_proprio(primary, secondary, active, call)
+
+
+async def salva(primary, secondary, active, user: dict, call_id: Any) -> None:
+    """Salva («segui») una call visibile di un altro owner (titolare, T4):
+    idempotente. La propria (o di un'altra azienda dello stesso owner) →
+    409 `call_propria`; una call non visibile → 404."""
+    _richiedi_titolare(active)
+    company_id = _richiedi_azienda(active)
+    call, ruolo = await carica_call_autorizzata(primary, call_id, active, user)
+    if ruolo in RUOLI_AZIENDA or str(call.get("family_parent_id")) == str(active.owner_id):
+        raise AppError(409, "call_propria", MSG_CALL_PROPRIA)
+    if not _visibile_ora(call):
+        raise NotFoundError("Call di partenariato non trovata")
+    await primary.table("partner_call_salvate").upsert(
+        {"company_profile_id": company_id, "partner_call_id": str(call["id"]),
+         "user_id": str(user["id"])},
+        on_conflict="company_profile_id,partner_call_id",
+        ignore_duplicates=True,
+    ).execute()
+
+
+async def rimuovi_salvata(primary, secondary, active, user: dict, call_id: Any) -> None:
+    """Smette di seguire la call (titolare): idempotente, anche se la call
+    non è più visibile."""
+    _richiedi_titolare(active)
+    company_id = _richiedi_azienda(active)
+    identificativo = normalizza_id(call_id)
+    await primary.table("partner_call_salvate").delete().eq(
+        "company_profile_id", company_id
+    ).eq("partner_call_id", identificativo).execute()
+
+
+async def riepilogo_partenariati(primary, secondary, active, user: dict) -> RiepilogoOut:
+    """Badge del menu «Partenariati»: call «Per te» pubblicate negli ultimi 7
+    giorni, call pubblicate dell'azienda attiva, call salvate ancora
+    visibili."""
+    if not active.company_id:
+        return RiepilogoOut()
+    oggi = _oggi()
+    idx = await partenariato_indice.indice(primary, secondary)
+    profilo = await partenariato_indice.profilo_azienda(primary, idx, active.company_id)
+    soglia = (_adesso() - FINESTRA_NUOVE).isoformat()
+    nuove = 0
+    if profilo is not None:
+        for m in pm.per_te(idx.matching, profilo, oggi=oggi, pesi=_pesi()):
+            ci = idx.bacheca.get(m.call_id)
+            if ci is not None and _ts(ci.riga.get("pubblicata_at")) and (
+                _ts(ci.riga.get("pubblicata_at")) >= _ts(soglia)
+            ):
+                nuove += 1
+    attive = (
+        await primary.table("partner_calls")
+        .select("id", count="exact")
+        .eq("company_profile_id", str(active.company_id))
+        .eq("family_parent_id", str(active.owner_id))
+        .eq("stato", "pubblicata")
+        .limit(1)
+        .execute()
+    )
+    salvate = await _salvate(primary, active.company_id)
+    visibili = sum(
+        1 for cid in salvate
+        if cid in idx.bacheca
+        and _in_bacheca(idx.bacheca[cid], idx.matching.calls.get(cid), active, oggi)
+    )
+    return RiepilogoOut(per_te_nuove=nuove, call_attive=attive.count or 0, salvate=visibili)

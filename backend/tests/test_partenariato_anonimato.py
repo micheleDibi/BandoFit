@@ -493,3 +493,114 @@ def test_regex_dinamica_con_separatori_lineare():
     assert not _gruppi_ripetuti(regex.pattern)
     assert regex.search("P.IVA 012.345.678.97") is not None
     assert regex.search("P.IVA 1012 345 678 97") is None
+
+
+# --------------------------------------------- forma canonica (WP6, C7)
+
+NASCOSTI = [
+    # contatti che si leggono solo nella forma canonica
+    ("Contattaci: 347​1234567", "telefono"),
+    ("Chiamate il 347 123 4567", "telefono"),
+    ("Chiamate il ３４７１２３４５６７", "telefono"),
+    ("Scrivete a mario​@​gmail​.com", "email"),
+    ("Scrivete a mario＠gmail．com", "email"),
+    ("Vedi www​.altrosito⁠.it", "url"),
+]
+NASCOSTI_ANONIMI = [
+    ("Siamo la Ros​si Meccanica di Brescia", "ragione_sociale"),
+    ("Siamo la RossiMeccanica di Brescia", "ragione_sociale"),
+    ("Le OFFICINEROSSIMECCANICA", "ragione_sociale"),
+    ("Vedi rossimeccanica​.it", "dominio_azienda"),
+    ("P.IVA ０１２３４５６７８９７", "piva_cf"),
+]
+
+
+def test_senza_invisibili_e_forma_canonica():
+    assert anon.senza_invisibili("a​b c d­﻿e") == "ab c\nde"
+    # i caratteri visibili restano: niente NFKC nel testo da salvare
+    assert anon.senza_invisibili("1º ３") == "1º ３"
+    assert anon.forma_canonica("３４７​1") == "3471"
+    assert anon.forma_canonica("ﬁnanza x") == "finanza x"
+
+
+def test_forma_canonica_unica_per_call_e_accesso():
+    """Le call e il modulo d'accesso usano le stesse funzioni (niente copie
+    che possano divergere)."""
+    from app.schemas import partner_call
+    from app.services import partenariato_accesso
+
+    assert partner_call.forma_canonica is anon.forma_canonica
+    assert partner_call.senza_invisibili is anon.senza_invisibili
+    assert partenariato_accesso.forma_canonica is anon.forma_canonica
+    assert partenariato_accesso.MIN_NOME_COMPATTO == anon.MIN_NOME_COMPATTO
+
+
+@pytest.mark.parametrize(("testo", "tipo"), NASCOSTI)
+@pytest.mark.parametrize("anonima", [True, False])
+def test_contatti_nascosti_sempre_bloccanti(ident, testo, tipo, anonima):
+    rilievi = trova_rilievi(testo, ident, anonima=anonima)
+    assert tipo in {r.tipo for r in rilievi if r.bloccante}
+    # l'estratto è quello della forma canonica, senza caratteri invisibili
+    assert all("​" not in r.estratto and "⁠" not in r.estratto for r in rilievi)
+
+
+@pytest.mark.parametrize(("testo", "tipo"), NASCOSTI_ANONIMI)
+def test_identificativi_nascosti_bloccanti_se_anonima(ident, testo, tipo):
+    assert tipo in {r.tipo for r in trova_rilievi(testo, ident, anonima=True) if r.bloccante}
+
+
+def test_nome_attaccato_solo_anonimo_e_abbastanza_lungo(ident):
+    assert trova_rilievi("Siamo la RossiMeccanica", ident, anonima=False) == []
+    corto = Identificativi(ragione_sociale="alfa beta")  # «alfabeta»: 8 caratteri
+    cortissimo = Identificativi(ragione_sociale="ab cd")
+    assert tipi("Siamo Alfabeta", corto, anonima=True) == ["ragione_sociale"]
+    assert trova_rilievi("Siamo Abcd", cortissimo, anonima=True) == []
+    # a confini di parola, come il nome con gli spazi
+    assert trova_rilievi("Siamo Alfabetari", corto, anonima=True) == []
+
+
+def test_nessun_doppione_tra_nome_attaccato_e_sito(ident):
+    # il dominio contiene il nome attaccato: un solo rilievo, quello del sito
+    assert estratti("rossimeccanica.it", ident, anonima=True) == [
+        ("dominio_azienda", "rossimeccanica.it")
+    ]
+
+
+def test_anonimizza_esce_senza_invisibili():
+    pulito, rimossi = anonimizza("Partner​ per la ‮logistica", None)
+    assert (pulito, rimossi) == ("Partner per la logistica", [])
+    # nessun contatto: i caratteri visibili restano quelli dell'utente
+    assert anonimizza("Il 1º classificato, 20 m²", None) == ("Il 1º classificato, 20 m²", [])
+
+
+@pytest.mark.parametrize(
+    ("testo", "atteso"),
+    [
+        ("Contattaci: 333​1234567", f"Contattaci: {SOSTITUTO}"),
+        ("Contattaci: ３３３１２３４５６７",
+         f"Contattaci: {SOSTITUTO}"),
+        ("Scrivi a mario＠gmail．com", f"Scrivi a {SOSTITUTO}"),
+        ("Siamo la Ros​si Meccanica", f"Siamo la {SOSTITUTO}"),
+        ("Siamo la RossiMeccanica", f"Siamo la {SOSTITUTO}"),
+        ("Vedi rossimeccanica​.it", f"Vedi {SOSTITUTO}"),
+    ],
+)
+def test_anonimizza_sulla_forma_canonica(ident, testo, atteso):
+    pulito, rimossi = anonimizza(testo, ident)
+    assert pulito == atteso and rimossi
+    assert not ha_bloccanti(trova_rilievi(pulito, ident, anonima=True))
+
+
+@pytest.mark.parametrize("testo", [t for t, _ in NASCOSTI + NASCOSTI_ANONIMI])
+def test_dopo_anonimizza_nessun_bloccante_anche_nascosto(ident, testo):
+    pulito, rimossi = anonimizza(testo, ident)
+    assert rimossi
+    assert not ha_bloccanti(trova_rilievi(pulito, ident, anonima=True))
+
+
+def test_invisibili_ostili_in_tempo_lineare(ident):
+    testo = "3​4​7１ " * 20_000
+    inizio = time.perf_counter()
+    trova_rilievi(testo, ident, anonima=True)
+    anonimizza(testo, ident)
+    assert time.perf_counter() - inizio < 5.0

@@ -288,7 +288,7 @@ Il dump locale è del 3 luglio e precede la v1.1: non va usato per queste stime.
 - **M3. Punteggio.**
   - Formula: `100·(0,50·copertura_gap + 0,20·affinità + 0,10·complementarità + 0,10·completezza + 0,10·rotazione) − 5 per ogni dato mancante (massimo 20)`.
   - Ordinamento per gap coperti, poi punteggio, poi tie-break `sha256(call:azienda:settimana ISO)` (rotazione settimanale deterministica); al massimo 2 aziende dello stesso owner per pagina.
-  - I pesi sono `Settings` con default documentati.
+  - I pesi sono `Settings` con default documentati (formule, pesi ed esempio guida nell'Appendice B).
   - **Nessun LLM, nemmeno nelle spiegazioni v1**: template deterministici («Copri «A» e «C», che mancano al capofila.»). Niente pgvector.
 - **M4. Indice in-process.** Carico bulk paginato a keyset, senza `raw` e senza CF in chiaro, con TTL di 60 s e invalidazione dai nostri servizi. **Ricontrollo live** di opt-in, sospensione, `accetta_inviti` e azienda viva sulla pagina restituita. Oggi c'è un solo processo uvicorn: niente riga di versione condivisa, che creerebbe hot row e deadlock.
 - **M5. Notifiche proattive.**
@@ -748,7 +748,21 @@ Durante l'esecuzione mi fermo solo per ambiguità che cambiano comportamento o c
   - scheduler: nel passo `chiusura_call` sono isolati, oltre a ogni call, anche i singoli aggiornamenti a blocchi di `bando_mancante_dal` e dello snapshot del bando;
   - accessibilità: l'interruttore «Lo cerchi / Cercalo» ha un nome con il requisito, e la conferma della pubblicazione si annuncia dopo il montaggio della pagina;
   - restano per i WP successivi, come da piano: esclusività sui membri (WP8), divieto di rimuovere posizioni con candidature (WP7), conteggio delle candidature (WP7), sospensione e decisione delle segnalazioni (WP9).
-- **WP6–WP10** — da fare.
+- **WP6 (fatto)** — matching, «Per te», bacheca, suggeriti, notifiche proattive e digest (migration 0038). Scostamenti decisi in implementazione o dopo la revisione del diff:
+  - **punteggio interno**: ordina le liste e decide le notifiche ma non esce dalle API in nessuna vista (nel `MatchOut` restano copertura, requisiti coperti e non coperti, voci da verificare, posizioni, fasce e spiegazione; la UI non mostra più un'«affinità» numerica). Affinità, complementarità e rotazione usano dati della controparte che la sua scheda non mostra (competenze e sedi del creatore, notifiche ricevute dal candidato): un numero esatto, ricalcolato al variare del proprio profilo, li farebbe ricostruire. Per la stessa ragione il filtro per regione della bacheca usa solo la sede mostrata sulla card e le regioni dei requisiti visibili e delle posizioni;
+  - filtri rigidi: in testa `call_non_attiva` (call non pubblicata, sospesa o scaduta, bando scaduto, creatore non vivo); tra i vincoli di ogni membro escludono **solo** territorio, paese e dimensione (elenco chiuso di M1): gli altri requisiti `ogni_membro` non coperti (tag, certificazioni, esperienze, ATECO, settore, tipo di soggetto) sono voci «da verificare» con la penalità, perché per un dato dichiarato «non coperto» vuol dire «non dichiarato»;
+  - collegamenti: oltre a versione e import, il marker vale solo se le chiavi d'identità salvate sono quelle che l'anagrafica dell'azienda genera adesso con la chiave corrente (P.IVA e ragione sociale nell'indice, anche il codice fiscale nel backfill): un'identità corretta dalla scheda dell'azienda senza un nuovo import o una rotazione di `RATE_LIMIT_PEPPER` escludono l'azienda finché il backfill non ricalcola. «Per te» senza opt-in: le chiavi di un'azienda senza visibilità e senza call non si calcolano (M2), quindi per lei l'esclusione delle collegate vale da quando attiva la visibilità o pubblica una call (la scoperta non permette contatti);
+  - vista pubblica: `GET /partenariati/call/{id}` porta già il confronto dell'azienda attiva, con i suoi numeri (`match`), lo stato «salvata» e `opt_in`; resta anche `GET …/match`. Una call scaduta ma non ancora chiusa dallo scheduler è 404 per le altre aziende, senza scritture; l'admin la vede come un visitatore;
+  - verso il creatore i suggeriti hanno lo pseudonimo della call (HMAC di call e codice pubblico, 16 caratteri base32) e il profilo pubblico **senza** `codice_pubblico`; le call solo su invito non compaiono mai in «Per te» (gli inviti arrivano con il WP7) e non generano notifiche proattive, mentre tra i loro suggeriti restano solo le aziende che accettano inviti;
+  - fan-out: si dichiara completato solo se ha valutato la call senza errori; una call fuori dall'indice (per esempio bando momentaneamente assente dal catalogo) o con i collegamenti del creatore non ancora calcolati resta pendente e la riprende lo scheduler, dopo il backfill dei collegamenti; alla ripresa le aziende già reclamate da un giro interrotto ricevono la notifica in modo idempotente;
+  - chi segue una call riceve «modificata» solo se la scrittura crea una nuova versione, cambia la proiezione pubblica (non per budget esatto, dettagli riservati, quota del creatore o requisiti non visibili) e la call è visibile a tutti prima e dopo; «chiusa» solo se la vedeva;
+  - digest: ogni destinatario è isolato (un errore conta nel riepilogo e non ferma gli altri) e le notifiche si marcano incluse subito dopo un invio riuscito; un Advisor riceve una sola email con una sezione per azienda, un membro solo le aziende che vede; le letture dei destinatari sono a blocchi di 100 owner;
+  - il badge del menu conta le call «Per te» pubblicate negli ultimi 7 giorni, non le non lette (testo e lettore di schermo lo dicono);
+  - nei log degli invii email (tutte le email, non solo il digest) l'indirizzo è mascherato e l'errore del provider riporta solo la classe e il codice;
+  - prerequisiti dal WP4-WP5 chiusi qui: gli intervalli aperti delle fasce (budget `oltre_5m` contro una fascia di bilancio aperta) non sollevano più ma danno un esito prudente (dato mancante); il controllo anti-contatti sulla forma canonica e sul nome scritto attaccato vive in `partenariato_anonimato` e vale anche per il profilo partner, i cui testi si salvano senza caratteri invisibili;
+  - esempio guida: fixture sintetica con i soli codici del vocabolario v1, verificata sulla parte pura, sui servizi (indice, fan-out, digest su un primario finto) e sulle API (Appendice B); la parte con candidature, quote e piano Gratuito del test d'integrazione di §10 arriva con WP7 e WP8. Benchmark opzionale (`BANDOFIT_BENCH=1`, 500 aziende e 200 call);
+  - `eventi_abilitati` c'è già nelle preferenze, ma le email di evento arrivano con il WP7.
+- **WP7–WP10** — da fare.
 
 ---
 
@@ -783,3 +797,55 @@ Durante l'esecuzione mi fermo solo per ambiguità che cambiano comportamento o c
 | `consorzio_ue` | Consortium Agreement (DESCA), dichiarazioni delle affiliated entities, lettere degli associated partners | affiliati e associati non contano per il numero minimo |
 
 **Ruoli**: capofila, partner.
+
+---
+
+## Appendice B — Matching (WP6): filtri, punteggio ed esempio guida
+
+Implementazione in `backend/app/services/partenariato_matching.py` (modulo puro, nessun LLM), indice in `partenariato_indice.py`, collegamenti in `partenariato_collegamenti.py`, notifiche e digest in `partenariato_notifiche.py`.
+
+**Filtri rigidi**, in ordine; escludono solo su esito certo e il loro codice resta interno (mai mostrato al creatore per le aziende di terzi):
+1. call non attiva (non pubblicata, sospesa, scaduta, bando scaduto, creatore non vivo);
+2. candidato senza opt-in visibile (non vale per «Per te», che è scoperta), sospeso, non vivo, impresa non attiva nel registro;
+3. stesso owner (anche la stessa azienda);
+4. collegamenti non calcolati (del creatore sempre, del candidato se visibile) o collegata, certo o possibile;
+5. categoria del bando tra quelle escluse dal candidato, forma prevista non accettata;
+6. nessuna posizione compatibile per ruolo disponibile e tipo di soggetto;
+7. territorio, paese, dimensione: requisiti `ogni_membro`, poi vincoli delle posizioni (regola «tutte le sedi» di `valuta_criterio`);
+8. regola economica non soddisfatta sulla **fascia** del candidato, su ogni posizione rimasta (le regole «per ciascun partner» sempre, quelle del capofila solo sulle posizioni da capofila; medie pesate e totali sono del validatore, WP8);
+9. esclusività (candidato già impegnato sullo stesso bando);
+10. call solo su invito: in «Per te» solo con un invito (WP7); tra i suggeriti solo chi accetta inviti.
+
+Dato mancante o esito incerto non escludono: diventano voci «da verificare» con la penalità. Lo stesso vale per un requisito `ogni_membro` diverso da territorio, paese e dimensione che il candidato non ha dichiarato.
+
+**Punteggio** (0–100, interno: non esce dalle API):
+
+`punteggio = arrotonda(100 · (p_cop·copertura_gap + p_aff·affinità + p_compl·complementarità + p_prof·completezza + p_rot·rotazione)) − min(penalità_max, penalità · voci_da_verificare)`
+
+limitato a 0..100, con arrotondamento half-up su frazioni esatte.
+
+| Componente | Definizione | Peso di default (variabile) |
+|---|---|---|
+| copertura_gap | requisiti cercati coperti / requisiti cercati; senza requisiti cercati 1 se una posizione è coperta, altrimenti 0 | 0,50 (`PARTENARIATO_PESO_COPERTURA`) |
+| affinità | media di tre indicatori 0/1: esperienza dichiarata nel programma del bando; una divisione ATECO in comune con il creatore o un settore (proprio o d'interesse) uguale al suo; una regione (sede o d'interesse) tra quelle della call | 0,20 (`PARTENARIATO_PESO_AFFINITA`) |
+| complementarità | competenze del candidato che il creatore non ha / competenze del candidato (0 senza competenze) | 0,10 (`PARTENARIATO_PESO_COMPLEMENTARITA`) |
+| completezza | completezza del profilo partner / 100 | 0,10 (`PARTENARIATO_PESO_COMPLETEZZA`) |
+| rotazione | max(0, 1 − notifiche proattive ricevute negli ultimi 7 giorni / 5) | 0,10 (`PARTENARIATO_PESO_ROTAZIONE`) |
+| penalità | per ogni voce da verificare, fino a un massimo | 5 e 20 (`PARTENARIATO_PENALITA_DATO_MANCANTE`, `PARTENARIATO_PENALITA_MAX`) |
+
+**Ordine** di suggeriti, «Per te» e bacheca per affinità: requisiti cercati coperti (decrescente), punteggio (decrescente), poi `sha256(call:codice_pubblico:settimana ISO)`: deterministico nella settimana, diverso la settimana dopo. Al massimo 2 aziende (nei suggeriti) o 2 call (in «Per te») dello stesso owner per pagina.
+
+**Notifiche proattive**: alla pubblicazione le prime 20 aziende (`PARTENARIATO_NOTIFICHE_TOP_K`) con almeno un requisito cercato coperto e punteggio ≥ 50 (`PARTENARIATO_NOTIFICHE_SOGLIA`), al più 3 a settimana per azienda (`PARTENARIATO_NOTIFICHE_TETTO_SETTIMANA`), una volta per azienda × call. Digest il lunedì dalle 08:30 (`PARTENARIATO_DIGEST_GIORNO`, `PARTENARIATO_DIGEST_ORA`) con le notifiche degli ultimi 14 giorni non ancora incluse.
+
+**Esempio guida** (fixture sintetica `backend/tests/fixtures/partenariati/esempio_guida.py`, solo codici del vocabolario v1). X (capofila; ATECO 62, piccola, sede in Calabria) pubblica una call su un bando Horizon con i requisiti A (organismo di ricerca), B (ATECO 62), C (competenza `prototipazione_testing`), D (micro, piccola o media), tutti «consorzio»: X copre B e D, quindi cerca A e C. Vincoli di ogni membro: E (sede in Calabria) ed F (costo della quota / fatturato medio degli ultimi 2 anni ≤ 0,6, per ciascun partner). Posizione P1: organismo di ricerca con `prototipazione_testing`, quota 20%; budget in fascia `2m_5m`, quindi costo della quota tra 400 k€ e 1 M€.
+
+| Azienda | Situazione | Esito |
+|---|---|---|
+| Y | organismo di ricerca, `prototipazione_testing`, sede legale nel Lazio e unità locale in Calabria, fatturato medio 2,5 M€ (fascia `2m_10m`), opt-in | prima nei suggeriti di X, e la call prima nel suo «Per te»: «Copri «A» e «C», che mancano al capofila.»; punteggio interno 90 |
+| T | come Y, senza bilanci | sotto Y, con «Bilanci non disponibili: la regola «F» non si può verificare»; 85 (penalità 5) |
+| Z | come Y, sedi solo in Lombardia | esclusa (territorio) |
+| W | come Y, collegata a X (socio comune al 60%) | esclusa (collegata) |
+| V | come Y, senza opt-in | esclusa dai suggeriti; la call le compare comunque in «Per te» |
+| U | come Y, fatturato medio 200 k€ (fascia `100k_500k`) | esclusa (regola economica: 0,6 × 500 k€ < 400 k€ su tutta la fascia) |
+
+Punteggio di Y, a mano: copertura 2/2 = 1; affinità 2/3 (esperienza nel programma sì, ATECO o settore in comune con X no, regione in comune sì); complementarità 3/3 = 1; completezza 0,70; rotazione 1 → 100 · (0,50 + 0,20 · 2/3 + 0,10 + 0,07 + 0,10) = 90,33 → **90**. Scostamenti dai numeri di §10: la fascia «1,0–1,2 M€» non esiste nell'enum delle call (si usa `2m_5m` con la quota al 20%) e le regole verso terzi si valutano sulle fasce: con la quota al 30% o una fascia di budget più bassa l'esito di U o di Y sarebbe «dipende dalla fascia», non certo.

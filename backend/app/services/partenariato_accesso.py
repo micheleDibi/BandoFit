@@ -27,14 +27,25 @@ Unico punto in cui si decide CHI vede una call e COSA vede:
   invisibili o a cifre a larghezza piena, e con il nome dell'azienda cercato
   anche scritto attaccato.
 
+WP6 (bacheca, «Per te», suggeriti): il ruolo `pubblico` apre la vista
+pubblica delle call di altri owner (pubblicate, visibili a tutti, non
+sospese); le card della bacheca portano il match dell'azienda attiva (vista
+«proprio»); verso il creatore i candidati suggeriti escono con uno
+PSEUDONIMO per call (`pseudonimo`), mai con `company_profile_id` né con il
+`codice_pubblico` stabile, e con i soli dati del registro ammessi (Q12).
+
 Modulo PURO salvo `carica_call_autorizzata` (due letture).
 """
 
+import base64
 from collections.abc import Iterable, Mapping
 from typing import Any, Literal
 from uuid import UUID
 
+from pydantic import BaseModel, ConfigDict, create_model
+
 from app.core.errors import NotFoundError
+from app.core.privacy import hmac_dominio
 from app.schemas.partner_call import (
     BandoPubblicoCallOut,
     CallCardOut,
@@ -42,20 +53,21 @@ from app.schemas.partner_call import (
     CreatoreCallOut,
     PosizionePubblicaOut,
     RequisitoPubblicoOut,
-    forma_canonica,
-    senza_invisibili,
 )
-from app.schemas.partner_profile import AtecoSezioneOut
+from app.schemas.partner_profile import AtecoSezioneOut, PartnerPubblicoOut
 from app.services import partenariato_vocabolario as voc
-from app.services.partenariato_anonimato import (
+from app.services.partenariato_anonimato import (  # noqa: F401 — riesportati
+    MIN_NOME_COMPATTO,
     SOSTITUTO,
     Identificativi,
     Rilievo,
     anonimizza,
-    ha_bloccanti,
+    forma_canonica,
+    senza_invisibili,
     trova_rilievi,
 )
 from app.services.partenariato_criteri import criterio_da_json
+from app.services.partenariato_matching import MatchInterno, MatchOut, proietta_match
 from app.services.partner_profilo_pubblico import CLASSI_DIMENSIONALI, ateco_sezione
 
 Ruolo = Literal["creatore", "titolare_o_membro", "pubblico", "admin"]
@@ -122,64 +134,26 @@ def _lista(valore: Any) -> list:
     return list(valore) if isinstance(valore, (list, tuple)) else []
 
 
-# Ragione sociale o denominazione di più parole: si cerca anche scritta tutta
-# attaccata («RossiCostruzioni»), se lunga almeno così (sotto, troppe parole
-# comuni).
-MIN_NOME_COMPATTO = 8
-
-
-def _varianti(ident: Identificativi | None) -> tuple[Identificativi | None, ...]:
-    """Gli identificativi da cercare: quelli dell'azienda e, per un nome di più
-    parole, lo stesso nome senza spazi."""
-    if ident is None:
-        return (None,)
-    compatti = tuple(dict.fromkeys(
-        nome.replace(" ", "")
-        for nome in (ident.ragione_sociale, ident.denominazione)
-        if nome and " " in nome and len(nome.replace(" ", "")) >= MIN_NOME_COMPATTO
-    ))
-    if not compatti:
-        return (ident,)
-    return (
-        ident,
-        Identificativi(ragione_sociale=compatti[0],
-                       denominazione=compatti[1] if len(compatti) > 1 else None),
-    )
-
-
 def rilievi_testo(testo: Any, ident: Identificativi | None, *, anonima: bool = True
                   ) -> list[Rilievo]:
-    """Rilievi anti-contatti (C7) di un testo della call, sulla sua forma
-    canonica (`forma_canonica`: niente caratteri invisibili né cifre a
-    larghezza piena) e con il nome dell'azienda anche scritto attaccato.
-    Senza doppioni (tipo, estratto), in ordine di variante e di posizione."""
+    """Rilievi anti-contatti (C7) di un testo della call: `trova_rilievi`,
+    che lavora sulla forma canonica (`forma_canonica`: niente caratteri
+    invisibili né cifre a larghezza piena) e cerca il nome dell'azienda anche
+    scritto attaccato. Senza doppioni (tipo, estratto), in ordine di
+    posizione."""
     if not isinstance(testo, str) or not testo.strip():
         return []
-    canonico = forma_canonica(testo)
-    rilievi: list[Rilievo] = []
-    visti: set[tuple[str, str]] = set()
-    for variante in _varianti(ident if anonima else None):
-        for rilievo in trova_rilievi(canonico, variante, anonima=anonima):
-            chiave = (rilievo.tipo, rilievo.estratto.casefold())
-            if chiave not in visti:
-                visti.add(chiave)
-                rilievi.append(rilievo)
-    return rilievi
+    return trova_rilievi(testo, ident, anonima=anonima)
 
 
 def testo_pubblico(testo: Any, ident: Identificativi | None) -> str | None:
     """Testo libero verso terzi: senza caratteri invisibili, senza contatti e,
     con `ident`, senza gli identificativi dell'azienda (anche nella forma
-    canonica: se lì c'è qualcosa da togliere si mostra quella, ripulita). Un
-    testo ridotto al solo «[rimosso]» sparisce."""
+    canonica: se lì c'è qualcosa da togliere si mostra quella, ripulita, vedi
+    `anonimizza`). Un testo ridotto al solo «[rimosso]» sparisce."""
     if not isinstance(testo, str) or not testo.strip():
         return None
-    pulito = senza_invisibili(testo).strip()
-    canonico = forma_canonica(pulito)
-    if canonico != pulito and ha_bloccanti(rilievi_testo(canonico, ident)):
-        pulito = canonico
-    for variante in _varianti(ident):
-        pulito, _ = anonimizza(pulito, variante)
+    pulito, _ = anonimizza(senza_invisibili(testo).strip(), ident)
     pulito = pulito.strip()
     return None if not pulito or pulito == SOSTITUTO else pulito
 
@@ -195,7 +169,8 @@ def ruolo_su_call(call: Mapping, active, user: Mapping) -> Ruolo | None:
     """Ruolo dell'utente sulla call (None = non autorizzato).
 
     Prima l'azienda creatrice (la call è dell'azienda ATTIVA e dell'owner),
-    poi l'admin, poi il pubblico: solo call pubblicate, visibili a tutti."""
+    poi l'admin, poi il pubblico: solo call pubblicate, visibili a tutti e
+    non sospese."""
     company_id = getattr(active, "company_id", None)
     if (
         company_id
@@ -205,9 +180,20 @@ def ruolo_su_call(call: Mapping, active, user: Mapping) -> Ruolo | None:
         return "creatore" if getattr(active, "editable", False) else "titolare_o_membro"
     if (user or {}).get("role") == "admin":
         return "admin"
-    if call.get("stato") == "pubblicata" and call.get("visibilita") == "pubblica":
+    if pubblicamente_visibile(call):
         return "pubblico"
     return None
+
+
+def pubblicamente_visibile(call: Mapping) -> bool:
+    """Una call che le altre aziende possono vedere: pubblicata, visibile a
+    tutti (le `solo_invitati` arrivano con gli inviti del WP7), non
+    sospesa."""
+    return (
+        call.get("stato") == "pubblicata"
+        and call.get("visibilita") == "pubblica"
+        and call.get("sospesa_at") is None
+    )
 
 
 async def _azienda_viva(primary, company_id: Any) -> bool:
@@ -444,6 +430,138 @@ def call_card(
         mia=mia,
         wizard_passo=call.get("wizard_passo") if mia else None,
         updated_at=call.get("updated_at") if mia else None,
+    )
+
+
+# ------------------------------------------------------- bacheca (WP6)
+
+DOMINIO_PSEUDONIMO = "partenariati.pseudonimo.v1"
+LUNGHEZZA_PSEUDONIMO = 16
+
+
+def pseudonimo(call_id: Any, codice_pubblico: Any) -> str:
+    """Handle opaco di un candidato verso il creatore di UNA call (T3):
+    `HMAC(call_id|codice_pubblico)` in base32, 16 caratteri. Cambia da una
+    call all'altra (un anonimo non si correla tra call diverse), non è mai
+    il `company_profile_id` né il `codice_pubblico`; lo risolve solo il
+    server (`partenariato_indice.risolvi_pseudonimo`, per gli inviti)."""
+    digest = hmac_dominio(DOMINIO_PSEUDONIMO, f"{call_id}|{codice_pubblico}")
+    return base64.b32encode(bytes.fromhex(digest)).decode("ascii")[:LUNGHEZZA_PSEUDONIMO]
+
+
+class _Uscita(BaseModel):
+    # Whitelist anche nella costruzione, come le proiezioni del WP5.
+    model_config = ConfigDict(extra="forbid")
+
+
+class CallBachecaOut(CallCardOut):
+    """Una call nelle liste (le mie, bacheca, salvate, «Per te»): la card del
+    WP5 più il match dell'azienda attiva con la call (vista «proprio»; null
+    se non è compatibile, se l'azienda attiva manca o se la call è sua), se
+    l'azienda l'ha salvata, le candidature ricevute (0 fino al WP7) e i
+    posti (somma dei partner cercati dalle posizioni)."""
+
+    match: MatchOut | None = None
+    salvata: bool = False
+    candidature_ricevute: int = 0
+    posti: int = 0
+
+
+class CallPubblicaDettaglioOut(CallPubblicaOut):
+    """GET /partenariati/call/{id} per un'azienda che non l'ha creata: la
+    proiezione pubblica, il proprio match (vista «proprio»), se l'ha salvata
+    e se ha l'opt-in visibile (per candidarsi serve, Q25)."""
+
+    match: MatchOut | None = None
+    salvata: bool = False
+    opt_in: bool = False
+
+
+class PerTeOut(_Uscita):
+    """GET /partenariati/per-te: pagina di call con il proprio match. Anche
+    senza opt-in (solo scoperta, Q25): `opt_in` false → CTA per attivarlo."""
+
+    items: list[CallBachecaOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    opt_in: bool = False
+
+
+# Il profilo pubblico del WP4 (whitelist, Q12 per gli anonimi) SENZA il
+# `codice_pubblico`: stabile tra le call, permetterebbe al creatore di
+# riconoscere lo stesso anonimo su call diverse. Verso il creatore l'handle è
+# solo lo pseudonimo della call.
+ProfiloSuggeritoOut = create_model(
+    "ProfiloSuggeritoOut",
+    __base__=_Uscita,
+    **{
+        nome: (campo.annotation, campo)
+        for nome, campo in PartnerPubblicoOut.model_fields.items()
+        if nome != "codice_pubblico"
+    },
+)
+
+
+class CandidatoSuggeritoOut(_Uscita):
+    """Un'azienda suggerita al creatore di una call (T3, Q12): pseudonimo
+    della call (mai `company_profile_id` né `codice_pubblico`), profilo
+    pubblico del WP4 (per gli anonimi: niente denominazione, sola fascia di
+    fatturato, esperienze col solo programma, certificazioni per categoria)
+    e match in vista «terzi» (solo fasce ed esiti)."""
+
+    pseudonimo: str
+    profilo: ProfiloSuggeritoOut  # type: ignore[valid-type]
+    match: MatchOut
+
+
+class SuggeritiOut(_Uscita):
+    """GET /partenariati/call/{id}/suggeriti."""
+
+    items: list[CandidatoSuggeritoOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class RiepilogoOut(_Uscita):
+    """GET /partenariati/riepilogo (badge del menu): call «Per te» pubblicate
+    negli ultimi 7 giorni, call pubblicate dell'azienda attiva, call salvate
+    ancora visibili."""
+
+    per_te_nuove: int = 0
+    call_attive: int = 0
+    salvate: int = 0
+
+
+def call_bacheca(
+    card: CallCardOut,
+    *,
+    match: MatchOut | None = None,
+    salvata: bool = False,
+    posti: int = 0,
+    candidature_ricevute: int = 0,
+) -> CallBachecaOut:
+    return CallBachecaOut(
+        **card.model_dump(),
+        match=match,
+        salvata=salvata,
+        posti=posti,
+        candidature_ricevute=candidature_ricevute,
+    )
+
+
+def candidato_suggerito(
+    m: MatchInterno, *, call_id: Any, profilo: PartnerPubblicoOut
+) -> CandidatoSuggeritoOut:
+    """Proiezione del candidato verso il creatore: `profilo` è la proiezione
+    pubblica del WP4 (`partner_profilo_pubblico.profilo_pubblico`)."""
+    return CandidatoSuggeritoOut(
+        pseudonimo=pseudonimo(call_id, m.codice_pubblico),
+        profilo=ProfiloSuggeritoOut(**profilo.model_dump(exclude={"codice_pubblico"})),
+        match=proietta_match(m, vista="terzi"),
     )
 
 

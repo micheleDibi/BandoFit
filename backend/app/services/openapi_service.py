@@ -759,6 +759,14 @@ async def _persist_import(
             [{"company_profile_id": company_id, **person} for person in people]
         ).execute()
 
+    # Collegamenti societari dei partenariati (WP6, M2): SOLO con il modulo
+    # acceso e solo per un'azienda idonea (opt-in visibile o call non chiusa:
+    # lo verifica `ricostruisci`). Best-effort, non solleva mai; import locale.
+    if get_settings().partenariati_attivo:
+        from app.services import partenariato_indice
+
+        await partenariato_indice.ricostruisci_collegamenti(primary, company_id)
+
     await primary.table("audit_log").insert(
         {
             "actor_id": parent_id,

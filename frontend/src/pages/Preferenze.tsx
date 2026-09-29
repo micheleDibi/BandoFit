@@ -5,6 +5,7 @@ import {
   Coins,
   FileText,
   Flag,
+  Handshake,
   Hash,
   Landmark,
   MapPin,
@@ -20,12 +21,14 @@ import { Card } from "../components/ui/Card";
 import { TagSelect, type TagSelectOption } from "../components/ui/TagSelect";
 import { Skeleton } from "../components/ui/states";
 import { useCompanyFacets } from "../hooks/useCompany";
+import { useFunzioni } from "../hooks/useFunzioni";
+import { usePartnerEmailSettings, useSalvaPartnerEmailSettings } from "../hooks/usePartenariati";
 import { useLookups } from "../hooks/useLookups";
 import { useAlertSettings, useSaveAlertSettings } from "../hooks/useAlertSettings";
 import { EMPTY_PREFERENCES, usePreferences, useSavePreferences } from "../hooks/usePreferences";
 import { apiErrorMessage } from "../lib/api";
 import { buildBandiPerTePreset, presetHasValues, presetSearchParams } from "../lib/bandiPreset";
-import type { Lookups, Preferences } from "../types";
+import type { Lookups, PartnerEmailSettings, Preferences } from "../types";
 
 type PrefKey = keyof Preferences;
 
@@ -169,7 +172,93 @@ function AlertEmailCard() {
   );
 }
 
+/** Email del modulo partenariati (solo a modulo acceso): il riepilogo
+ *  settimanale delle call per te e le email sulle attività. Sono dell'utente,
+ *  separate dagli avvisi sui bandi; ogni email ha il proprio link per
+ *  disiscriversi. */
+function PartnerEmailCard() {
+  const { data: settings, isPending, isError, error, refetch } = usePartnerEmailSettings();
+  const save = useSalvaPartnerEmailSettings();
+  const [errore, setErrore] = useState<string | null>(null);
+
+  const cambia = async (campo: keyof PartnerEmailSettings, valore: boolean) => {
+    if (!settings) return;
+    setErrore(null);
+    try {
+      await save.mutateAsync({ ...settings, [campo]: valore });
+    } catch (err) {
+      setErrore(apiErrorMessage(err));
+    }
+  };
+
+  const voci: Array<{ campo: keyof PartnerEmailSettings; etichetta: string; nota: string }> = [
+    {
+      campo: "digest_abilitato",
+      etichetta: "Riepilogo settimanale delle call per te",
+      nota: "Il lunedì, se ci sono call nuove adatte alla tua azienda. Arriva solo per le aziende visibili come partner.",
+    },
+    {
+      campo: "eventi_abilitati",
+      etichetta: "Email sulle attività dei partenariati",
+      nota: "Quando ricevi un invito, una candidatura, una risposta o nuovi messaggi.",
+    },
+  ];
+
+  return (
+    <Card className="p-5">
+      <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
+        <Handshake className="size-4 text-brand-500" aria-hidden />
+        Email sui partenariati
+      </h2>
+      {isPending ? (
+        <Skeleton className="mt-3 h-16 w-full" />
+      ) : isError || !settings ? (
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <p className="text-sm text-red-700" role="alert">
+            {apiErrorMessage(error, "Impossibile caricare le preferenze email dei partenariati.")}
+          </p>
+          <Button variant="secondary" size="sm" onClick={() => void refetch()}>
+            Riprova
+          </Button>
+        </div>
+      ) : (
+        <>
+          <p className="mt-1 text-sm text-slate-500">
+            Gli avvisi nell'app arrivano comunque: qui scegli quali ricevere anche via email.
+          </p>
+          <div className="mt-3 space-y-3">
+            {voci.map((v) => (
+              <label key={v.campo} className="flex cursor-pointer items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4 cursor-pointer accent-brand-500"
+                  checked={settings[v.campo]}
+                  disabled={save.isPending}
+                  onChange={(e) => void cambia(v.campo, e.target.checked)}
+                />
+                <span>
+                  <span className="block text-sm font-medium text-slate-700">{v.etichetta}</span>
+                  <span className="block text-xs text-slate-500">{v.nota}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            Puoi disattivarle quando vuoi, anche dal link in fondo a ogni email.
+          </p>
+          {errore && (
+            <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+              {errore}
+            </p>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
 export default function Preferenze() {
+  const { partenariatiAttivo } = useFunzioni();
   const { data: saved, isPending } = usePreferences();
   const { data: lookups } = useLookups();
   const { data: facets } = useCompanyFacets();
@@ -358,6 +447,7 @@ export default function Preferenze() {
         {/* Colonna destra: avvisi email + le preferenze per faccetta */}
         <div className="space-y-4">
           <AlertEmailCard />
+          {partenariatiAttivo && <PartnerEmailCard />}
           {FACETS.map((facet) => {
             const inheritedHere = inherited[facet.key];
             const inheritedIds = inheritedHere.map((v) => v.id);

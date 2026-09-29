@@ -1006,6 +1006,101 @@ class TestSalvaProfilo:
         assert db.upserts == []
 
 
+class TestFormaCanonica:
+    """Gli stessi casi delle call (WP5): i controlli guardano la forma
+    canonica (niente caratteri invisibili, spazi Unicode, cifre e simboli a
+    larghezza piena, nome dell'azienda scritto attaccato) e nel DB i testi
+    finiscono senza caratteri invisibili."""
+
+    @pytest.mark.parametrize(
+        ("testo", "tipo"),
+        [
+            ("Contattaci: 347​1234567", "un numero di telefono"),
+            ("Chiamate il 347 123 4567", "un numero di telefono"),
+            ("Chiamate il ３４７１２３４５６７",
+             "un numero di telefono"),
+            ("Scrivete a mario​@​gmail​.com", "un indirizzo email"),
+            ("Scrivete a mario＠gmail．com", "un indirizzo email"),
+            ("Siamo la Ros​si Meccanica di Brescia", "il nome dell'azienda"),
+            ("Siamo la RossiMeccanica di Brescia", "il nome dell'azienda"),
+            ("Vedi rossimeccanica​.it", "il sito dell'azienda"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "campo", ["descrizione_competenze", "competenze_libere", "programma", "titolo",
+                  "certificazioni", "infrastrutture"],
+    )
+    async def test_testi_non_conformi(self, testo, tipo, campo):
+        if campo in ("competenze_libere", "certificazioni"):
+            campi = {campo: [testo]}
+        elif campo == "programma":
+            campi = {"esperienze": [{"programma": testo}]}
+        elif campo == "titolo":
+            campi = {"esperienze": [{"programma": "Horizon", "titolo": testo}]}
+        else:
+            campi = {campo: testo}
+        db = FakeDb().con_profilo(anonimo=True)
+        with pytest.raises(AppError) as exc:
+            await pps.salva_profilo(db, object(), titolare(), USER_OWNER, profilo_in(**campi))
+        assert (exc.value.status_code, exc.value.code) == (400, "testo_non_conforme")
+        assert tipo in exc.value.message
+        # il messaggio non ripete il dato
+        for dato in ("347", "gmail", "Rossi", "rossimeccanica"):
+            assert dato not in exc.value.message
+        assert db.upserts == []
+
+    @pytest.mark.parametrize(
+        "nascosto", ["Scrivete a mario​@​rossi​.it",
+                     "Scrivete a mario＠rossi．it"],
+    )
+    async def test_nominativo_nome_si_contatti_nascosti_no(self, nominativo_attivo, nascosto):
+        db = FakeDb().con_profilo(anonimo=False)
+        await pps.salva_profilo(db, object(), titolare(), USER_OWNER,
+                                profilo_in(descrizione_competenze="La RossiMeccanica guida"))
+        with pytest.raises(AppError) as exc:
+            await pps.salva_profilo(db, object(), titolare(), USER_OWNER,
+                                    profilo_in(descrizione_competenze=nascosto))
+        assert exc.value.code == "testo_non_conforme" and "un indirizzo email" in exc.value.message
+
+    async def test_testi_salvati_senza_caratteri_invisibili(self):
+        db = FakeDb()
+        await pps.salva_profilo(
+            db, object(), titolare(), USER_OWNER,
+            profilo_in(
+                descrizione_competenze="​Tornitura di precisione⁠",
+                infrastrutture="Riga uno riga due ­senza trattino ﻿1º posto",
+                competenze_libere=["Stampa​ 3D", "​​", "Stampa 3D"],
+                certificazioni=["ISO 9001"],
+                esperienze=[{"programma": "Horizon‎ Europe",
+                             "titolo": "‮Progetto Alfa"}],
+            ),
+        )
+        [payload] = db.upserts
+        assert payload["descrizione_competenze"] == "Tornitura di precisione"
+        # caratteri visibili invariati (niente NFKC nel DB): «º» resta «º»
+        assert payload["infrastrutture"] == "Riga uno\nriga due senza trattino 1º posto"
+        # voce fatta solo di invisibili scartata, doppione tolto dopo la pulizia
+        assert payload["competenze_libere"] == ["Stampa 3D"]
+        assert payload["certificazioni"] == ["ISO 9001"]
+        assert payload["esperienze"][0]["programma"] == "Horizon Europe"
+        assert payload["esperienze"][0]["titolo"] == "Progetto Alfa"
+
+    async def test_solo_invisibili_come_vuoto(self):
+        db = FakeDb()
+        await pps.salva_profilo(db, object(), titolare(), USER_OWNER,
+                                profilo_in(descrizione_competenze="​​"))
+        assert db.upserts[0]["descrizione_competenze"] is None
+        with pytest.raises(AppError) as exc:
+            await pps.salva_profilo(db, object(), titolare(), USER_OWNER,
+                                    profilo_in(esperienze=[{"programma": "⁠"}]))
+        assert (exc.value.status_code, exc.value.code) == (400, "bad_request")
+        assert len(db.upserts) == 1
+
+    def test_senza_invisibili_restituisce_lo_stesso_oggetto(self):
+        dati = profilo_in(**PROFILO_COMPLETO)
+        assert pps.testi_senza_invisibili(dati) is dati
+
+
 # ------------------------------------------------------------ consenso
 
 

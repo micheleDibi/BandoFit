@@ -464,9 +464,20 @@ def _mul(x: _Intervallo, y: _Intervallo) -> _Intervallo:
     )
 
 
+def _differenza(a: Decimal, b: Decimal, *, infimo: bool) -> Decimal:
+    """`a − b` per un estremo dell'intervallo. ∞ − ∞ (stesso segno) non è
+    determinato: capita solo valutando come punto un estremo illimitato (un
+    budget «oltre 5 milioni» contro una fascia aperta). L'estremo diventa
+    illimitato nella direzione prudente: l'intervallo si allarga, quindi
+    l'esito non può diventare falsamente certo (resta `dato_mancante`)."""
+    if a.is_infinite() and b.is_infinite() and a == b:
+        return -_INF if infimo else _INF
+    return a - b
+
+
 def _sub(x: _Intervallo, y: _Intervallo) -> _Intervallo:
-    lo = x[0] - y[2]
-    hi = x[2] - y[0]
+    lo = _differenza(x[0], y[2], infimo=True)
+    hi = _differenza(x[2], y[0], infimo=False)
     return (lo, x[1] and y[3] and lo.is_finite(), hi, x[3] and y[1] and hi.is_finite())
 
 
@@ -617,6 +628,8 @@ def _fmt(valore: Decimal, euro: bool = False) -> str:
 
 def _fmt_intervallo(intervallo: _Intervallo, euro: bool) -> str:
     lo, _li, hi, _hi = intervallo
+    if not lo.is_finite() and not hi.is_finite():
+        return "non determinato"
     if lo == hi:
         return _fmt(lo, euro)
     if not hi.is_finite():
@@ -654,6 +667,23 @@ def _esito_mancante(
         spiegazione_terzi=f"Esito: dato mancante ({motivo}).",
         anni_usati=anni,
     )
+
+
+def _intervallo_costo(costo_quota) -> _Intervallo | None:
+    """Il costo della quota come intervallo, None se non è usabile.
+
+    Il minimo deve essere un numero finito; il massimo può essere +Infinity
+    (fascia di budget senza tetto, es. `oltre_5m`) e allora è ESCLUSO, come
+    ogni estremo illimitato. Estremi non numerici o NaN, un minimo infinito o
+    entrambi gli estremi infiniti valgono come costo non noto: meglio un
+    «dato mancante» che un esito su un costo che non esiste."""
+    try:
+        lo, hi = sorted(Decimal(str(estremo)) for estremo in costo_quota)
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not lo.is_finite() or hi.is_nan():
+        return None
+    return (lo, True, hi, hi.is_finite())
 
 
 def _anno_ancora(per_anno, variabili: list[str]) -> int | None:
@@ -695,7 +725,9 @@ def valuta_regola_finanziaria(
 
     - `esercizi`: righe fuse (EsercizioBilancio) dell'azienda valutata;
     - `costo_quota`: intervallo `(minimo, massimo)` del costo della quota
-      (un punto se il budget è esatto), None se non noto;
+      (un punto se il budget è esatto), None se non noto; il massimo può
+      essere `Decimal("Infinity")` (fascia di budget senza tetto), il minimo
+      deve essere finito (altrimenti vale come costo non noto);
     - `vista`: «proprio» valuta sui valori esatti (per il titolare); «terzi»
       sostituisce ogni variabile di bilancio con l'intervallo della sua
       fascia (per le medie, la fascia della media stessa; `bilanci_approvati_n`
@@ -725,8 +757,11 @@ def valuta_regola_finanziaria(
             return _esito_mancante(
                 f"variabile non supportata: {_ETICHETTE_VARIABILI[variabile]}", vista=vista
             )
-    if "costo_quota" in variabili and costo_quota is None:
-        return _esito_mancante("manca il costo della quota", vista=vista)
+    costo: _Intervallo | None = None
+    if "costo_quota" in variabili:
+        costo = _intervallo_costo(costo_quota) if costo_quota is not None else None
+        if costo is None:
+            return _esito_mancante("manca il costo della quota", vista=vista)
 
     per_anno = {e.anno: e for e in esercizi if e.ha_core}
     if "bilanci_approvati_n" in variabili and not per_anno:
@@ -744,8 +779,7 @@ def valuta_regola_finanziaria(
     fasce_usate: list[str] = []
     for variabile in variabili:
         if variabile == "costo_quota":
-            lo, hi = sorted((Decimal(str(costo_quota[0])), Decimal(str(costo_quota[1]))))
-            intervalli[variabile] = (lo, True, hi, True)
+            intervalli[variabile] = costo
             continue
         if variabile == "bilanci_approvati_n":
             esatti[variabile] = Decimal(len(per_anno))
@@ -853,7 +887,10 @@ def _spiegazione_titolare(
     if regola.denominatore is not None:
         parti += f" / {termine(regola.denominatore)}"
         num, den = intervalli[regola.numeratore], intervalli[regola.denominatore]
-        if num[0] == num[2] and den[0] == den[2] and den[0] > 0:
+        if (
+            num[0] == num[2] and den[0] == den[2] and den[0] > 0
+            and num[0].is_finite() and den[0].is_finite()
+        ):
             parti += f" = {_fmt(num[0] / den[0])}"
     simbolo = _SIMBOLI[regola.operatore]
     if regola.soglia is not None:

@@ -2491,3 +2491,120 @@ export interface VersioneCall {
   created_at: string;
   snapshot: Record<string, unknown>;
 }
+
+// ---- Partenariati: matching, «Per te», bacheca, suggeriti (WP6) ------------------
+
+/** Un requisito CERCATO dal proponente, per etichetta («A», «C»). */
+export interface MatchRequisito {
+  requisito_id: string;
+  etichetta: string;
+}
+
+/** Voce «da verificare» (dato mancante o esito incerto): non esclude, pesa
+ *  sul punteggio. `testo` è già in parole, dal server. */
+export interface MatchAttenzione {
+  codice: string;
+  testo: string;
+}
+
+export interface MatchPosizione {
+  id: string;
+  titolo: string;
+}
+
+/** Codici di fascia (come `FasceBilancio`), mai importi. */
+export interface MatchFasce {
+  fatturato: string | null;
+  patrimonio_netto: string | null;
+  dipendenti: string | null;
+  trend: string | null;
+}
+
+/** `MatchOut` del server (`partenariato_matching.MatchOut`): confronto
+ *  deterministico tra una call e un'azienda, senza AI.
+ *  - vista «proprio» (la tua azienda con una call): `dettaglio` con i tuoi
+ *    valori nelle regole economiche;
+ *  - vista «terzi» (il proponente che guarda un'azienda suggerita): solo fasce
+ *    ed esiti, `dettaglio` null; per le aziende anonime la sola fascia di
+ *    fatturato.
+ *  Il punteggio non arriva mai: il server lo usa solo per ordinare. */
+export interface MatchOut {
+  copertura: { coperti: number; cercati: number };
+  copre: MatchRequisito[];
+  non_copre: MatchRequisito[];
+  attenzione: MatchAttenzione[];
+  posizioni_compatibili: MatchPosizione[];
+  fasce: MatchFasce | null;
+  /** Frase da template («Copri «A» e «C», che mancano al capofila.»). */
+  spiegazione: string;
+  dettaglio?: string[] | null;
+}
+
+export type VistaPartenariati = "per-te" | "tutte" | "mie" | "salvate";
+export type OrdineBacheca = "affinita" | "recenti" | "scadenza";
+
+/** Filtri della bacheca (`vista=tutte`), nei searchParams. */
+export interface FiltriBacheca {
+  /** Slug del bando nel catalogo. */
+  bando: string | null;
+  /** Id della regione (lookups del catalogo). */
+  regione: number | null;
+  forma: FormaPrevistaCall | null;
+  /** Ruolo della posizione offerta: capofila o partner. */
+  ruolo: RuoloPartner | null;
+  ordine: OrdineBacheca;
+}
+
+/** Una call nella bacheca, in «Per te» e tra le salvate
+ *  (`GET /partenariati/call?vista=tutte|salvate`, `GET /partenariati/per-te`):
+ *  la card del WP5 più il confronto con l'azienda attiva (null se non è
+ *  idonea), lo stato «salvata» e i contatori. */
+export interface CallBacheca extends CallCard {
+  match: MatchOut | null;
+  salvata: boolean;
+  /** Candidature ricevute (0 fino alle candidature). */
+  candidature_ricevute: number;
+  /** Posti cercati nella call. */
+  posti: number;
+}
+
+/** `GET /partenariati/per-te`: visibile anche senza visibilità come partner
+ *  (`opt_in: false`), calcolato sui dati dell'azienda attiva. */
+export interface PerTePage extends Page<CallBacheca> {
+  opt_in: boolean;
+}
+
+/** La call vista da un'altra azienda (`GET /partenariati/call/{id}`): il
+ *  confronto con l'azienda attiva (vista «proprio», con i tuoi numeri; null
+ *  se non è compatibile), lo stato «salvata» e se l'azienda attiva è visibile
+ *  come partner (per candidarsi serve). */
+export interface CallPubblicaDettaglio extends CallPubblica {
+  match: MatchOut | null;
+  salvata: boolean;
+  opt_in: boolean;
+}
+
+/** Un'azienda suggerita al proponente (`GET /partenariati/call/{id}/suggeriti`):
+ *  pseudonimo per QUESTA call (mai l'id dell'azienda), profilo pubblico SENZA
+ *  il codice pubblico (stabile tra le call: il server non lo manda) e
+ *  confronto in vista «terzi». */
+export interface PartnerSuggerito {
+  pseudonimo: string;
+  profilo: Omit<PartnerPubblico, "codice_pubblico">;
+  match: MatchOut;
+}
+
+/** `GET /partenariati/riepilogo`: numeri per il badge del menu. */
+export interface RiepilogoPartenariati {
+  per_te_nuove: number;
+  call_attive: number;
+  salvate: number;
+}
+
+/** `GET/PUT /me/partenariati/email-settings` (per utente). */
+export interface PartnerEmailSettings {
+  /** Riepilogo settimanale delle call per te. */
+  digest_abilitato: boolean;
+  /** Email sulle attività (inviti, candidature, risposte, messaggi). */
+  eventi_abilitati: boolean;
+}

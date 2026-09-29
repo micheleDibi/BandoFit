@@ -15,6 +15,7 @@ from email.utils import formatdate, make_msgid, parseaddr
 import httpx
 
 from app.core.config import Settings, get_settings
+from app.core.privacy import mask_email
 
 logger = logging.getLogger("bandofit.email")
 
@@ -165,24 +166,30 @@ async def _dispatch(
     (es. List-Unsubscribe), sanificate contro l'header injection."""
     settings = get_settings()
     subject = _sanitize_header(subject)
+    # Mai l'indirizzo in chiaro nei log (digest e periodiche ne scrivono uno
+    # per destinatario): basta il dominio per diagnosticare il recapito.
+    destinatario = mask_email(to_email)
     try:
         if settings.smtp_host:
             sent = await _send_via_smtp(
                 settings, to_email, subject, html_body, text_body, headers
             )
-            logger.info("Email inviata via SMTP a %s (%r)", to_email, subject)
+            logger.info("Email inviata via SMTP a %s (%r)", destinatario, subject)
             return sent
         if settings.resend_api_key:
             sent = await _send_via_resend(
                 settings, to_email, subject, html_body, text_body, headers
             )
             if sent:
-                logger.info("Email inviata via Resend a %s (%r)", to_email, subject)
+                logger.info("Email inviata via Resend a %s (%r)", destinatario, subject)
             return sent
     except Exception as exc:
-        logger.error("Invio email a %s fallito: %s", to_email, exc)
+        # Solo la classe e il codice SMTP: il messaggio dell'eccezione può
+        # riportare l'indirizzo (es. SMTPRecipientsRefused).
+        logger.error("Invio email a %s fallito: %s%s", destinatario, type(exc).__name__,
+                     f" {exc.smtp_code}" if getattr(exc, "smtp_code", None) else "")
         return False
-    logger.info("[email dev fallback] to=%s subject=%r", to_email, subject)
+    logger.info("[email dev fallback] to=%s subject=%r", destinatario, subject)
     return True
 
 
@@ -776,6 +783,101 @@ async def send_bandi_digest_email_multi(
         cta_url=cta_url,
         unsubscribe_url=unsubscribe_url,
         multi=True,
+    )
+    return await _dispatch(
+        to_email,
+        subject,
+        html_body,
+        text,
+        headers={
+            "List-Unsubscribe": f"<{unsubscribe_url}>",
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
+    )
+
+
+def _partner_call_card(voce: dict) -> str:
+    """Card di una call nel digest dei partenariati: solo il titolo del bando
+    (catalogo pubblico) e quanti requisiti mancanti copri, mai dati di chi ha
+    creato la call. Tutto escapato qui."""
+    bando = html.escape(voce.get("bando") or "Bando")
+    url = html.escape(voce["url"], quote=True)
+    coperti = int(voce.get("coperti") or 0)
+    copertura = (
+        "Copri 1 requisito mancante"
+        if coperti == 1
+        else f"Copri {coperti} requisiti mancanti"
+    )
+    return (
+        '<span style="display:block;border:1px solid #e2e8f0;border-radius:10px;'
+        'padding:14px 16px;margin:0 0 4px">'
+        f'<a href="{url}" style="font-size:16px;font-weight:600;color:#1E5EFF;'
+        f'text-decoration:none">Call per il bando «{bando}»</a><br>'
+        f'<span style="font-size:13px;color:#475569">{copertura}</span>'
+        "</span>"
+    )
+
+
+async def send_partner_digest_email(
+    to_email: str,
+    sezioni: list[dict],
+    cta_url: str,
+    unsubscribe_url: str,
+) -> bool:
+    """Digest settimanale delle call di partenariato «per te» (WP6, Q6).
+    `sezioni` = lista di `{"azienda": str | None, "call": [{"bando", "coperti",
+    "url"}]}` già risolte (intestazione di sezione solo se c'è più di
+    un'azienda: Advisor). Link di disiscrizione proprio del modulo e header
+    RFC 8058, come le altre email periodiche. Mai solleva."""
+    multi = sum(1 for s in sezioni if s.get("call")) > 1
+    tutte = [c for s in sezioni for c in s.get("call") or []]
+    quante = len(tutte)
+    heading = (
+        "Una nuova call di partenariato per te"
+        if quante == 1
+        else f"{quante} nuove call di partenariato per te"
+    )
+    subject = (
+        "Una nuova call di partenariato per te — BandoFit"
+        if quante == 1
+        else f"{quante} nuove call di partenariato per te — BandoFit"
+    )
+    corpo: list[str] = []
+    righe_testo: list[str] = []
+    for sezione in sezioni:
+        if not sezione.get("call"):
+            continue
+        if multi and sezione.get("azienda"):
+            corpo.append(_section_header(sezione["azienda"]))
+            righe_testo.append(f"[{sezione['azienda']}]")
+        for voce in sezione["call"]:
+            corpo.append(_partner_call_card(voce))
+            coperti = int(voce.get("coperti") or 0)
+            righe_testo.append(
+                f"- Call per il bando «{voce.get('bando') or 'Bando'}»: copri {coperti} "
+                f"{'requisito mancante' if coperti == 1 else 'requisiti mancanti'}\n"
+                f"  {voce['url']}"
+            )
+    unsubscribe_href = html.escape(unsubscribe_url, quote=True)
+    paragraphs = [
+        "Queste call cercano partner con le competenze della tua azienda:",
+        *corpo,
+        '<span style="font-size:12px;color:#94a3b8">Non vuoi più ricevere questo riepilogo? '
+        f'<a href="{unsubscribe_href}" style="color:#64748b">Disattivalo con un clic</a> '
+        "o dalle Preferenze della piattaforma.</span>",
+    ]
+    html_body = _branded_html(
+        heading,
+        paragraphs,
+        "Vedi le call per te",
+        html.escape(cta_url, quote=True),
+        "Ricevi questa email perché la tua azienda è visibile come partner su BandoFit.",
+    )
+    text = (
+        f"{heading}.\n\n"
+        + "\n\n".join(righe_testo)
+        + f"\n\nTutte le call per te: {cta_url}"
+        + f"\n\nPer non ricevere più questo riepilogo: {unsubscribe_url}"
     )
     return await _dispatch(
         to_email,

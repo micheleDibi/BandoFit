@@ -2493,6 +2493,92 @@ class TestPostElaborazione:
         assert "almeno 4 partner" in avvisi and "sareste in 3" in avvisi
         assert "aggiungi una posizione con ruolo capofila" in avvisi
 
+    def test_quota_per_partner_con_categoria_solo_per_quel_tipo(self):
+        """«Ciascuna grande impresa tra il 20% e il 50%»: nessun avviso a chi
+        di sicuro è di un altro tipo, avviso condizionale a chi forse lo è."""
+        regole = RegoleConfermaIn.model_validate(
+            {"regole": snapshot_minimo(quote=[{
+                "id": "Q1", "ambito": "per_partner", "categoria": "grande_impresa",
+                "min_percentuale": 20, "max_percentuale": 50,
+                "base_calcolo": "costo_totale_progetto",
+                "effetto_violazione": "inammissibilita_progetto",
+                "origine_voce": "modificata"}]),
+             "esclusivita": False}).regole
+
+        def posizione(titolo, tipi):
+            return PosizioneAi(
+                titolo=titolo, ruolo="partner", tipi_soggetto=tipi, competenze=[],
+                ateco_divisioni=[], regioni=[], territorio_modalita="qualsiasi", paesi=[],
+                dimensioni=[], quota_ipotizzata_pct=10.0, numero=1, requisiti=[],
+                motivazione="m")
+
+        proposta = PropostaPosizioni(posizioni=[
+            posizione("Grande partner", ["grande_impresa"]),
+            posizione("Centro di ricerca", ["organismo_ricerca"]),
+            posizione("Partner qualsiasi", []),
+            posizione("Partner misto", ["grande_impresa", "organismo_ricerca"]),
+        ])
+        out = pca.post_posizioni(proposta, etichette={}, regioni={}, ident=None,
+                                 ruolo_creatore="capofila", quota_creatore=55, regole=regole)
+        assert set(out["avvisi"]) == {
+            "«Grande partner»: la quota è sotto il minimo del bando per ogni partner di "
+            "tipo «Grande impresa» (20%)",
+            "«Partner qualsiasi»: se il partner sarà di tipo «Grande impresa», la quota è "
+            "sotto il minimo del bando per quel tipo di partner (20%)",
+            "«Partner misto»: se il partner sarà di tipo «Grande impresa», la quota è "
+            "sotto il minimo del bando per quel tipo di partner (20%)",
+            "La tua quota: se la tua azienda è di tipo «Grande impresa», la quota supera "
+            "il massimo del bando per quel tipo di partner (50%)",
+        }
+
+    @pytest.mark.parametrize(("categoria", "tipi", "avviso"), [
+        ("pmi", ["micro_impresa"], True),  # una micro impresa è una PMI
+        ("grande_impresa", ["impresa"], True),  # un'impresa può essere grande
+        ("pmi", ["startup_innovativa", "cooperativa"], True),
+        ("pmi", ["libero_professionista"], True),  # spesso equiparato alle PMI
+        ("micro_impresa", ["libero_professionista"], True),
+        ("impresa_sociale", ["ente_terzo_settore"], True),
+        ("cooperativa", ["ente_terzo_settore"], True),
+        ("altro", ["pmi"], True),  # «altro» è sempre incerto, come nel validatore
+        ("altro", ["altro"], True),
+        ("pmi", ["altro"], True),
+        # sovrapposizioni fuori dalle imprese, in entrambi i versi
+        ("organismo_ricerca", ["universita"], True),
+        ("universita", ["organismo_ricerca"], True),
+        ("ente_pubblico", ["universita"], True),
+        ("ente_pubblico", ["ente_locale"], True),
+        ("istituto_scolastico", ["ente_pubblico"], True),
+        ("ente_terzo_settore", ["fondazione"], True),
+        ("ente_terzo_settore", ["associazione_categoria"], True),
+        ("ente_sportivo", ["ente_terzo_settore"], True),
+        ("pmi", ["organismo_ricerca"], False),  # tipo estraneo: nessun avviso
+        ("pmi", ["universita"], False),
+        ("ente_locale", ["universita"], False),  # entrambi enti pubblici, ma diversi
+        ("fondazione", ["pmi"], False),
+    ])
+    def test_quota_con_categoria_tipi_imparentati_o_altro(self, categoria, tipi, avviso):
+        """Tra tipi che si sovrappongono, o con «altro», il tipo non si esclude:
+        nel dubbio l'avviso è condizionale, mai assente."""
+        regole = RegoleConfermaIn.model_validate(
+            {"regole": snapshot_minimo(quote=[{
+                "id": "Q1", "ambito": "per_partner", "categoria": categoria,
+                "min_percentuale": 20, "base_calcolo": "costo_totale_progetto",
+                "effetto_violazione": "inammissibilita_progetto",
+                "origine_voce": "modificata"}]),
+             "esclusivita": False}).regole
+        proposta = PropostaPosizioni(posizioni=[PosizioneAi(
+            titolo="Partner cercato", ruolo="partner", tipi_soggetto=tipi, competenze=[],
+            ateco_divisioni=[], regioni=[], territorio_modalita="qualsiasi", paesi=[],
+            dimensioni=[], quota_ipotizzata_pct=10.0, numero=1, requisiti=[],
+            motivazione="m")])
+        out = pca.post_posizioni(proposta, etichette={}, regioni={}, ident=None,
+                                 ruolo_creatore="capofila", quota_creatore=None,
+                                 regole=regole)
+        etichetta = pca.voc.TIPI_SOGGETTO[categoria].etichetta
+        atteso = (f"«Partner cercato»: se il partner sarà di tipo «{etichetta}», la quota è "
+                  "sotto il minimo del bando per quel tipo di partner (20%)")
+        assert out["avvisi"] == ([atteso] if avviso else [])
+
 
 # ------------------------------------------------------------ anteprima
 

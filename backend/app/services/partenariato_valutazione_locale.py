@@ -478,6 +478,8 @@ def _campi_predetti(regole: dict | None, esito: str) -> dict:
         "partner_min": predetto["partner_min"],
         "partner_max": predetto["partner_max"],
         "quote": predetto["quote"],
+        # le sole quote verificate, quelle che la call preseleziona
+        "quote_usate": predetto["quote_usate"],
         "forme": [f.get("forma") for f in (regole or {}).get("forme_ammesse") or []],
     }
 

@@ -33,7 +33,11 @@ indica». Controlli:
 - `quota_partner` (capofila e partner), `quota_categoria` (somma delle quote
   dei membri della categoria, esclusi i partner associati), `quota_capofila`;
   se la violazione fa perdere solo una maggiorazione il rosso diventa grigio
-  (il consorzio resta ammissibile);
+  (il consorzio resta ammissibile). Con la categoria, `quota_partner` vale
+  solo per i membri di quel tipo (nessuno → verde; un membro di tipo incerto
+  dà grigio solo se la quota manca o viola i limiti) e `quota_capofila` è
+  grigia se il capofila non è di quel tipo o se il suo tipo è incerto, anche
+  con la quota nei limiti;
 - `indipendenza` su TUTTE le coppie di membri in piattaforma tranne le
   entità affiliate (collegate per definizione al beneficiario):
   collegamento certo → rosso (grigio se il bando non chiede
@@ -850,20 +854,48 @@ def _quota(q: QuotaSnapshot, membri: Sequence[MembroSnapshot]) -> Voce:
     def colore(esito: EsitoVoce) -> EsitoVoce:
         return "grigio" if maggiorazione and esito == "rosso" else esito
 
+    # per_partner e capofila con categoria: la quota vale solo per i membri di
+    # quel tipo. Per ogni partner un tipo incerto dà grigio solo se la quota
+    # manca o viola i limiti (se li rispetta, la regola è soddisfatta comunque);
+    # per il capofila un tipo incerto dà sempre grigio, perché la regola può
+    # presupporre un capofila di quel tipo.
+    tipo = voc.TIPI_SOGGETTO[q.categoria].etichetta if q.categoria else None
     if q.ambito == "per_partner":
         per_membro: dict[str, EsitoMembro] = {}
+        conteggiati = False
         for m in membri:
-            if m.ruolo in RUOLI_CONTEGGIO:
-                esito = colore(_nei_limiti(m.quota, minimo, massimo))
-                per_membro[m.id] = EsitoMembro(esito, esito)
+            if m.ruolo not in RUOLI_CONTEGGIO:
+                continue
+            conteggiati = True
+            esito = colore(_nei_limiti(m.quota, minimo, massimo))
+            dichiarato = False
+            if q.categoria is not None:
+                stato, dichiarato = _ha_tipo(q.categoria, m)
+                if stato == "no":
+                    continue
+                if stato == "forse" and esito != "verde":
+                    esito = "grigio"
+            per_membro[m.id] = EsitoMembro(esito, esito, dichiarato)
+        if tipo is None:
+            titolo, descrizione = "Quota di ogni partner", f"{limiti} per ogni partner.{nota}"
+        else:
+            titolo = f"Quota di ogni partner: {tipo}"
+            descrizione = f"{limiti} per ogni partner di tipo «{tipo}».{nota}"
+            if conteggiati and not per_membro:
+                return Voce(
+                    id=f"quota:{q.id}", codice="quota_partner", titolo=titolo, esito="verde",
+                    dettaglio_pubblico=(
+                        f"{limiti}. Nel consorzio non ci sono partner di tipo «{tipo}».{nota}"
+                    ),
+                    regola=regola,
+                )
         return _voce_per_membro(
-            id=f"quota:{q.id}", codice="quota_partner", titolo="Quota di ogni partner",
-            descrizione=f"{limiti} per ogni partner.{nota}", regola=regola,
-            per_membro=per_membro,
+            id=f"quota:{q.id}", codice="quota_partner", titolo=titolo,
+            descrizione=descrizione, regola=regola, per_membro=per_membro,
         )
     if q.ambito == "capofila":
         capofila = [m for m in membri if m.ruolo == "capofila"]
-        titolo = "Quota del capofila"
+        titolo = "Quota del capofila" if tipo is None else f"Quota del capofila: {tipo}"
         if not capofila:
             return Voce(
                 id=f"quota:{q.id}", codice="quota_capofila", titolo=titolo, esito="grigio",
@@ -872,13 +904,23 @@ def _quota(q: QuotaSnapshot, membri: Sequence[MembroSnapshot]) -> Voce:
             )
         m = capofila[0]
         esito = colore(_nei_limiti(m.quota, minimo, massimo))
+        sul_tipo = ""
+        dichiarato = False
+        if q.categoria is not None:
+            stato, dichiarato = _ha_tipo(q.categoria, m)
+            if stato == "no":
+                esito = "grigio"
+                sul_tipo = f" Il capofila non risulta di tipo «{tipo}»."
+            elif stato == "forse":
+                esito = "grigio"
+                sul_tipo = f" Da verificare se il capofila è di tipo «{tipo}»."
         dettaglio = f"{limiti}. Quota del capofila: " + (
             _pct(m.quota) if m.quota is not None else "non indicata"
-        ) + f".{nota}"
+        ) + f".{sul_tipo}{nota}"
         return Voce(
             id=f"quota:{q.id}", codice="quota_capofila", titolo=titolo, esito=esito,
             dettaglio_pubblico=dettaglio, regola=regola,
-            membri_coinvolti=() if esito == "verde" else (m.id,),
+            membri_coinvolti=() if esito == "verde" else (m.id,), dichiarato=dichiarato,
         )
     # per_categoria: somma delle quote dei membri della categoria che ricevono
     # budget (i partner associati no).

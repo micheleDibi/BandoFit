@@ -738,6 +738,8 @@ class TestCli:
         assert (uno["partner_min"], uno["partner_max"]) == (2, None)
         assert uno["quote"] == [{"ambito": "per_partner", "categoria": None, "min": 20.0,
                                  "max": None}]
+        assert uno["quote_usate"] == uno["quote"]  # la quota è verificata
+        assert tre["quote_usate"] == []  # nessun_segnale: nessuna regola
         assert uno["forme"] == ["ats"]
         assert uno["fonti"] == [{"n": 1, "etichetta": "Avviso", "dominio": "ente.example.it",
                                  "stato": "letto", "pagine_totali": 2,
@@ -959,7 +961,23 @@ def _esegui_con_grezzi(cat, tmp_path, monkeypatch, nome="locale.json", *extra, a
 
 CAMPI_DI_CONFRONTO = ("bando_id", "esito", "errore_codice", "modalita", "modalita_effettiva",
                       "modalita_citazione_verificata", "partner_min", "partner_max", "quote",
-                      "forme", "regole", "costo_cents", "latenza_s", "atteso", "gruppo")
+                      "quote_usate", "forme", "regole", "costo_cents", "latenza_s", "atteso",
+                      "gruppo")
+
+
+def test_campi_predetti_quote_usate_solo_verificate():
+    """Per ogni bando l'uscita espone anche le quote che la call preseleziona."""
+    regole = {"quote": [
+        {"ambito": "per_partner", "categoria": None, "min_percentuale": 10.0,
+         "max_percentuale": None, "stato": "verificata"},
+        {"ambito": "capofila", "categoria": None, "min_percentuale": 30.0,
+         "max_percentuale": None, "stato": "da_verificare"},
+    ]}
+    campi = loc._campi_predetti(regole, "estratta")
+    assert len(campi["quote"]) == 2
+    assert campi["quote_usate"] == [
+        {"ambito": "per_partner", "categoria": None, "min": 10.0, "max": None}]
+    assert loc._campi_predetti(None, "nessun_segnale")["quote_usate"] == []
 
 
 class TestInputGrezzo:

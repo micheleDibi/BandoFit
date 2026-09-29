@@ -1,0 +1,461 @@
+{
+  "versione": 2,
+  "descrizione": "Secondo campione di valutazione delle regole di partenariato (WP3), di verifica: 18 bandi, tutti con partenariato (gruppo «positivo»). Solo id, slug troncato ed etichette: nessun testo del catalogo né URL. Frame: bandi non chiusi del catalogo (DB bandi) con almeno un PDF ufficiale, senza filtri per parole chiave; ordine casuale con il seme sha256(\"campione2-2026-09-29:\" + id); 480 bandi esaminati; strati con_quote 12, confondente 4, senza_percentuali 2 (campo strato); al massimo 2 bandi per ente. Etichette di un analista, verificate da 2 verificatori indipendenti con un arbitro sui disaccordi, congelate il 2026-09-29 prima di qualunque esecuzione del modello su questi bandi. fonte_verificata, quote (percentuali 0-100 del costo del progetto) e non_raggiungibili come in campione_v1. In 17855 la categoria «partner RIS» (soggetti di paesi ammissibili RIS) è resa con «altro»: il vocabolario non ha un tipo territoriale. La quota «altro» di 17855 non può risultare verificata: misura il limite del vocabolario.",
+  "campione": [
+    {
+      "bando_id": 127902,
+      "slug_prefisso": "mimit-scoperta-imprenditoriale-ii-ricerca-innovazione-imprese",
+      "tipologia_bando_id": 2,
+      "gruppo": "positivo",
+      "strato": "con_quote",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": 2,
+        "partner_max": 3,
+        "quote": [
+          {
+            "ambito": "per_partner",
+            "categoria": null,
+            "min": 10,
+            "max": null
+          }
+        ],
+        "forme": [
+          "rete_contratto",
+          "consorzio",
+          "accordo_partenariato"
+        ],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 17520,
+      "slug_prefisso": "fondazione-varesotto-bando-4-sfide-4-comunita",
+      "tipologia_bando_id": 5,
+      "gruppo": "positivo",
+      "strato": "con_quote",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": 2,
+        "partner_max": null,
+        "quote": [],
+        "forme": [
+          "accordo_partenariato"
+        ],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 18454,
+      "slug_prefisso": "contratto-insediamento-piemonte-grandi-imprese",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "strato": "con_quote",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": 2,
+        "partner_max": 2,
+        "quote": [
+          {
+            "ambito": "per_categoria",
+            "categoria": "pmi",
+            "min": 30,
+            "max": null
+          },
+          {
+            "ambito": "per_categoria",
+            "categoria": "organismo_ricerca",
+            "min": 10,
+            "max": null
+          }
+        ],
+        "forme": [
+          "accordo_partenariato"
+        ],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 18119,
+      "slug_prefisso": "horizon-europe-raise-reti-dottorato-ia-scienza",
+      "tipologia_bando_id": 1,
+      "gruppo": "positivo",
+      "strato": "con_quote",
+      "etichetta": {
+        "modalita": "obbligatorio",
+        "partner_min": 3,
+        "partner_max": null,
+        "quote": [
+          {
+            "ambito": "per_partner",
+            "categoria": null,
+            "min": null,
+            "max": 40
+          }
+        ],
+        "forme": [
+          "consorzio_ue"
+        ],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf",
+        "non_raggiungibili": [
+          "modalita",
+          "partner_min",
+          "quote"
+        ]
+      }
+    },
+    {
+      "bando_id": 18225,
+      "slug_prefisso": "fondazione-crc-bando-autunno-contributi-progetti-cuneo",
+      "tipologia_bando_id": 5,
+      "gruppo": "positivo",
+      "strato": "con_quote",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [
+          {
+            "ambito": "capofila",
+            "categoria": null,
+            "min": 51,
+            "max": null
+          }
+        ],
+        "forme": [
+          "accordo_partenariato"
+        ],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 17855,
+      "slug_prefisso": "eit-rawmaterials-kava-14-innovazione-ris",
+      "tipologia_bando_id": 1,
+      "gruppo": "positivo",
+      "strato": "con_quote",
+      "etichetta": {
+        "modalita": "obbligatorio",
+        "partner_min": 2,
+        "partner_max": 5,
+        "quote": [
+          {
+            "ambito": "per_partner",
+            "categoria": null,
+            "min": null,
+            "max": 80
+          },
+          {
+            "ambito": "per_categoria",
+            "categoria": "altro",
+            "min": 60,
+            "max": null
+          }
+        ],
+        "forme": [
+          "consorzio_ue"
+        ],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 17608,
+      "slug_prefisso": "con-i-bambini-opportunita-per-me-futuro-migliore-seconda-occasione",
+      "tipologia_bando_id": 2,
+      "gruppo": "positivo",
+      "strato": "con_quote",
+      "etichetta": {
+        "modalita": "obbligatorio",
+        "partner_min": 3,
+        "partner_max": null,
+        "quote": [
+          {
+            "ambito": "per_partner",
+            "categoria": null,
+            "min": null,
+            "max": 50
+          },
+          {
+            "ambito": "per_categoria",
+            "categoria": "ente_terzo_settore",
+            "min": 65,
+            "max": null
+          },
+          {
+            "ambito": "capofila",
+            "categoria": null,
+            "min": null,
+            "max": 30
+          }
+        ],
+        "forme": [],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 18594,
+      "slug_prefisso": "bando-digital-transformation-pmi-trasformazione-tecnologica-digitale",
+      "tipologia_bando_id": 2,
+      "gruppo": "positivo",
+      "strato": "con_quote",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": 3,
+        "partner_max": 11,
+        "quote": [
+          {
+            "ambito": "per_partner",
+            "categoria": "pmi",
+            "min": 10,
+            "max": null
+          }
+        ],
+        "forme": [
+          "rete_contratto",
+          "rete_soggetto",
+          "consorzio",
+          "accordo_partenariato"
+        ],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 415151,
+      "slug_prefisso": "bando-comunita-connesse-welfare-plurale-nord-milano",
+      "tipologia_bando_id": 5,
+      "gruppo": "positivo",
+      "strato": "con_quote",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": 3,
+        "partner_max": null,
+        "quote": [
+          {
+            "ambito": "capofila",
+            "categoria": null,
+            "min": 40,
+            "max": null
+          },
+          {
+            "ambito": "per_partner",
+            "categoria": null,
+            "min": 10,
+            "max": null
+          }
+        ],
+        "forme": [
+          "accordo_partenariato"
+        ],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 562297,
+      "slug_prefisso": "fondazione-vco-bando-welfare-sociale-piemonte",
+      "tipologia_bando_id": 5,
+      "gruppo": "positivo",
+      "strato": "con_quote",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": 2,
+        "partner_max": null,
+        "quote": [
+          {
+            "ambito": "capofila",
+            "categoria": null,
+            "min": 50,
+            "max": null
+          },
+          {
+            "ambito": "per_partner",
+            "categoria": null,
+            "min": 10,
+            "max": null
+          }
+        ],
+        "forme": [
+          "accordo_partenariato"
+        ],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 17606,
+      "slug_prefisso": "fondazione-pro-valtellina-bando-servizi-persona-2026",
+      "tipologia_bando_id": 5,
+      "gruppo": "positivo",
+      "strato": "con_quote",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": 2,
+        "partner_max": null,
+        "quote": [
+          {
+            "ambito": "per_partner",
+            "categoria": null,
+            "min": 10,
+            "max": null
+          }
+        ],
+        "forme": [
+          "accordo_partenariato"
+        ],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 1184735,
+      "slug_prefisso": "umbria-avviso-step-2026-linea-a-sovvenzione-fesr",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "strato": "con_quote",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": 2,
+        "partner_max": 6,
+        "quote": [
+          {
+            "ambito": "per_partner",
+            "categoria": null,
+            "min": 10,
+            "max": null
+          }
+        ],
+        "forme": [
+          "ati_rti"
+        ],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 17955,
+      "slug_prefisso": "cciaa-maremma-tirreno-valorizzazione-prodotti-tipici-locali",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "strato": "confondente",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 562289,
+      "slug_prefisso": "toscana-incentivi-riuso-valorizzazione-risorse-2026",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "strato": "confondente",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 18532,
+      "slug_prefisso": "simest-temporary-manager-internazionalizzazione-imprese",
+      "tipologia_bando_id": 2,
+      "gruppo": "positivo",
+      "strato": "confondente",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [
+          "rete_soggetto"
+        ],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 18396,
+      "slug_prefisso": "fondo-veneto-ricerca-sviluppo-innovazione-eccellenza",
+      "tipologia_bando_id": 3,
+      "gruppo": "positivo",
+      "strato": "confondente",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 17514,
+      "slug_prefisso": "sport-missione-comune-credito-sportivo-mutui-agevolati-enti-locali",
+      "tipologia_bando_id": 2,
+      "gruppo": "positivo",
+      "strato": "senza_percentuali",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [
+          "altra"
+        ],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    },
+    {
+      "bando_id": 18318,
+      "slug_prefisso": "fondazione-caritro-trasmettiamo-ricerca-divulgazione-scientifica",
+      "tipologia_bando_id": 5,
+      "gruppo": "positivo",
+      "strato": "senza_percentuali",
+      "etichetta": {
+        "modalita": "ammesso",
+        "partner_min": null,
+        "partner_max": null,
+        "quote": [],
+        "forme": [],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria, arbitro sui disaccordi)",
+        "verificato_at": "2026-09-29",
+        "fonte_verificata": "pdf"
+      }
+    }
+  ]
+}

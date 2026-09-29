@@ -84,7 +84,7 @@
             "max": null
           },
           {
-            "ambito": "per_categoria",
+            "ambito": "per_partner",
             "categoria": "grande_impresa",
             "min": 10,
             "max": null
@@ -93,10 +93,12 @@
         "forme": [
           "rete_contratto",
           "consorzio",
-          "accordo_partenariato"
+          "accordo_partenariato",
+          "ats",
+          "ati_rti"
         ],
-        "verificato_da": "claude (da validare da Michele)",
-        "verificato_at": "2026-09-28",
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria)",
+        "verificato_at": "2026-09-29",
         "fonte_verificata": "pdf",
         "non_raggiungibili": [
           "partner_max",
@@ -348,7 +350,7 @@
       "gruppo": "positivo",
       "etichetta": {
         "modalita": "ammesso",
-        "partner_min": null,
+        "partner_min": 2,
         "partner_max": 2,
         "quote": [
           {
@@ -361,8 +363,8 @@
         "forme": [
           "ati_rti"
         ],
-        "verificato_da": "claude (da validare da Michele)",
-        "verificato_at": "2026-09-28",
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria)",
+        "verificato_at": "2026-09-29",
         "fonte_verificata": "pdf",
         "non_raggiungibili": [
           "quote",

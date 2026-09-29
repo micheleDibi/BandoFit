@@ -756,6 +756,9 @@ class TestCli:
         assert metriche["partner_max"]["exact_match"] == round(2 / 3, 4)
         assert metriche["raggiungibili"]["partner_max"]["exact_match"] == 1.0
         assert metriche["quote"]["tp"] == 1
+        # le quote predette sono tutte verificate: quelle usate coincidono con tutte
+        assert metriche["quote_usate"] == metriche["quote"]
+        assert metriche["raggiungibili"]["quote_usate"]["tp"] == 1
         assert metriche["citazioni"]["percentuale"] is not None
         assert metriche["costi"]["costo_totale_cents"] == 2 * REALE
         # AiFinta non passa dalla convalida: nessun input grezzo, quindi niente
@@ -829,7 +832,7 @@ class TestCli:
         metriche = loc.metriche_locali(campione, unite)
         attese = intera["metriche"]
         for chiave in ("etichettate", "modalita", "partner_min", "partner_max", "quote",
-                       "raggiungibili", "citazioni", "errori"):
+                       "quote_usate", "raggiungibili", "citazioni", "errori"):
             assert metriche[chiave] == attese[chiave], chiave
         assert metriche["costi"]["costo_totale_cents"] == attese["costi"][
             "costo_totale_cents"] == 2 * REALE
@@ -1079,6 +1082,8 @@ class TestRivaluta:
         errori = capsys.readouterr().err
         assert "Rivalutazione senza modello: 3 bandi" in errori
         assert "Prima:" in errori and "Dopo:" in errori
+        # la metrica principale delle quote è quella sulle quote usate
+        assert "quote usate P 1.0 R 1.0 (tutte P 1.0 R 1.0)" in errori
         assert "Nota:" not in errori  # stesse versioni del codice
 
     def test_usa_le_regioni_salvate_del_bando(self, cat, tmp_path, monkeypatch):
@@ -1183,7 +1188,7 @@ class TestRivaluta:
         assert [b["esito"] for b in nuovo["bandi"]] == ["estratta", "estratta",
                                                          "nessun_segnale"]
         for chiave in ("etichettate", "modalita", "partner_min", "partner_max", "quote",
-                       "raggiungibili", "citazioni", "errori"):
+                       "quote_usate", "raggiungibili", "citazioni", "errori"):
             assert nuovo["metriche"][chiave] == intera["metriche"][chiave], chiave
         assert tentativi == []
 

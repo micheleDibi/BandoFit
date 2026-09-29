@@ -154,6 +154,59 @@ class TestCalcolaMetriche:
         assert m["raggiungibili"]["quote"]["fn"] == 0
         assert m["raggiungibili"]["modalita"]["n"] == 2
 
+    def test_risultato_da_regole_quote_usate_solo_verificate(self):
+        regole = {"quote": [
+            {"ambito": "per_partner", "categoria": None, "min_percentuale": 10.0,
+             "max_percentuale": None, "stato": "verificata"},
+            {"ambito": "capofila", "categoria": None, "min_percentuale": 30.0,
+             "max_percentuale": None, "stato": "da_verificare"},
+            {"ambito": "per_partner", "categoria": None, "min_percentuale": None,
+             "max_percentuale": 50.0},  # senza stato: non usata
+        ]}
+        predetto = val.risultato_da_regole(regole)
+        assert len(predetto["quote"]) == 3
+        assert predetto["quote_usate"] == [
+            {"ambito": "per_partner", "categoria": None, "min": 10.0, "max": None}]
+        assert val.risultato_da_regole(None)["quote_usate"] == []
+
+    def test_quote_usate_solo_sulle_verificate(self):
+        campione = [
+            {"bando_id": 1, "gruppo": "positivo", "etichetta": {
+                "modalita": "ammesso", "partner_min": None, "partner_max": None,
+                "quote": [
+                    {"ambito": "per_partner", "categoria": None, "min": 10, "max": None},
+                    {"ambito": "capofila", "categoria": None, "min": 30, "max": None},
+                ]}},
+            {"bando_id": 2, "gruppo": "positivo", "etichetta": {
+                "modalita": "ammesso", "partner_min": None, "partner_max": None,
+                "quote": [{"ambito": "per_partner", "categoria": None, "min": 5, "max": None}],
+                "non_raggiungibili": ["quote"]}},
+        ]
+
+        def quota(ambito, categoria, minimo, massimo, stato):
+            return {"ambito": ambito, "categoria": categoria, "min_percentuale": minimo,
+                    "max_percentuale": massimo, "stato": stato}
+
+        regole = {
+            1: {"modalita_effettiva": "ammesso", "quote": [
+                quota("per_partner", None, 10.0, None, "verificata"),
+                # giusta ma da verificare: il prodotto non la preseleziona
+                quota("capofila", None, 30.0, None, "da_verificare"),
+                # sbagliata ma da verificare: non arriva al prodotto
+                quota("per_categoria", "organismo_ricerca", None, 33.0, "da_verificare"),
+            ]},
+            2: {"modalita_effettiva": "ammesso", "quote": []},
+        }
+        m = val.calcola_metriche(campione, {b: {"regole": r} for b, r in regole.items()})
+        assert (m["quote"]["tp"], m["quote"]["fp"], m["quote"]["fn"]) == (2, 1, 1)
+        usate = m["quote_usate"]
+        assert (usate["tp"], usate["fp"], usate["fn"]) == (1, 0, 2)
+        assert usate["precision"] == 1.0 and usate["recall"] == round(1 / 3, 4)
+        # anche senza i campi non raggiungibili, accanto a `quote`
+        ragg = m["raggiungibili"]
+        assert (ragg["quote_usate"]["tp"], ragg["quote_usate"]["fn"]) == (1, 1)
+        assert (ragg["quote"]["tp"], ragg["quote"]["fn"]) == (2, 0)
+
     def test_recall_preclassificatore_sull_etichetta(self):
         analisi = [
             # gruppo «negativo» ma etichetta ammesso: è un positivo

@@ -410,13 +410,11 @@ function EditorQuota({
     if (mi !== null && ma !== null && mi > ma) problemi.push("La percentuale minima supera la massima.");
     if (v.ambito === "per_categoria" && !v.categoria) problemi.push("Scegli la categoria.");
     if (problemi.length) return setErrori(problemi);
-    onFatto({
-      ...v,
-      min_percentuale: mi,
-      max_percentuale: ma,
-      categoria: v.ambito === "per_categoria" ? v.categoria : null,
-    });
+    // La categoria resta anche con «Ciascun partner» o «Il capofila»: toglierla è una scelta
+    // dell'utente, non un effetto del cambio di ambito.
+    onFatto({ ...v, min_percentuale: mi, max_percentuale: ma });
   };
+  const perCategoria = v.ambito === "per_categoria";
   return (
     <CorniceEditor errori={errori} onFatto={fatto} onAnnulla={onAnnulla}>
       <div className="grid gap-4 sm:grid-cols-2">
@@ -426,19 +424,17 @@ function EditorQuota({
           opzioni={Object.entries(AMBITI_QUOTA) as Array<[QuotaRegola["ambito"], string]>}
           onChange={(a) => setV({ ...v, ambito: a })}
         />
-        {v.ambito === "per_categoria" && (
-          <Select<TipoSoggettoPartenariato | "">
-            etichetta="Categoria"
-            valore={v.categoria ?? ""}
-            opzioni={[
-              ["", "Scegli…"],
-              ...(vocabolario?.tipi_soggetto ?? []).map(
-                (t) => [t.codice, t.etichetta] as [TipoSoggettoPartenariato, string],
-              ),
-            ]}
-            onChange={(c) => setV({ ...v, categoria: c || null })}
-          />
-        )}
+        <Select<TipoSoggettoPartenariato | "">
+          etichetta={perCategoria ? "Categoria" : "Categoria (facoltativa)"}
+          valore={v.categoria ?? ""}
+          opzioni={[
+            ["", perCategoria ? "Scegli…" : "Qualsiasi categoria"],
+            ...(vocabolario?.tipi_soggetto ?? []).map(
+              (t) => [t.codice, t.etichetta] as [TipoSoggettoPartenariato, string],
+            ),
+          ]}
+          onChange={(c) => setV({ ...v, categoria: c || null })}
+        />
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <TextField label="Almeno (%)" inputMode="decimal" value={minimo} onChange={(e) => setMinimo(e.target.value)} />

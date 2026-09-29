@@ -982,13 +982,16 @@ def _leggi_risultato(percorso: str) -> dict:
 def _sintesi_metriche(metriche: dict | None) -> str:
     if not metriche:
         return "nessuna"
+    # Principale: le quote usate dal prodotto (verificate); tra parentesi tutte.
+    usate = metriche.get("quote_usate") or {}
     quote = metriche.get("quote") or {}
     citazioni = metriche.get("citazioni") or {}
     return (
         f"modalità {(metriche.get('modalita') or {}).get('accuracy')}, "
         f"partner_min {(metriche.get('partner_min') or {}).get('exact_match')}, "
         f"partner_max {(metriche.get('partner_max') or {}).get('exact_match')}, "
-        f"quote P {quote.get('precision')} R {quote.get('recall')}, "
+        f"quote usate P {usate.get('precision')} R {usate.get('recall')} "
+        f"(tutte P {quote.get('precision')} R {quote.get('recall')}), "
         f"citazioni {citazioni.get('percentuale')}"
     )
 

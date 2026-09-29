@@ -116,17 +116,12 @@ class TestJunctionFilters:
 
 
 class TestFullText:
-    def test_fts_uses_wfts_italian_on_all_columns(self, client):
-        # Grezzi + rielaborati: l'utente cerca le parole che legge in card.
+    def test_fts_uses_wfts_italian_on_ricerca(self, client):
+        # Una sola colonna tsvector generata (contratto DB bandi v11 §3/§7),
+        # non più l'``or`` a cinque rami.
         params = params_of(build(client, BandiFilters(q="transizione digitale")))
-        [value] = params["or"]
-        assert value == (
-            "(titolo_raw.wfts(italian).transizione digitale,"
-            "descrizione_raw.wfts(italian).transizione digitale,"
-            "titolo.wfts(italian).transizione digitale,"
-            "titolo_breve.wfts(italian).transizione digitale,"
-            "descrizione_breve.wfts(italian).transizione digitale)"
-        )
+        assert params["ricerca"] == ["wfts(italian).transizione digitale"]
+        assert "or" not in params
 
     def test_sanitize_strips_grammar_breaking_chars(self):
         assert sanitize_fts_term("a,b(c)d\\e") == "a b c d e"
@@ -136,8 +131,15 @@ class TestFullText:
         # I doppi apici aprirebbero un token quotato mai chiuso in or=(...).
         assert '"' not in sanitize_fts_term('"bando energia" 2024')
 
-    def test_blank_term_after_sanitize_adds_no_or(self, client):
+    def test_sanitized_term_goes_to_ricerca(self, client):
+        params = params_of(build(client, BandiFilters(q='"energia", (PNRR)')))
+        [value] = params["ricerca"]
+        assert value.startswith("wfts(italian).")
+        assert not set(value.removeprefix("wfts(italian).")) & set(',()\\"')
+
+    def test_blank_term_after_sanitize_adds_no_ricerca(self, client):
         params = params_of(build(client, BandiFilters(q="(),")))
+        assert "ricerca" not in params
         assert "or" not in params
 
 
@@ -177,12 +179,22 @@ class TestTiers:
             "(stato_bando.eq.chiuso,data_scadenza.lt.2026-07-03)",
         ]
 
-    def test_tier_or_coexists_with_fts_or(self, client):
-        # PostgREST mette in AND i parametri ``or`` ripetuti: la ricerca
-        # full-text e il segmento devono restare condizioni separate.
+    def test_tier_or_coexists_with_fts(self, client):
+        # La ricerca full-text è un filtro a sé su ``ricerca``: gli ``or`` restano
+        # solo quelli del segmento, guardia R0-a compresa.
         params = params_of(apply_open_tier(build(client, BandiFilters(q="energia")), TODAY))
-        assert len(params["or"]) == 4
-        assert params["or"][0].startswith("(titolo_raw.wfts")
+        assert params["ricerca"] == ["wfts(italian).energia"]
+        assert params["or"] == [
+            GUARDIA_STATI,
+            "(stato_bando.neq.chiuso,stato_bando.is.null)",
+            "(data_scadenza.gte.2026-07-03,data_scadenza.is.null)",
+        ]
+        params = params_of(apply_closed_tier(build(client, BandiFilters(q="energia")), TODAY))
+        assert params["ricerca"] == ["wfts(italian).energia"]
+        assert params["or"] == [
+            GUARDIA_STATI,
+            "(stato_bando.eq.chiuso,data_scadenza.lt.2026-07-03)",
+        ]
 
     def test_today_italy_is_a_date(self):
         assert isinstance(today_italy(), date)
@@ -311,6 +323,7 @@ class FakeBandiQuery:
         self._response = response
         self.select_kwargs: dict = {}
         self.or_filters: list[str] = []
+        self.filters: list[tuple[str, str, str]] = []
         self.orders: list[tuple] = []
         self.range_args: tuple | None = None
         self.limit_arg: int | None = None
@@ -340,6 +353,10 @@ class FakeBandiQuery:
 
     def or_(self, filters: str):
         self.or_filters.append(filters)
+        return self
+
+    def filter(self, column: str, operator: str, criteria: str):
+        self.filters.append((column, operator, criteria))
         return self
 
     def order(self, column, desc=False, nullsfirst=None):
@@ -442,6 +459,16 @@ class TestFetchBandi:
         # la guardia sugli stati vale per entrambe le query (R0-a)
         assert f"({open_q.or_filters[0]})" == GUARDIA_STATI
         assert f"({closed_q.or_filters[0]})" == GUARDIA_STATI
+
+    async def test_fts_is_applied_to_both_queries(self):
+        secondary = FakeSecondary([
+            SimpleNamespace(data=[], count=0),
+            SimpleNamespace(data=[], count=0),
+        ])
+        await fetch_bandi(secondary, BandiFilters(q="energia"), 1, 20, "pubblicazione_desc")
+        for query in secondary.queries:
+            assert query.filters == [("ricerca", "wfts(italian)", "energia")]
+            assert f"({query.or_filters[0]})" == GUARDIA_STATI
 
     async def test_unknown_sort_falls_back_to_most_recent(self):
         secondary = FakeSecondary([

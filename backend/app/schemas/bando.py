@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel
@@ -60,6 +60,13 @@ class BandoDetail(BandoListItem):
     link_candidatura: str | None = None
     contenuto: dict[str, Any] | None = None
     allegati: list[Any] = []
+    # Fonte ufficiale trovata dal produttore del catalogo. Tipi `str` e non
+    # Literal: un valore nuovo di tipo/stato non deve rompere la validazione.
+    fonte_ufficiale_url: str | None = None
+    fonte_ufficiale_host: str | None = None
+    fonte_ufficiale_tipo: str | None = None  # ente | portale_pubblico
+    fonte_ufficiale_stato: str | None = None  # trovata | in_verifica | non_trovata
+    fonte_ufficiale_verificata_at: datetime | None = None
     programma: LookupItem | None = None
     settori: list[LookupItem] = []
     beneficiari: list[LookupItem] = []

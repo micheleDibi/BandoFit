@@ -20,6 +20,7 @@ from app.schemas.calendar import (
     CalendarEventUpdate,
 )
 from app.services import company_scope
+from app.services.bandi_risoluzione import carica_per_slug
 
 logger = logging.getLogger("bandofit.calendar")
 
@@ -119,18 +120,10 @@ async def create_bando_event(
 ) -> CalendarEventOut:
     """Aggiunge al calendario dell'azienda attiva la SCADENZA di un bando
     (evento tipo 'bando', data derivata dal catalogo). Idempotente: se l'evento
-    esiste già per questo bando lo ritorna. Non richiede che il bando sia salvato."""
-    resp = (
-        await secondary.table("bando")
-        .select(SNAPSHOT_SELECT)
-        .eq("slug", slug)
-        .eq("stato_processing", "completed")
-        .limit(1)
-        .execute()
-    )
-    if not resp.data:
-        raise NotFoundError("Bando non trovato")
-    bando = resp.data[0]
+    esiste già per questo bando lo ritorna. Non richiede che il bando sia salvato.
+    Slug spostato (storico 301 o fusione) → l'evento riguarda il master;
+    ritirato → 410; sconosciuto → 404."""
+    bando = await carica_per_slug(secondary, slug, SNAPSHOT_SELECT)
     if not bando.get("data_scadenza"):
         raise BadRequestError("Questo bando non ha una data di scadenza da aggiungere")
 

@@ -1,4 +1,4 @@
-import { Bookmark, CalendarCheck, CalendarPlus, Trash2 } from "lucide-react";
+import { ArrowRight, Bookmark, CalendarCheck, CalendarPlus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { SavableBandoCard } from "../components/bandi/SavableBandoCard";
 import { Badge } from "../components/ui/Badge";
@@ -12,23 +12,38 @@ import { formatDate } from "../lib/format";
 import type { SavedBandoItem } from "../types";
 
 /** Card di ripiego per un bando salvato che il catalogo non restituisce: niente
- *  link (il dettaglio darebbe 404), solo lo snapshot e la rimozione. Il testo
- *  resta neutro: il bando potrebbe tornare o essere confluito in un altro. */
+ *  link al vecchio dettaglio (darebbe 404), solo lo snapshot e la rimozione. Testo
+ *  neutro (il bando potrebbe tornare), tranne quando si conosce la scheda che lo
+ *  sostituisce (`slug_aggiornato`): allora badge e testo lo dicono e c'è il link. */
 function UnavailableCard({ item }: { item: SavedBandoItem }) {
   const toggle = useToggleSaved();
   return (
     <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone="slate">Scheda non disponibile</Badge>
+        <Badge tone="slate">
+          {item.slug_aggiornato ? "Unito a un'altra scheda" : "Scheda non disponibile"}
+        </Badge>
       </div>
       <h3 className="mt-3 font-display text-base font-semibold text-slate-500">
         {item.bando.titolo ?? item.bando.slug}
       </h3>
       <p className="mt-1.5 text-sm text-slate-400">
-        Al momento non riusciamo a mostrare la scheda aggiornata di questo bando. Qui trovi i dati
-        che avevi salvato.
+        {item.slug_aggiornato
+          ? "Questo bando è stato unito a un'altra scheda del catalogo. Qui trovi i dati che avevi salvato."
+          : "Al momento non riusciamo a mostrare la scheda aggiornata di questo bando. Qui trovi i dati che avevi salvato."}
         {item.bando.data_scadenza && <> Scadenza: {formatDate(item.bando.data_scadenza)}.</>}
       </p>
+      {item.slug_aggiornato && (
+        <LinkButton
+          to={`/app/bandi/${item.slug_aggiornato}`}
+          variant="secondary"
+          size="sm"
+          className="mt-3"
+        >
+          Apri la scheda aggiornata
+          <ArrowRight className="size-4" aria-hidden />
+        </LinkButton>
+      )}
       <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-200 pt-3">
         <span className="text-xs text-slate-400">Salvato il {formatDate(item.salvato_il)}</span>
         <Button

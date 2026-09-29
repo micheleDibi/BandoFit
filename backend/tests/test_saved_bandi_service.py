@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.api.deps import ActiveCompany
-from app.core.errors import BadRequestError, NotFoundError
+from app.core.errors import BadRequestError, BandoRitiratoError, NotFoundError
 from app.services import saved_bandi_service
 
 USER_ID = "a0000000-0000-0000-0000-000000000001"
@@ -171,6 +171,21 @@ def saved_row(bando_id: int = 42, **overrides) -> dict:
     return row
 
 
+def catalogo_per_id(*bandi: dict):
+    """Catalogo in cui lo slug richiesto non c'è più (miss) ma i master si
+    trovano per id: la seconda lettura di carica_per_slug (R0-b)."""
+
+    def bando(filters):
+        if "slug" in filters:
+            return []
+        return [b for b in bandi if b["id"] == filters.get("id")]
+
+    return bando
+
+
+STORICO_301 = [{"slug": "vecchio-slug", "bando_id": 42, "esito": "301"}]
+
+
 # ---------------------------------------------------------------- salvataggio
 
 class TestSaveBando:
@@ -254,6 +269,54 @@ class TestSaveBando:
         item = await saved_bandi_service.save_bando(primary, secondary, USER_ID, _active(), "bando-x")
         assert item.bando.id == 42  # la riga vinta dalla corsa viene ritornata
 
+    @pytest.mark.parametrize(
+        "risoluzione",
+        [
+            {"bando_slug_storico": STORICO_301},
+            {"bando_fusione": [{"bando_id": 7, "master_id": 42, "master_slug": "bando-x"}]},
+        ],
+        ids=["storico-301", "fusione"],
+    )
+    async def test_slug_spostato_salva_il_master(self, risoluzione):
+        primary = FakeDb({"saved_bandi": [], "calendar_events": []})
+        secondary = FakeDb({"bando": catalogo_per_id(BANDO_VIVO), **risoluzione})
+        item = await saved_bandi_service.save_bando(
+            primary, secondary, USER_ID, _active(), "vecchio-slug"
+        )
+        [(inserted, _)] = primary.ops_for("saved_bandi", "insert")
+        assert inserted["bando_id"] == 42
+        assert inserted["bando_slug"] == "bando-x"  # canonico, non quello richiesto
+        assert item.disponibile is True
+        assert item.bando.slug == "bando-x"
+
+    async def test_master_gia_salvato_ritorna_la_riga_esistente(self):
+        # L'idempotenza vale sul master: nessun secondo insert (l'indice unico
+        # non viene mai sollecitato) e nemmeno il conteggio per il limite.
+        def saved_bandi(filters):
+            if filters.get("bando_id") == 42:
+                return [saved_row(42, bando_slug="bando-x")]
+            return []
+
+        primary = FakeDb({"saved_bandi": saved_bandi, "calendar_events": []})
+        secondary = FakeDb({"bando": catalogo_per_id(BANDO_VIVO), "bando_slug_storico": STORICO_301})
+        item = await saved_bandi_service.save_bando(
+            primary, secondary, USER_ID, _active(), "vecchio-slug"
+        )
+        assert not primary.ops_for("saved_bandi", "insert")
+        [(_, filters)] = primary.ops_for("saved_bandi", "select")
+        assert filters["bando_id"] == 42
+        assert item.bando.id == 42 and item.bando.slug == "bando-x"
+
+    async def test_slug_ritirato_410_primario_mai_interrogato(self):
+        primary = FakeDb({"saved_bandi": []})
+        secondary = FakeDb({
+            "bando": [],
+            "bando_slug_storico": [{"slug": "ritirato", "bando_id": None, "esito": "410"}],
+        })
+        with pytest.raises(BandoRitiratoError):
+            await saved_bandi_service.save_bando(primary, secondary, USER_ID, _active(), "ritirato")
+        assert primary.ops == []
+
 
 class TestRemoveBando:
     async def test_delete_con_entrambi_i_filtri(self):
@@ -302,6 +365,43 @@ class TestListSaved:
         assert mancante.disponibile is False
         assert mancante.bando.titolo == "Bando 99"  # dallo snapshot
         assert mancante.bando.stato_bando == "sospeso"
+
+    async def test_spariti_per_fusione_rimandano_al_master(self):
+        rows = [saved_row(42), saved_row(99), saved_row(100), saved_row(101)]
+        primary = FakeDb({"saved_bandi": rows, "calendar_events": []})
+        secondary = FakeDb({
+            "bando": [BANDO_VIVO],
+            "bando_fusione": [
+                {"bando_id": 99, "master_id": 42, "master_slug": "bando-x"},
+                {"bando_id": 100, "master_id": 43, "master_slug": None},
+            ],
+        })
+
+        page = await saved_bandi_service.list_saved(primary, secondary, USER_ID, _active(), 1, 20)
+        vivo, fuso, fuso_senza_slug, sparito = page.items
+        assert vivo.disponibile is True and vivo.slug_aggiornato is None
+        assert fuso.disponibile is False
+        assert fuso.slug_aggiornato == "bando-x"
+        # la card resta quella dello snapshot: id salvato, rimozione per id intatta
+        assert fuso.bando.id == 99 and fuso.bando.slug == "bando-99"
+        assert fuso_senza_slug.disponibile is False and fuso_senza_slug.slug_aggiornato is None
+        assert sparito.disponibile is False and sparito.slug_aggiornato is None
+
+        # una sola risoluzione, per i soli id mancanti
+        [(_, filters)] = secondary.ops_for("bando_fusione", "select")
+        assert filters["bando_id__in"] == [99, 100, 101]
+        # nessuna scrittura sul primario (la rimappatura è della fase c)
+        assert {op for _, op, _, _ in primary.ops} == {"select"}
+
+    async def test_tutti_vivi_nessuna_query_di_risoluzione(self):
+        primary = FakeDb({"saved_bandi": [saved_row(42)], "calendar_events": []})
+        secondary = FakeDb({
+            "bando": [BANDO_VIVO],
+            "bando_fusione": [{"bando_id": 42, "master_id": 1, "master_slug": "altro"}],
+        })
+        page = await saved_bandi_service.list_saved(primary, secondary, USER_ID, _active(), 1, 20)
+        assert page.items[0].slug_aggiornato is None
+        assert [table for table, *_ in secondary.ops] == ["bando"]
 
     async def test_pagina_vuota_salta_il_secondario(self):
         primary = FakeDb({"saved_bandi": []})

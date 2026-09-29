@@ -19,6 +19,11 @@ class NotFoundError(AppError):
         super().__init__(404, "not_found", message)
 
 
+class BandoRitiratoError(AppError):
+    def __init__(self, message: str = "Questo bando non è più disponibile."):
+        super().__init__(410, "bando_ritirato", message)
+
+
 class UnauthorizedError(AppError):
     def __init__(self, message: str = "Autenticazione richiesta o token non valido"):
         super().__init__(401, "unauthorized", message)

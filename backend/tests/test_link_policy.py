@@ -7,6 +7,8 @@ Il dominio bloccato non deve mai uscire dall'API: né dai link diretti
 
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.bandi_service import (
     fetch_bando_by_slug,
     fetch_bando_for_ai,
@@ -50,6 +52,15 @@ class TestIsBlockedLink:
         assert not is_blocked_link("https://bandi.regione.piemonte.it/x")
         assert not is_blocked_link("https://www.lazioeuropa.it/bandi/y")
 
+    def test_host_nudo(self):
+        # `fonte_ufficiale_host` è un host senza schema né percorso.
+        assert is_blocked_link("obiettivoeuropa.com")
+        assert is_blocked_link("www.obiettivoeuropa.com")
+        assert is_blocked_link("WWW.ObiettivoEuropa.com.")
+        assert not is_blocked_link("bandi.regione.piemonte.it")
+        assert not is_blocked_link("obiettivoeuropa.com.evil.com")
+        assert not is_blocked_link("notobiettivoeuropa.com")
+
     def test_valori_non_url_non_bloccati(self):
         assert not is_blocked_link(None)
         assert not is_blocked_link("")
@@ -77,6 +88,103 @@ class TestScrubLinkDiretti:
         original = {"link_bando": BLOCKED, "contenuto": {"sections": []}}
         scrub_bando_row(original)
         assert original["link_bando"] == BLOCKED
+
+
+def _fonte(url, host) -> dict:
+    return {
+        "fonte_ufficiale_url": url,
+        "fonte_ufficiale_host": host,
+        "fonte_ufficiale_tipo": "portale_pubblico",
+        "fonte_ufficiale_stato": "trovata",
+        "fonte_ufficiale_verificata_at": "2026-09-20T10:00:00+00:00",
+    }
+
+
+class TestScrubFonteUfficiale:
+    def test_url_bloccato_azzera_url_e_host(self):
+        row = scrub_bando_row(_fonte(BLOCKED, "www.obiettivoeuropa.com"))
+        assert row["fonte_ufficiale_url"] is None
+        assert row["fonte_ufficiale_host"] is None
+        # Gli altri campi della fonte restano: decide il frontend cosa mostrare.
+        assert row["fonte_ufficiale_tipo"] == "portale_pubblico"
+        assert row["fonte_ufficiale_stato"] == "trovata"
+        assert row["fonte_ufficiale_verificata_at"] == "2026-09-20T10:00:00+00:00"
+
+    def test_url_bloccato_con_host_legittimo_azzera_entrambi(self):
+        row = scrub_bando_row(_fonte(BLOCKED, "bandi.regione.piemonte.it"))
+        assert row["fonte_ufficiale_url"] is None
+        assert row["fonte_ufficiale_host"] is None
+
+    def test_solo_host_bloccato_azzera_entrambi(self):
+        # L'host è l'etichetta del pulsante: non deve comparire nemmeno lì.
+        row = scrub_bando_row(_fonte(OK, "www.obiettivoeuropa.com"))
+        assert row["fonte_ufficiale_url"] is None
+        assert row["fonte_ufficiale_host"] is None
+        assert row["fonte_ufficiale_stato"] == "trovata"
+
+    def test_host_nudo_senza_url_bloccato(self):
+        row = scrub_bando_row(_fonte(None, "obiettivoeuropa.com"))
+        assert row["fonte_ufficiale_url"] is None
+        assert row["fonte_ufficiale_host"] is None
+
+    def test_fonte_legittima_intatta(self):
+        originale = _fonte(OK, "bandi.regione.piemonte.it")
+        assert scrub_bando_row(originale) == originale
+
+    @pytest.mark.parametrize("url", [
+        "javascript:alert(1)",
+        "JAVASCRIPT:alert(1)",
+        "  JavaScript:alert(1)",
+        "java\tscript:alert(1)",
+        "data:text/html,<b>ciao</b>",
+        "www.regione.piemonte.it/bando/1",  # senza schema
+        "//www.regione.piemonte.it/bando/1",  # senza schema
+        "ftp://www.regione.piemonte.it/bando/1",
+        "",
+        "http://[::1",  # urlsplit solleva ValueError
+        42,  # non stringa
+    ])
+    def test_url_non_http_azzera_url_e_host(self, url):
+        row = scrub_bando_row(_fonte(url, "www.regione.piemonte.it"))
+        assert row["fonte_ufficiale_url"] is None
+        assert row["fonte_ufficiale_host"] is None
+        assert row["fonte_ufficiale_tipo"] == "portale_pubblico"
+        assert row["fonte_ufficiale_stato"] == "trovata"
+
+    @pytest.mark.parametrize("url", [
+        "https://www.regione.piemonte.it/bando/1",
+        "http://www.regione.piemonte.it/bando/1",
+        "HTTPS://www.regione.piemonte.it/bando/1",
+        "  https://www.regione.piemonte.it/bando/1  ",
+    ])
+    def test_url_http_o_https_intatto(self, url):
+        originale = _fonte(url, "www.regione.piemonte.it")
+        assert scrub_bando_row(originale) == originale
+
+    def test_url_none_lascia_l_host(self):
+        row = scrub_bando_row(_fonte(None, "www.regione.piemonte.it"))
+        assert row["fonte_ufficiale_url"] is None
+        assert row["fonte_ufficiale_host"] == "www.regione.piemonte.it"
+
+    def test_schema_non_controllato_su_link_bando_e_candidatura(self):
+        # Il controllo dello schema vale solo per la fonte ufficiale: i link
+        # storici mantengono il comportamento di prima (solo domini esclusi).
+        row = scrub_bando_row(
+            {"link_bando": "www.regione.piemonte.it/x", "link_candidatura": "mailto:a@b.it"}
+        )
+        assert row["link_bando"] == "www.regione.piemonte.it/x"
+        assert row["link_candidatura"] == "mailto:a@b.it"
+
+    def test_campi_assenti_non_aggiunti(self):
+        row = scrub_bando_row({"link_bando": OK})
+        assert "fonte_ufficiale_url" not in row
+        assert "fonte_ufficiale_host" not in row
+
+    def test_non_muta_la_riga_originale(self):
+        originale = _fonte(BLOCKED, "www.obiettivoeuropa.com")
+        scrub_bando_row(originale)
+        assert originale["fonte_ufficiale_url"] == BLOCKED
+        assert originale["fonte_ufficiale_host"] == "www.obiettivoeuropa.com"
 
 
 class TestScrubAllegati:
@@ -287,6 +395,7 @@ def riga_dettaglio() -> dict:
             '[{"kind": "link", "url": "' + BLOCKED + '", "text": "vedi"}]}]}'
         ),
         "allegati": [{"url": BLOCKED, "label": "Scheda"}],
+        **_fonte(BLOCKED, "www.obiettivoeuropa.com"),
         "programmi": None,
         "bando_settori": [],
         "bando_beneficiari": [],
@@ -304,6 +413,9 @@ class TestDettaglioSerializzato:
         assert detail.link_bando is None
         assert detail.link_candidatura is None
         assert detail.allegati == []
+        assert detail.fonte_ufficiale_url is None
+        assert detail.fonte_ufficiale_host is None
+        assert detail.fonte_ufficiale_stato == "trovata"
 
 
 class TestScrubTextMentions:
@@ -333,29 +445,56 @@ class TestScrubTextMentions:
 
 
 class FakeSecondary:
-    """Catena select→eq→limit→execute del client PostgREST, senza rete."""
+    """Catena select→eq→limit→execute del client PostgREST, senza rete.
 
-    def __init__(self, row: dict):
+    Di default ammette solo `bando` e restituisce `row` a ogni lettura.
+    Con `storico=[riga]` simula uno slug spostato: la lettura per slug su
+    `bando` non trova nulla, `bando_slug_storico` restituisce `storico` e la
+    riletta del master per id restituisce `row`."""
+
+    def __init__(self, row: dict, *, storico: list | None = None):
         self.row = row
+        self.storico = storico
+        self.tabelle: list[str] = []
 
     def table(self, name: str):
-        assert name == "bando"
+        ammesse = {"bando"} if self.storico is None else {"bando", "bando_slug_storico"}
+        assert name in ammesse
+        self.tabelle.append(name)
         fake = self
 
         class _Query:
+            per_slug = False
+
             def select(self, *args, **kwargs):
                 return self
 
-            def eq(self, *args):
+            def eq(self, column, value):
+                if column == "slug":
+                    self.per_slug = True
+                return self
+
+            @property
+            def not_(self):
+                return self
+
+            def is_(self, *args):
                 return self
 
             def limit(self, *args):
                 return self
 
             async def execute(self):
+                if name == "bando_slug_storico":
+                    return SimpleNamespace(data=list(fake.storico))
+                if fake.storico is not None and self.per_slug:
+                    return SimpleNamespace(data=[])
                 return SimpleNamespace(data=[dict(fake.row)])
 
         return _Query()
+
+
+STORICO_301 = {"slug": "vecchio-slug", "bando_id": 1, "esito": "301"}
 
 
 class TestFetchApplicaIlFiltro:
@@ -373,6 +512,28 @@ class TestFetchApplicaIlFiltro:
         assert row["link_bando"] is None
         assert row["allegati"] == []
         # Il contenuto arriva normalizzato E filtrato alla pipeline AI.
+        assert row["contenuto"]["sections"][0]["segments"] == [
+            {"kind": "text", "text": "vedi"}
+        ]
+        assert row["fonte_ufficiale_url"] is None
+        assert row["fonte_ufficiale_host"] is None
+
+    async def test_fetch_bando_by_slug_filtra_anche_il_master(self):
+        # Slug spostato: la riga del master passa dallo stesso filtro.
+        db = FakeSecondary(riga_dettaglio(), storico=[STORICO_301])
+        detail = await fetch_bando_by_slug(db, "vecchio-slug")
+        assert db.tabelle == ["bando", "bando_slug_storico", "bando"]
+        assert detail.slug == "bando-test"
+        assert "obiettivoeuropa" not in detail.model_dump_json()
+        assert detail.link_bando is None
+        assert detail.fonte_ufficiale_url is None
+
+    async def test_fetch_bando_for_ai_filtra_anche_il_master(self):
+        db = FakeSecondary(riga_dettaglio(), storico=[STORICO_301])
+        row = await fetch_bando_for_ai(db, "vecchio-slug")
+        assert db.tabelle == ["bando", "bando_slug_storico", "bando"]
+        assert row["slug"] == "bando-test"
+        assert "obiettivoeuropa" not in str(row)
         assert row["contenuto"]["sections"][0]["segments"] == [
             {"kind": "text", "text": "vedi"}
         ]

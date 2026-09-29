@@ -15,8 +15,8 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from app.core.errors import NotFoundError
 from app.schemas.bando import BandoDetail, BandoListItem, Compatibilita
+from app.services.bandi_risoluzione import carica_per_slug
 from app.services.compatibility import CompanyFacets, compute_compatibilita
 from app.services.link_policy import scrub_bando_row
 from app.schemas.common import Page
@@ -44,22 +44,12 @@ DETAIL_SELECT = (
     "data_pubblicazione,data_apertura,data_scadenza,"
     "importo_totale_eur,importo_max_per_progetto_eur,ente_erogatore,"
     "area_geografica,tematica,link_bando,link_candidatura,contenuto,allegati,"
+    "fonte_ufficiale_url,fonte_ufficiale_host,fonte_ufficiale_tipo,fonte_ufficiale_stato,"
+    "fonte_ufficiale_verificata_at,"
     "tipologie_bando(id,nome),modalita_erogazione(id,nome),programmi(id,nome),"
     "bando_regioni(regioni(id,nome)),bando_settori(settori(id,nome)),"
     "bando_beneficiari(beneficiari(id,nome)),"
     "bando_codici_ateco(codici_ateco(id,codice,descrizione))"
-)
-
-# Colonne della ricerca full-text: i grezzi dello scraping E i rielaborati
-# mostrati in UI (titolo e descrizione_breve in card, titolo e descrizione
-# piena nel dettaglio; titolo_breve resta come ripiego del titolo); senza
-# questi ultimi le parole lette in UI sarebbero spesso introvabili.
-FTS_COLUMNS = (
-    "titolo_raw",
-    "descrizione_raw",
-    "titolo",
-    "titolo_breve",
-    "descrizione_breve",
 )
 
 # faccetta -> (alias, junction, colonna id)
@@ -109,8 +99,8 @@ class BandiFilters:
 
 
 def sanitize_fts_term(term: str) -> str:
-    """Rimuove i caratteri che romperebbero la grammatica di ``or=(...)`` di PostgREST
-    (virgole, parentesi, backslash e doppi apici che aprirebbero un token quotato)."""
+    """Rimuove virgole, parentesi, backslash e doppi apici dal termine di ricerca:
+    tiene semplice il valore di ``ricerca=wfts(italian).<termine>`` (e stabili i test)."""
     return re.sub(r'[,()\\"]', " ", term).strip()
 
 
@@ -153,12 +143,10 @@ def apply_filters(query, filters: BandiFilters, today: date | None = None):
     if filters.q:
         term = sanitize_fts_term(filters.q)
         if term:
-            # Sia i campi grezzi dello scraping sia quelli rielaborati mostrati
-            # in UI: l'utente cerca le parole che legge in card (titolo_breve)
-            # e nel dettaglio (titolo), spesso assenti dal testo grezzo.
-            query = query.or_(
-                ",".join(f"{col}.wfts(italian).{term}" for col in FTS_COLUMNS)
-            )
+            # `ricerca`: colonna tsvector generata di `bando` (titolo, titolo_breve,
+            # descrizione_breve, titolo_raw), contratto DB bandi v11 §3/§7: un solo
+            # `@@` per riga invece dei cinque `to_tsvector` dell'`or` a più rami.
+            query = query.filter("ricerca", "wfts(italian)", term)
     if filters.stato:
         query = query.in_("stato_bando", filters.stato)
     if filters.livello:
@@ -198,8 +186,7 @@ def apply_filters(query, filters: BandiFilters, today: date | None = None):
 # 'sospeso', 'revocato' e qualunque stato non previsto non sono né aperti né
 # chiusi e restano fuori da ENTRAMBI (contratto DB bandi §4 e §7, R0-a: un
 # sospeso non viene mai chiuso dalla scadenza). PostgREST mette in AND i
-# parametri ``or`` ripetuti, quindi convivono anche con l'``or`` della ricerca
-# full-text.
+# parametri ``or`` ripetuti e gli altri filtri, ricerca full-text compresa.
 
 STATI_SEGMENTATI = ("aperto", "in apertura prossimamente", "chiuso")
 
@@ -303,6 +290,11 @@ def map_detail(row: dict) -> BandoDetail:
         link_candidatura=row.get("link_candidatura"),
         contenuto=normalize_contenuto(row.get("contenuto")),
         allegati=row.get("allegati") or [],
+        fonte_ufficiale_url=row.get("fonte_ufficiale_url"),
+        fonte_ufficiale_host=row.get("fonte_ufficiale_host"),
+        fonte_ufficiale_tipo=row.get("fonte_ufficiale_tipo"),
+        fonte_ufficiale_stato=row.get("fonte_ufficiale_stato"),
+        fonte_ufficiale_verificata_at=row.get("fonte_ufficiale_verificata_at"),
         programma=_lookup(row.get("programmi")),
         settori=_flatten_junction(row.get("bando_settori"), "settori"),
         beneficiari=_flatten_junction(row.get("bando_beneficiari"), "beneficiari"),
@@ -379,18 +371,12 @@ async def fetch_bando_for_ai(secondary, slug: str) -> dict:
     """Riga grezza del bando per la pipeline AI-check (la chiave della
     cache estrazioni è l'hash del testo serializzato, vedi
     `compute_content_hash`). `contenuto` è già normalizzato (gestione
-    del doppio-encoding)."""
-    resp = (
-        await secondary.table("bando")
-        .select(DETAIL_SELECT)
-        .eq("slug", slug)
-        .eq("stato_processing", "completed")
-        .limit(1)
-        .execute()
-    )
-    if not resp.data:
-        raise NotFoundError("Bando non trovato")
-    row = dict(resp.data[0])
+    del doppio-encoding).
+
+    Stessa risoluzione del dettaglio (`carica_per_slug`): uno slug spostato
+    restituisce la riga del master (id e slug canonici), uno ritirato solleva
+    `BandoRitiratoError` (410)."""
+    row = await carica_per_slug(secondary, slug, DETAIL_SELECT)
     row["contenuto"] = normalize_contenuto(row.get("contenuto"))
     # I link ai domini esclusi (concorrenti) non devono arrivare nemmeno
     # al testo del prompt: il modello li citerebbe nel report.
@@ -404,17 +390,10 @@ async def fetch_bando_by_slug(
     company_facets: "CompanyFacets | None" = None,
     totale_regioni: int = 0,
 ) -> BandoDetail:
-    resp = (
-        await secondary.table("bando")
-        .select(DETAIL_SELECT)
-        .eq("slug", slug)
-        .eq("stato_processing", "completed")
-        .limit(1)
-        .execute()
-    )
-    if not resp.data:
-        raise NotFoundError("Bando non trovato")
-    row = dict(resp.data[0])
+    """Dettaglio per slug. Slug spostato (storico 301 o fusione) → dettaglio
+    del master, con lo slug canonico in `slug`; ritirato → 410; altrimenti
+    404 (vedi `bandi_risoluzione.carica_per_slug`)."""
+    row = await carica_per_slug(secondary, slug, DETAIL_SELECT)
     # Normalizzare PRIMA di filtrare: un `contenuto` doppio-encodato non
     # verrebbe attraversato dal filtro dei link (map_detail è idempotente).
     row["contenuto"] = normalize_contenuto(row.get("contenuto"))

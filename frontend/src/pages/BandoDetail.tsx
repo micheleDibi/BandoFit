@@ -1,3 +1,4 @@
+import axios from "axios";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -22,10 +23,11 @@ import { SaveBandoButton } from "../components/bandi/SaveBandoButton";
 import { Badge } from "../components/ui/Badge";
 import { Button, buttonClasses, LinkButton } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import { ErrorState, Skeleton } from "../components/ui/states";
+import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
 import { useBando } from "../hooks/useBandi";
 import { useAddBandoDeadline } from "../hooks/useCalendar";
-import { apiErrorMessage } from "../lib/api";
+import { useSlugCanonico } from "../hooks/useSlugCanonico";
+import { apiErrorCode, apiErrorMessage } from "../lib/api";
 import { formatDate, formatEur } from "../lib/format";
 
 function MetaTile({
@@ -53,6 +55,8 @@ export default function BandoDetail() {
   const { data: bando, isPending, isError, error, refetch } = useBando(slug);
   const addDeadline = useAddBandoDeadline();
 
+  useSlugCanonico(slug, bando);
+
   if (isPending) {
     return (
       <div className="mx-auto max-w-5xl">
@@ -69,12 +73,26 @@ export default function BandoDetail() {
   }
 
   if (isError || !bando) {
+    // Ritirato (410) e non trovato (404) sono definitivi: stato neutro, senza
+    // «Riprova». Lo status copre anche un 404 senza il corpo d'errore del backend.
+    const codice = apiErrorCode(error);
+    const nonTrovato =
+      codice === "not_found" || (axios.isAxiosError(error) && error.response?.status === 404);
     return (
       <div className="mx-auto max-w-3xl">
-        <ErrorState
-          message={apiErrorMessage(error, "Bando non trovato.")}
-          onRetry={() => refetch()}
-        />
+        {codice === "bando_ritirato" ? (
+          <EmptyState
+            title="Questo bando non è più disponibile."
+            description="Puoi cercarne altri nell'elenco dei bandi."
+          />
+        ) : nonTrovato ? (
+          <EmptyState title="Bando non trovato." />
+        ) : (
+          <ErrorState
+            message={apiErrorMessage(error, "Bando non trovato.")}
+            onRetry={() => refetch()}
+          />
+        )}
         <div className="mt-4 text-center">
           <Link to="/app/bandi" className="text-sm font-medium text-brand-600 hover:underline">
             ← Torna all'elenco bandi
@@ -85,7 +103,13 @@ export default function BandoDetail() {
   }
 
   const titolo = bando.titolo ?? bando.titolo_breve ?? "Bando";
-  const linkPrincipale = bando.link_candidatura ?? bando.link_bando;
+  // Fonte ufficiale (sito dell'ente o portale pubblico) solo se verificata come
+  // trovata; altrimenti si ripiega su `link_bando` come prima.
+  const fonteUfficiale =
+    bando.fonte_ufficiale_stato === "trovata" ? bando.fonte_ufficiale_url : null;
+  const hostFonte = fonteUfficiale ? bando.fonte_ufficiale_host : null;
+  const linkPrincipale = bando.link_candidatura ?? fonteUfficiale ?? bando.link_bando;
+  const linkFonte = fonteUfficiale ?? bando.link_bando;
   const allegati = (bando.allegati ?? []).filter((a) => a && (a.url || a.link));
 
   // Solo i riquadri con un dato reale: niente box con "—".
@@ -229,15 +253,22 @@ export default function BandoDetail() {
                     Vai al bando
                     <ArrowUpRight className="size-4" aria-hidden />
                   </a>
-                  {bando.link_bando && bando.link_bando !== linkPrincipale && (
+                  {hostFonte && linkPrincipale === fonteUfficiale && (
+                    <p className="break-all text-center text-xs text-slate-500">
+                      Sito ufficiale: {hostFonte}
+                    </p>
+                  )}
+                  {linkFonte && linkFonte !== linkPrincipale && (
                     <a
-                      href={bando.link_bando}
+                      href={linkFonte}
                       target="_blank"
                       rel="noopener noreferrer"
                       className={buttonClasses("secondary", "md", "w-full")}
                     >
-                      Fonte ufficiale
-                      <ExternalLink className="size-4" aria-hidden />
+                      <span className="min-w-0 truncate">
+                        {hostFonte ? `Fonte ufficiale · ${hostFonte}` : "Fonte ufficiale"}
+                      </span>
+                      <ExternalLink className="size-4 shrink-0" aria-hidden />
                     </a>
                   )}
                 </div>

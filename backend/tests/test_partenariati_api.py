@@ -71,6 +71,7 @@ ROTTE_NUOVE = [
     ("POST", "/api/v1/bandi/un-bando/partenariato/analisi"),
     ("GET", "/api/v1/partenariati/vocabolario"),
     ("GET", "/api/v1/partenariati/informativa"),  # WP4
+    ("POST", "/api/v1/partenariati/segnalazioni"),  # WP5
     ("GET", "/api/v1/admin/partenariati/estrazioni"),
     ("POST", "/api/v1/admin/partenariati/estrazioni/12"),
     ("POST", "/api/v1/admin/partenariati/run"),

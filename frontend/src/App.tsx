@@ -1,5 +1,10 @@
 import { Navigate, Route, Routes } from "react-router-dom";
-import { AdminRoute, ProgettistaRoute, ProtectedRoute } from "./components/layout/guards";
+import {
+  AdminRoute,
+  PartenariatiRoute,
+  ProgettistaRoute,
+  ProtectedRoute,
+} from "./components/layout/guards";
 import { AppShell } from "./components/layout/AppShell";
 import Abbonamento from "./pages/Abbonamento";
 import Collegati from "./pages/Collegati";
@@ -16,6 +21,8 @@ import Aziende from "./pages/Aziende";
 import BandiList from "./pages/BandiList";
 import BandoDetail from "./pages/BandoDetail";
 import Calendario from "./pages/Calendario";
+import CallPartenariato from "./pages/CallPartenariato";
+import CallWizard from "./pages/CallWizard";
 import Checkout from "./pages/Checkout";
 import CheckoutEsito from "./pages/CheckoutEsito";
 import ConfermaEmail from "./pages/ConfermaEmail";
@@ -28,6 +35,7 @@ import RichiestaDetail from "./pages/progettista/RichiestaDetail";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import Notifiche from "./pages/Notifiche";
+import Partenariati from "./pages/Partenariati";
 import Preferenze from "./pages/Preferenze";
 import Profilo from "./pages/Profilo";
 import RecuperaPassword from "./pages/RecuperaPassword";
@@ -73,6 +81,39 @@ export default function App() {
         <Route path="profilo" element={<Profilo />} />
         <Route path="consulenze" element={<Consulenze />} />
         <Route path="consulenze/:id" element={<ConsulenzaDetail />} />
+        {/* Modulo partenariati: a modulo spento le pagine «non esistono». */}
+        <Route
+          path="partenariati"
+          element={
+            <PartenariatiRoute>
+              <Partenariati />
+            </PartenariatiRoute>
+          }
+        />
+        <Route
+          path="partenariati/call/nuova"
+          element={
+            <PartenariatiRoute>
+              <CallWizard />
+            </PartenariatiRoute>
+          }
+        />
+        <Route
+          path="partenariati/call/:id/modifica"
+          element={
+            <PartenariatiRoute>
+              <CallWizard />
+            </PartenariatiRoute>
+          }
+        />
+        <Route
+          path="partenariati/call/:id"
+          element={
+            <PartenariatiRoute>
+              <CallPartenariato />
+            </PartenariatiRoute>
+          }
+        />
         <Route
           path="progettista/richieste"
           element={

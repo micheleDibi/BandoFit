@@ -7,14 +7,24 @@ capability); qui c'è solo la LETTURA — lo snapshot servito da GET
 famiglia). Nessun servizio deve più derivare un limite leggendo le colonne del
 piano: chi ha bisogno del numero passa da qui o dai wrapper SQL
 (`fn_family_limit` / `fn_effective_max_aziende`).
+
+I limiti del modulo partenariati (0036/0037) hanno una semantica diversa
+(None = illimitato, 0 = esclusa) e una RPC propria (`fn_partenariati_snapshot`):
+si aggiungono allo snapshot solo con il flag acceso e non lo rompono mai.
 """
 
+import logging
+
+from app.core.config import get_settings
 from app.schemas.entitlement import (
     AiChecksEntitlement,
     EntitlementsOut,
+    PartenariatiEntitlement,
     ResourceEntitlement,
 )
 from app.services.family_service import get_membership
+
+logger = logging.getLogger("bandofit.entitlements")
 
 _VUOTA = {"base": 0, "extra": 0, "effettivo": 0, "usato": 0, "residuo": 0}
 
@@ -61,6 +71,23 @@ async def usati_membro(
     return resp.count or 0
 
 
+async def partenariati_for_owner(primary, owner_id: str) -> PartenariatiEntitlement | None:
+    """Limiti di partenariato di un TITOLARE già risolto (pool su tutte le sue
+    aziende). None a flag spento e su qualunque errore (RPC assente prima della
+    0037, rete, forma inattesa): è un'informazione per la UI, i limiti veri li
+    applicano le RPC di pubblicazione e candidatura sotto il lock dell'owner."""
+    if not get_settings().partenariati_attivo:
+        return None
+    try:
+        resp = await primary.rpc(
+            "fn_partenariati_snapshot", {"p_owner": str(owner_id)}
+        ).execute()
+        return PartenariatiEntitlement.model_validate(resp.data)
+    except Exception:
+        logger.warning("snapshot dei limiti di partenariato non disponibile", exc_info=True)
+        return None
+
+
 async def get_entitlements(primary, user: dict) -> EntitlementsOut:
     """Per un collegato ATTIVO risolve il titolare (pool condiviso della
     famiglia, editable=False) e aggiunge budget/consumi propri (WP6);
@@ -83,4 +110,5 @@ async def get_entitlements(primary, user: dict) -> EntitlementsOut:
         seats=ResourceEntitlement(**_risorsa(snap, "seats")),
         companies=ResourceEntitlement(**_risorsa(snap, "companies")),
         ai_checks=ai,
+        partenariati=await partenariati_for_owner(primary, owner_id),
     )

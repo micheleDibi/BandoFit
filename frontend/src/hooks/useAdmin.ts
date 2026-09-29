@@ -91,6 +91,9 @@ export interface PlanPayload {
   num_account_aziendali?: number;
   /** Bullet custom della card (una per voce); null azzera l'override. */
   features_override?: string[] | null;
+  /** Partenariati: null = illimitate, 0 = non incluse nel piano. */
+  partner_calls_attive_max?: number | null;
+  partner_candidature_mese?: number | null;
   ordering?: number;
   is_active?: boolean;
 }

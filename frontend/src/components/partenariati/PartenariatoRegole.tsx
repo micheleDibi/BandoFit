@@ -37,7 +37,7 @@ const FASE_PASSO: Record<FasePartenariato, string> = {
   analisi: "Analisi",
 };
 
-const COSTITUZIONE: Record<CostituzionePartenariato, string> = {
+export const COSTITUZIONE: Record<CostituzionePartenariato, string> = {
   costituenda_ammessa: "Il raggruppamento può essere costituito anche dopo la domanda",
   costituita_richiesta: "Il raggruppamento deve essere già costituito alla domanda",
   non_indicato: "Il bando non dice quando va costituito il raggruppamento",
@@ -66,14 +66,14 @@ const EFFETTO_VIOLAZIONE: Record<QuotaRegola["effetto_violazione"], string | nul
   non_indicato: null,
 };
 
-const MOMENTO: Record<MomentoRegola, string | null> = {
+export const MOMENTO: Record<MomentoRegola, string | null> = {
   domanda: "Alla presentazione della domanda",
   concessione: "Alla concessione del contributo",
   prima_erogazione: "Alla prima erogazione",
   non_indicato: null,
 };
 
-const TIPO_VINCOLO: Record<TipoVincoloPartenariato, string> = {
+export const TIPO_VINCOLO: Record<TipoVincoloPartenariato, string> = {
   indipendenza: "Indipendenza tra i partner",
   esclusivita_partenariato: "Un solo partenariato per soggetto",
   paesi_distinti: "Partner di paesi diversi",
@@ -83,7 +83,7 @@ const TIPO_VINCOLO: Record<TipoVincoloPartenariato, string> = {
   altro: "Altro vincolo",
 };
 
-const TIPO_DOCUMENTO: Record<TipoDocumentoRichiesto, string> = {
+export const TIPO_DOCUMENTO: Record<TipoDocumentoRichiesto, string> = {
   lettera_intenti: "Lettera d'intenti",
   nda: "Accordo di riservatezza (NDA)",
   term_sheet_mou: "Term sheet o protocollo d'intesa",
@@ -104,7 +104,7 @@ const TIPO_DOCUMENTO: Record<TipoDocumentoRichiesto, string> = {
   altro: "Altro documento",
 };
 
-const VARIABILE: Record<VariabileFinanziaria, string> = {
+export const VARIABILE: Record<VariabileFinanziaria, string> = {
   fatturato: "Fatturato",
   fatturato_medio_2: "Fatturato medio degli ultimi 2 anni",
   fatturato_medio_3: "Fatturato medio degli ultimi 3 anni",
@@ -194,7 +194,7 @@ function intervallo(
 
 // ---- Etichette dal vocabolario ---------------------------------------------
 
-function etichettaTipo(
+export function etichettaTipo(
   codice: TipoSoggettoPartenariato,
   testoLibero: string | null,
   vocabolario: Vocabolario | undefined,
@@ -203,7 +203,7 @@ function etichettaTipo(
   return vocabolario?.tipi_soggetto.find((t) => t.codice === codice)?.etichetta ?? umanizza(codice);
 }
 
-function etichettaForma(
+export function etichettaForma(
   codice: string,
   vocabolario: Vocabolario | undefined,
   delServer?: string,
@@ -213,14 +213,26 @@ function etichettaForma(
   );
 }
 
-function titoloComposizione(voce: ComposizioneRegola, vocabolario: Vocabolario | undefined) {
+export function titoloComposizione(
+  voce: Pick<
+    ComposizioneRegola,
+    "tipo_soggetto" | "tipo_soggetto_testo" | "minimo" | "massimo" | "ruolo"
+  >,
+  vocabolario: Vocabolario | undefined,
+) {
   const tipo = etichettaTipo(voce.tipo_soggetto, voce.tipo_soggetto_testo, vocabolario);
   const quanti = intervallo(voce.minimo, voce.massimo, (n) => String(n));
   const ruolo = RUOLO[voce.ruolo] ?? null;
   return `${quanti ? `${tipo}: ${quanti}` : tipo}${ruolo ? ` (${ruolo})` : ""}`;
 }
 
-function titoloQuota(voce: QuotaRegola, vocabolario: Vocabolario | undefined): string {
+export function titoloQuota(
+  voce: Pick<
+    QuotaRegola,
+    "ambito" | "categoria" | "min_percentuale" | "max_percentuale" | "base_calcolo"
+  >,
+  vocabolario: Vocabolario | undefined,
+): string {
   const chi =
     voce.ambito === "capofila"
       ? "Quota del capofila"
@@ -236,7 +248,18 @@ function titoloQuota(voce: QuotaRegola, vocabolario: Vocabolario | undefined): s
 }
 
 /** «Costo della tua quota / Fatturato medio degli ultimi 2 anni: al massimo 0,6». */
-function formulaFinanziaria(regola: RegolaFinanziariaRegola): string | null {
+export function formulaFinanziaria(
+  regola: Pick<
+    RegolaFinanziariaRegola,
+    | "numeratore"
+    | "denominatore"
+    | "operatore"
+    | "soglia"
+    | "soglia_variabile"
+    | "soglia_coefficiente"
+    | "unita"
+  >,
+): string | null {
   const nome = (v: VariabileFinanziaria) => VARIABILE[v] ?? umanizza(v);
   const sinistra = regola.denominatore
     ? `${nome(regola.numeratore)} / ${nome(regola.denominatore)}`

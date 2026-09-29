@@ -2,6 +2,7 @@ import { Menu, ShieldCheck, X } from "lucide-react";
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
+import { useFunzioni } from "../../hooks/useFunzioni";
 import { useMe } from "../../hooks/useMe";
 import { cn } from "../../lib/cn";
 import { hasAreaProgettista } from "../../lib/roles";
@@ -23,6 +24,10 @@ const directLinks: NavItem[] = [
   { to: "/app/ai-check", label: "AI-check" },
   { to: "/app/consulenze", label: "Consulenze" },
 ];
+
+// Modulo partenariati: link diretto, solo a modulo acceso (a modulo spento la
+// pagina «non esiste», come le rotte del backend).
+const partenariatiLink: NavItem = { to: "/app/partenariati", label: "Partenariati" };
 
 // Voci di ACCOUNT (te + fatturazione): vivono nel menu avatar (UserMenu). I dati
 // azienda e la gestione portafoglio stanno nel CompanyMenu, non qui. La voce
@@ -59,6 +64,7 @@ const navLinkClasses = ({ isActive }: { isActive: boolean }) =>
 
 export function AppShell() {
   const { data: me } = useMe();
+  const { partenariatiAttivo } = useFunzioni();
   const { signOut } = useAuth();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -71,6 +77,7 @@ export function AppShell() {
   const accountLinks: NavItem[] = isParent
     ? [...accountBase, { to: "/app/collegati", label: "Account collegati" }]
     : accountBase;
+  const mainLinks: NavItem[] = partenariatiAttivo ? [...directLinks, partenariatiLink] : directLinks;
 
   const handleSignOut = async () => {
     await signOut();
@@ -103,7 +110,8 @@ export function AppShell() {
             <Logo />
           </Link>
 
-          {/* Solo navigazione: 5 link diretti + i menu dei ruoli. L'azienda vive
+          {/* Solo navigazione: 5 link diretti (6 con i partenariati) + i menu
+              dei ruoli. L'azienda vive
               nel CompanyMenu e l'account (profilo/preferenze/abbonamento/uscita)
               nell'UserMenu, a destra. La nav per esteso entra da lg, sotto
               resta l'hamburger. */}
@@ -111,7 +119,7 @@ export function AppShell() {
             className="ml-3 hidden items-center gap-0.5 lg:flex"
             aria-label="Navigazione principale"
           >
-            {directLinks.map((item) => (
+            {mainLinks.map((item) => (
               <NavLink key={item.to} to={item.to} className={navLinkClasses}>
                 {item.label}
               </NavLink>
@@ -153,7 +161,7 @@ export function AppShell() {
             className="flex flex-col gap-1 border-t border-slate-200 px-4 py-3 lg:hidden"
             aria-label="Navigazione mobile"
           >
-            {directLinks.map(mobileLink)}
+            {mainLinks.map(mobileLink)}
             {isProgettista && (
               <>
                 <p className={mobileSectionLabel}>Progettista</p>

@@ -1,9 +1,15 @@
 """Scheduler del modulo partenariati (WP3): claim giornaliero, passi isolati,
 riepilogo, batch spento con budget 0 (nessuna lettura) e batch che si ferma
-al primo rifiuto di budget; avvio nel lifespan solo con il modulo acceso."""
+al primo rifiuto di budget; avvio nel lifespan solo con il modulo acceso.
+
+Passi del WP5 (sul primario finto di test_partner_call_service, gemello delle
+RPC della 0037): `failsafe_ai_call` e `chiusura_call` (scadenza della call;
+bando chiuso, sospeso, revocato o assente da 7 giorni; azienda non viva;
+snapshot del bando; errore del catalogo che non vale come assenza; notifica
+al creatore e al titolare con dedup)."""
 
 import asyncio
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -15,6 +21,8 @@ from app.services import partenariati_scheduler as sched
 from app.services.partenariato_prompts import PARTENARIATO_PROMPT_VERSION, SCHEMA_VERSION
 
 OGGI = date(2026, 9, 28)
+NESSUNA_CALL = {"controllate": 0, "chiuse": 0, "bando_mancante": 0, "snapshot_aggiornati": 0,
+                "errori": 0, "bandi_letti": True}
 
 
 @pytest.fixture(autouse=True)
@@ -62,6 +70,12 @@ class FakeQuery:
 
     def in_(self, c, v):
         self.filtri[c] = list(v)
+        return self
+
+    def order(self, *a, **k):
+        return self
+
+    def range(self, *a):
         return self
 
     async def execute(self):
@@ -194,6 +208,7 @@ class TestClaim:
         dopo = datetime(2026, 9, 28, 6, 0, tzinfo=ZoneInfo("Europe/Rome"))
         esiti = await sched.esegui_se_dovuto(db, SecondarioVietato(), FakeAi(), dopo)
         assert esiti == {"failsafe_estrazioni": 2, "failsafe_bozze_profilo": 2,
+                         "failsafe_ai_call": 2, "chiusura_call": NESSUNA_CALL,
                          "batch_estrazioni": {"eseguite": 0, "motivo": "spento"}}
         # seconda volta nello stesso giorno: già rivendicata
         assert await sched.esegui_se_dovuto(db, SecondarioVietato(), FakeAi(), dopo) is None
@@ -215,6 +230,7 @@ class TestPassi:
         db = FakePrimary()
         esiti = await sched.esegui_run(db, object(), FakeAi(), OGGI)
         assert esiti == {"failsafe_estrazioni": "errore", "failsafe_bozze_profilo": 2,
+                         "failsafe_ai_call": 2, "chiusura_call": NESSUNA_CALL,
                          "batch_estrazioni": {"eseguite": 0}}
         assert chiamato == [OGGI]
         [aggiornamento] = [op for op in db.ops if op[0] == "partenariati_runs" and op[1] == "update"]
@@ -348,3 +364,213 @@ class TestLifespan:
     async def test_scheduler_spento(self, monkeypatch):
         avviato, partiti = await self._avvia(monkeypatch, True, False)
         assert avviato is False and partiti == []
+
+
+# ------------------------------------------------------------ passi del WP5
+
+
+def _call_db():
+    """Primario e catalogo finti delle call (gemelli della 0037)."""
+    from tests.test_partner_call_service import FakeDb, FakeSecondary, riga_bando_pubblico
+
+    return FakeDb(), FakeSecondary, riga_bando_pubblico
+
+
+def _pubblicata(db, scadenza: date, **modifiche) -> dict:
+    return db.con_call(**{"stato": "pubblicata", "pubblicata_at": "2026-09-01T10:00:00+00:00",
+                          "scadenza_call": scadenza.isoformat(), **modifiche})
+
+
+class TestFailsafeAiCall:
+    async def test_chiama_la_rpc_con_la_soglia(self, monkeypatch):
+        imposta(monkeypatch, PARTNER_CALL_AI_STALE_MINUTI="15")
+        db = FakePrimary(stale=3)
+        assert await sched.failsafe_ai_call(db) == 3
+        assert db.rpcs == ["fn_partner_call_ai_chiudi_stale"]
+
+    async def test_chiude_i_job_orfani(self):
+        db, _, _ = _call_db()
+        call = db.con_call(ai_testi_stato="in_corso", ai_testi_avviata_at="2026-09-01T10:00:00Z",
+                           ai_testi_esecuzione_id="e1")
+        db.esecuzioni["e1"] = {
+            "id": "e1", "servizio": "partner_call_testi", "gruppo": "altri", "company": "c",
+            "owner": call["family_parent_id"], "bando_id": call["bando_id"],
+            "richiedente": call["family_parent_id"], "stato": "in_corso",
+            "costo_riservato_cents": 7, "cost_cents": None, "input_tokens": 0,
+            "output_tokens": 0, "model": None, "errore_codice": None, "llm_eseguito": False,
+            "avviata_at": "2026-09-01T10:00:00+00:00",
+        }
+        assert await sched.failsafe_ai_call(db) == 1
+        assert db.call(call["id"])["ai_testi_errore"] == "interrotta"
+        [uso] = db.usage
+        assert (uso["outcome"], uso["cost_cents"]) == ("timeout_unknown", 7)
+
+
+class TestChiusuraCall:
+    async def test_scadenza_e_notifica_con_dedup(self):
+        db, Secondary, riga = _call_db()
+        scaduta = _pubblicata(db, OGGI - timedelta(days=1))
+        aperta = _pubblicata(db, OGGI, bando_id=202)
+        secondary = Secondary(pubblici=[riga(), riga(id=202)])
+        esiti = await sched.chiusura_call(db, secondary, OGGI)
+        assert esiti["chiuse"] == 1 and esiti["controllate"] == 2
+        assert (db.call(scaduta["id"])["stato"], db.call(scaduta["id"])["motivo_chiusura"]) == (
+            "scaduta", "scadenza_call")
+        assert db.call(aperta["id"])["stato"] == "pubblicata"
+        # creatore e titolare coincidono: una notifica sola
+        [notifica] = db.tabelle["notifications"]
+        assert notifica["tipo"] == "partenariato.call_chiusa"
+        assert notifica["dedup_key"] == f"call-chiusa:{scaduta['id']}"
+        assert notifica["titolo"] == "Una tua call di partenariato è stata chiusa"
+        # una seconda run non trova nulla da chiudere né da notificare
+        await sched.chiusura_call(db, secondary, OGGI)
+        assert len(db.tabelle["notifications"]) == 1
+        assert [a for a in db.audit if a["action"] == "partenariato.call_chiusa"] == [
+            {"action": "partenariato.call_chiusa", "actor": None, "call_id": scaduta["id"],
+             "motivo": "scadenza_call"}]
+
+    async def test_creatore_diverso_dal_titolare(self):
+        db, Secondary, riga = _call_db()
+        altro = "b0000000-0000-0000-0000-000000000002"
+        call = _pubblicata(db, OGGI - timedelta(days=3), creato_da=altro)
+        await sched.chiusura_call(db, Secondary(pubblici=[riga()]), OGGI)
+        destinatari = {n["user_id"] for n in db.tabelle["notifications"]}
+        assert destinatari == {call["family_parent_id"], altro}
+
+    @pytest.mark.parametrize(
+        ("stato_bando", "stato", "motivo"),
+        [("chiuso", "scaduta", "bando_chiuso"), ("sospeso", "scaduta", "bando_sospeso"),
+         ("revocato", "chiusa_annullata", "bando_revocato"), ("Revocato ", "chiusa_annullata",
+                                                               "bando_revocato")],
+    )
+    async def test_stato_live_del_bando(self, stato_bando, stato, motivo):
+        db, Secondary, riga = _call_db()
+        call = _pubblicata(db, OGGI + timedelta(days=30))
+        bozza = db.con_call(company_profile_id="c0000000-0000-0000-0000-000000000002")
+        await sched.chiusura_call(db, Secondary(pubblici=[riga(stato_effettivo=stato_bando)]),
+                                  OGGI)
+        assert (db.call(call["id"])["stato"], db.call(call["id"])["motivo_chiusura"]) == (
+            stato, motivo)
+        # una bozza non «scade»: si annulla con lo stesso motivo
+        assert (db.call(bozza["id"])["stato"], db.call(bozza["id"])["motivo_chiusura"]) == (
+            "chiusa_annullata", motivo)
+
+    async def test_bando_assente_sette_giorni(self):
+        db, Secondary, _ = _call_db()
+        call = _pubblicata(db, OGGI + timedelta(days=60))
+        secondary = Secondary(pubblici=[])
+        esiti = await sched.chiusura_call(db, secondary, OGGI)
+        assert esiti["bando_mancante"] == 1 and esiti["chiuse"] == 0
+        assert db.call(call["id"])["bando_mancante_dal"] == OGGI.isoformat()
+        # il giorno dopo non si riscrive la data
+        esiti = await sched.chiusura_call(db, secondary, OGGI + timedelta(days=1))
+        assert esiti["bando_mancante"] == 0
+        assert db.call(call["id"])["bando_mancante_dal"] == OGGI.isoformat()
+        await sched.chiusura_call(db, secondary, OGGI + timedelta(days=6))
+        assert db.call(call["id"])["stato"] == "pubblicata"
+        await sched.chiusura_call(db, secondary, OGGI + timedelta(days=7))
+        assert (db.call(call["id"])["stato"], db.call(call["id"])["motivo_chiusura"]) == (
+            "chiusa_annullata", "bando_non_disponibile")
+
+    async def test_bando_ritrovato_aggiorna_lo_snapshot(self):
+        db, Secondary, riga = _call_db()
+        call = _pubblicata(db, OGGI + timedelta(days=60),
+                           bando_mancante_dal=(OGGI - timedelta(days=2)).isoformat())
+        nuova_scadenza = (OGGI + timedelta(days=200)).isoformat()
+        esiti = await sched.chiusura_call(
+            db, Secondary(pubblici=[riga(stato_effettivo="in apertura prossimamente",
+                                         data_scadenza=nuova_scadenza)]), OGGI)
+        assert esiti["snapshot_aggiornati"] == 1
+        aggiornata = db.call(call["id"])
+        assert aggiornata["bando_mancante_dal"] is None
+        assert aggiornata["bando_stato_effettivo"] == "in apertura prossimamente"
+        assert aggiornata["bando_scadenza"] == nuova_scadenza
+        assert aggiornata["stato"] == "pubblicata"
+
+    async def test_snapshot_invariato_nessuna_scrittura(self):
+        db, Secondary, riga = _call_db()
+        call = _pubblicata(db, OGGI + timedelta(days=60))
+        riga_live = riga()
+        db.call(call["id"])["bando_scadenza"] = riga_live["data_scadenza"]
+        esiti = await sched.chiusura_call(db, Secondary(pubblici=[riga_live]), OGGI)
+        assert esiti["snapshot_aggiornati"] == 0
+        assert [op for op in db.ops if op[1] == "update"] == []
+
+    async def test_azienda_non_viva(self):
+        db, Secondary, riga = _call_db()
+        call = _pubblicata(db, OGGI + timedelta(days=60))
+        db.tabelle["company_profiles"][0]["archived_at"] = "2026-09-20T10:00:00+00:00"
+        await sched.chiusura_call(db, Secondary(pubblici=[riga()]), OGGI)
+        assert (db.call(call["id"])["stato"], db.call(call["id"])["motivo_chiusura"]) == (
+            "chiusa_annullata", "azienda_non_disponibile")
+
+    async def test_catalogo_in_errore_non_vale_come_assenza(self):
+        db, Secondary, _ = _call_db()
+        scaduta = _pubblicata(db, OGGI - timedelta(days=1))
+        aperta = _pubblicata(db, OGGI + timedelta(days=9), bando_id=202)
+        secondary = Secondary()
+        secondary.guasto_pubblico = RuntimeError("rete")
+        esiti = await sched.chiusura_call(db, secondary, OGGI)
+        assert esiti["bandi_letti"] is False and esiti["bando_mancante"] == 0
+        assert db.call(scaduta["id"])["stato"] == "scaduta"  # la scadenza non dipende dal bando
+        assert db.call(aperta["id"])["stato"] == "pubblicata"
+        assert db.call(aperta["id"])["bando_mancante_dal"] is None
+        # nemmeno una call con il bando già mancante da più di 7 giorni
+        db.call(aperta["id"])["bando_mancante_dal"] = (OGGI - timedelta(days=10)).isoformat()
+        await sched.chiusura_call(db, secondary, OGGI)
+        assert db.call(aperta["id"])["stato"] == "pubblicata"
+
+    async def test_una_call_in_errore_non_ferma_le_altre(self, monkeypatch):
+        db, Secondary, riga = _call_db()
+        prima = _pubblicata(db, OGGI - timedelta(days=1))
+        seconda = _pubblicata(db, OGGI - timedelta(days=1), bando_id=202)
+        originale = db._fn_partner_call_chiudi_auto
+
+        def chiudi(p):
+            if p["p_call"] == prima["id"]:
+                raise RuntimeError("guasto")
+            return originale(p)
+
+        db._fn_partner_call_chiudi_auto = chiudi
+        esiti = await sched.chiusura_call(db, Secondary(pubblici=[riga()]), OGGI)
+        assert esiti["errori"] == 1 and esiti["chiuse"] == 1
+        assert db.call(seconda["id"])["stato"] == "scaduta"
+
+    async def test_aggiornamenti_a_blocchi_isolati(self, monkeypatch):
+        """Un errore negli aggiornamenti di `bando_mancante_dal` o dello
+        snapshot del bando non fa uscire il passo: le chiusure già fatte e gli
+        altri blocchi restano nel riepilogo, l'errore si conta."""
+        monkeypatch.setattr(sched, "_BLOCCO_ID", 1)
+        db, Secondary, riga = _call_db()
+        scaduta = _pubblicata(db, OGGI - timedelta(days=1))
+        _pubblicata(db, OGGI + timedelta(days=30), bando_id=202)  # bando assente
+        _pubblicata(db, OGGI + timedelta(days=30), bando_id=203)  # bando assente
+        cambiata = _pubblicata(db, OGGI + timedelta(days=30), bando_id=204)
+        live = riga(id=204, stato_effettivo="in apertura prossimamente")
+        db.guasti[("partner_calls", "update")] = RuntimeError("postgrest")
+        esiti = await sched.chiusura_call(db, Secondary(pubblici=[riga(), live]), OGGI)
+        assert esiti["chiuse"] == 1 and db.call(scaduta["id"])["stato"] == "scaduta"
+        assert esiti["errori"] == 3  # due blocchi di mancanti e un bando da aggiornare
+        assert esiti["bando_mancante"] == 0 and esiti["snapshot_aggiornati"] == 0
+        # senza guasti la run dopo completa il lavoro
+        del db.guasti[("partner_calls", "update")]
+        esiti = await sched.chiusura_call(db, Secondary(pubblici=[live]), OGGI)
+        assert esiti["errori"] == 0 and esiti["bando_mancante"] == 2
+        assert esiti["snapshot_aggiornati"] == 1
+        assert db.call(cambiata["id"])["bando_stato_effettivo"] == "in apertura prossimamente"
+
+    async def test_pagine(self, monkeypatch):
+        monkeypatch.setattr(sched, "CALL_PAGINA", 2)
+        db, Secondary, riga = _call_db()
+        for i in range(5):
+            _pubblicata(db, OGGI - timedelta(days=1), bando_id=101 + i)
+        esiti = await sched.chiusura_call(db, Secondary(pubblici=[]), OGGI)
+        assert esiti["controllate"] == 5 and esiti["chiuse"] == 5
+
+    async def test_chiuse_e_sospese_non_si_toccano(self):
+        db, Secondary, _ = _call_db()
+        for stato in ("scaduta", "chiusa_completata", "chiusa_annullata", "sospesa_moderazione"):
+            db.con_call(stato=stato)
+        esiti = await sched.chiusura_call(db, Secondary(pubblici=[]), OGGI)
+        assert esiti["controllate"] == 0
+        assert db.chiamate("fn_partner_call_chiudi_auto") == []

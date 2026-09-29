@@ -85,6 +85,76 @@ RPC_ERRORS: dict[str, tuple[int, str, str]] = {
         "ai_limite_giornaliero",
         "Hai raggiunto le bozze di oggi per questa azienda: riprova domani",
     ),
+    # WP5 — call di partenariato (migration 0036-0037). Restano NON mappati di
+    # proposito (sono bug del backend, non errori dell'utente → 502):
+    # parametri_non_validi, versione_immutabile, stato_non_valido.
+    "owner_not_found": (404, "not_found", "Account del titolare non trovato"),
+    "call_not_found": (404, "not_found", "Call di partenariato non trovata"),
+    "piano_non_include_call": (
+        403,
+        "piano_non_include_call",
+        "Il tuo piano non include la creazione di call di partenariato",
+    ),
+    "limite_call_raggiunto": (
+        409,
+        "limite_call_raggiunto",
+        "Hai raggiunto il numero massimo di call attive del tuo piano",
+    ),
+    "troppe_bozze": (
+        409,
+        "troppe_bozze",
+        "Hai troppe call in bozza per questa azienda: completane o annullane una",
+    ),
+    "call_gia_presente": (409, "call_gia_presente", "Hai già una call per questo bando"),
+    "stato_call_non_valido": (
+        409,
+        "stato_call_non_valido",
+        "La call non si può modificare in questo stato",
+    ),
+    "campo_non_modificabile": (
+        400,
+        "campo_non_modificabile",
+        "Dopo la pubblicazione questo campo non si può più modificare",
+    ),
+    "scadenza_call_non_valida": (
+        400,
+        "scadenza_call_non_valida",
+        "La scadenza della call deve essere tra oggi e la scadenza del bando",
+    ),
+    "call_incompleta": (
+        400,
+        "call_incompleta",
+        "La call non è completa: servono titolo, descrizione, regole del bando confermate, "
+        "almeno una posizione e almeno un requisito cercato",
+    ),
+    "bando_non_disponibile": (
+        409,
+        "bando_non_disponibile",
+        "Il bando non è aperto: per ora non si possono pubblicare call",
+    ),
+    "ai_in_corso": (
+        409,
+        "ai_in_corso",
+        "La proposta è già in preparazione: attendi qualche istante",
+    ),
+    "ai_limite_call": (
+        429,
+        "ai_limite_giornaliero",
+        "Hai raggiunto le proposte di oggi per questa call: riprova domani",
+    ),
+    "dati_non_validi": (400, "bad_request", "Dati della call non validi"),
+    "regole_non_valide": (400, "bad_request", "Regole di partenariato non valide"),
+    "requisiti_non_validi": (
+        400,
+        "bad_request",
+        "Requisiti non validi: le regole finanziarie devono coincidere con quelle del bando "
+        "confermate e ogni etichetta va usata una sola volta",
+    ),
+    "posizioni_non_valide": (
+        400,
+        "bad_request",
+        "Posizioni non valide: controlla i dati e i requisiti collegati",
+    ),
 }
 
 

@@ -27,6 +27,30 @@ class AiChecksEntitlement(ResourceEntitlement):
     usati_membro: int | None = None
 
 
+class PartenariatiLimite(BaseModel):
+    """Un limite del modulo partenariati (migration 0036/0037). A differenza
+    delle risorse sopra: ``limite`` None = illimitato (e allora ``residuo`` è
+    None), 0 = funzione non inclusa nel piano."""
+
+    limite: int | None
+    usate: int
+    residuo: int | None
+
+
+class PartenariatiLimiteMese(PartenariatiLimite):
+    # Mese solare Europe/Rome (ISO date); None se il DB non lo fornisce.
+    periodo_inizio: str | None = None
+    periodo_fine: str | None = None
+
+
+class PartenariatiEntitlement(BaseModel):
+    """Snapshot di `fn_partenariati_snapshot` (pool del titolare su tutte le
+    sue aziende): call attive (pubblicate o sospese) e candidature del mese."""
+
+    call_attive: PartenariatiLimite
+    candidature_mese: PartenariatiLimiteMese
+
+
 class EntitlementsOut(BaseModel):
     """Risposta di GET /me/entitlements. Per un collegato ATTIVO lo snapshot è
     quello del titolare (pool condiviso) e ``editable`` è False."""
@@ -35,3 +59,6 @@ class EntitlementsOut(BaseModel):
     seats: ResourceEntitlement
     companies: ResourceEntitlement
     ai_checks: AiChecksEntitlement
+    # Solo con il modulo partenariati acceso e lo snapshot leggibile: None a
+    # flag spento o se la RPC fallisce (la risposta non si rompe mai per lui).
+    partenariati: PartenariatiEntitlement | None = None

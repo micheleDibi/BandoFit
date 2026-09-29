@@ -1,13 +1,16 @@
 import { Handshake, Loader2 } from "lucide-react";
+import { useMieCall } from "../../hooks/useCallPartenariato";
+import { useCompany } from "../../hooks/useCompany";
 import { useFunzioni } from "../../hooks/useFunzioni";
 import { analisiInCorso, usePartenariatoBando } from "../../hooks/usePartenariatoBando";
 import { apiErrorCode } from "../../lib/api";
 import { PARTENARIATO_COPY } from "../../lib/copy";
 import type { PartenariatoBando } from "../../types";
-import { Button } from "../ui/Button";
+import { Button, LinkButton } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Skeleton } from "../ui/states";
 import { PARTENARIATO_CONTENUTO_ID } from "./ancora";
+import { bandoAperto, callAperta, linkCall } from "./callDati";
 import { ModalitaBadge } from "./ModalitaBadge";
 
 function Stato({ dati }: { dati: PartenariatoBando }) {
@@ -53,9 +56,38 @@ function Stato({ dati }: { dati: PartenariatoBando }) {
   );
 }
 
+/** «Crea call» per il titolare (bando aperto), oppure «Vai alla tua call» se
+ *  l'azienda attiva ne ha già una non chiusa su questo bando. */
+function CtaCall({ slug, dati }: { slug: string; dati: PartenariatoBando }) {
+  const mie = useMieCall();
+  const { data: azienda } = useCompany();
+  const esistente = (mie.data?.items ?? []).find(
+    (c) => c.mia && c.bando.slug === slug && callAperta(c.stato),
+  );
+  if (esistente) {
+    return (
+      <LinkButton to={linkCall(esistente)} size="sm" className="mt-2 w-full">
+        Vai alla tua call
+      </LinkButton>
+    );
+  }
+  // Senza lo stato del bando si mostra: il wizard ricontrolla e spiega.
+  const aperto = dati.stato_bando === null || bandoAperto(dati.stato_bando);
+  if (mie.isPending || !azienda?.editable || !aperto) return null;
+  return (
+    <LinkButton
+      to={`/app/partenariati/call/nuova?bando=${encodeURIComponent(slug)}`}
+      size="sm"
+      className="mt-2 w-full"
+    >
+      Crea call
+    </LinkButton>
+  );
+}
+
 /** Card compatta nella sidebar di BandoDetail: modalità di partecipazione in
- *  una parola e rimando alla sezione completa. Non esiste a modulo spento.
- *  Le CTA «Crea call» e «Cerca partner» arrivano con WP5 e WP6. */
+ *  una parola, rimando alla sezione completa e CTA della call (WP5). Non
+ *  esiste a modulo spento. «Cerca partner» arriva con il WP6. */
 export function PartenariatoCard({
   slug,
   onVediRegole,
@@ -95,6 +127,13 @@ export function PartenariatoCard({
       ) : (
         <div className="mt-3">
           <Stato dati={data} />
+          {data.calls_aperte > 0 && (
+            <p className="mt-1.5 text-xs text-slate-500">
+              {data.calls_aperte === 1
+                ? "1 call di partenariato aperta su questo bando"
+                : `${data.calls_aperte} call di partenariato aperte su questo bando`}
+            </p>
+          )}
           <Button
             variant="secondary"
             size="sm"
@@ -104,6 +143,7 @@ export function PartenariatoCard({
           >
             Vedi regole
           </Button>
+          <CtaCall slug={slug} dati={data} />
         </div>
       )}
     </Card>

@@ -195,6 +195,21 @@ class Settings(BaseSettings):
     partner_bozza_ai_max_tokens: int = 4000
     partner_bozza_ai_timeout_seconds: float = 60.0
     partner_bozza_ai_stale_minuti: int = 10
+    # Call di partenariato (WP5). Bozze aperte per azienda (fail-closed nella
+    # RPC). Proposte AI di posizioni e testi: job asincroni sul budget «altri»,
+    # con un limite al giorno PER CALL (azienda × bando, per servizio) e uno
+    # PER TITOLARE su tutti i servizi call; tetto dei token di output, timeout
+    # della chiamata e minuti dopo i quali un job «in corso» è orfano. Scadenza
+    # di default della call alla pubblicazione (mai oltre quella del bando) e
+    # segnalazioni DSA al giorno per utente (anti-abuso, fail-open).
+    partner_call_bozze_max: int = 5
+    partner_call_ai_limite_giorno: int = 10
+    partner_call_ai_limite_owner_giorno: int = 30
+    partner_call_ai_max_tokens: int = 6000
+    partner_call_ai_timeout_seconds: float = 90.0
+    partner_call_scadenza_default_giorni: int = 60
+    partner_segnalazioni_limite_giorno: int = 10
+    partner_call_ai_stale_minuti: int = 10
 
     @model_validator(mode="after")
     def _segreti_obbligatori_in_produzione(self) -> "Settings":

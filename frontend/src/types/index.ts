@@ -141,6 +141,12 @@ export interface Plan {
   /** Bullet custom della card (una per riga in AdminPiani); null/vuoto =
    *  bullet derivate dai parametri del piano. */
   features_override: string[] | null;
+  /** Partenariati (0036): call attive (pubblicate o sospese) su tutte le aziende
+   *  del titolare. null = illimitate, 0 = non incluse (OPPOSTO di
+   *  alert_ritardo_giorni, dove null = esclusi). */
+  partner_calls_attive_max: number | null;
+  /** Partenariati (0036): candidature al mese solare. null = illimitate, 0 = non incluse. */
+  partner_candidature_mese: number | null;
   ordering: number;
   is_active: boolean;
   updated_at: string | null;
@@ -1119,6 +1125,28 @@ export interface AiChecksEntitlement extends ResourceEntitlement {
   usati_membro: number | null;
 }
 
+/** Un limite del modulo partenariati (0036/0037). A differenza delle risorse
+ *  sopra: `limite` null = illimitato (e allora `residuo` è null), 0 = non
+ *  incluso nel piano. */
+export interface PartenariatiLimite {
+  limite: number | null;
+  usate: number;
+  residuo: number | null;
+}
+
+export interface PartenariatiLimiteMese extends PartenariatiLimite {
+  /** Mese solare (Europe/Rome), date ISO. */
+  periodo_inizio: string | null;
+  periodo_fine: string | null;
+}
+
+/** Limiti di partenariato del titolare, su tutte le sue aziende. */
+export interface PartenariatiEntitlement {
+  /** Call pubblicate o sospese (le bozze non contano). */
+  call_attive: PartenariatiLimite;
+  candidature_mese: PartenariatiLimiteMese;
+}
+
 /** Le quote dell'account in un'unica risposta: il frontend legge, non
  *  ricalcola. Per un collegato attivo sono quelle del titolare. */
 export interface Entitlements {
@@ -1126,6 +1154,9 @@ export interface Entitlements {
   seats: ResourceEntitlement;
   companies: ResourceEntitlement;
   ai_checks: AiChecksEntitlement;
+  /** null con il modulo spento o se il dato non è disponibile: in quel caso
+   *  la UI non mostra i limiti (li applica comunque il server). */
+  partenariati: PartenariatiEntitlement | null;
 }
 
 // ---- Admin pagamenti (registro fatture, anomalie) ---------------------------
@@ -1830,4 +1861,633 @@ export interface ReferentePartnerInput {
 export interface RispostaReferenteInput {
   azione: "accetta" | "rifiuta" | "revoca";
   informativa_versione?: string | null;
+}
+
+// ---- Partenariati: call di partenariato (WP5) --------------------------------
+// Specchio di `backend/app/schemas/partner_call.py` e `partenariato_criteri.py`
+// (fonte unica dei DTO). Gli importi e le percentuali (`Decimal` nel backend)
+// arrivano come STRINGHE decimali, come il prezzo dei piani.
+
+/** Chi crea la call: guida il progetto (capofila) o cerca chi lo guidi. */
+export type RuoloCreatoreCall = "capofila" | "cerco_capofila";
+
+/** Forma prevista dal creatore: le 7 del vocabolario, senza `altra`. */
+export type FormaPrevistaCall = Exclude<FormaAggregazione, "altra">;
+
+export type StatoCall =
+  | "bozza"
+  | "pubblicata"
+  | "chiusa_completata"
+  | "chiusa_annullata"
+  | "scaduta"
+  | "sospesa_moderazione";
+
+export type MotivoChiusuraCall =
+  | "scadenza_call"
+  | "bando_chiuso"
+  | "bando_sospeso"
+  | "bando_revocato"
+  | "bando_non_disponibile"
+  | "azienda_non_disponibile"
+  | "creatore_completata"
+  | "creatore_annullata"
+  | "moderazione";
+
+export type VisibilitaCall = "pubblica" | "solo_invitati";
+
+/** Fascia PUBBLICA del budget di progetto (il budget esatto è riservato). */
+export type BudgetFasciaCall =
+  | "fino_50k"
+  | "50k_150k"
+  | "150k_300k"
+  | "300k_500k"
+  | "500k_1m"
+  | "1m_2m"
+  | "2m_5m"
+  | "oltre_5m";
+
+export type OrigineRequisitoCall =
+  | "ai_check"
+  | "precheck"
+  | "bando_partenariato"
+  | "regola_finanziaria"
+  | "manuale";
+
+export type EsitoCoperturaCall =
+  | "coperto"
+  | "non_coperto"
+  | "dato_mancante"
+  | "incerto"
+  | "non_valutabile";
+
+export type FonteCoperturaCall = "registro" | "bilanci" | "dichiarato" | "ai_check" | "nessuna";
+
+/** `consorzio` = basta un membro (i requisiti «cercati»); `ogni_membro` =
+ *  vale per ciascun membro (filtro rigido sui candidati). */
+export type AmbitoRequisitoCall = "consorzio" | "ogni_membro";
+
+export type TerritorioModalitaCall = "qualsiasi" | "sede_attuale" | "sede_entro_erogazione";
+
+export type StatoJobAiCall = "nessuno" | "in_corso" | "pronta" | "errore";
+
+/** Come una voce entra nelle regole confermate dal creatore. */
+export type OrigineVoceRegola = "confermata" | "modificata" | "aggiunta";
+
+/** Classe dimensionale del Registro Imprese. */
+export type DimensioneImpresa = "micro" | "piccola" | "media" | "grande";
+
+export type CategoriaCertificazione =
+  | "qualita"
+  | "ambiente"
+  | "sicurezza_lavoro"
+  | "sicurezza_informazioni"
+  | "energia"
+  | "appalti_soa"
+  | "settoriale"
+  | "altro";
+
+// Criteri tipizzati: unione discriminata su `tipo`, STRICT lato server (niente
+// campi in più, liste non vuote, id interi).
+
+export interface CriterioTipoSoggetto {
+  tipo: "tipo_soggetto";
+  valori: TipoSoggettoPartenariato[];
+}
+export interface CriterioTag {
+  tipo: "tag";
+  /** Codici delle competenze del vocabolario. */
+  tags: string[];
+  modalita: "almeno_uno" | "tutti";
+}
+export interface CriterioRegione {
+  tipo: "regione";
+  regioni_ids: number[];
+  modalita: "sede_attuale" | "sede_entro_erogazione";
+}
+export interface CriterioPaese {
+  tipo: "paese";
+  /** ISO 3166-1 alpha-2. */
+  paesi: string[];
+  escludi: boolean;
+}
+export interface CriterioAteco {
+  tipo: "ateco";
+  /** Divisioni a 2 cifre. */
+  divisioni: string[];
+}
+export interface CriterioSettore {
+  tipo: "settore";
+  settori_ids: number[];
+}
+export interface CriterioDimensione {
+  tipo: "dimensione";
+  valori: DimensioneImpresa[];
+}
+export interface CriterioCertificazione {
+  tipo: "certificazione";
+  categorie: CategoriaCertificazione[];
+}
+export interface CriterioEsperienza {
+  tipo: "esperienza";
+  programmi_ids: number[];
+  ruolo: RuoloPartner | null;
+}
+/** Contratto unico WP1 (`schemas/regole_finanziarie.py`), senza i campi di
+ *  stato e citazione delle regole estratte. */
+export interface RegolaFinanziaria {
+  id: string;
+  descrizione: string;
+  ambito: AmbitoRegolaFinanziaria;
+  numeratore: VariabileFinanziaria;
+  denominatore: VariabileFinanziaria | null;
+  operatore: "lt" | "le" | "gt" | "ge";
+  soglia: string | null;
+  soglia_variabile: VariabileFinanziaria | null;
+  soglia_coefficiente: string | null;
+  unita: "rapporto" | "euro" | "numero";
+}
+/** Solo dalle regole del bando confermate (Q11): mai scritta a mano. */
+export interface CriterioRegolaFinanziaria {
+  tipo: "regola_finanziaria";
+  regola: RegolaFinanziaria;
+}
+/** Requisito descritto solo a parole: non si valuta mai in automatico. */
+export interface CriterioManuale {
+  tipo: "manuale";
+}
+
+export type CriterioPartner =
+  | CriterioTipoSoggetto
+  | CriterioTag
+  | CriterioRegione
+  | CriterioPaese
+  | CriterioAteco
+  | CriterioSettore
+  | CriterioDimensione
+  | CriterioCertificazione
+  | CriterioEsperienza
+  | CriterioRegolaFinanziaria
+  | CriterioManuale;
+
+export type TipoCriterio = CriterioPartner["tipo"];
+
+/** Passaggio del bando a cui si ancora un requisito o una voce delle regole
+ *  (`CitazioneIn`): stessa forma di `CitazioneRegola` del WP3. */
+export interface CitazioneCall {
+  sezione: string;
+  testo: string;
+  verificata: boolean;
+  fonte_etichetta?: string | null;
+  url_documento?: string | null;
+  pagina?: number | null;
+}
+
+// Snapshot delle regole confermate dal creatore (`partner_calls.regole_partenariato`).
+// `confermata` solo per voci verificate dell'estrazione, uguali e con la loro
+// citazione; `modificata` = responsabilità del creatore; `aggiunta` senza
+// citazione. Nessuna chiave in più (il server le rifiuta).
+
+export interface VoceSnapshotRegola {
+  origine_voce: OrigineVoceRegola;
+  citazione: CitazioneCall | null;
+}
+export interface ModalitaSnapshot extends VoceSnapshotRegola {
+  valore: ModalitaPartenariato;
+}
+export interface CostituzioneSnapshot extends VoceSnapshotRegola {
+  valore: CostituzionePartenariato;
+}
+export interface ConteggioSnapshot extends VoceSnapshotRegola {
+  valore: number;
+}
+export interface FormaAmmessaSnapshot extends VoceSnapshotRegola {
+  forma: FormaAggregazione;
+  note: string | null;
+}
+export interface ComposizioneSnapshot extends VoceSnapshotRegola {
+  id: string;
+  tipo_soggetto: TipoSoggettoPartenariato;
+  tipo_soggetto_testo: string | null;
+  minimo: number | null;
+  massimo: number | null;
+  ruolo: RuoloComposizione;
+  regioni: number[];
+  paesi: string[];
+  vincolo_territoriale: string | null;
+}
+export interface QuotaSnapshot extends VoceSnapshotRegola {
+  id: string;
+  ambito: QuotaRegola["ambito"];
+  categoria: TipoSoggettoPartenariato | null;
+  min_percentuale: number | null;
+  max_percentuale: number | null;
+  base_calcolo: QuotaRegola["base_calcolo"];
+  effetto_violazione: QuotaRegola["effetto_violazione"];
+}
+export interface VincoloSnapshot extends VoceSnapshotRegola {
+  id: string;
+  tipo: TipoVincoloPartenariato;
+  descrizione: string;
+  parametro: number | null;
+  momento: MomentoRegola;
+}
+/** Q11: solo `confermata`, con la citazione verificata. */
+export interface RegolaFinanziariaSnapshot extends VoceSnapshotRegola, RegolaFinanziaria {}
+export interface DocumentoSnapshot extends VoceSnapshotRegola {
+  id: string;
+  tipo: TipoDocumentoRichiesto;
+  descrizione: string;
+  momento: MomentoRegola;
+}
+/** Estrazione di partenza: la scrive il server (quella del client si ignora). */
+export interface FonteSnapshotRegole {
+  estratta_at: string | null;
+  prompt_version: number | null;
+  modalita_effettiva: ModalitaPartenariato;
+}
+export interface RegoleCallSnapshot {
+  versione: 1;
+  fonte: FonteSnapshotRegole | null;
+  modalita: ModalitaSnapshot;
+  forme_ammesse: FormaAmmessaSnapshot[];
+  costituzione: CostituzioneSnapshot | null;
+  partner_min: ConteggioSnapshot | null;
+  partner_max: ConteggioSnapshot | null;
+  composizione: ComposizioneSnapshot[];
+  quote: QuotaSnapshot[];
+  vincoli: VincoloSnapshot[];
+  regole_finanziarie: RegolaFinanziariaSnapshot[];
+  documenti_richiesti: DocumentoSnapshot[];
+}
+
+// ---- Input (corpi delle richieste; il server rifiuta i campi in più) ----------
+
+/** `POST /partenariati/call`. `anonima` non si manda: le call sono solo
+ *  anonime (false → 409 `nominativo_non_disponibile`). */
+export interface CallCreaInput {
+  bando_slug: string;
+  ruolo_creatore: RuoloCreatoreCall;
+  forma_aggregazione_prevista?: FormaPrevistaCall | null;
+  /** Solo se le regole del bando dicono «non ammesso» (almeno 20 caratteri). */
+  override_non_ammesso_motivo?: string | null;
+}
+
+/** `PATCH /partenariati/call/{id}`: SOLO i campi da cambiare. Dopo la
+ *  pubblicazione si possono cambiare solo testi (non il titolo), scadenza,
+ *  visibilità, budget e quota; `wizard_passo` mai. */
+export interface CallAggiornaInput {
+  titolo?: string | null;
+  descrizione_pubblica?: string | null;
+  dettagli_riservati?: string | null;
+  profilo_partner_ideale?: string | null;
+  /** YYYY-MM-DD. */
+  scadenza_call?: string | null;
+  visibilita?: VisibilitaCall;
+  budget_fascia?: BudgetFasciaCall | null;
+  /** Decimale come stringa, riservato (lo vedi solo tu). */
+  budget_progetto_eur?: string | null;
+  /** Decimale come stringa, (0, 100]. */
+  quota_creatore_pct?: string | null;
+  ruolo_creatore?: RuoloCreatoreCall;
+  forma_aggregazione_prevista?: FormaPrevistaCall | null;
+  wizard_passo?: number;
+  override_non_ammesso_motivo?: string | null;
+}
+
+export interface RegoleConfermaInput {
+  regole: RegoleCallSnapshot;
+  esclusivita: boolean;
+}
+
+/** Un requisito (replace-all con `PUT …/requisiti`): la copertura la calcola
+ *  il server, l'etichetta breve la assegna lui. */
+export interface RequisitoInput {
+  id?: string | null;
+  etichetta?: string | null;
+  testo: string;
+  criterio: CriterioPartner | null;
+  ambito: AmbitoRequisitoCall;
+  cercato: boolean;
+  origine: OrigineRequisitoCall;
+  rif_origine?: string | null;
+  citazione?: CitazioneCall | null;
+}
+
+/** Una posizione cercata (replace-all con `PUT …/posizioni`). */
+export interface PosizioneInput {
+  id?: string | null;
+  titolo: string;
+  ruolo: RuoloPartner;
+  tipi_soggetto: TipoSoggettoPartenariato[];
+  competenze: string[];
+  ateco_divisioni: string[];
+  regioni: number[];
+  territorio_modalita: TerritorioModalitaCall;
+  paesi: string[];
+  dimensioni: DimensioneImpresa[];
+  /** Decimale come stringa, (0, 100]. */
+  quota_ipotizzata_pct: string | null;
+  numero: number;
+  requisiti_ids: string[];
+  note: string | null;
+}
+
+export interface ChiudiCallInput {
+  esito: "completata" | "annullata";
+}
+
+export type OggettoSegnalazione = "call" | "profilo";
+export type MotivoSegnalazione =
+  | "contenuto_illecito"
+  | "dati_personali"
+  | "spam_pubblicita"
+  | "contatti_nel_testo"
+  | "discriminatorio"
+  | "impersonificazione"
+  | "altro";
+export type StatoSegnalazione =
+  | "ricevuta"
+  | "in_esame"
+  | "decisa"
+  | "ricorso_presentato"
+  | "ricorso_deciso";
+
+/** `POST /partenariati/segnalazioni` (DSA): la buona fede è obbligatoria. */
+export interface SegnalazioneInput {
+  oggetto_tipo: OggettoSegnalazione;
+  oggetto_id: string;
+  motivo: MotivoSegnalazione;
+  descrizione: string;
+  buona_fede: true;
+}
+
+export interface SegnalazioneRicevuta {
+  id: string;
+  stato: StatoSegnalazione;
+  created_at: string;
+}
+
+// ---- Vista del creatore ----------------------------------------------------------
+
+export interface BandoCall {
+  id: number;
+  slug: string;
+  titolo: string;
+  scadenza: string | null;
+  programma_id: number | null;
+  tipologia_id: number | null;
+  stato_effettivo: string | null;
+  verificato_at: string | null;
+  mancante_dal: string | null;
+}
+
+/** Requisito con la copertura del creatore (solo per lui: mai verso terzi).
+ *  `id` null = proposta della gap analysis non ancora salvata. */
+export interface RequisitoCall {
+  id: string | null;
+  etichetta: string | null;
+  testo: string;
+  criterio: CriterioPartner | null;
+  ambito: AmbitoRequisitoCall;
+  cercato: boolean;
+  origine: OrigineRequisitoCall;
+  rif_origine: string | null;
+  citazione: CitazioneCall | null;
+  copertura_creatore: EsitoCoperturaCall | null;
+  copertura_fonte: FonteCoperturaCall | null;
+  /** Solo da template deterministici del server. */
+  copertura_nota: string | null;
+  ordine: number;
+}
+
+export interface PosizioneCall {
+  id: string;
+  titolo: string;
+  ruolo: RuoloPartner;
+  tipi_soggetto: TipoSoggettoPartenariato[];
+  competenze: string[];
+  ateco_divisioni: string[];
+  regioni: number[];
+  territorio_modalita: TerritorioModalitaCall;
+  paesi: string[];
+  dimensioni: DimensioneImpresa[];
+  quota_ipotizzata_pct: string | null;
+  numero: number;
+  requisiti_ids: string[];
+  note: string | null;
+  ordine: number;
+}
+
+export interface RiepilogoGap {
+  coperti: number;
+  non_coperti: number;
+  dato_mancante: number;
+  incerto: number;
+  non_valutabile: number;
+}
+
+export interface GapCall {
+  requisiti: RequisitoCall[];
+  riepilogo: RiepilogoGap;
+  /** L'ultimo AI-check pronto dell'azienda sul bando. */
+  ai_check: { disponibile: boolean; id: string | null; data: string | null };
+  partenariato: {
+    stato: StatoPartenariatoBando | null;
+    modalita_effettiva: ModalitaPartenariato | null;
+  };
+}
+
+/** Rilievo anti-contatti su un testo pubblico: nomina campo e tipo. */
+export interface RilievoCall {
+  campo: string;
+  tipo: string;
+  estratto: string;
+  bloccante: boolean;
+}
+
+/** Posizione proposta dall'AI, già post-validata dal server: si salva solo se
+ *  la confermi con `PUT …/posizioni`. */
+export interface PosizioneProposta {
+  titolo: string;
+  ruolo: RuoloPartner;
+  tipi_soggetto: TipoSoggettoPartenariato[];
+  competenze: string[];
+  ateco_divisioni: string[];
+  regioni: number[];
+  territorio_modalita: TerritorioModalitaCall;
+  paesi: string[];
+  dimensioni: DimensioneImpresa[];
+  quota_ipotizzata_pct: string | null;
+  numero: number;
+  requisiti_ids: string[];
+  note: string | null;
+  motivazione: string | null;
+}
+
+export interface PropostaPosizioni {
+  posizioni: PosizioneProposta[];
+  /** Avvisi deterministici (quote oltre il 100%, numero di partner…). */
+  avvisi: string[];
+}
+
+/** Bozza dei testi pubblici, già anonimizzata, con i rilievi rimasti. */
+export interface PropostaTesti {
+  titolo: string | null;
+  descrizione_pubblica: string | null;
+  profilo_partner_ideale: string | null;
+  rilievi: RilievoCall[];
+  avvisi: string[];
+}
+
+/** Job AI asincrono (202 + stato riletto con il dettaglio della call). */
+export interface JobAiCall<P> {
+  stato: StatoJobAiCall;
+  avviata_at: string | null;
+  errore: string | null;
+  proposta: P | null;
+}
+
+export interface MotivoBloccoCall {
+  codice: string;
+  messaggio: string;
+}
+
+/** `GET /partenariati/call/{id}` per l'azienda creatrice (titolare e membri
+ *  con visibilità; `editable` solo per il titolare). */
+export interface CallVistaCreatore {
+  id: string;
+  company_profile_id: string;
+  editable: boolean;
+  stato: StatoCall;
+  motivo_chiusura: MotivoChiusuraCall | null;
+  versione: number;
+  wizard_passo: number;
+  bando: BandoCall;
+  ruolo_creatore: RuoloCreatoreCall;
+  forma_aggregazione_prevista: FormaPrevistaCall | null;
+  anonima: boolean;
+  titolo: string | null;
+  descrizione_pubblica: string | null;
+  dettagli_riservati: string | null;
+  profilo_partner_ideale: string | null;
+  budget_fascia: BudgetFasciaCall | null;
+  budget_progetto_eur: string | null;
+  quota_creatore_pct: string | null;
+  scadenza_call: string | null;
+  visibilita: VisibilitaCall;
+  override_non_ammesso_motivo: string | null;
+  regole_partenariato: RegoleCallSnapshot | null;
+  regole_confermate_at: string | null;
+  esclusivita: boolean;
+  posizioni: PosizioneCall[];
+  gap: GapCall;
+  ai_posizioni: JobAiCall<PropostaPosizioni>;
+  ai_testi: JobAiCall<PropostaTesti>;
+  /** Pool del titolare; null se non leggibile (lo applica comunque il server). */
+  limiti: PartenariatiEntitlement | null;
+  puo_pubblicare: boolean;
+  motivi_blocco: MotivoBloccoCall[];
+  pubblicata_at: string | null;
+  chiusa_at: string | null;
+  sospesa_at: string | null;
+  sospeso_motivo: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+// ---- Proiezioni verso le altre aziende (whitelist del server) --------------------
+
+/** Il creatore visto dagli altri: per ora sempre «Azienda anonima» con
+ *  regione, sezione ATECO e classe dimensionale (dal Registro Imprese). */
+export interface CreatoreCall {
+  anonima: boolean;
+  denominazione: string;
+  regione: string | null;
+  ateco_sezione: { lettera: string; descrizione: string } | null;
+  classe_dimensionale: DimensioneImpresa | null;
+}
+
+export interface BandoPubblicoCall {
+  slug: string;
+  titolo: string;
+  scadenza: string | null;
+}
+
+/** Requisito CERCATO: niente copertura del creatore, niente citazione. */
+export interface RequisitoPubblicoCall {
+  etichetta: string;
+  testo: string;
+  criterio: CriterioPartner | null;
+  ambito: AmbitoRequisitoCall;
+}
+
+export interface PosizionePubblicaCall {
+  id: string;
+  titolo: string;
+  ruolo: RuoloPartner;
+  tipi_soggetto: TipoSoggettoPartenariato[];
+  competenze: string[];
+  ateco_divisioni: string[];
+  regioni: number[];
+  regioni_nomi: string[];
+  territorio_modalita: TerritorioModalitaCall;
+  paesi: string[];
+  dimensioni: DimensioneImpresa[];
+  quota_ipotizzata_pct: string | null;
+  numero: number;
+  /** Etichette dei requisiti cercati («A», «C»). */
+  requisiti: string[];
+  note: string | null;
+}
+
+/** La call vista dalle altre aziende (e l'anteprima «come ti vedono»). */
+export interface CallPubblica {
+  id: string;
+  stato: StatoCall;
+  bando: BandoPubblicoCall;
+  creatore: CreatoreCall;
+  ruolo_creatore: RuoloCreatoreCall;
+  forma_aggregazione_prevista: FormaPrevistaCall | null;
+  titolo: string | null;
+  descrizione_pubblica: string | null;
+  profilo_partner_ideale: string | null;
+  budget_fascia: BudgetFasciaCall | null;
+  scadenza_call: string | null;
+  visibilita: VisibilitaCall;
+  esclusivita: boolean;
+  pubblicata_at: string | null;
+  requisiti: RequisitoPubblicoCall[];
+  posizioni: PosizionePubblicaCall[];
+}
+
+/** Una call nelle liste (`GET /partenariati/call?vista=mie`). */
+export interface CallCard {
+  id: string;
+  stato: StatoCall;
+  titolo: string | null;
+  bando: BandoPubblicoCall;
+  creatore: CreatoreCall;
+  ruolo_creatore: RuoloCreatoreCall;
+  budget_fascia: BudgetFasciaCall | null;
+  scadenza_call: string | null;
+  pubblicata_at: string | null;
+  posizioni_n: number;
+  requisiti_cercati_n: number;
+  /** Call dell'azienda attiva: solo allora `wizard_passo` e `updated_at`. */
+  mia: boolean;
+  wizard_passo: number | null;
+  updated_at: string | null;
+}
+
+/** `GET /partenariati/call/{id}/anteprima`. */
+export interface AnteprimaCall {
+  call: CallPubblica;
+  rilievi: RilievoCall[];
+}
+
+/** `GET /partenariati/call/{id}/versioni` (solo per il creatore). */
+export interface VersioneCall {
+  versione: number;
+  created_at: string;
+  snapshot: Record<string, unknown>;
 }

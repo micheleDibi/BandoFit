@@ -1,12 +1,21 @@
 """Rotte trasversali del modulo partenariati (flag sul router: 404 a flag
 spento, anche senza token). WP3: il vocabolario controllato; WP4 aggiunge
-l'informativa."""
+l'informativa; WP5 le segnalazioni DSA."""
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import CurrentUser, RottaPartenariati, require_partenariati_attivo
+from app.api.deps import (
+    ActiveCompanyDep,
+    CurrentUser,
+    PrimaryClient,
+    RottaPartenariati,
+    SecondaryClient,
+    require_partenariati_attivo,
+)
 from app.schemas.partenariato_vocabolario import VocabolarioOut
+from app.schemas.partner_call import SegnalazioneIn, SegnalazioneOut
 from app.schemas.partner_profile import InformativaPartnerOut
+from app.services import partner_call_service
 from app.services.partenariato_informativa import informativa_out
 from app.services.partenariato_vocabolario import vocabolario_out
 
@@ -29,3 +38,17 @@ async def get_informativa(user: CurrentUser) -> InformativaPartnerOut:
     """Informativa per il profilo partner e per il referente, con le versioni
     da rimandare al consenso."""
     return informativa_out()
+
+
+@router.post("/segnalazioni", response_model=SegnalazioneOut, status_code=201)
+async def segnala(
+    data: SegnalazioneIn,
+    user: CurrentUser,
+    active: ActiveCompanyDep,
+    primary: PrimaryClient,
+    secondary: SecondaryClient,
+) -> SegnalazioneOut:
+    """Segnala una call o un profilo partner che vedi (DSA): 201 con la
+    conferma di ricezione; 404 se il contenuto non è visibile, 409 se l'hai
+    già segnalato, 429 oltre il limite giornaliero."""
+    return await partner_call_service.segnala(primary, secondary, active, user, data)

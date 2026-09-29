@@ -418,6 +418,36 @@ def _to_out(
     )
 
 
+async def calls_aperte(primary, bando_id: int) -> int:
+    """Call aperte sul bando (WP5): pubblicate, visibili a tutti e non
+    scadute (Europe/Rome; lo scheduler le chiude di notte, qui non si aspetta).
+    Le call `solo_invitati` non si contano: non devono rivelarsi. Best-effort:
+    un guasto vale 0, la GET in polling non fallisce per questo."""
+    oggi = bandi_service.today_italy().isoformat()
+    try:
+        resp = (
+            await primary.table("partner_calls")
+            .select("scadenza_call")
+            .eq("bando_id", int(bando_id))
+            .eq("stato", "pubblicata")
+            .eq("visibilita", "pubblica")
+            .limit(1000)
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "partenariati: call aperte non leggibili (bando %s, %s)",
+            bando_id,
+            getattr(exc, "code", None) or type(exc).__name__,
+        )
+        return 0
+    return sum(
+        1
+        for riga in resp.data or []
+        if isinstance(riga, dict) and str(riga.get("scadenza_call") or "")[:10] >= oggi
+    )
+
+
 async def get_stato(primary, secondary, slug: str, *, ai=None) -> PartenariatoBandoOut:
     """Stato delle regole di partenariato del bando (GET in polling). Applica
     il failsafe dei claim scaduti prima di leggere."""
@@ -430,7 +460,7 @@ async def get_stato(primary, secondary, slug: str, *, ai=None) -> PartenariatoBa
         avviata_at = await _avviata_at(primary, row.get("esecuzione_id")) or _iso(
             row.get("updated_at")
         )
-    return _to_out(
+    out = _to_out(
         bando,
         row,
         stato_pubblico,
@@ -438,6 +468,8 @@ async def get_stato(primary, secondary, slug: str, *, ai=None) -> PartenariatoBa
         ai_attiva=None if ai is None else bool(ai.enabled),
         avviata_at=avviata_at,
     )
+    out.calls_aperte = await calls_aperte(primary, int(bando["id"]))
+    return out
 
 
 # ------------------------------------------------------------ avvio

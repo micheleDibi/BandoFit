@@ -1,5 +1,5 @@
 import { BadgeCheck, Plus } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -15,6 +15,29 @@ import {
 import { apiErrorMessage } from "../lib/api";
 import type { Plan, TipoPrezzo } from "../types";
 
+/** Limite di partenariato nel form: «Illimitate» (null all'API) oppure un
+ *  numero, dove 0 = funzione non inclusa nel piano. Semantica OPPOSTA al
+ *  ritardo degli avvisi, dove il campo vuoto (null) esclude la funzione. */
+interface LimitePartenariatoForm {
+  illimitato: boolean;
+  limite: string;
+}
+
+function limiteDaPiano(valore: number | null | undefined): LimitePartenariatoForm {
+  // Solo null è «illimitato»: un valore assente (backend non aggiornato) vale 0.
+  return valore === null
+    ? { illimitato: true, limite: "0" }
+    : { illimitato: false, limite: String(valore ?? 0) };
+}
+
+function limiteValido(v: LimitePartenariatoForm): boolean {
+  return v.illimitato || (v.limite !== "" && Number.isInteger(Number(v.limite)) && Number(v.limite) >= 0);
+}
+
+function limiteToApi(v: LimitePartenariatoForm): number | null {
+  return v.illimitato ? null : Number(v.limite);
+}
+
 interface PlanFormState {
   nome: string;
   slug: string;
@@ -28,6 +51,8 @@ interface PlanFormState {
   alert_ritardo_giorni: string;
   num_account_aziendali: string;
   features_override: string;
+  partner_calls_attive_max: LimitePartenariatoForm;
+  partner_candidature_mese: LimitePartenariatoForm;
   ordering: string;
   is_active: boolean;
 }
@@ -48,6 +73,8 @@ function toFormState(plan: Plan): PlanFormState {
       plan.alert_ritardo_giorni != null ? String(plan.alert_ritardo_giorni) : "",
     num_account_aziendali: String(plan.num_account_aziendali),
     features_override: (plan.features_override ?? []).join("\n"),
+    partner_calls_attive_max: limiteDaPiano(plan.partner_calls_attive_max),
+    partner_candidature_mese: limiteDaPiano(plan.partner_candidature_mese),
     ordering: String(plan.ordering),
     is_active: plan.is_active,
   };
@@ -66,6 +93,9 @@ const EMPTY_FORM: PlanFormState = {
   alert_ritardo_giorni: "",
   num_account_aziendali: "1",
   features_override: "",
+  // Come il default della colonna: un piano nuovo nasce senza partenariati.
+  partner_calls_attive_max: { illimitato: false, limite: "0" },
+  partner_candidature_mese: { illimitato: false, limite: "0" },
   ordering: "10",
   is_active: true,
 };
@@ -87,6 +117,10 @@ function validate(form: PlanFormState): string | null {
     return "Il ritardo degli avvisi nuovi bandi non è valido (intero ≥ 0, o vuoto per escluderli).";
   if (!Number.isInteger(Number(form.num_account_aziendali)) || Number(form.num_account_aziendali) < 1)
     return "Gli account aziendali devono essere almeno 1.";
+  if (!limiteValido(form.partner_calls_attive_max))
+    return "Il limite di call di partenariato attive non è valido (intero ≥ 0, oppure «Illimitate»).";
+  if (!limiteValido(form.partner_candidature_mese))
+    return "Il limite di candidature al mese non è valido (intero ≥ 0, oppure «Illimitate»).";
   return null;
 }
 
@@ -112,9 +146,67 @@ function toPayload(form: PlanFormState): PlanPayload {
         .filter(Boolean);
       return righe.length > 0 ? righe : null;
     })(),
+    partner_calls_attive_max: limiteToApi(form.partner_calls_attive_max),
+    partner_candidature_mese: limiteToApi(form.partner_candidature_mese),
     ordering: Number(form.ordering) || 0,
     is_active: form.is_active,
   };
+}
+
+function LimitePartenariatoField({
+  legend,
+  helper,
+  inputLabel,
+  value,
+  onChange,
+}: {
+  legend: string;
+  helper: string;
+  inputLabel: string;
+  value: LimitePartenariatoForm;
+  onChange: (v: LimitePartenariatoForm) => void;
+}) {
+  const id = useId();
+  return (
+    <fieldset aria-describedby={`${id}-helper`}>
+      <legend className="text-sm font-medium text-slate-700">{legend}</legend>
+      <div className="mt-2 flex flex-wrap items-center gap-4">
+        <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-700">
+          <input
+            type="radio"
+            name={`${id}-scelta`}
+            className="accent-brand-500"
+            checked={value.illimitato}
+            onChange={() => onChange({ ...value, illimitato: true })}
+          />
+          Illimitate
+        </label>
+        <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-700">
+          <input
+            type="radio"
+            name={`${id}-scelta`}
+            className="accent-brand-500"
+            checked={!value.illimitato}
+            onChange={() => onChange({ illimitato: false, limite: value.limite || "0" })}
+          />
+          Limite
+        </label>
+        <input
+          type="number"
+          min={0}
+          step={1}
+          aria-label={inputLabel}
+          disabled={value.illimitato}
+          value={value.illimitato ? "" : value.limite}
+          onChange={(e) => onChange({ illimitato: false, limite: e.target.value })}
+          className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm tabular-nums focus:border-brand-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50"
+        />
+      </div>
+      <p id={`${id}-helper`} className="mt-1.5 text-sm text-slate-500">
+        {helper}
+      </p>
+    </fieldset>
+  );
 }
 
 function PlanFormFields({
@@ -241,6 +333,20 @@ function PlanFormFields({
         type="number"
         value={form.ordering}
         onChange={(e) => setForm((f) => ({ ...f, ordering: e.target.value }))}
+      />
+      <LimitePartenariatoField
+        legend="Call di partenariato attive"
+        helper="Call pubblicate nello stesso momento, contando tutte le aziende del cliente. 0 = non incluse nel piano."
+        inputLabel="Numero massimo di call di partenariato attive"
+        value={form.partner_calls_attive_max}
+        onChange={(v) => setForm((f) => ({ ...f, partner_calls_attive_max: v }))}
+      />
+      <LimitePartenariatoField
+        legend="Candidature al mese"
+        helper="Candidature a call di altre aziende in un mese, contando tutte le aziende del cliente. 0 = non incluse nel piano."
+        inputLabel="Numero massimo di candidature al mese"
+        value={form.partner_candidature_mese}
+        onChange={(v) => setForm((f) => ({ ...f, partner_candidature_mese: v }))}
       />
       <div className="sm:col-span-2">
         <TextareaField

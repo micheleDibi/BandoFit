@@ -105,7 +105,7 @@ function payload(p: PartnerProfileInput): PartnerProfileInput {
 
 /** Aggiunge o toglie un codice mantenendo l'ordine di riferimento (quello
  *  del vocabolario), così l'elenco salvato è stabile. */
-function alterna<T extends string>(scelti: T[], codice: T, ordine: readonly T[]): T[] {
+export function alterna<T extends string>(scelti: T[], codice: T, ordine: readonly T[]): T[] {
   const insieme = new Set(scelti);
   if (insieme.has(codice)) insieme.delete(codice);
   else insieme.add(codice);
@@ -139,7 +139,7 @@ function Sezione({
   );
 }
 
-interface OpzioneCheckbox<T extends string> {
+export interface OpzioneCheckbox<T extends string> {
   codice: T;
   etichetta: string;
   nota?: string;
@@ -147,7 +147,7 @@ interface OpzioneCheckbox<T extends string> {
 
 /** Gruppo di checkbox con legenda: al limite le voci non scelte si
  *  disabilitano (quelle scelte restano togliibili). */
-function GruppoCheckbox<T extends string>({
+export function GruppoCheckbox<T extends string>({
   legenda,
   opzioni,
   scelti,
@@ -316,7 +316,7 @@ function VociLibere({
 
 /** Scelta multipla su una lookup del catalogo (regioni, settori, tipologie):
  *  chip rimovibili + ricerca. */
-function SceltaLookup({
+export function SceltaLookup({
   etichetta,
   aiuto,
   opzioni,

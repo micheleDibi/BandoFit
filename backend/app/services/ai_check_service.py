@@ -682,6 +682,26 @@ async def get_check(primary, active, check_id: str) -> AiCheckOut:
     return _to_out(resp.data[0], include_report=True)
 
 
+async def ultimo_ready(
+    primary, *, owner_id: str, company_id: str, bando_id: int
+) -> dict | None:
+    """Ultimo AI-check `ready` dell'azienda sul bando (riga completa, report
+    compreso), oppure None. SOLA LETTURA: la gap analysis delle call (WP5) lo
+    usa come fonte e non scrive mai in `ai_checks`, che vale come quota."""
+    resp = (
+        await primary.table("ai_checks")
+        .select(CHECK_SELECT)
+        .eq("family_parent_id", str(owner_id))
+        .eq("company_profile_id", str(company_id))
+        .eq("bando_id", int(bando_id))
+        .eq("status", "ready")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    return resp.data[0] if resp.data else None
+
+
 async def quota_for(primary, user: dict) -> AiQuotaOut:
     owner_id, _ = await owner_and_editable(primary, user)
     # Anche qui il failsafe: una pending zombie non deve gonfiare la quota.

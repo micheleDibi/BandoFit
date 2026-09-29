@@ -236,6 +236,9 @@ def stub_settings(monkeypatch):
         "SECONDARY_SUPABASE_ANON_KEY": "k",
         "COMPANY_IMPORT_COOLDOWN_MINUTES": "10",
         "COMPANY_IMPORT_DRAFT_TTL_MINUTES": "30",
+        # Storico acceso: i test di IT-advanced nell'anteprima lo presuppongono;
+        # a storico spento, TestStoricoSpento.
+        "BILANCI_STORICO_ATTIVO": "true",
     }.items():
         monkeypatch.setenv(key, value)
     from app.core.config import get_settings
@@ -1151,6 +1154,106 @@ class TestConfermaBilanci:
         assert "advanced_tentato_at" not in stato
         assert "advanced_raw" not in stato
         assert set(registrazioni(primary)) == {"it_full"}
+
+
+class TestStoricoSpento:
+    """BILANCI_STORICO_ATTIVO=false: l'anteprima non chiama MAI IT-advanced
+    (esito None = «non richiesto», come un draft precedente alla 0032) e la
+    conferma non tocca lo storico già salvato."""
+
+    @pytest.fixture(autouse=True)
+    def storico_spento(self, monkeypatch):
+        from app.core.config import get_settings
+
+        monkeypatch.setenv("BILANCI_STORICO_ATTIVO", "false")
+        get_settings.cache_clear()
+
+    async def test_it_advanced_non_chiamato(self):
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(result=it_full_bilanci(), advanced=it_advanced_dato())
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+
+        assert openapi.calls == {"it_full": [PIVA_BIL], "it_advanced": []}
+        assert eventi(primary, "IT-advanced") == []
+        assert len(eventi(primary, "IT-full")) == 1
+        assert primary.rpc_names().count("fn_openapi_prenota_operazione") == 1
+        [draft] = primary.ops_for("company_import_drafts", "upsert")
+        assert draft["advanced_esito"] is None and draft["advanced_motivo"] is None
+        assert draft["advanced_tentato_at"] is None and draft["advanced_raw"] is None
+        assert preview.bilanci.model_dump() == {
+            "stato": "disponibili", "motivo": "non_richiesto", "anni": [2021]
+        }
+        assert upsert_stato(primary) == []
+        assert RILASCIO in primary.rpcs
+
+    async def test_draft_riusato(self):
+        """Riuso del draft scritto a storico spento: gratis, IT-advanced non si
+        chiama, lo storico resta «non richiesto»."""
+        draft = draft_row(
+            PIVA_BIL, payload=it_full_bilanci(), eta_minuti=1,
+            esito=None, motivo=None, raw=None, tentato_at=None,
+        )
+        primary = FakePrimary(
+            selects={"company_profiles": [COMPANY_BIL], "company_import_drafts": [draft]}
+        )
+        openapi = fake_openapi(result=it_full_bilanci(), advanced=it_advanced_dato())
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        assert preview.reused is True
+        assert openapi.calls == {"it_full": [], "it_advanced": []}
+        assert primary.rpcs == []  # né lock né quota
+        assert primary.ops_for("api_usage_events", "insert") == []
+        assert primary.ops_for("company_import_drafts", "upsert") == []
+        assert preview.bilanci.model_dump() == {
+            "stato": "disponibili", "motivo": "non_richiesto", "anni": [2021]
+        }
+
+    async def test_societa_di_persone_resta_saltata(self):
+        data = it_full_bilanci()
+        data["legalForm"]["legalForm"] = {"code": "SP", "description": "Partnership"}
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(result=data, advanced=it_advanced_dato())
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        assert openapi.calls["it_advanced"] == []
+        [draft] = primary.ops_for("company_import_drafts", "upsert")
+        assert (draft["advanced_esito"], draft["advanced_motivo"]) == (
+            "saltato", "forma_senza_bilancio"
+        )
+        assert preview.bilanci.motivo == "forma_senza_bilancio"
+
+    async def test_conferma_non_tocca_lo_storico_salvato(self):
+        """Il draft scritto a storico spento, confermato su un'azienda con uno
+        storico completo già recuperato: stato e righe it_advanced intatti."""
+        anteprima = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(result=it_full_bilanci(), advanced=it_advanced_dato())
+        await openapi_service.preview_import(anteprima, None, openapi, _active(), PIVA_BIL)
+        [draft] = anteprima.ops_for("company_import_drafts", "upsert")
+
+        stato_salvato = {
+            "company_profile_id": COMPANY_BIL["id"], "advanced_esito": "ok",
+            "advanced_motivo": None, "advanced_tentato_at": TENTATO_AT,
+            "advanced_fetched_at": TENTATO_AT, "advanced_raw": it_advanced_dato(),
+            "advanced_piva": PIVA_BIL, "advanced_fetch_count": 1,
+            "mapping_versione": MAPPING_BILANCI_VERSIONE,
+        }
+        primary = FakePrimary(selects={
+            "company_profiles": [COMPANY_BIL],
+            "company_import_drafts": [draft],
+            "company_financials_stato": [stato_salvato],
+        })
+        await openapi_service.confirm_import(primary, None, _active(), PIVA_BIL)
+
+        # solo l'esercizio di IT-full, senza sostituire gli anni già registrati
+        fonti = registrazioni(primary)
+        assert set(fonti) == {"it_full"}
+        assert fonti["it_full"]["p_sostituisci"] is False
+        # nello stato al più la versione del mapping: esito, raw e date intatti
+        assert all(
+            not any(k.startswith("advanced_") for k in u) for u in upsert_stato(primary)
+        )
+        assert primary.ops_for("company_financials_stato", "update") == []
+        assert primary.ops_for("company_financials_stato", "delete") == []
+        assert primary.ops_for("api_usage_events", "insert") == []
+        assert primary.ops_for("company_import_drafts", "delete")
 
 
 class TestMascheramentoPiva:

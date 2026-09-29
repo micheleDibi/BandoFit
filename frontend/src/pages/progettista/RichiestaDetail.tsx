@@ -12,6 +12,7 @@ import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { TextareaField } from "../../components/ui/Field";
 import { ErrorState, Skeleton } from "../../components/ui/states";
+import { useFunzioni } from "../../hooks/useFunzioni";
 import {
   useCallRichiesta,
   useDossierRichiesta,
@@ -163,6 +164,7 @@ export default function RichiestaDetail() {
   const { data: richiesta, isPending, isError, error, refetch } = useRichiesta(id);
   const invia = useInviaProposta(id ?? "");
   const ritira = useRitiraProposta();
+  const { partenariatiAttivo } = useFunzioni();
 
   const [messaggio, setMessaggio] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
@@ -298,8 +300,9 @@ export default function RichiestaDetail() {
         </Card>
       )}
 
-      {/* Consulto dalla call (WP9): la call solo per l'assegnato. */}
-      {richiesta.da_call && (
+      {/* Consulto dalla call (WP9): la call solo per l'assegnato, e solo a
+          modulo partenariati acceso (da spento la sua rotta non esiste). */}
+      {partenariatiAttivo && richiesta.da_call && (
         <section className="mt-4" aria-label="Call di partenariato del cliente">
           {richiesta.assegnata_a_me ? (
             <CallDelCliente requestId={richiesta.id} />

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useBilanci, useRecuperaBilanci } from "../../../hooks/useBilanci";
+import { useFunzioni } from "../../../hooks/useFunzioni";
 import { apiErrorMessage } from "../../../lib/api";
 import {
   FASCE_TITOLI,
@@ -100,10 +101,11 @@ function SintesiFasce({ fasce }: { fasce: FasceBilancio }) {
 /** Sezione «Bilanci» della pagina Azienda (ancora `#bilanci`): tabella per
  *  esercizio, andamento del fatturato, fasce e indicatori, oppure il motivo
  *  per cui mancano e la CTA di recupero (solo titolare); in fondo la card
- *  del bilancio ufficiale. */
+ *  del bilancio ufficiale. CTA e card solo a storico acceso. */
 export function BilanciSection() {
   const { data, isPending, isError, error, refetch } = useBilanci();
   const recupera = useRecuperaBilanci();
+  const { bilanciStoricoAttivo } = useFunzioni();
   const [esito, setEsito] = useState<Esito | null>(null);
   const [errore, setErrore] = useState<string | null>(null);
 
@@ -203,8 +205,9 @@ export function BilanciSection() {
           </div>
         ) : (
           <p className="mt-1 text-sm text-slate-500">
-            I bilanci depositati negli ultimi anni: fatturato, utile, patrimonio e dipendenti,
-            esercizio per esercizio.
+            {bilanciStoricoAttivo
+              ? "I bilanci depositati negli ultimi anni: fatturato, utile, patrimonio e dipendenti, esercizio per esercizio."
+              : "I bilanci depositati: fatturato, utile, patrimonio e dipendenti, esercizio per esercizio."}
           </p>
         )}
       </div>
@@ -239,8 +242,9 @@ export function BilanciSection() {
 
       {/* Bilancio ufficiale on-demand: dati propri, indipendenti dallo stato
           dei bilanci qui sopra (serve proprio quando mancano). La card si
-          nasconde da sola se l'addon non è a catalogo. */}
-      <BilancioUfficialeCard className="mt-6" />
+          nasconde da sola se l'addon non è a catalogo; a storico spento non
+          si monta (le sue rotte rispondono 404). */}
+      {bilanciStoricoAttivo && <BilancioUfficialeCard className="mt-6" />}
     </section>
   );
 }

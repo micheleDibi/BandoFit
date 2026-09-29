@@ -264,6 +264,15 @@ async def require_partenariati_attivo() -> None:
         raise NotFoundError("Risorsa non trovata")
 
 
+async def require_bilanci_storico_attivo() -> None:
+    """Flag dello storico dei bilanci (IT-advanced e bilancio ufficiale, a
+    pagamento). A flag spento 404 come una rotta che non esiste. Va sulla
+    singola rotta del router aziendale, che ha anche rotte gratuite: FastAPI
+    la risolve prima delle altre dipendenze, quindi nessun servizio parte."""
+    if not get_settings().bilanci_storico_attivo:
+        raise NotFoundError("Risorsa non trovata")
+
+
 class RottaPartenariati(APIRoute):
     """Rotta dei router del modulo partenariati: il flag si controlla prima
     di tutto, anche della lettura del corpo (a flag spento un POST con JSON

@@ -246,7 +246,10 @@ async def get_me(primary, user_id: str) -> MeOut:
         progettista=await _fetch_progettista(primary, user_id, row["role"]),
         max_aziende=max_aziende,
         multi_azienda=multi_azienda,
-        funzioni=FunzioniOut(partenariati=get_settings().partenariati_attivo),
+        funzioni=FunzioniOut(
+            partenariati=get_settings().partenariati_attivo,
+            bilanci_storico=get_settings().bilanci_storico_attivo,
+        ),
     )
 
 

@@ -12,6 +12,7 @@ import {
   useAdminUpdatePlan,
   type PlanPayload,
 } from "../hooks/useAdmin";
+import { useFunzioni } from "../hooks/useFunzioni";
 import { apiErrorMessage } from "../lib/api";
 import type { Plan, TipoPrezzo } from "../types";
 
@@ -103,7 +104,10 @@ const EMPTY_FORM: PlanFormState = {
   is_active: true,
 };
 
-function validate(form: PlanFormState): string | null {
+/** `partenariati`: modulo acceso. Da spento i limiti partner_* non si
+ *  mostrano, non si validano e non entrano nel payload (in modifica restano
+ *  invariati, in creazione vale il default del server: non inclusi). */
+function validate(form: PlanFormState, partenariati: boolean): string | null {
   if (!form.nome.trim()) return "Il nome del piano è obbligatorio.";
   // Il prezzo conta solo in modalità «importo»: con gratis/su_richiesta il
   // campo è disabilitato, un valore residuo vuoto non deve bloccare il salvataggio.
@@ -120,16 +124,16 @@ function validate(form: PlanFormState): string | null {
     return "Il ritardo degli avvisi nuovi bandi non è valido (intero ≥ 0, o vuoto per escluderli).";
   if (!Number.isInteger(Number(form.num_account_aziendali)) || Number(form.num_account_aziendali) < 1)
     return "Gli account aziendali devono essere almeno 1.";
-  if (!limiteValido(form.partner_calls_attive_max))
+  if (partenariati && !limiteValido(form.partner_calls_attive_max))
     return "Il limite di call di partenariato attive non è valido (intero ≥ 0, oppure «Illimitate»).";
-  if (!limiteValido(form.partner_candidature_mese))
+  if (partenariati && !limiteValido(form.partner_candidature_mese))
     return "Il limite di candidature al mese non è valido (intero ≥ 0, oppure «Illimitate»).";
-  if (!limiteValido(form.partner_bozze_mese))
+  if (partenariati && !limiteValido(form.partner_bozze_mese))
     return "Il limite di bozze di documenti al mese non è valido (intero ≥ 0, oppure «Illimitate»).";
   return null;
 }
 
-function toPayload(form: PlanFormState): PlanPayload {
+function toPayload(form: PlanFormState, partenariati: boolean): PlanPayload {
   return {
     nome: form.nome.trim(),
     descrizione: form.descrizione.trim() || null,
@@ -151,9 +155,13 @@ function toPayload(form: PlanFormState): PlanPayload {
         .filter(Boolean);
       return righe.length > 0 ? righe : null;
     })(),
-    partner_calls_attive_max: limiteToApi(form.partner_calls_attive_max),
-    partner_candidature_mese: limiteToApi(form.partner_candidature_mese),
-    partner_bozze_mese: limiteToApi(form.partner_bozze_mese),
+    ...(partenariati
+      ? {
+          partner_calls_attive_max: limiteToApi(form.partner_calls_attive_max),
+          partner_candidature_mese: limiteToApi(form.partner_candidature_mese),
+          partner_bozze_mese: limiteToApi(form.partner_bozze_mese),
+        }
+      : {}),
     ordering: Number(form.ordering) || 0,
     is_active: form.is_active,
   };
@@ -224,6 +232,7 @@ function PlanFormFields({
   setForm: (updater: (f: PlanFormState) => PlanFormState) => void;
   isNew?: boolean;
 }) {
+  const { partenariatiAttivo } = useFunzioni();
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <TextField
@@ -340,27 +349,31 @@ function PlanFormFields({
         value={form.ordering}
         onChange={(e) => setForm((f) => ({ ...f, ordering: e.target.value }))}
       />
-      <LimitePartenariatoField
-        legend="Call di partenariato attive"
-        helper="Call pubblicate nello stesso momento, contando tutte le aziende del cliente. 0 = non incluse nel piano."
-        inputLabel="Numero massimo di call di partenariato attive"
-        value={form.partner_calls_attive_max}
-        onChange={(v) => setForm((f) => ({ ...f, partner_calls_attive_max: v }))}
-      />
-      <LimitePartenariatoField
-        legend="Candidature al mese"
-        helper="Candidature a call di altre aziende in un mese, contando tutte le aziende del cliente. 0 = non incluse nel piano."
-        inputLabel="Numero massimo di candidature al mese"
-        value={form.partner_candidature_mese}
-        onChange={(v) => setForm((f) => ({ ...f, partner_candidature_mese: v }))}
-      />
-      <LimitePartenariatoField
-        legend="Bozze di documenti al mese"
-        helper="Bozze generate con l'AI (lettera d'intenti, NDA, term sheet) in un mese, contando tutte le aziende del cliente. Contano anche quelle fallite dopo la chiamata all'AI, tranne quando il servizio AI la rifiuta subito (ad esempio perché sovraccarico). 0 = non incluse nel piano."
-        inputLabel="Numero massimo di bozze di documenti al mese"
-        value={form.partner_bozze_mese}
-        onChange={(v) => setForm((f) => ({ ...f, partner_bozze_mese: v }))}
-      />
+      {partenariatiAttivo && (
+        <>
+          <LimitePartenariatoField
+            legend="Call di partenariato attive"
+            helper="Call pubblicate nello stesso momento, contando tutte le aziende del cliente. 0 = non incluse nel piano."
+            inputLabel="Numero massimo di call di partenariato attive"
+            value={form.partner_calls_attive_max}
+            onChange={(v) => setForm((f) => ({ ...f, partner_calls_attive_max: v }))}
+          />
+          <LimitePartenariatoField
+            legend="Candidature al mese"
+            helper="Candidature a call di altre aziende in un mese, contando tutte le aziende del cliente. 0 = non incluse nel piano."
+            inputLabel="Numero massimo di candidature al mese"
+            value={form.partner_candidature_mese}
+            onChange={(v) => setForm((f) => ({ ...f, partner_candidature_mese: v }))}
+          />
+          <LimitePartenariatoField
+            legend="Bozze di documenti al mese"
+            helper="Bozze generate con l'AI (lettera d'intenti, NDA, term sheet) in un mese, contando tutte le aziende del cliente. Contano anche quelle fallite dopo la chiamata all'AI, tranne quando il servizio AI la rifiuta subito (ad esempio perché sovraccarico). 0 = non incluse nel piano."
+            inputLabel="Numero massimo di bozze di documenti al mese"
+            value={form.partner_bozze_mese}
+            onChange={(v) => setForm((f) => ({ ...f, partner_bozze_mese: v }))}
+          />
+        </>
+      )}
       <div className="sm:col-span-2">
         <TextareaField
           label="Caratteristiche personalizzate (una per riga)"
@@ -391,15 +404,16 @@ function PlanEditor({ plan }: { plan: Plan }) {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const updatePlan = useAdminUpdatePlan();
+  const { partenariatiAttivo } = useFunzioni();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setSaved(false);
-    const problem = validate(form);
+    const problem = validate(form, partenariatiAttivo);
     setValidationError(problem);
     if (problem) return;
     try {
-      await updatePlan.mutateAsync({ planId: plan.id, data: toPayload(form) });
+      await updatePlan.mutateAsync({ planId: plan.id, data: toPayload(form, partenariatiAttivo) });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch {
@@ -442,13 +456,14 @@ export default function AdminPiani() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newForm, setNewForm] = useState<PlanFormState>(EMPTY_FORM);
   const [createError, setCreateError] = useState<string | null>(null);
+  const { partenariatiAttivo } = useFunzioni();
 
   const handleCreate = async () => {
-    const problem = validate(newForm) ?? (!newForm.slug.trim() ? "Lo slug è obbligatorio." : null);
+    const problem = validate(newForm, partenariatiAttivo) ?? (!newForm.slug.trim() ? "Lo slug è obbligatorio." : null);
     setCreateError(problem);
     if (problem) return;
     try {
-      await createPlan.mutateAsync({ ...toPayload(newForm), nome: newForm.nome.trim(), slug: newForm.slug.trim() });
+      await createPlan.mutateAsync({ ...toPayload(newForm, partenariatiAttivo), nome: newForm.nome.trim(), slug: newForm.slug.trim() });
       setCreateOpen(false);
       setNewForm(EMPTY_FORM);
     } catch (err) {

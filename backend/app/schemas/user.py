@@ -49,6 +49,8 @@ class FunzioniOut(BaseModel):
     il frontend nasconde menu e card dei moduli spenti."""
 
     partenariati: bool = False
+    # Storico dei bilanci (IT-advanced) e bilancio ufficiale.
+    bilanci_storico: bool = False
 
 
 class MeOut(BaseModel):

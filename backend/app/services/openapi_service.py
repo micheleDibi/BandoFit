@@ -303,9 +303,9 @@ def _resolve_piva(partita_iva: str | None, company_row: dict | None) -> str:
 
 
 def _esito_da_draft(draft: dict):
-    """EsitoAdvanced salvato nel draft. Un draft precedente alla 0032 (colonne
-    null) vale «non richiesto»: la conferma non riprova, la UI propone il
-    recupero."""
+    """EsitoAdvanced salvato nel draft. Un draft precedente alla 0032 o scritto
+    a storico spento (colonne null) vale «non richiesto»: la conferma non
+    riprova; a storico acceso la UI propone il recupero."""
     from app.services.bilanci_service import EsitoAdvanced  # import locale: evita cicli
 
     return EsitoAdvanced(
@@ -329,7 +329,8 @@ def _bilanci_anteprima(payload: dict, advanced) -> ImportPreviewBilanci:
     IT-full), quindi `disponibili` appena ce n'è uno — anche il solo
     esercizio di IT-full finisce nella pagina Azienda. `motivo` dice perché
     manca lo storico (None = recuperato; `non_richiesto` per un draft
-    precedente alla 0032): la UI propone il recupero dalla pagina Azienda."""
+    precedente alla 0032 o a storico spento): a storico acceso la UI propone
+    il recupero dalla pagina Azienda."""
     esito = advanced.esito if advanced is not None else None
     raw = _advanced_ok(advanced)
     anni = {r.anno for r in da_it_full(payload)}
@@ -423,11 +424,16 @@ async def _esito_advanced_anteprima(
     Non si paga quando è inutile: società di persone (non depositano bilanci;
     solo il codice di PRIMO livello, 'SP' nel dettaglio è la SpA), P.IVA
     diversa da quella già sull'azienda, tempo insufficiente per restare nella
-    catena dei timeout. Non solleva mai: l'esito finisce nel draft."""
+    catena dei timeout. Con lo storico spento (`bilanci_storico_attivo`)
+    niente chiamata: esito None, come un draft precedente alla 0032 («non
+    richiesto»), senza tentativo né consumo. Non solleva mai: l'esito finisce
+    nel draft."""
     from app.services import bilanci_service  # import locale: evita cicli
 
     if forma_giuridica_codice(payload) == "SP":
         return bilanci_service.EsitoAdvanced.saltato("forma_senza_bilancio")
+    if not get_settings().bilanci_storico_attivo:
+        return bilanci_service.EsitoAdvanced(esito=None, motivo=None)
     piva_profilo = (company_row or {}).get("partita_iva")
     if piva_profilo and piva_profilo != piva:
         return bilanci_service.EsitoAdvanced.saltato("piva_diversa")

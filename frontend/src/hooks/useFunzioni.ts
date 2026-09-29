@@ -10,6 +10,7 @@ export function useFunzioni() {
   const { data: me, isPending } = useMe();
   return {
     partenariatiAttivo: me?.funzioni?.partenariati === true,
+    bilanciStoricoAttivo: me?.funzioni?.bilanci_storico === true,
     isPending,
   };
 }

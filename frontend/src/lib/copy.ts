@@ -214,6 +214,9 @@ export const IMPORT_COPY = {
 
   introForm:
     "Recuperiamo i dati ufficiali della tua azienda dal Registro Imprese tramite openapi.it: anagrafica, ATECO, sede e unità locali, cariche, dipendenti, bilanci degli ultimi anni e altro.",
+  /** Al posto di `introForm` a storico spento: arriva solo l'ultimo esercizio. */
+  introFormSenzaStorico:
+    "Recuperiamo i dati ufficiali della tua azienda dal Registro Imprese tramite openapi.it: anagrafica, ATECO, sede e unità locali, cariche, dipendenti, ultimo bilancio depositato e altro.",
   attesa:
     "Recupero dei dati ufficiali e dei bilanci dal Registro Imprese in corso. L'operazione può richiedere qualche minuto: non chiudere questa finestra.",
 
@@ -278,6 +281,8 @@ export const BILANCI_COPY = {
   /** Al posto di `motivi.nessun_bilancio` quando un esercizio c'è già (dalla
    *  visura): «nessun bilancio depositato» contraddirebbe la tabella. */
   nessunAltroBilancio: "Lo storico del Registro Imprese non riporta altri bilanci di questa azienda.",
+  /** Nessun esercizio e nessun motivo da dire (o storico spento). */
+  senzaBilanci: "Al momento non ci sono bilanci per questa azienda.",
   /** Con `piva_diversa` il recupero parte solo dopo la correzione. */
   correggiPiva: "Correggi la partita IVA nei dati aziendali, poi recupera lo storico.",
   recupera: "Recupera i bilanci",

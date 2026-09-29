@@ -32,6 +32,18 @@ CAMPI_ESERCIZIO = {
 }
 
 
+@pytest.fixture(autouse=True)
+def storico_acceso(monkeypatch):
+    """«Recupera i bilanci» esiste solo a storico acceso (spento: 404,
+    test_bilanci_storico_flag.py)."""
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("BILANCI_STORICO_ATTIVO", "true")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 def _client(db, openapi=None, *, editable: bool = True) -> httpx.AsyncClient:
     app = FastAPI()
     register_exception_handlers(app)

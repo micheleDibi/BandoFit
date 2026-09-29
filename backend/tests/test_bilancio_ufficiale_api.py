@@ -43,6 +43,25 @@ CAMPI_RICHIESTA = {
 }
 
 
+@pytest.fixture(autouse=True)
+def storico_acceso(monkeypatch):
+    """Il bilancio ufficiale esiste solo a storico acceso (spento: 404,
+    test_bilanci_storico_flag.py)."""
+    from app.core.config import get_settings
+
+    for chiave, valore in {
+        "PRIMARY_SUPABASE_URL": "https://dummy.supabase.co",
+        "PRIMARY_SUPABASE_SERVICE_ROLE_KEY": "k",
+        "SECONDARY_SUPABASE_URL": "https://d2.supabase.co",
+        "SECONDARY_SUPABASE_ANON_KEY": "k",
+        "BILANCI_STORICO_ATTIVO": "true",
+    }.items():
+        monkeypatch.setenv(chiave, valore)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 def _client(db, openapi=None, *, editable: bool = True) -> httpx.AsyncClient:
     app = FastAPI()
     register_exception_handlers(app)

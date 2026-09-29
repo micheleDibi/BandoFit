@@ -36,6 +36,8 @@ def flag(monkeypatch):
         for chiave, v in _OBBLIGATORIE.items():
             monkeypatch.setenv(chiave, v)
         monkeypatch.setenv("PARTENARIATI_ATTIVO", "true" if valore else "false")
+        # indipendente dal .env locale, che Settings legge comunque
+        monkeypatch.setenv("BILANCI_STORICO_ATTIVO", "false")
         get_settings.cache_clear()
 
     yield imposta
@@ -287,7 +289,9 @@ class TestMeFunzioni:
         flag(attivo)
         me = await user_service.get_me(_PrimarioFinto(_PROFILO), _PROFILO["id"])
         assert me.funzioni == FunzioniOut(partenariati=attivo)
-        assert me.model_dump(mode="json")["funzioni"] == {"partenariati": attivo}
+        assert me.model_dump(mode="json")["funzioni"] == {
+            "partenariati": attivo, "bilanci_storico": False
+        }
 
     def test_default_spento(self):
         """Un MeOut costruito altrove (es. risposte admin) non accende nulla."""

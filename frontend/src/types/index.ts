@@ -427,6 +427,8 @@ export interface Me {
 
 export interface Funzioni {
   partenariati: boolean;
+  /** Storico dei bilanci e bilancio ufficiale (assente = spento). */
+  bilanci_storico?: boolean;
 }
 
 /** Voce dell'elenco aziende gestite (Advisor multi-azienda). */

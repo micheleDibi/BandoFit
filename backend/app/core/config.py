@@ -76,6 +76,13 @@ class Settings(BaseSettings):
     # Vita dell'anteprima già pagata, in attesa di conferma. Più lungo del
     # cooldown: chi annulla e ci ripensa non deve ripagare il fetch.
     company_import_draft_ttl_minutes: int = 30
+    # Storico dei bilanci (docs/partenariati.md, WP1-WP2). Spento = niente
+    # storico IT-advanced (né nell'anteprima dell'import né in «Recupera i
+    # bilanci») e niente bilancio ufficiale: quelle rotte rispondono 404 e il
+    # frontend non le mostra. Si accende dopo la verifica in sandbox (G1)
+    # aggiungendo BILANCI_STORICO_ATTIVO all'environment del backend in
+    # docker-compose.yml: il default è quello sicuro.
+    bilanci_storico_attivo: bool = False
 
     # Slug dell'addon che attiva il flusso consulenze (l'addon vive a catalogo
     # nel DB; la migration 0017 lo garantisce con un seed idempotente).

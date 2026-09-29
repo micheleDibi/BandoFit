@@ -5,6 +5,7 @@ import { chiusureRichieste, intervalloPollingBilanci } from "../lib/bilanci";
 import type { BilanciUfficiali, BilancioRichiesta, StatoRichiestaBilancio } from "../types";
 import { useActiveCompany } from "./useActiveCompany";
 import { useAuth } from "./useAuth";
+import { useFunzioni } from "./useFunzioni";
 
 /** La POST risponde di solito in pochi secondi, ma nel caso peggiore somma
  *  il controllo della forma giuridica, il token e l'invio al Registro
@@ -25,16 +26,18 @@ const bilanciUfficialiKey = (aziendaId: string | null) =>
  *  richieste aperte sul server. Polling ogni 30 s finché c'è una richiesta
  *  aperta nata da meno di 45 minuti. Quando una richiesta si conclude
  *  rilegge l'inventario addon (può esserci un rimborso) e, se è completata,
- *  i bilanci per esercizio. */
+ *  i bilanci per esercizio. A storico spento non chiama nulla (la rotta
+ *  risponderebbe 404). */
 export function useBilanciUfficiali() {
   const { session } = useAuth();
   const { activeCompanyId } = useActiveCompany();
+  const { bilanciStoricoAttivo } = useFunzioni();
   const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: bilanciUfficialiKey(activeCompanyId),
     queryFn: async () =>
       (await api.get<BilanciUfficiali>("/me/company/bilanci/ufficiale")).data,
-    enabled: !!session,
+    enabled: !!session && bilanciStoricoAttivo,
     staleTime: 15_000,
     refetchInterval: (q) => intervalloPollingBilanci(q.state.data?.richieste),
   });

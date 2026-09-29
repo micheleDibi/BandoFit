@@ -1,5 +1,6 @@
 import { Download, Info } from "lucide-react";
 import { useEffect, useId, useState } from "react";
+import { useFunzioni } from "../../../hooks/useFunzioni";
 import { BILANCI_COPY } from "../../../lib/copy";
 import { formatSlotOra } from "../../../lib/format";
 import type { BilanciOut, MotivoBilanci } from "../../../types";
@@ -81,16 +82,31 @@ interface BilanciNonDisponibiliProps {
  *  - esercizi presenti ma storico non recuperato: banner sopra la tabella.
  *  La CTA c'è solo per il titolare (`editable`) e resta disabilitata fino a
  *  `recuperabile_da`. L'esito del recupero lo annuncia la sezione, che resta
- *  montata anche quando questo componente sparisce. */
+ *  montata anche quando questo componente sparisce. A storico spento nessun
+ *  invito al recupero: niente banner, e lo stato vuoto dice solo un motivo
+ *  certo (la forma giuridica) o una frase neutra. */
 export function BilanciNonDisponibili({
   data,
   onRecupera,
   recuperoInCorso,
 }: BilanciNonDisponibiliProps) {
+  const { bilanciStoricoAttivo } = useFunzioni();
   const puoRiprovare = recuperabile(data.motivo);
-  const conCta = data.editable && puoRiprovare;
+  const conCta = bilanciStoricoAttivo && data.editable && puoRiprovare;
 
   if (data.stato !== "disponibili" || data.esercizi.length === 0) {
+    if (!bilanciStoricoAttivo) {
+      return (
+        <EmptyState
+          title="Bilanci non disponibili"
+          description={
+            data.motivo === "forma_senza_bilancio"
+              ? BILANCI_COPY.motivi.forma_senza_bilancio
+              : BILANCI_COPY.senzaBilanci
+          }
+        />
+      );
+    }
     const titolo =
       data.stato === "mai_richiesti" ? "Bilanci non ancora recuperati" : "Bilanci non disponibili";
     let descrizione: string;
@@ -99,9 +115,7 @@ export function BilanciNonDisponibili({
         ? "Recupera i bilanci depositati al Registro Imprese negli ultimi anni: fatturato, utile, patrimonio e dipendenti, anno per anno."
         : "Il titolare non ha ancora recuperato i bilanci dell'azienda.";
     } else {
-      descrizione = data.motivo
-        ? BILANCI_COPY.motivi[data.motivo]
-        : "Al momento non ci sono bilanci per questa azienda.";
+      descrizione = data.motivo ? BILANCI_COPY.motivi[data.motivo] : BILANCI_COPY.senzaBilanci;
       if (!data.editable && puoRiprovare) descrizione += " Solo il titolare può riprovare.";
       else if (data.editable && data.motivo === "piva_diversa") {
         descrizione += ` ${BILANCI_COPY.correggiPiva}`;
@@ -126,7 +140,7 @@ export function BilanciNonDisponibili({
     );
   }
 
-  if (data.storico_esito === "ok") return null;
+  if (data.storico_esito === "ok" || !bilanciStoricoAttivo) return null;
 
   const motivo: MotivoBilanci = data.motivo ?? "non_richiesto";
   const titolo =

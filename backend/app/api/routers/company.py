@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Depends, Response
 
 from app.api.deps import (
     ActiveCompanyDep,
@@ -6,6 +6,7 @@ from app.api.deps import (
     OpenapiDep,
     PrimaryClient,
     SecondaryClient,
+    require_bilanci_storico_attivo,
 )
 from app.schemas.bilanci import BilanciOut
 from app.schemas.bilancio_ufficiale import (
@@ -133,7 +134,11 @@ async def get_bilanci(active: ActiveCompanyDep, primary: PrimaryClient) -> Bilan
     return await bilanci_service.get_bilanci(primary, active)
 
 
-@router.post("/bilanci/recupera", response_model=BilanciOut)
+@router.post(
+    "/bilanci/recupera",
+    response_model=BilanciOut,
+    dependencies=[Depends(require_bilanci_storico_attivo)],
+)
 async def recupera_bilanci(
     active: ActiveCompanyDep, primary: PrimaryClient, openapi: OpenapiDep
 ) -> BilanciOut:
@@ -143,7 +148,11 @@ async def recupera_bilanci(
     return await bilanci_service.recupera_bilanci(primary, openapi, active)
 
 
-@router.get("/bilanci/ufficiale", response_model=BilanciUfficialiOut)
+@router.get(
+    "/bilanci/ufficiale",
+    response_model=BilanciUfficialiOut,
+    dependencies=[Depends(require_bilanci_storico_attivo)],
+)
 async def lista_bilanci_ufficiali(
     active: ActiveCompanyDep, primary: PrimaryClient, openapi: OpenapiDep
 ) -> BilanciUfficialiOut:
@@ -153,7 +162,12 @@ async def lista_bilanci_ufficiali(
     return await bilancio_ufficiale_service.lista(primary, openapi, active)
 
 
-@router.post("/bilanci/ufficiale", response_model=BilancioRichiestaOut, status_code=201)
+@router.post(
+    "/bilanci/ufficiale",
+    response_model=BilancioRichiestaOut,
+    status_code=201,
+    dependencies=[Depends(require_bilanci_storico_attivo)],
+)
 async def richiedi_bilancio_ufficiale(
     data: BilancioRichiestaIn,
     active: ActiveCompanyDep,
@@ -168,7 +182,11 @@ async def richiedi_bilancio_ufficiale(
     return await bilancio_ufficiale_service.richiedi(primary, openapi, active, user, data.anno)
 
 
-@router.get("/bilanci/ufficiale/{richiesta_id}", response_model=BilancioRichiestaOut)
+@router.get(
+    "/bilanci/ufficiale/{richiesta_id}",
+    response_model=BilancioRichiestaOut,
+    dependencies=[Depends(require_bilanci_storico_attivo)],
+)
 async def dettaglio_bilancio_ufficiale(
     richiesta_id: str, active: ActiveCompanyDep, primary: PrimaryClient, openapi: OpenapiDep
 ) -> BilancioRichiestaOut:
@@ -176,7 +194,10 @@ async def dettaglio_bilancio_ufficiale(
     return await bilancio_ufficiale_service.dettaglio(primary, openapi, active, richiesta_id)
 
 
-@router.get("/bilanci/ufficiale/{richiesta_id}/pdf")
+@router.get(
+    "/bilanci/ufficiale/{richiesta_id}/pdf",
+    dependencies=[Depends(require_bilanci_storico_attivo)],
+)
 async def scarica_bilancio_ufficiale(
     richiesta_id: str, active: ActiveCompanyDep, primary: PrimaryClient, user: CurrentUser
 ) -> Response:

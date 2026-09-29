@@ -70,12 +70,14 @@ function Riga({ etichetta, valore }: { etichetta: string; valore: string | null 
 }
 
 /** Perché manca lo storico e, se si può, come recuperarlo. `trovati`: almeno
- *  un esercizio arriva comunque (dalla visura). */
-function notaStorico(motivo: MotivoBilanci, trovati: boolean): string {
+ *  un esercizio arriva comunque (dalla visura). A storico spento nessun
+ *  invito, e nessuna nota se lo storico non è stato nemmeno chiesto. */
+function notaStorico(motivo: MotivoBilanci, trovati: boolean, storicoAttivo: boolean): string {
   if (motivo === "nessun_bilancio") {
     return trovati ? BILANCI_COPY.nessunAltroBilancio : BILANCI_COPY.motivi[motivo];
   }
   if (motivo === "forma_senza_bilancio") return BILANCI_COPY.motivi[motivo];
+  if (!storicoAttivo) return motivo === "non_richiesto" ? "" : BILANCI_COPY.motivi[motivo];
   if (motivo === "piva_diversa") return `${BILANCI_COPY.motivi[motivo]} ${BILANCI_COPY.correggiPiva}`;
   const invito = trovati ? IMPORT_COPY.bilanciStoricoRecuperabile : IMPORT_COPY.bilanciRecuperabili;
   return `${BILANCI_COPY.motivi[motivo]} ${invito}`;
@@ -84,12 +86,19 @@ function notaStorico(motivo: MotivoBilanci, trovati: boolean): string {
 /** Bilanci pluriennali recuperati insieme all'anteprima. Non bloccano mai
  *  l'import: se lo storico manca, il titolare lo recupera poi dalla pagina
  *  Azienda (tranne quando la forma giuridica non prevede il deposito o il
- *  Registro Imprese non ha bilanci). */
-function BloccoBilanci({ bilanci }: { bilanci: ImportPreviewBilanci | undefined }) {
+ *  Registro Imprese non ha bilanci, o lo storico è spento). */
+function BloccoBilanci({
+  bilanci,
+  storicoAttivo,
+}: {
+  bilanci: ImportPreviewBilanci | undefined;
+  storicoAttivo: boolean;
+}) {
   const anni = bilanci?.anni ?? [];
   const trovati = bilanci?.stato === "disponibili" && anni.length > 0;
   // null = storico recuperato; un blocco assente vale «non richiesto».
   const motivo = bilanci ? bilanci.motivo : "non_richiesto";
+  const nota = motivo ? notaStorico(motivo, trovati, storicoAttivo) : "";
   return (
     <div>
       <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
@@ -102,11 +111,13 @@ function BloccoBilanci({ bilanci }: { bilanci: ImportPreviewBilanci | undefined 
             : IMPORT_COPY.bilanciNonTrovati}
         </Badge>
       </div>
-      <p className="mt-1.5 text-sm text-slate-600">
-        {trovati && IMPORT_COPY.bilanciTrovatiNota}
-        {trovati && motivo && " "}
-        {motivo && notaStorico(motivo, trovati)}
-      </p>
+      {(trovati || nota) && (
+        <p className="mt-1.5 text-sm text-slate-600">
+          {trovati && IMPORT_COPY.bilanciTrovatiNota}
+          {trovati && nota && " "}
+          {nota}
+        </p>
+      )}
     </div>
   );
 }
@@ -121,7 +132,7 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
   const { data: preferences } = usePreferences();
   const savePreferences = useSavePreferences();
   const queryClient = useQueryClient();
-  const { partenariatiAttivo } = useFunzioni();
+  const { partenariatiAttivo, bilanciStoricoAttivo } = useFunzioni();
 
   const [step, setStep] = useState<Step>("form");
   const [piva, setPiva] = useState(defaultPiva ?? "");
@@ -461,7 +472,7 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
             />
           </dl>
 
-          <BloccoBilanci bilanci={preview.bilanci} />
+          <BloccoBilanci bilanci={preview.bilanci} storicoAttivo={bilanciStoricoAttivo} />
 
           {preview.autofill.applied.length > 0 && (
             <div>
@@ -498,7 +509,8 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
       ) : (
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <p>
-            {IMPORT_COPY.introForm} I campi già compilati{" "}
+            {bilanciStoricoAttivo ? IMPORT_COPY.introForm : IMPORT_COPY.introFormSenzaStorico} I
+            campi già compilati{" "}
             <strong>non verranno sovrascritti</strong>.
           </p>
           <TextField

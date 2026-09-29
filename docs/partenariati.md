@@ -90,7 +90,7 @@ Il dump locale è del 3 luglio e precede la v1.1: non va usato per queste stime.
   - `Settings.partenariati_attivo=False` (env `PARTENARIATI_ATTIVO`).
   - Dependency `require_partenariati_attivo` che risponde **404** (pattern nuovo): a livello di router per i router nuovi, **a livello di rotta** per le aggiunte a router esistenti (`/bandi`, `/me`, `/progettista`), così le rotte esistenti non cambiano.
   - Verso il frontend: `MeOut.funzioni = {partenariati: bool}`. Con il flag spento, menu e card (Partenariato in BandoDetail, profilo partner in Azienda, passo di consenso nell'import) non si rendono.
-  - WP1 e WP2 vanno senza flag.
+  - WP1 e WP2 vanno senza il flag del modulo, ma le loro chiamate a pagamento stanno dietro un interruttore proprio, `BILANCI_STORICO_ATTIVO` (`Settings.bilanci_storico_attivo=False`, `MeOut.funzioni.bilanci_storico`), **spento finché G1 non è chiuso**: niente storico IT-advanced (né nell'anteprima né in «Recupera i bilanci») e niente bilancio ufficiale, con le rotte relative in 404 (dipendenza `require_bilanci_storico_attivo` sulla singola rotta). L'import IT-full, la quota giornaliera, il legame della P.IVA e `GET /me/company/bilanci` restano attivi. Motivo: le risposte reali di IT-advanced e del bilancio ottico non sono ancora verificate in sandbox.
   - In produzione il flag si accende solo con una riga in `docker-compose.yml`, che aggiungi tu.
 - **T2. Nomi unici.**
   - Scheduler `services/partenariati_scheduler.py` + tabella `partenariati_runs` (claim per giorno) + `partenariati_scheduler_attivo`/`partenariati_ora_esecuzione="05:30"`. Nasce in WP3; ogni WP aggiunge passi isolati.
@@ -587,7 +587,7 @@ Il **caso peggiore** è limitato dai tetti fail-closed: WP3 $5 al giorno + altri
 ## 11. Sequenza, commit, migration e gate
 
 1. **WP0** — commit `docs/partenariati.md` (questo piano + appendice A) + indice in `docs/README.md` + fixture del campione (solo id) + script sandbox (`backend/scripts/verifica_sandbox_openapi.py`, legge le chiavi dalle variabili d'ambiente e salva fixture anonimizzate).
-2. **WP1** → ⚠️ 0032. **WP2** → ⚠️ 0033. Vanno senza flag.
+2. **WP1** → ⚠️ 0032. **WP2** → ⚠️ 0033. Vanno senza il flag del modulo; storico IT-advanced e bilancio ufficiale restano spenti dietro `BILANCI_STORICO_ATTIVO` fino a G1 (§2.1 T1).
 3. **WP3** → ⚠️ 0034. **WP4** → ⚠️ 0035. **WP5** → ⚠️ 0036, 0037. **WP6** → ⚠️ 0038. **WP7** → ⚠️ 0039. **WP8** → ⚠️ 0040. **WP9** → ⚠️ 0041. **WP10** → ⚠️ 0042.
 
 Regole di commit:
@@ -598,7 +598,7 @@ Regole di commit:
 Branch `feat/partenariati` da `main`: la spec qui prevale sul `claude/<…>` del CLAUDE.md globale.
 
 Gate (non bloccano lo sviluppo, ma il rilascio sì):
-- **G1** sandbox openapi: le tue azioni in §14, poi lanci lo script. Serve a sostituire le fixture sintetiche e a confermare i codici CEE; senza G1 il fix del mapping resta «verificato solo su OAS».
+- **G1** sandbox openapi: le tue azioni in §14, poi lanci lo script. Serve a sostituire le fixture sintetiche e a confermare i codici CEE; senza G1 il fix del mapping resta «verificato solo su OAS» e `BILANCI_STORICO_ATTIVO` resta spento.
 - **G2** migration nello SQL Editor prima di ogni deploy.
 - **G3** credito Anthropic, poi `partenariato_valutazione --reale --locale --tetto-cents 800 --conferma --out <file fuori dal repo>` (modalità locale: nessuna scrittura su DB reali; tetto sulla somma delle esecuzioni).
 - **G4** testi legali (informativa, Termini/DSA, disclaimer) prima di accendere il flag in produzione.
@@ -663,8 +663,8 @@ Durante l'esecuzione mi fermo solo per ambiguità che cambiano comportamento o c
    - esporta nella shell `OPENAPI_SANDBOX_EMAIL` e `OPENAPI_SANDBOX_API_KEY`;
    - lancia `! backend/.venv/bin/python backend/scripts/verifica_sandbox_openapi.py`.
 2. **Prima del deploy di WP1/WP2**: attiva le stesse API anche in **produzione** (senza, falliscono solo i nuovi prodotti, grazie ai token separati); poi le migration 0032 e 0033 dallo SQL Editor.
-3. Prezzo e attivazione dell'addon `bilancio-ufficiale` in AdminAddon.
-4. Per il modulo partenariati: le migration 0034–0042 in ordine, prima dei rispettivi deploy; la riga `PARTENARIATI_ATTIVO: ${PARTENARIATI_ATTIVO:-false}` in `docker-compose.yml` quando vorrai accendere il flag. Dopo la 0036, in AdminPiani, i limiti di partenariato dei piani diversi da Gratuito, Smart, Pro e Advisor (per esempio `tailored`): partono da 0, cioè senza call né candidature; dopo la 0042 lo stesso per «Bozze di documenti al mese».
+3. **Dopo G1**: la riga `BILANCI_STORICO_ATTIVO` nell'`environment` del backend in `docker-compose.yml` (accende storico e bilancio ufficiale); dopo il deploy, prezzo e attivazione dell'addon `bilancio-ufficiale` in AdminAddon (ha senso solo a storico acceso).
+4. Per il modulo partenariati: le migration 0034–0042 in ordine, **prima del deploy e anche a modulo spento**, perché il backend legge colonne della 0036, 0041 e 0042 qualunque sia il flag (con la 0032 e la 0033 del punto 2: tutte dalla 0032 alla 0042, in ordine); la riga `PARTENARIATI_ATTIVO: ${PARTENARIATI_ATTIVO:-false}` in `docker-compose.yml` quando vorrai accendere il flag. Dopo la 0036, in AdminPiani, i limiti di partenariato dei piani diversi da Gratuito, Smart, Pro e Advisor (per esempio `tailored`): partono da 0, cioè senza call né candidature; dopo la 0042 lo stesso per «Bozze di documenti al mese».
 5. Revisione legale di informativa, Termini/DSA e disclaimer (G4); un canale di segnalazione per chi non è utente.
 6. Credito Anthropic per la valutazione reale (G3).
 7. Dati che mi servono: `proxy_read_timeout` di nginx/NPM e piano Cloudflare; valore «Max rows» del DB primario (Supabase → Settings → API).
@@ -869,8 +869,8 @@ Durante l'esecuzione mi fermo solo per ambiguità che cambiano comportamento o c
   - **accessibilità** (dopo la revisione): l'esito di una bozza si annuncia anche mentre un'altra è in preparazione;
   - **tetto giornaliero per titolare** (rifinitura): `fn_partner_bozza_prenota` ha in più `p_limite_owner` (ultimo parametro, NULL = nessun tetto), passato a `fn_partenariati_ai_prenota` e contato sulle sole esecuzioni delle bozze dell'owner nel giorno; il backend passa `PARTNER_BOZZE_DOCUMENTO_LIMITE_OWNER_GIORNO` (10), così anche un piano illimitato non consuma in un giorno il budget «altri» condiviso con WP4 e WP5 (`429 ai_limite_giornaliero`). Il conteggio usa l'esclusione della 0034 (solo gli errori senza LLM a costo 0 non contano): a differenza del limite mensile conta anche `ai_non_disponibile`, perché è a costo ignoto e la sua riserva pesa sul budget del giorno, che è ciò che il tetto protegge.
 - **Modulo completo (WP0-WP10)**. Resta per l'accensione in produzione:
-  - **G1** sandbox openapi (§14): fixture reali al posto di quelle sintetiche e codici CEE ancora da verificare;
-  - **G2** migration 0034-0042 in ordine dallo SQL Editor del primario, ciascuna prima del deploy che la usa;
+  - **G1** sandbox openapi (§14): fixture reali al posto di quelle sintetiche e codici CEE ancora da verificare. Fino ad allora storico IT-advanced e bilancio ufficiale (WP1-WP2) sono in produzione ma spenti dietro `BILANCI_STORICO_ATTIVO` (§2.1 T1): chiuso G1 si accende la variabile nell'`environment` del backend e, dopo il deploy, si fissano prezzo e attivazione dell'addon `bilancio-ufficiale`;
+  - **G2** tutte le migration dalla 0032 alla 0042, in ordine dallo SQL Editor del primario, **prima** del deploy e qualunque sia il flag: il backend legge colonne della 0036, 0041 e 0042 anche a modulo spento;
   - **G4** revisione legale di informative, Termini d'uso e DSA, statement of reasons e disclaimer (anche quello delle bozze dei documenti e le istruzioni di stesura dei tre documenti), poi la loro versione nel codice;
   - **qualità dell'estrazione WP3** (§16 WP3): con il prompt v3 le quote verificate hanno precisione 1,00 su entrambi i campioni, ma la `modalita` è corretta nel 68% (campione 1) e nel 61% (campione 2, selezionato dalle fonti ufficiali), sotto l'obiettivo del 90%, perché vale solo con una citazione da un documento ufficiale: il prossimo intervento va deciso;
   - in AdminPiani il limite delle bozze dei piani su misura (partono da 0); consigliato dimensionare il budget giornaliero «altri» (condiviso da bozza del profilo, proposte della call e bozze dei documenti, ciascuno con il suo tetto giornaliero per titolare) sul numero di clienti attivi;

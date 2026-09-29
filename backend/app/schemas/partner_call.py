@@ -15,9 +15,12 @@ Fonte UNICA dei DTO per backend e frontend. Tre famiglie:
     WHITELIST verso terzi (`CallPubblicaOut`, `CallCardOut`, `extra='forbid'`
     anche in costruzione), anteprima, versioni, segnalazioni.
 
-Le call sono per ora SOLO anonime (WP4, `NOMINATIVO_DISPONIBILE = False`):
-`anonima` si accetta in input solo perché il servizio risponda 409
-`nominativo_non_disponibile` a `false`.
+Call nominative (WP9, decisione di Michele): `anonima: false` solo per le
+aziende con l'identità verificata dalla piattaforma (altrimenti 409
+`identita_non_verificata_admin` dal servizio; 409 `nominativo_non_disponibile`
+con l'interruttore globale `NOMINATIVO_DISPONIBILE` spento). Verso terzi il
+creatore resta comunque «Azienda anonima» finché non esiste una proiezione
+nominativa delle call.
 """
 
 import math
@@ -566,7 +569,8 @@ class CallCreaIn(BaseModel):
     # Richiesto solo se l'estrazione WP3 dice `non_ammesso` (409
     # `partenariato_non_ammesso` altrimenti): perché il bando lo ammette.
     override_non_ammesso_motivo: str | None = None
-    # Solo true (WP4): false → 409 `nominativo_non_disponibile` dal servizio.
+    # false solo per un'azienda con l'identità verificata dalla piattaforma
+    # (WP9): altrimenti 409 `identita_non_verificata_admin` dal servizio.
     anonima: StrictBool = True
 
     @field_validator("override_non_ammesso_motivo")

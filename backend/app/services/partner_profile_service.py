@@ -14,8 +14,13 @@ Scritture:
   registro solo come avvisi;
 - `consenso` → `fn_partner_consenso` (registro append-only + audit nella
   stessa transazione), con l'identità dal registro (T5) e, in produzione, dati
-  non sandbox. Il profilo NOMINATIVO è spento (`NOMINATIVO_DISPONIBILE`): si
-  compare solo in forma anonima;
+  non sandbox. Il profilo NOMINATIVO (WP9, decisione di Michele) vale solo per
+  un'azienda con l'identità verificata dalla piattaforma
+  (`identita_forte` = `fn_partenariato_identita_forte`): altrimenti 409
+  `identita_non_verificata_admin` (la RPC lo ricontrolla con
+  `fn_partenariato_rappresentante_ok`);
+- `richiedi_verifica` → `fn_identita_richiedi` (titolare, T5, una richiesta
+  aperta alla volta): la verifica la decide un admin (WP9, area admin);
 - `referente` / `risposta_referente` → `fn_partner_referente`;
 - `avvia_bozza_ai` → prenotazione fail-closed (`fn_partner_bozza_ai_prenota`:
   limite per azienda, limite per titolare e budget del gruppo `altri`) e job
@@ -71,6 +76,8 @@ from app.schemas.partner_profile import (
     ReferentePossibileOut,
     ReferentePropostoOut,
     ReferenteRispostaIn,
+    VerificaIdentitaIn,
+    VerificaIdentitaOut,
 )
 from app.services import bilanci_service, lookup_service, partenariato_indice
 from app.services import partenariato_vocabolario as voc
@@ -86,7 +93,7 @@ from app.services.partenariato_anonimato import (
     senza_invisibili,
     trova_rilievi,
 )
-from app.services.partenariato_errori import raise_from_rpc
+from app.services.partenariato_errori import RPC_ERRORS, raise_from_rpc
 from app.services.partenariato_informativa import (
     INFORMATIVA_PARTNER_VERSIONE,
     INFORMATIVA_REFERENTE_VERSIONE,
@@ -115,20 +122,24 @@ MSG_NOMINATIVO_NON_DISPONIBILE = (
     "con una verifica della rappresentanza dell'impresa"
 )
 MSG_LIMITE_BOZZE_UTENTE = "Hai raggiunto le bozze di oggi: riprova domani"
-# Profilo NOMINATIVO (Q9): spento finché non esiste una prova forte che chi
-# agisce rappresenti l'impresa. La verifica del codice fiscale del profilo da
-# sola non basta a dimostrarlo, quindi oggi si compare solo in forma anonima.
-# Si riaccende SOLO insieme a quella verifica (non è una setting d'ambiente).
-NOMINATIVO_DISPONIBILE = False
+MSG_SOLO_TITOLARE_VERIFICA = "La verifica dell'identità la chiede il titolare dell'azienda"
+# Profilo NOMINATIVO (Q9 rivista, decisione di Michele del WP9): interruttore
+# GLOBALE, acceso. In più serve la verifica dell'identità PER AZIENDA da parte
+# della piattaforma (`identita_forte`): senza, 409 `identita_non_verificata_admin`
+# e verso terzi il profilo resta anonimo anche se salvato come nominativo
+# (una verifica revocata spegne il nome nelle viste successive). Costante, non
+# setting: spenta, nessuna azienda può mostrare il nome.
+NOMINATIVO_DISPONIBILE = True
 # Rivelazione dell'IDENTITÀ all'accettazione di una candidatura o di un invito
-# (WP7, K2, Q13): implementata ma SPENTA per la stessa ragione del profilo
-# nominativo. Spenta, le due aziende restano anonime l'una per l'altra anche
-# dopo l'accettazione (proiezioni anonime e pseudonimo, chat con il banner
-# sull'identità non verificata) e `fn_partner_decidi` non scrive l'audit di
-# rivelazione. Accesa: ragione sociale, sito e PEC dal registro, nome e ruolo
-# del referente (mai la sua email), con l'audit nella RPC. Costante, non
-# setting: si riaccende solo insieme alla verifica della rappresentanza.
-RIVELAZIONE_IDENTITA_DISPONIBILE = False
+# (WP7, K2, Q13): interruttore GLOBALE, acceso. La rivelazione è SIMMETRICA:
+# avviene solo se ENTRAMBE le aziende hanno l'identità verificata dalla
+# piattaforma (`rivelazione_ammessa`, ricontrollata da `fn_partner_decidi`
+# della 0041) e le viste successive la mostrano solo se oggi lo sono ancora.
+# Altrimenti le due aziende restano anonime l'una per l'altra (proiezioni
+# anonime e pseudonimo, chat con il banner sull'identità non verificata) e la
+# RPC non scrive l'audit di rivelazione. Rivelata: ragione sociale, sito e PEC
+# dal registro, nome e ruolo del referente (mai la sua email).
+RIVELAZIONE_IDENTITA_DISPONIBILE = True
 # Tempo massimo per chiudere la bozza quando il task viene cancellato
 # (spegnimento del processo): poi ci pensa il failsafe.
 CHIUSURA_SU_CANCELLAZIONE_SECONDI = 5.0
@@ -217,11 +228,6 @@ def _ts(valore) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
-def _cf(valore) -> str:
-    """Stesso confronto della RPC: `upper(btrim(...))`."""
-    return valore.strip().upper() if isinstance(valore, str) else ""
-
-
 def richiedi_non_sandbox() -> bool:
     """Dati del registro di sandbox NON ammessi per il consenso. Fail-closed:
     li ammette solo un ambiente openapi dichiarato `sandbox` (contratto: vale
@@ -247,6 +253,83 @@ def _informativa_superata(referente: bool = False) -> AppError:
         "informativa_superata",
         f"L'informativa {cosa}è stata aggiornata: rileggila e conferma di nuovo",
     )
+
+
+# ------------------------------------ identità verificata dalla piattaforma
+
+
+def errore_identita_non_verificata(messaggio: str | None = None) -> AppError:
+    """409 `identita_non_verificata_admin`: nominativo senza l'identità
+    verificata dalla piattaforma (stessa tripla di `RPC_ERRORS`; il messaggio
+    si può adattare all'oggetto, per esempio la call)."""
+    status, code, testo = RPC_ERRORS["identita_non_verificata_admin"]
+    return AppError(status, code, messaggio or testo)
+
+
+async def identita_forte(primary, company_id) -> bool:
+    """L'azienda ha OGGI l'identità verificata dalla piattaforma
+    (`fn_partenariato_identita_forte`, 0041: stato `verificata` e dati del
+    Registro Imprese ancora coerenti). Unica fonte per nominativo e
+    rivelazione. Errore di lettura → `UpstreamError` (fail-closed: nessuna
+    decisione su un dato incerto); per le sole viste `identita_forte_o_no`."""
+    if not company_id:
+        return False
+    try:
+        resp = await primary.rpc(
+            "fn_partenariato_identita_forte", {"p_company": str(company_id)}
+        ).execute()
+    except APIError as exc:
+        logger.error("partner: identità verificata non leggibile (azienda %s, code=%s)",
+                     company_id, exc.code)
+        raise UpstreamError() from exc
+    return resp.data is True
+
+
+async def identita_forte_o_no(primary, company_id) -> bool:
+    """`identita_forte` per le VISTE: su qualunque errore False (l'identità
+    non si mostra) con un warning."""
+    try:
+        return await identita_forte(primary, company_id)
+    except Exception as exc:  # noqa: BLE001 — fail-closed: resta anonima
+        logger.warning("partner: identità verificata non leggibile per una vista (azienda %s, %s)",
+                       company_id, type(exc).__name__)
+        return False
+
+
+async def aziende_con_identita_forte(primary, company_ids) -> set[str]:
+    """Le aziende, tra quelle date, con l'identità verificata OGGI (per le
+    viste, fail-closed: un'azienda illeggibile non c'è)."""
+    ids = list(dict.fromkeys(str(c) for c in company_ids if c))
+    esiti = await asyncio.gather(*(identita_forte_o_no(primary, c) for c in ids))
+    return {c for c, forte in zip(ids, esiti, strict=True) if forte}
+
+
+async def rivelazione_ammessa(primary, company_a, company_b) -> bool:
+    """Rivelazione SIMMETRICA dell'identità all'accettazione (decisione di
+    Michele): interruttore globale acceso ED entrambe le aziende con
+    l'identità verificata oggi. `fn_partner_decidi` (0041) la ricontrolla
+    sotto i lock. Errore di lettura → `UpstreamError` (niente decisione)."""
+    if not RIVELAZIONE_IDENTITA_DISPONIBILE:
+        return False
+    return await identita_forte(primary, company_a) and await identita_forte(primary, company_b)
+
+
+def profilo_per_terzi(riga: dict, forte: bool) -> dict:
+    """La riga del profilo come la vedono i terzi: nominativa solo con
+    l'interruttore acceso e l'identità verificata OGGI (`forte`); altrimenti
+    anonima, anche se salvata come nominativa (una verifica revocata spegne
+    il nome nelle viste successive)."""
+    if riga.get("anonimo") is False and not (NOMINATIVO_DISPONIBILE and forte):
+        return {**riga, "anonimo": True}
+    return riga
+
+
+async def profili_per_terzi(primary, righe: dict[str, dict]) -> dict[str, dict]:
+    """`profilo_per_terzi` su un blocco di profili (company_id → riga): la
+    verifica si legge solo per quelli salvati come nominativi."""
+    nominativi = [c for c, r in righe.items() if isinstance(r, dict) and r.get("anonimo") is False]
+    forti = await aziende_con_identita_forte(primary, nominativi) if nominativi else set()
+    return {c: profilo_per_terzi(r, c in forti) for c, r in righe.items()}
 
 
 # ------------------------------------------------------------ letture DB
@@ -404,6 +487,52 @@ async def _failsafe_bozza(primary, ctx: _Contesto) -> None:
         logger.exception("partner: failsafe delle bozze AI non riuscito")
 
 
+IDENTITA_STATO_SELECT = "company_profile_id,stato,verificata_at,richiesta_at"
+
+
+async def _stato_verifica(primary, company_id: str) -> dict | None:
+    """Riga di `company_identita_stato` (nessuna riga = mai richiesta). Mai
+    `verificata_da` (l'admin) né `metodo`."""
+    resp = (
+        await primary.table("company_identita_stato")
+        .select(IDENTITA_STATO_SELECT)
+        .eq("company_profile_id", company_id)
+        .limit(1)
+        .execute()
+    )
+    return resp.data[0] if resp.data else None
+
+
+async def _verifica_out(primary, ctx: _Contesto, *, editable: bool) -> VerificaIdentitaOut:
+    """Stato della verifica per il titolare e i membri: l'identità FORTE di
+    oggi solo se lo stato è `verificata` (altrimenti niente RPC) e se
+    `fn_partenariato_identita_forte` lo conferma (fail-closed); la richiesta
+    con le stesse condizioni di `fn_identita_richiedi` (titolare, T5 senza il
+    controllo sandbox, nessuna richiesta aperta, non già verificata)."""
+    riga = await _stato_verifica(primary, ctx.company_id) or {}
+    stato = riga.get("stato") if riga.get("stato") in (
+        "richiesta", "verificata", "rifiutata") else "non_richiesta"
+    forte = stato == "verificata" and await identita_forte_o_no(primary, ctx.company_id)
+    if not editable:
+        motivo = "solo_titolare"
+    elif stato == "richiesta":
+        motivo = "gia_richiesta"
+    elif stato == "verificata":
+        motivo = "gia_verificata"
+    elif _motivo_registro(ctx, controlla_sandbox=False) is not None:
+        motivo = "dati_registro"
+    else:
+        motivo = None
+    return VerificaIdentitaOut(
+        stato=stato,
+        verificata=forte,
+        richiesta_at=riga.get("richiesta_at"),
+        verificata_at=riga.get("verificata_at") if stato == "verificata" else None,
+        puo_richiedere=motivo is None,
+        motivo_non_richiedibile=motivo,
+    )
+
+
 # ---------------------------------------------------------- composizione
 
 
@@ -419,33 +548,36 @@ def _dedotti(ctx: _Contesto) -> list[str]:
     return tipi_soggetto_dedotti(dati.get("derived") or {}, dossier.get("flags"), forma or None)
 
 
-def _identita(ctx: _Contesto, titolare: dict) -> IdentitaPartnerOut:
-    """Stessi controlli di `fn_partner_consenso` (T5 e Q9), per la UI."""
+def _motivo_registro(ctx: _Contesto, *, controlla_sandbox: bool) -> str | None:
+    """Perché l'identità dal Registro Imprese (T5) non vale, come
+    `fn_partenariato_identita_ok`: senza `controlla_sandbox` è la variante
+    della verifica dell'admin (`p_richiedi_non_sandbox` = false)."""
     dati = ctx.company_data
     piva = ctx.azienda.get("partita_iva")
-    motivo = None
     if dati is None:
-        motivo = "dati_non_importati"
-    elif not piva or dati.get("piva_fetched") != piva:
-        motivo = "piva_diversa"
-    elif str(dati.get("stato_impresa") or "").strip().lower() != "attiva":
-        motivo = "impresa_non_attiva"
-    elif dati.get("sandbox") is not False and richiedi_non_sandbox():
-        motivo = "dati_sandbox"
+        return "dati_non_importati"
+    if not piva or dati.get("piva_fetched") != piva:
+        return "piva_diversa"
+    if str(dati.get("stato_impresa") or "").strip().lower() != "attiva":
+        return "impresa_non_attiva"
+    if controlla_sandbox and dati.get("sandbox") is not False and richiedi_non_sandbox():
+        return "dati_sandbox"
+    return None
+
+
+def _identita(ctx: _Contesto, verifica: VerificaIdentitaOut) -> IdentitaPartnerOut:
+    """Stessi controlli di `fn_partner_consenso` (T5 e, per il nominativo,
+    l'identità verificata dalla piattaforma), per la UI."""
+    dati = ctx.company_data
+    piva = ctx.azienda.get("partita_iva")
+    motivo = _motivo_registro(ctx, controlla_sandbox=True)
     denominazione = None
     if dati is not None and piva and dati.get("piva_fetched") == piva:
         denominazione = (dati.get("denominazione") or "").strip() or None
-
-    cf = _cf(titolare.get("codice_fiscale"))
     if not NOMINATIVO_DISPONIBILE:
         motivo_nominativo = "non_disponibile"
-    elif not cf or not titolare.get("cf_verified_at"):
-        motivo_nominativo = "cf_non_verificato"
-    elif not any(
-        p.get("is_legale_rappresentante") is True and _cf(p.get("codice_fiscale")) == cf
-        for p in ctx.persone
-    ):
-        motivo_nominativo = "non_rappresentante"
+    elif not verifica.verificata:
+        motivo_nominativo = "identita_non_verificata_admin"
     else:
         motivo_nominativo = None
     return IdentitaPartnerOut(
@@ -454,6 +586,7 @@ def _identita(ctx: _Contesto, titolare: dict) -> IdentitaPartnerOut:
         denominazione_registro=denominazione,
         puo_essere_nominativo=motivo is None and motivo_nominativo is None,
         motivo_nominativo=motivo_nominativo,
+        verifica=verifica,
     )
 
 
@@ -638,9 +771,10 @@ def _avvisi_anonimato(ctx: _Contesto) -> list[str]:
 
 
 async def _componi(primary, active, user: dict, ctx: _Contesto) -> PartnerProfileOut:
-    titolare, membri = await asyncio.gather(
+    titolare, membri, verifica = await asyncio.gather(
         _titolare(primary, user, ctx.owner_id),
         _membri_con_accesso(primary, ctx.owner_id, ctx.company_id),
+        _verifica_out(primary, ctx, editable=bool(active.editable)),
     )
     riga = ctx.profilo or {}
     dedotti = _dedotti(ctx)
@@ -661,7 +795,7 @@ async def _componi(primary, active, user: dict, ctx: _Contesto) -> PartnerProfil
         else None,
         informativa_versione_corrente=INFORMATIVA_PARTNER_VERSIONE,
         riconsenso_suggerito=visibile and versione != INFORMATIVA_PARTNER_VERSIONE,
-        identita=_identita(ctx, titolare),
+        identita=_identita(ctx, verifica),
         profilo=_dati_profilo(riga),
         tipi_soggetto_dedotti=dedotti,
         completezza=completezza(riga, dedotti),
@@ -694,11 +828,15 @@ async def get_profilo(primary, secondary, active, user: dict) -> PartnerProfileO
 async def anteprima(primary, secondary, active, user: dict) -> PartnerPubblicoOut:
     """«Come ti vedono»: la stessa proiezione a whitelist che vedranno le
     altre aziende, anche se il profilo non è visibile (o non è mai stato
-    salvato: allora con i soli dati del registro)."""
+    salvato: allora con i soli dati del registro). Un profilo nominativo
+    senza l'identità verificata oggi si vede anonimo, come lo vedono gli
+    altri."""
     ctx = await _contesto(primary, active)
     esercizi = await bilanci_service.carica_esercizi(primary, ctx.company_id)
     lookups = await _lookups_opzionali(secondary)
     riga = ctx.profilo or {"codice_pubblico": CODICE_PUBBLICO_ASSENTE, "anonimo": True}
+    if riga.get("anonimo") is False:
+        riga = profilo_per_terzi(riga, await identita_forte_o_no(primary, ctx.company_id))
     return profilo_pubblico(
         riga, ctx.company_data, ctx.dossier, calcola_fasce(esercizi), lookups, ident=ctx.ident
     )
@@ -782,8 +920,10 @@ async def consenso(
     """Concessione, revoca o cambio di anonimato (titolare) via
     `fn_partner_consenso`.
 
-    Il nominativo (`anonimo=false`) oggi non è disponibile (409
-    `nominativo_non_disponibile`, vedi `NOMINATIVO_DISPONIBILE`).
+    Il nominativo (`anonimo=false`) vale solo con l'interruttore globale
+    acceso (409 `nominativo_non_disponibile`, vedi `NOMINATIVO_DISPONIBILE`) e
+    con l'identità dell'azienda verificata dalla piattaforma (409
+    `identita_non_verificata_admin`; la RPC lo ricontrolla).
     L'informativa inviata deve essere quella corrente per concedere e per
     passare al nominativo (409 `informativa_superata`); per passare al
     nominativo un profilo già visibile, anche il consenso REGISTRATO deve
@@ -811,6 +951,8 @@ async def consenso(
             and riga.get("consenso_versione") != INFORMATIVA_PARTNER_VERSIONE
         ):
             raise _informativa_superata()
+    if nominativo and not await identita_forte(primary, company_id):
+        raise errore_identita_non_verificata()
     if dati.anonimo is not None and (
         dati.azione == "concedi" or (dati.azione == "anonimato" and dati.anonimo)
     ):
@@ -899,6 +1041,57 @@ async def risposta_referente(
     except APIError as exc:
         raise_from_rpc(exc)
     return await get_profilo(primary, secondary, active, user)
+
+
+# I detail di fn_identita_richiedi comuni con il consenso hanno nella mappa un
+# messaggio sul profilo partner: qui si parla della verifica. Code invariati.
+_ERRORI_VERIFICA: dict[str, tuple[int, str, str]] = {
+    "attore_non_titolare": (403, "forbidden", MSG_SOLO_TITOLARE_VERIFICA),
+    "identita_non_verificata": (
+        409,
+        "identita_non_verificata",
+        "Per chiedere la verifica importa prima i dati ufficiali dell'azienda dalla partita "
+        "IVA: l'impresa deve risultare attiva nel Registro Imprese",
+    ),
+}
+
+
+async def get_verifica(primary, secondary, active, user: dict) -> VerificaIdentitaOut:
+    """GET /me/partner-profile/identita: stato della verifica dell'identità
+    dell'azienda attiva (titolare e membri con visibilità, in lettura)."""
+    ctx = await _contesto(primary, active)
+    return await _verifica_out(primary, ctx, editable=bool(active.editable))
+
+
+async def richiedi_verifica(
+    primary, secondary, active, user: dict, dati: VerificaIdentitaIn | None = None
+) -> VerificaIdentitaOut:
+    """POST /me/partner-profile/identita: il titolare chiede alla piattaforma
+    la verifica dell'identità (`fn_identita_richiedi`: T5, una richiesta
+    aperta alla volta, non già verificata; registro e audit nella stessa
+    transazione). La nota facoltativa (≤ 500) arriva solo all'admin, senza
+    caratteri invisibili. Errori: 403, 404, 409 `identita_non_verificata`
+    / `identita_richiesta_aperta` / `identita_gia_verificata`."""
+    if not active.editable:
+        raise ForbiddenError(MSG_SOLO_TITOLARE_VERIFICA)
+    company_id = _richiedi_azienda(active)
+    nota = senza_invisibili(dati.nota).strip() if dati is not None and dati.nota else ""
+    try:
+        await primary.rpc(
+            "fn_identita_richiedi",
+            {
+                "p_owner": str(active.owner_id),
+                "p_company": company_id,
+                "p_attore": str(user["id"]),
+                "p_nota": nota or None,
+            },
+        ).execute()
+    except APIError as exc:
+        detail = (exc.details or "").strip()
+        if detail in _ERRORI_VERIFICA:
+            raise AppError(*_ERRORI_VERIFICA[detail]) from exc
+        raise_from_rpc(exc)
+    return await get_verifica(primary, secondary, active, user)
 
 
 async def scarta_bozza(primary, secondary, active, user: dict) -> PartnerProfileOut:

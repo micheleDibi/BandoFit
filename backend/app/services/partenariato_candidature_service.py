@@ -24,13 +24,20 @@ azienda → controparte → call → candidatura). Qui si valida PRIMA della RPC
   409 `partner_non_disponibile` (codice neutro unico). Mai
   `company_profile_id` in ingresso né in uscita verso terzi.
 - `decidi` / `ritira`: decide X le candidature e Y gli inviti; ritira chi ha
-  mandato. All'accettazione la RPC crea la conversazione e scrive l'audit
-  (quello di rivelazione solo con
-  `partner_profile_service.RIVELAZIONE_IDENTITA_DISPONIBILE`, oggi spenta).
+  mandato. All'accettazione la RPC crea la conversazione e scrive l'audit;
+  quello di rivelazione solo con la rivelazione SIMMETRICA (WP9, decisione di
+  Michele): interruttore globale acceso ed ENTRAMBE le aziende con l'identità
+  verificata dalla piattaforma (`p_rivela`, ricontrollato dalla RPC). Le viste
+  successive mostrano l'identità solo se oggi lo sono ancora
+  (`identita_se_rivelata`): una verifica revocata la spegne, gli audit restano.
 - Letture (`lista`, `dettaglio`) per lato: X vede Y solo per pseudonimo, con
   profilo pubblico (nel dettaglio) e valutazione solo finché Y è ancora
   visibile («Azienda non più disponibile» altrimenti, senza fasce); Y vede la
   call senza identità del creatore. Scadenza pigra degli inviti in lettura.
+  Le fasce oltre al fatturato (WP9) solo per una Y che OGGI si mostra col nome
+  (profilo nominativo e identità verificata dalla piattaforma): la valutazione
+  si salva così (`match_per_terzi`) e si riduce in lettura se nel frattempo
+  la verifica è stata revocata.
 - Anti-abuso (fail-open, non è un tetto di spesa): candidature e inviti al
   giorno per utente.
 - Notifiche in-app (canale affidabile) e email di evento in background, solo
@@ -46,6 +53,7 @@ Log: solo id e codici; mai testi, P.IVA, email o nomi.
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Iterable, Mapping
+from dataclasses import replace
 from datetime import date, datetime, timezone
 from typing import Any, Literal, NoReturn
 from uuid import UUID
@@ -92,7 +100,7 @@ from app.services.partenariato_anonimato import (
     trova_rilievi,
 )
 from app.services.partenariato_errori import RPC_ERRORS, raise_from_rpc
-from app.services.partenariato_matching import MatchOut
+from app.services.partenariato_matching import FasceMatchOut, MatchOut
 from app.services.partner_profilo_pubblico import profilo_pubblico
 
 logger = logging.getLogger("bandofit.partenariati")
@@ -429,6 +437,49 @@ def _uuid(valore: Any) -> UUID | None:
         return None
 
 
+def _solo_fatturato(m: MatchOut) -> MatchOut:
+    """Il match di un'azienda che oggi non si mostra col nome (Q12: agli
+    anonimi la sola fascia di fatturato), anche se la valutazione era stata
+    salvata quando si mostrava (WP9: una verifica revocata spegne le fasce
+    in più nelle viste successive)."""
+    if m.fasce is None:
+        return m
+    fasce = FasceMatchOut(fatturato=m.fasce.fatturato) if m.fasce.fatturato else None
+    return m.model_copy(update={"fasce": fasce})
+
+
+async def match_per_terzi(primary, m: pm.MatchInterno) -> pm.MatchInterno:
+    """Il match come lo vedono i terzi (il creatore della call): un profilo
+    salvato come nominativo conta come anonimo (la sola fascia di fatturato)
+    se OGGI l'azienda non si mostra col nome, per l'interruttore spento o
+    senza l'identità verificata dalla piattaforma (stessa regola di
+    `pps.profilo_per_terzi`; lettura non riuscita → anonimo)."""
+    if m.anonimo:
+        return m
+    if pps.NOMINATIVO_DISPONIBILE and await pps.identita_forte_o_no(primary, m.company_id):
+        return m
+    return replace(m, anonimo=True)
+
+
+async def _nominativi_oggi(primary, company_ids: Iterable[str]) -> set[str]:
+    """Le aziende, tra quelle date, che OGGI si mostrano col nome ai terzi
+    (profilo salvato nominativo, interruttore acceso, identità verificata
+    dalla piattaforma): solo per loro la valutazione salvata esce con tutte
+    le fasce. L'identità si legge solo per i profili nominativi."""
+    ids = sorted({str(c) for c in company_ids if c})
+    if not ids or not pps.NOMINATIVO_DISPONIBILE:
+        return set()
+    nominativi: list[str] = []
+    for blocco in _blocchi(ids):
+        resp = await (
+            primary.table("company_partner_profiles").select("company_profile_id")
+            .in_("company_profile_id", blocco).eq("anonimo", False).execute()
+        )
+        nominativi += [str(r["company_profile_id"]) for r in resp.data or []
+                       if isinstance(r, dict)]
+    return await pps.aziende_con_identita_forte(primary, nominativi) if nominativi else set()
+
+
 def _match(valutazione: Any) -> tuple[MatchOut | None, bool | None]:
     """(match in vista terzi, compatibile) dalla valutazione salvata."""
     if not isinstance(valutazione, dict) or not valutazione:
@@ -485,6 +536,8 @@ class _Contesto:
         self.posizioni: dict[str, dict] = {}
         self.requisiti: dict[str, dict] = {}
         self.disponibili: set[str] = set()
+        # Candidate che oggi si mostrano col nome (tutte le fasce): WP9.
+        self.nominativi: set[str] = set()
         self.ident: dict[str, Identificativi] = {}
 
 
@@ -552,6 +605,7 @@ async def _contesto(primary, righe: list[dict], company_id: str) -> _Contesto:
         ctx.requisiti.update({str(q["id"]): q for q in resp.data or []})
     if candidati:
         ctx.disponibili = set(await partenariato_indice.ricontrollo_live(primary, candidati))
+        ctx.nominativi = await _nominativi_oggi(primary, ctx.disponibili)
     creatori = [str(r["creatore_company_profile_id"]) for r in righe
                 if _lato(r, company_id) == "partner"]
     if creatori:
@@ -606,6 +660,8 @@ def proietta(
                 ))
     valutazione, compatibile = _match(riga.get("valutazione")) if creatore and disponibile \
         else (None, None)
+    if valutazione is not None and str(riga.get("company_profile_id")) not in ctx.nominativi:
+        valutazione = _solo_fatturato(valutazione)
     return CandidaturaOut(
         id=riga["id"],
         tipo=riga["tipo"],
@@ -640,7 +696,8 @@ def proietta(
 
 async def _profilo_candidato(primary, secondary, company_id: str):
     """Profilo pubblico del WP4 della candidata (whitelist, Q12 per gli
-    anonimi) SENZA `codice_pubblico`: solo nel dettaglio, per il creatore."""
+    anonimi) SENZA `codice_pubblico`: solo nel dettaglio, per il creatore.
+    Nominativo solo con l'identità verificata oggi (WP9)."""
     resp = (
         await primary.table("company_partner_profiles").select(pcs.PROFILO_PUBBLICO_SELECT)
         .eq("company_profile_id", company_id).eq("visibile_come_partner", True)
@@ -649,6 +706,8 @@ async def _profilo_candidato(primary, secondary, company_id: str):
     riga = resp.data[0] if resp.data else None
     if riga is None:
         return None
+    if riga.get("anonimo") is False:
+        riga = pps.profilo_per_terzi(riga, await pps.identita_forte_o_no(primary, company_id))
     try:
         az = await pcs.carica_azienda(primary, company_id, None)
     except NotFoundError:
@@ -828,7 +887,8 @@ async def _valutazione(primary, secondary, call_id: str, company_id: str) -> dic
         return {}
     if m is None:
         return {"compatibile": False}
-    return pm.proietta_match(m, vista="terzi").model_dump(mode="json")
+    return pm.proietta_match(await match_per_terzi(primary, m),
+                             vista="terzi").model_dump(mode="json")
 
 
 async def _codice_pubblico(primary, company_id: str) -> str:
@@ -946,7 +1006,8 @@ async def invita(primary, secondary, active, user: dict, call_id: Any,
         "invitato_company_id": invitata,
         "posizione_id": str(dati.posizione_id) if dati.posizione_id else None,
         "messaggio": dati.messaggio,
-        "valutazione": pm.proietta_match(m, vista="terzi").model_dump(mode="json"),
+        "valutazione": pm.proietta_match(await match_per_terzi(primary, m),
+                                         vista="terzi").model_dump(mode="json"),
         "pseudonimo": handle,
         "max_inviti": settings.partner_inviti_max_per_call,
         "ttl_giorni": settings.partner_invito_ttl_giorni,
@@ -981,7 +1042,9 @@ async def decidi(primary, secondary, active, user: dict, candidatura_id: Any,
     """Accetta o rifiuta (titolare dell'azienda che decide: il creatore per le
     candidature, l'invitata per gli inviti; l'altra parte → 404).
     L'accettazione crea la conversazione nella stessa transazione della RPC,
-    con l'audit (quello di rivelazione solo con la rivelazione accesa).
+    con l'audit (quello di rivelazione solo se ENTRAMBE le aziende hanno
+    l'identità verificata dalla piattaforma: `pps.rivelazione_ammessa`, poi
+    ricontrollata dalla RPC; una lettura non riuscita → 502 senza decisione).
     Errori: 403, 404, 400 `testo_non_conforme` (motivo), 409
     (`candidatura_gia_decisa`, `invito_scaduto`, `call_non_attiva`,
     `esclusivita_violata`, `profilo_partner_non_attivo`,
@@ -995,6 +1058,9 @@ async def decidi(primary, secondary, active, user: dict, candidatura_id: Any,
     if motivo:
         az = await pcs.carica_azienda(primary, company_id, active.owner_id)
         controlla_testo(motivo, az.ident, "Il motivo")
+    rivela = decisione == "accetta" and await pps.rivelazione_ammessa(
+        primary, riga["company_profile_id"], riga["creatore_company_profile_id"]
+    )
     esito = await _rpc(primary, "fn_partner_decidi", {
         "p_candidatura": str(riga["id"]),
         "p_attore": str(user["id"]),
@@ -1002,7 +1068,7 @@ async def decidi(primary, secondary, active, user: dict, candidatura_id: Any,
         "p_company": company_id,
         "p_decisione": decisione,
         "p_motivo": motivo,
-        "p_rivela": bool(pps.RIVELAZIONE_IDENTITA_DISPONIBILE),
+        "p_rivela": bool(rivela),
         "p_richiedi_non_sandbox": pps.richiedi_non_sandbox(),
     })
     nuova = (esito or {}).get("candidatura") if isinstance(esito, dict) else None
@@ -1188,18 +1254,30 @@ async def conteggi_riepilogo(primary, active) -> dict:
 async def identita_se_rivelata(primary, candidatura_id: Any, company_id: str
                                ) -> IdentitaRivelataOut | None:
     """Identità dell'azienda `company_id` (la controparte di una candidatura
-    accettata) SOLO se la rivelazione è accesa E la RPC ha scritto l'audit di
+    accettata) SOLO se la rivelazione è accesa, la RPC ha scritto l'audit di
     rivelazione per quella candidatura (una rivelazione accesa dopo non
-    tocca le accettazioni precedenti). Ragione sociale, sito e PEC dal
-    registro; nome e ruolo del referente (mai la sua email). Spenta: None,
-    senza letture."""
+    tocca le accettazioni precedenti) E OGGI entrambe le aziende hanno
+    ancora l'identità verificata dalla piattaforma (rivelazione simmetrica,
+    WP9: una verifica revocata spegne l'identità nelle viste successive, gli
+    audit restano; lettura non riuscita → nessuna identità). Ragione sociale,
+    sito e PEC dal registro; nome e ruolo del referente (mai la sua email).
+    Spenta: None, senza letture."""
     if not pps.RIVELAZIONE_IDENTITA_DISPONIBILE:
         return None
     audit = await (
-        primary.table("audit_log").select("id").eq("action", AUDIT_IDENTITA)
+        primary.table("audit_log").select("id,payload").eq("action", AUDIT_IDENTITA)
         .eq("payload->>candidatura_id", str(candidatura_id)).limit(1).execute()
     )
     if not audit.data:
+        return None
+    payload = audit.data[0].get("payload")
+    if not isinstance(payload, dict):
+        return None
+    parti = {str(payload.get("company_profile_id") or ""),
+             str(payload.get("creatore_company_profile_id") or "")} - {""}
+    if len(parti) != 2 or str(company_id) not in parti:
+        return None
+    if len(await pps.aziende_con_identita_forte(primary, parti)) != 2:
         return None
     azienda = await _una(
         primary.table("company_profiles").select("id,parent_id,partita_iva").eq("id", company_id)

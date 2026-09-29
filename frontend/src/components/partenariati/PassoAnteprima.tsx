@@ -33,7 +33,7 @@ export function PassoAnteprima({ call, onAvanti, onIndietro, onDirty }: PassoPro
           Così vedranno la call le altre aziende: niente nome, niente budget esatto, niente dettagli
           riservati e niente di quello che sai sulla tua copertura dei requisiti.
         </p>
-        <NotaAnonima />
+        <NotaAnonima anonima={call.anonima} />
       </Card>
       {anteprima.isPending ? (
         <Skeleton className="h-96 w-full" />

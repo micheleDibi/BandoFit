@@ -57,6 +57,7 @@ ROTTE = [
     ("POST", f"/api/v1/partenariati/call/{CALL_FINTA}/pubblica"),
     ("POST", f"/api/v1/partenariati/call/{CALL_FINTA}/chiudi"),
     ("GET", f"/api/v1/partenariati/call/{CALL_FINTA}/versioni"),
+    ("POST", f"/api/v1/partenariati/call/{CALL_FINTA}/consulto"),
     ("GET", f"/api/v1/partenariati/call/{CALL_FINTA}/suggeriti"),
     ("GET", f"/api/v1/partenariati/call/{CALL_FINTA}/match"),
     ("POST", f"/api/v1/partenariati/call/{CALL_FINTA}/salva"),
@@ -385,10 +386,10 @@ class TestValidazione:
                                       json={"titolo": "corto"})
         assert resp.status_code == 400 and resp.json()["error"]["code"] == "bad_request"
 
-    async def test_nominativo_409(self, flag):
+    async def test_nominativo_409_senza_verifica_dell_identita(self, flag):
         flag(True)
         async with _http(mini_app(FakeDb())) as client:
             resp = await client.post("/api/v1/partenariati/call", json={
                 "bando_slug": SLUG, "ruolo_creatore": "capofila", "anonima": False})
         assert resp.status_code == 409
-        assert resp.json()["error"]["code"] == "nominativo_non_disponibile"
+        assert resp.json()["error"]["code"] == "identita_non_verificata_admin"

@@ -10,6 +10,9 @@ WP6: la lista ha le viste `tutte` (bacheca delle call di altri owner, con
 filtri, ordinamento e il proprio match) e `salvate`; il dettaglio di una call
 di un'altra azienda è la vista pubblica con il proprio match; il creatore
 vede i suggeriti (pseudonimi, mai id interni); «Salva» vale come «segui».
+
+WP9: `POST /{id}/consulto` chiede un consulto a un progettista dalla call
+(`consulting_service.create_request_da_call`).
 """
 
 from datetime import date
@@ -28,6 +31,7 @@ from app.api.deps import (
     require_partenariati_attivo,
 )
 from app.schemas.common import Page
+from app.schemas.consulting import ConsulenzaOut
 from app.schemas.partner_call import (
     AnteprimaOut,
     CallAggiornaIn,
@@ -42,7 +46,7 @@ from app.schemas.partner_call import (
     RequisitiIn,
     VersioneOut,
 )
-from app.services import partner_call_service
+from app.services import consulting_service, partner_call_service
 from app.services.partenariato_accesso import (
     CallBachecaOut,
     CallPubblicaDettaglioOut,
@@ -323,6 +327,23 @@ async def chiudi_call(
 ) -> CallVistaCreatoreOut:
     """Chiude la call: completata (partenariato fatto) o annullata."""
     return await partner_call_service.chiudi(primary, secondary, active, user, call_id, data)
+
+
+@router.post("/{call_id}/consulto", response_model=ConsulenzaOut, status_code=201)
+async def chiedi_consulto(
+    call_id: str,
+    user: CurrentUser,
+    active: ActiveCompanyDep,
+    primary: PrimaryClient,
+    secondary: SecondaryClient,
+) -> ConsulenzaOut:
+    """Chiede un consulto a un progettista direttamente dalla call (WP9, W1):
+    titolare dell'azienda creatrice, stesse regole di consumo dei consulti
+    esistenti (l'AI-check è facoltativo). Un consulto aperto alla volta per
+    call; il bando ritirato dal catalogo risponde 410."""
+    return await consulting_service.create_request_da_call(
+        primary, secondary, user, active, call_id
+    )
 
 
 @router.get("/{call_id}/versioni", response_model=list[VersioneOut])

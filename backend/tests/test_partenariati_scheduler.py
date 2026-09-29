@@ -202,6 +202,18 @@ def passi_wp6(monkeypatch):
     monkeypatch.setattr(sched, "digest_settimanale", digest)
 
 
+# Passo del WP9 (test propri qui sotto e, sul primario finto del WP8, in
+# test_partenariato_moderazione_service): esito fisso per l'orchestrazione.
+ESITI_WP9 = {"ricalcolo_validazioni": {"call": 0, "ricalcolate": 0, "errori": 0}}
+
+
+def passi_wp9(monkeypatch):
+    async def ricalcolo(primary, secondary):
+        return ESITI_WP9["ricalcolo_validazioni"]
+
+    monkeypatch.setattr(sched, "ricalcolo_validazioni", ricalcolo)
+
+
 class TestClaim:
     async def test_claim_una_volta_al_giorno(self):
         db = FakePrimary()
@@ -226,6 +238,7 @@ class TestClaim:
     async def test_esegui_se_dovuto_rispetta_l_ora(self, monkeypatch):
         imposta(monkeypatch, PARTENARIATI_ORA_ESECUZIONE="05:30")
         passi_wp6(monkeypatch)
+        passi_wp9(monkeypatch)
         db = FakePrimary()
         prima = datetime(2026, 9, 28, 5, 0, tzinfo=ZoneInfo("Europe/Rome"))
         assert await sched.esegui_se_dovuto(db, SecondarioVietato(), FakeAi(), prima) is None
@@ -236,7 +249,7 @@ class TestClaim:
                          "failsafe_ai_call": 2, "chiusura_call": NESSUNA_CALL,
                          "scadenza_inviti": 2,
                          "batch_estrazioni": {"eseguite": 0, "motivo": "spento"},
-                         **ESITI_WP6}
+                         **ESITI_WP6, **ESITI_WP9}
         # seconda volta nello stesso giorno: già rivendicata
         assert await sched.esegui_se_dovuto(db, SecondarioVietato(), FakeAi(), dopo) is None
 
@@ -255,12 +268,13 @@ class TestPassi:
         monkeypatch.setattr(sched, "failsafe_estrazioni", esplode)
         monkeypatch.setattr(sched, "batch_estrazioni", batch)
         passi_wp6(monkeypatch)
+        passi_wp9(monkeypatch)
         db = FakePrimary()
         esiti = await sched.esegui_run(db, object(), FakeAi(), OGGI)
         assert esiti == {"failsafe_estrazioni": "errore", "failsafe_bozze_profilo": 2,
                          "failsafe_ai_call": 2, "chiusura_call": NESSUNA_CALL,
                          "scadenza_inviti": 2, "batch_estrazioni": {"eseguite": 0},
-                         **ESITI_WP6}
+                         **ESITI_WP6, **ESITI_WP9}
         assert chiamato == [OGGI]
         [aggiornamento] = [op for op in db.ops if op[0] == "partenariati_runs" and op[1] == "update"]
         assert aggiornamento[2] == {"riepilogo": esiti}
@@ -626,3 +640,93 @@ class TestChiusuraCall:
         esiti = await sched.chiusura_call(db, Secondary(pubblici=[]), OGGI)
         assert esiti["controllate"] == 0
         assert db.chiamate("fn_partner_call_chiudi_auto") == []
+
+
+class TestRicalcoloValidazioni:
+    """Passo del WP9: le call da rivalidare dalla RPC della 0041, ognuna
+    isolata; il ricalcolo vero (vista del creatore, salvataggio) è verificato
+    sul primario finto del WP8 in test_partenariato_moderazione_service."""
+
+    class _Primario:
+        def __init__(self, dati):
+            self.dati, self.chiamate = dati, []
+
+        def rpc(self, nome, params):
+            self.chiamate.append((nome, params))
+            primario = self
+
+            class _R:
+                async def execute(self_inner):
+                    return SimpleNamespace(data=primario.dati)
+
+            return _R()
+
+    async def test_blocco_limitato_e_call_isolate(self, monkeypatch):
+        fatte = []
+
+        async def ricalcola(primary, secondary, call_id):
+            fatte.append(call_id)
+            if call_id == "c2":
+                raise RuntimeError("guasto")
+            return call_id != "c3"
+
+        monkeypatch.setattr(sched.partenariato_consorzio_service, "ricalcola_validazione",
+                            ricalcola)
+        db = self._Primario(["c1", "c2", {"fn_partner_call_validazioni_da_ricalcolare": "c3"}])
+        esito = await sched.ricalcolo_validazioni(db, object())
+        assert esito == {"call": 3, "ricalcolate": 1, "errori": 1}
+        assert fatte == ["c1", "c2", "c3"]
+        assert db.chiamate == [("fn_partner_call_validazioni_da_ricalcolare",
+                                {"p_limite": sched.RICALCOLO_VALIDAZIONI_LIMITE})]
+        assert sched.RICALCOLO_VALIDAZIONI_LIMITE == 100
+
+    async def test_nessuna_call(self, monkeypatch):
+        async def vietato(*a):
+            raise AssertionError("nessun ricalcolo atteso")
+
+        monkeypatch.setattr(sched.partenariato_consorzio_service, "ricalcola_validazione",
+                            vietato)
+        for dati in ([], None, 3):
+            assert await sched.ricalcolo_validazioni(self._Primario(dati), object()) == {
+                "call": 0, "ricalcolate": 0, "errori": 0}
+
+    async def test_nella_run_del_giorno_dopo_il_backfill(self, monkeypatch):
+        ordine = []
+        for nome in ("failsafe_estrazioni", "failsafe_bozze_profilo", "failsafe_ai_call",
+                     "backfill_collegamenti"):
+            async def passo(primary, _n=nome):
+                ordine.append(_n)
+                return 0
+            monkeypatch.setattr(sched, nome, passo)
+
+        async def chiusura(primary, secondary, oggi):
+            ordine.append("chiusura_call")
+            return 0
+
+        async def inviti(primary):
+            ordine.append("scadenza_inviti")
+            return 0
+
+        async def batch(primary, secondary, ai, oggi):
+            ordine.append("batch_estrazioni")
+            return 0
+
+        async def ricalcolo(primary, secondary):
+            ordine.append("ricalcolo_validazioni")
+            return {"call": 0, "ricalcolate": 0, "errori": 0}
+
+        async def fanout(primary, secondary):
+            ordine.append("fanout_pendenti")
+            return 0
+
+        async def digest(primary, adesso):
+            ordine.append("digest_settimanale")
+            return 0
+
+        for nome, fn in (("chiusura_call", chiusura), ("scadenza_inviti", inviti),
+                         ("batch_estrazioni", batch), ("ricalcolo_validazioni", ricalcolo),
+                         ("fanout_pendenti", fanout), ("digest_settimanale", digest)):
+            monkeypatch.setattr(sched, nome, fn)
+        esiti = await sched.esegui_run(FakePrimary(), object(), FakeAi(), OGGI)
+        assert esiti["ricalcolo_validazioni"] == {"call": 0, "ricalcolate": 0, "errori": 0}
+        assert ordine.index("ricalcolo_validazioni") == ordine.index("backfill_collegamenti") + 1

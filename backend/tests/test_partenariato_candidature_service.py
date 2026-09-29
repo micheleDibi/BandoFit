@@ -13,8 +13,10 @@ Verifica: candidatura con e senza opt-in, piano Gratuito
 messaggio, requisiti non visibili, valutazione in vista «terzi» senza numeri
 né punteggio; invito con pseudonimo valido, di un'altra call, non più
 suggeribile, malformato; decisioni dal lato giusto (l'altro è 404), doppia
-decisione, rifiuto con motivo; rivelazione spenta (nessuna identità, nessun
-audit di rivelazione) e accesa via monkeypatch (identità e audit); ritiro;
+decisione, rifiuto con motivo; rivelazione SIMMETRICA (WP9: identità e audit
+solo con entrambe le aziende verificate dalla piattaforma, canary con una
+sola verificata, revoca che spegne l'identità nelle viste successive,
+interruttore spento); ritiro;
 liste per lato con la scadenza pigra; notifiche con deep link e email solo
 con `eventi_abilitati`, mai testi; riepilogo; scheduler."""
 
@@ -191,6 +193,29 @@ class FakePrimaryWP7(FakePrimary):
             and str(cd.get("stato_impresa") or "").strip().lower() == "attiva"
             and (richiedi is False or cd.get("sandbox") is False)
         )
+
+    # -- 0041: identità verificata dall'admin
+    def verifica_identita(self, company) -> None:
+        """Riga `verificata` di company_identita_stato (fn_identita_decidi)."""
+        self.tabelle.setdefault("company_identita_stato", [])[:] = [
+            r for r in self.tabelle.get("company_identita_stato", [])
+            if r["company_profile_id"] != company
+        ] + [{"company_profile_id": company, "stato": "verificata",
+              "metodo": "pec", "verificata_at": _adesso().isoformat(),
+              "verificata_da": "d0000000-0000-4000-8000-0000000000ad",
+              "richiesta_at": _adesso().isoformat(), "aggiornato_at": _adesso().isoformat()}]
+
+    def revoca_identita(self, company) -> None:
+        """fn_identita_revoca / revoca automatica: stato non_richiesta."""
+        for r in self.righe("company_identita_stato", company_profile_id=company):
+            r.update(stato="non_richiesta", metodo=None, verificata_at=None, verificata_da=None)
+
+    def _fn_partenariato_identita_forte(self, p):
+        """fn_partenariato_identita_forte (0041): verificata + T5 senza sandbox."""
+        stato = next(iter(self.righe("company_identita_stato",
+                                     company_profile_id=p["p_company"])), None)
+        return bool(stato and stato.get("stato") == "verificata"
+                    and self._identita_ok(p["p_company"], False))
 
     def _call_aperta(self, call) -> bool:
         oggi = bandi_service.today_italy().isoformat()
@@ -446,7 +471,11 @@ class FakePrimaryWP7(FakePrimary):
         payload["conversazione_id"] = conversazione["id"]
         self._audit(p["p_attore"], "partenariato.candidatura_accettata", target, p["p_owner"],
                     payload)
-        if p.get("p_rivela"):
+        # 0041: rivelazione SIMMETRICA, ricontrollata sotto i lock.
+        if (p.get("p_rivela")
+                and self._fn_partenariato_identita_forte({"p_company": riga["company_profile_id"]})
+                and self._fn_partenariato_identita_forte(
+                    {"p_company": riga["creatore_company_profile_id"]})):
             for azione in ("partenariato.identita_rivelata", "partenariato.contatti_rivelati"):
                 self._audit(p["p_attore"], azione, target, p["p_owner"], payload)
         return {"candidatura": copy.deepcopy(riga), "conversazione_id": conversazione["id"]}
@@ -702,6 +731,15 @@ def _canary(testo: str, *nomi: str) -> None:
             assert valore not in testo, (nome, valore)
     for numero in NUMERI_ESATTI:
         assert numero not in testo, numero
+
+
+def _canary_identita(testo: str, nome: str) -> None:
+    """Nessun dato che identifica l'azienda `nome` (la controparte vede il
+    budget esatto della call: qui contano solo i dati d'identità)."""
+    for valore in (g.COMPANY[nome], g.OWNER[nome], PIVA[nome], RAGIONE[nome],
+                   RAGIONE[nome].upper(), g.CODICE_PUBBLICO[nome], EMAIL[nome],
+                   "impresa.x@pec.example.test"):
+        assert valore not in testo, (nome, valore)
 
 
 # ------------------------------------------------------------ candidatura
@@ -1094,9 +1132,10 @@ class TestDecisioni:
         for valore in (g.COMPANY["X"], g.OWNER["X"], PIVA["X"], EMAIL["X"]):
             assert valore not in testo
 
-    async def test_rivelazione_accesa_identita_e_audit(self, fondo, monkeypatch):
-        monkeypatch.setattr(pps, "RIVELAZIONE_IDENTITA_DISPONIBILE", True)
+    async def test_rivelazione_con_entrambe_verificate_identita_e_audit(self, fondo):
         db, sec = await scenario_wp7()
+        db.verifica_identita(g.COMPANY["X"])
+        db.verifica_identita(g.COMPANY["Y"])
         db.una("profiles", id=g.OWNER["X"]).update(nome="Carla", cognome="Neri")
         db.una("partner_calls", id=g.CALL_GUIDA_ID)["dettagli_riservati"] = (
             "Il progetto della Impresa Sintetica X riguarda la linea pilota di Catanzaro.")
@@ -1118,15 +1157,110 @@ class TestDecisioni:
         assert "Sintetica X" in vista.dettagli_riservati
         assert EMAIL["X"] not in vista.model_dump_json()  # mai l'email del referente
 
-    async def test_rivelazione_accesa_dopo_non_tocca_le_accettazioni_precedenti(self, fondo,
-                                                                               monkeypatch):
+    async def test_verifiche_successive_non_toccano_le_accettazioni_precedenti(self, fondo):
+        """Accettazione senza verifiche (nessun audit di rivelazione): verificare
+        dopo le due aziende non rivela nulla su quella candidatura."""
         db, sec = await scenario_wp7()
         await candida(db, sec)
         [riga] = db.tabelle["partner_candidature"]
         await svc.decidi(db, sec, attiva("X"), utente("X"), riga["id"], "accetta")
-        monkeypatch.setattr(pps, "RIVELAZIONE_IDENTITA_DISPONIBILE", True)
+        db.verifica_identita(g.COMPANY["X"])
+        db.verifica_identita(g.COMPANY["Y"])
         vista = await pcs.dettaglio(db, sec, attiva("Y"), utente("Y"), g.CALL_GUIDA_ID)
         assert vista.identita is None and vista.identita_rivelata is False
+
+    @pytest.mark.parametrize("verificata", ["X", "Y"])
+    async def test_una_sola_verificata_niente_rivelazione_canary_identita(self, fondo, verificata):
+        """Rivelazione simmetrica: con una sola azienda verificata nessuna delle
+        due vede l'identità dell'altra (vista controparte, chat), la RPC non
+        riceve p_rivela e non c'è audit di rivelazione."""
+        db, sec = await scenario_wp7()
+        db.verifica_identita(g.COMPANY[verificata])
+        db.una("partner_calls", id=g.CALL_GUIDA_ID)["dettagli_riservati"] = (
+            "Il progetto della Impresa Sintetica X riguarda la linea pilota di Catanzaro.")
+        await candida(db, sec)
+        [riga] = db.tabelle["partner_candidature"]
+        await svc.decidi(db, sec, attiva("X"), utente("X"), riga["id"], "accetta")
+        assert db.chiamate("fn_partner_decidi")[0]["p_rivela"] is False
+        azioni = [a["action"] for a in db.tabelle["audit_log"]]
+        assert "partenariato.identita_rivelata" not in azioni
+        assert "partenariato.contatti_rivelati" not in azioni
+        vista_y = await pcs.dettaglio(db, sec, attiva("Y"), utente("Y"), g.CALL_GUIDA_ID)
+        assert vista_y.identita is None and vista_y.identita_rivelata is False
+        _canary_identita(vista_y.model_dump_json(), "X")
+        [conv] = db.tabelle["partner_conversazioni"]
+        chat_x = await chat.dettaglio(db, sec, attiva("X"), utente("X"), conv["id"])
+        chat_y = await chat.dettaglio(db, sec, attiva("Y"), utente("Y"), conv["id"])
+        assert chat_x.identita is None and chat_y.identita is None
+        _canary_identita(chat_x.model_dump_json(), "Y")
+        _canary_identita(chat_y.model_dump_json(), "X")
+
+    @pytest.mark.parametrize("revocata", ["X", "Y"])
+    async def test_revoca_spegne_la_rivelazione_nelle_viste_future(self, fondo, revocata):
+        """Rivelata con entrambe verificate; revocata dopo la verifica di una
+        delle due, le viste successive non mostrano più l'identità di nessuna
+        (gli audit restano). Con una nuova verifica tornano a mostrarla."""
+        db, sec = await scenario_wp7()
+        db.verifica_identita(g.COMPANY["X"])
+        db.verifica_identita(g.COMPANY["Y"])
+        await candida(db, sec)
+        [riga] = db.tabelle["partner_candidature"]
+        await svc.decidi(db, sec, attiva("X"), utente("X"), riga["id"], "accetta")
+        [conv] = db.tabelle["partner_conversazioni"]
+        assert (await chat.dettaglio(db, sec, attiva("X"), utente("X"), conv["id"])).identita
+        vista = await pcs.dettaglio(db, sec, attiva("Y"), utente("Y"), g.CALL_GUIDA_ID)
+        assert vista.identita.ragione_sociale == RAGIONE["X"].upper()
+        db.revoca_identita(g.COMPANY[revocata])
+        vista = await pcs.dettaglio(db, sec, attiva("Y"), utente("Y"), g.CALL_GUIDA_ID)
+        assert vista.identita is None and vista.identita_rivelata is False
+        _canary_identita(vista.model_dump_json(), "X")
+        for nome, altra in (("X", "Y"), ("Y", "X")):
+            dettaglio = await chat.dettaglio(db, sec, attiva(nome), utente(nome), conv["id"])
+            assert dettaglio.identita is None and dettaglio.identita_rivelata is False
+            _canary_identita(dettaglio.model_dump_json(), altra)
+        azioni = [a["action"] for a in db.tabelle["audit_log"]]
+        assert azioni.count("partenariato.identita_rivelata") == 1  # l'audit resta
+        db.verifica_identita(g.COMPANY[revocata])
+        vista = await pcs.dettaglio(db, sec, attiva("Y"), utente("Y"), g.CALL_GUIDA_ID)
+        assert vista.identita_rivelata is True
+
+    async def test_interruttore_spento_nessuna_rivelazione(self, fondo, monkeypatch):
+        monkeypatch.setattr(pps, "RIVELAZIONE_IDENTITA_DISPONIBILE", False)
+        db, sec = await scenario_wp7()
+        db.verifica_identita(g.COMPANY["X"])
+        db.verifica_identita(g.COMPANY["Y"])
+        await candida(db, sec)
+        [riga] = db.tabelle["partner_candidature"]
+        await svc.decidi(db, sec, attiva("X"), utente("X"), riga["id"], "accetta")
+        assert db.chiamate("fn_partner_decidi")[0]["p_rivela"] is False
+        assert db.chiamate("fn_partenariato_identita_forte") == []
+        vista = await pcs.dettaglio(db, sec, attiva("Y"), utente("Y"), g.CALL_GUIDA_ID)
+        assert vista.identita is None
+
+    async def test_verifica_non_leggibile_alla_decisione_502_senza_decidere(self, fondo):
+        db, sec = await scenario_wp7()
+        db.rpc_guasti["fn_partenariato_identita_forte"] = errore("errore_interno")
+        await candida(db, sec)
+        [riga] = db.tabelle["partner_candidature"]
+        with pytest.raises(AppError) as exc:
+            await svc.decidi(db, sec, attiva("X"), utente("X"), riga["id"], "accetta")
+        assert (exc.value.status_code, exc.value.code) == (502, "upstream_error")
+        assert db.chiamate("fn_partner_decidi") == [] and riga["stato"] == "inviata"
+        # il rifiuto non legge le verifiche
+        await svc.decidi(db, sec, attiva("X"), utente("X"), riga["id"], "rifiuta")
+        assert riga["stato"] == "rifiutata"
+
+    async def test_verifica_non_leggibile_nelle_viste_niente_identita(self, fondo):
+        db, sec = await scenario_wp7()
+        db.verifica_identita(g.COMPANY["X"])
+        db.verifica_identita(g.COMPANY["Y"])
+        await candida(db, sec)
+        [riga] = db.tabelle["partner_candidature"]
+        await svc.decidi(db, sec, attiva("X"), utente("X"), riga["id"], "accetta")
+        db.rpc_guasti["fn_partenariato_identita_forte"] = errore("errore_interno")
+        vista = await pcs.dettaglio(db, sec, attiva("Y"), utente("Y"), g.CALL_GUIDA_ID)
+        assert vista.identita is None
+        _canary_identita(vista.model_dump_json(), "X")
 
     async def test_lato_sbagliato_404_e_doppia_decisione(self, fondo):
         db, sec = await scenario_wp7()
@@ -1391,3 +1525,105 @@ class TestRiepilogoEScheduler:
         assert riga["stato"] == "scaduta" and riga["motivo_chiusura"] == "ttl"
         assert await partenariato_indice.indice(db, sec) is not primo  # invalidato
         assert await partenariati_scheduler.scadenza_inviti(db) == 0
+
+
+class TestNominativoVersoTerzi:
+    """WP9: un profilo salvato come nominativo mostra il nome ai terzi
+    (suggeriti del creatore, dettaglio della candidatura) solo se OGGI
+    l'azienda ha l'identità verificata dalla piattaforma; una verifica
+    revocata lo spegne nelle viste successive."""
+
+    async def _viste(self, db, sec):
+        sugg = await pcs.suggeriti(db, sec, attiva("X"), utente("X"), g.CALL_GUIDA_ID)
+        [cand] = db.righe("partner_candidature", company_profile_id=g.COMPANY["Y"])
+        dettaglio = await svc.dettaglio(db, sec, attiva("X"), utente("X"), cand["id"])
+        voce = next(i for i in sugg.items if i.pseudonimo == pseudo("Y"))
+        self.fasce_match = voce.match.fasce
+        return voce.profilo, dettaglio.candidato.profilo
+
+    async def test_nome_solo_con_la_verifica_di_oggi(self, fondo):
+        db, sec = await scenario_wp7()
+        db.una("company_partner_profiles", company_profile_id=g.COMPANY["Y"])["anonimo"] = False
+        await candida(db, sec)
+        def solo_fatturato(fasce) -> bool:
+            return fasce is None or all(
+                v is None for k, v in fasce.model_dump().items() if k != "fatturato")
+
+        for profilo in await self._viste(db, sec):
+            assert profilo.anonimo is True and profilo.denominazione is None
+            _canary_identita(profilo.model_dump_json(), "Y")
+        # anche il match verso il creatore resta quello di un anonimo (Q12)
+        assert solo_fatturato(self.fasce_match)
+        db.verifica_identita(g.COMPANY["Y"])
+        for profilo in await self._viste(db, sec):
+            assert profilo.anonimo is False
+            assert profilo.denominazione == RAGIONE["Y"].upper()
+        assert not solo_fatturato(self.fasce_match)
+        db.revoca_identita(g.COMPANY["Y"])
+        for profilo in await self._viste(db, sec):
+            assert profilo.anonimo is True and profilo.denominazione is None
+            _canary_identita(profilo.model_dump_json(), "Y")
+        assert solo_fatturato(self.fasce_match)
+
+    @staticmethod
+    def _solo_fatturato(fasce) -> bool:
+        return fasce is None or all(
+            v is None for k, v in fasce.model_dump().items() if k != "fatturato")
+
+    async def test_valutazione_salvata_di_un_nominativo_non_verificato(self, fondo):
+        """Profilo salvato come nominativo, identità non verificata oggi: la
+        valutazione salvata con la candidatura e con l'invito è quella di un
+        anonimo (Q12: la sola fascia di fatturato)."""
+        db, sec = await scenario_wp7()
+        db.una("company_partner_profiles", company_profile_id=g.COMPANY["Y"])["anonimo"] = False
+        await candida(db, sec)
+        await svc.ritira(db, sec, attiva("Y"), utente("Y"),
+                         db.tabelle["partner_candidature"][0]["id"])
+        await invita_y(db, sec)
+        righe = db.tabelle["partner_candidature"]
+        assert {r["tipo"] for r in righe} == {"candidatura", "invito"}
+        for riga in righe:
+            assert riga["valutazione"]["fasce"] == {
+                "fatturato": "2m_10m", "patrimonio_netto": None, "dipendenti": None,
+                "trend": None}, riga["tipo"]
+        [payload] = [c["p_payload"] for c in db.chiamate("fn_partner_invita")]
+        assert self._solo_fatturato(svc.MatchOut.model_validate(payload["valutazione"]).fasce)
+
+    async def test_revoca_riduce_la_valutazione_gia_salvata(self, fondo):
+        """Candidatura mandata da verificata (tutte le fasce salvate): dopo la
+        revoca della verifica il creatore vede, nelle viste successive, la
+        sola fascia di fatturato; con la verifica di nuovo, di nuovo tutte."""
+        db, sec = await scenario_wp7()
+        db.una("company_partner_profiles", company_profile_id=g.COMPANY["Y"])["anonimo"] = False
+        db.verifica_identita(g.COMPANY["Y"])
+        await candida(db, sec)
+        [riga] = db.tabelle["partner_candidature"]
+        assert not self._solo_fatturato(svc.MatchOut.model_validate(riga["valutazione"]).fasce)
+
+        async def viste():
+            dettaglio = await svc.dettaglio(db, sec, attiva("X"), utente("X"), riga["id"])
+            pagina = await svc.lista(db, sec, attiva("X"), utente("X"), direzione="ricevute")
+            [voce] = pagina.items
+            return dettaglio.valutazione, voce.valutazione
+
+        for valutazione in await viste():
+            assert not self._solo_fatturato(valutazione.fasce)
+        db.revoca_identita(g.COMPANY["Y"])
+        for valutazione in await viste():
+            assert self._solo_fatturato(valutazione.fasce)
+            assert valutazione.fasce.fatturato == "2m_10m"
+            assert valutazione.copertura.coperti == 2  # il resto resta
+        # Y che torna anonima da sé: stesse fasce ridotte
+        db.verifica_identita(g.COMPANY["Y"])
+        db.una("company_partner_profiles", company_profile_id=g.COMPANY["Y"])["anonimo"] = True
+        for valutazione in await viste():
+            assert self._solo_fatturato(valutazione.fasce)
+
+    async def test_profilo_anonimo_non_legge_le_verifiche(self, fondo):
+        db, sec = await scenario_wp7()
+        db.verifica_identita(g.COMPANY["Y"])
+        await candida(db, sec)
+        db.rpcs.clear()
+        for profilo in await self._viste(db, sec):
+            assert profilo.anonimo is True
+        assert db.chiamate("fn_partenariato_identita_forte") == []

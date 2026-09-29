@@ -53,6 +53,7 @@ import logging
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from types import SimpleNamespace
 from typing import Any, NoReturn
 from uuid import UUID
 
@@ -77,12 +78,14 @@ from app.services import partenariato_vocabolario as voc
 from app.services import partner_call_service as pcs
 from app.services.partenariato_accesso import (
     CALL_SELECT,
+    MSG_CALL_NON_TROVATA,
     POSIZIONE_SELECT,
     REQUISITO_SELECT,
     RUOLI_AZIENDA,
     RUOLI_SCRITTURA,
     STATI_CONSORZIO_MODIFICABILE,
     carica_call_autorizzata,
+    normalizza_id,
     proietta_membro,
     pseudonimo,
     requisito_visibile,
@@ -642,9 +645,14 @@ def _in_piattaforma_non_creatore(membro: Mapping, call: Mapping) -> str | None:
 
 async def get_consorzio(primary, secondary, active, user: dict, call_id: Any) -> ConsorzioOut:
     """GET /partenariati/call/{id}/consorzio: azienda creatrice (titolare e
-    membri in lettura) e controparti accettate; 404 per chiunque altro."""
-    call, ruolo = await carica_call_autorizzata(primary, call_id, active, user,
-                                                ammessi=RUOLI_CONSORZIO)
+    membri in lettura) e controparti accettate; 404 per chiunque altro. Con
+    la call sospesa per moderazione (WP9) un'azienda del consorzio diversa
+    dalla creatrice riceve SOLO la propria riga, per poterne uscire."""
+    try:
+        call, ruolo = await carica_call_autorizzata(primary, call_id, active, user,
+                                                    ammessi=RUOLI_CONSORZIO)
+    except NotFoundError:
+        return await _propria_in_call_sospesa(primary, active, call_id)
     return await _consorzio(primary, secondary, active, call, ruolo, dopo_scrittura=False)
 
 
@@ -727,17 +735,86 @@ async def conferma(primary, secondary, active, user: dict, call_id: Any, membro_
     return await _dopo(primary, secondary, active, call, ruolo)
 
 
+def _sospesa(call: Mapping) -> bool:
+    return call.get("stato") == "sospesa_moderazione" or call.get("sospesa_at") is not None
+
+
+async def _riga_propria_in_call_sospesa(primary, active, call_id: Any, membro_id: Any
+                                       ) -> tuple[dict, dict]:
+    """WP9 (WP8 P14): durante una sospensione per moderazione la call non si
+    legge, nemmeno dalla controparte (WP7), ma un'azienda del consorzio deve
+    poter USCIRE. Solo per l'uscita, solo un'azienda diversa dalla creatrice
+    e solo dalla PROPRIA riga; in ogni altro caso lo stesso 404 di una call
+    inesistente (nessuna prova dell'esistenza). → (call, riga)."""
+    identificativo = normalizza_id(call_id)
+    righe = await _righe(primary, "partner_calls", CALL_SELECT, "id", identificativo)
+    call = righe[0] if righe else None
+    company = str(active.company_id)
+    if call is None or not _sospesa(call) or str(call.get("company_profile_id")) == company:
+        raise NotFoundError(MSG_CALL_NON_TROVATA)
+    try:
+        riga = await _membro(primary, call, membro_id)
+    except NotFoundError:
+        raise NotFoundError(MSG_CALL_NON_TROVATA) from None
+    if str(riga.get("company_profile_id")) != company:
+        raise NotFoundError(MSG_CALL_NON_TROVATA)
+    return call, riga
+
+
+async def _propria_in_call_sospesa(primary, active, call_id: Any) -> ConsorzioOut:
+    """WP9 (WP8 P14): la GET del consorzio di una call sospesa per un'azienda
+    che ne fa ancora parte e non l'ha creata: solo la propria riga (nome,
+    ruolo, posizione senza titolo, quota, stato, `puo_uscire` al titolare),
+    nessun altro membro, voce, requisito, documento né budget. È l'unico modo
+    di trovare il proprio `membro_id` per uscire mentre la call non si legge.
+    In ogni altro caso lo stesso 404 di una call inesistente."""
+    if not active.company_id:
+        raise NotFoundError(MSG_CALL_NON_TROVATA)
+    company = str(active.company_id)
+    righe = await _righe(primary, "partner_calls", CALL_SELECT, "id", normalizza_id(call_id))
+    call = righe[0] if righe else None
+    if call is None or not _sospesa(call) or str(call.get("company_profile_id")) == company:
+        raise NotFoundError(MSG_CALL_NON_TROVATA)
+    resp = (
+        await primary.table("partner_call_membri").select(MEMBRO_SELECT)
+        .eq("partner_call_id", str(call["id"])).eq("company_profile_id", company)
+        .limit(1).execute()
+    )
+    riga = resp.data[0] if resp.data and isinstance(resp.data[0], dict) else None
+    if riga is None or riga.get("stato") == "uscito":
+        raise NotFoundError(MSG_CALL_NON_TROVATA)
+    aziende = await partenariato_indice.carica_membri(primary, {company})
+    az = aziende.get(company)
+    editable = bool(active.editable)
+    return ConsorzioOut(
+        membri=[proietta_membro(
+            riga, call=call, viewer_company_id=company, sei_creatore=False, editable=editable,
+            ident_creatore=None, nome_proprio=az.nome if az is not None else None,
+        )],
+        validazione=ValidazioneOut(esito="grigio"),
+        budget=BudgetOut(),
+        editable=editable,
+    )
+
+
 async def esci(primary, secondary, active, user: dict, call_id: Any, membro_id: Any
                ) -> ConsorzioOut:
     """Il creatore toglie un membro (call pubblicata o chiusa come
-    completata) o un'azienda esce da sé (in qualunque stato della call); la
-    riga del creatore non si tocca. Errori: 403, 404, 409
-    `membro_non_rimovibile`, `call_non_modificabile`."""
+    completata) o un'azienda esce da sé (in qualunque stato della call, anche
+    sospesa per moderazione: WP9); la riga del creatore non si tocca. Dalla
+    call sospesa si esce solo dalla PROPRIA riga, e la risposta ha solo
+    quella. Errori: 403, 404, 409 `membro_non_rimovibile`,
+    `call_non_modificabile`."""
     _richiedi_titolare(active)
     _richiedi_azienda(active)
-    call, ruolo = await carica_call_autorizzata(primary, call_id, active, user,
-                                                ammessi=RUOLI_MEMBRO)
-    riga = await _membro(primary, call, membro_id)
+    try:
+        call, ruolo = await carica_call_autorizzata(primary, call_id, active, user,
+                                                    ammessi=RUOLI_MEMBRO)
+    except NotFoundError:
+        call, riga = await _riga_propria_in_call_sospesa(primary, active, call_id, membro_id)
+        ruolo = "controparte"
+    else:
+        riga = await _membro(primary, call, membro_id)
     esito = _esito(await _rpc(primary, "fn_partner_membro_esci", {
         **_parametri(active, user), "p_membro": str(riga["id"]),
     }))
@@ -763,6 +840,24 @@ async def esci(primary, secondary, active, user: dict, call_id: Any, membro_id: 
                 dedup=dedup,
             )
     return await _dopo(primary, secondary, active, call, ruolo)
+
+
+async def ricalcola_validazione(primary, secondary, call_id: Any) -> bool:
+    """Passo `ricalcolo_validazioni` dello scheduler (WP9, WP8 P13a):
+    validazione della call ricalcolata con la vista del creatore e salvata,
+    come dopo una scrittura sul consorzio. Solo negli stati in cui il
+    consorzio si modifica; → False se la call non c'è o non è in quegli
+    stati. Nessuna proiezione esce da qui."""
+    righe = await _righe(primary, "partner_calls", CALL_SELECT, "id", normalizza_id(call_id))
+    call = righe[0] if righe else None
+    if call is None or call.get("stato") not in STATI_CONSORZIO_MODIFICABILE:
+        return False
+    # L'azienda creatrice in sola lettura (nessun utente: nessuna scrittura
+    # oltre al salvataggio della validazione).
+    vista = SimpleNamespace(company_id=str(call["company_profile_id"]),
+                            owner_id=str(call["family_parent_id"]), editable=False)
+    await _consorzio(primary, secondary, vista, call, "titolare_o_membro", dopo_scrittura=True)
+    return True
 
 
 async def aggiungi_o_modifica_esterno(primary, secondary, active, user: dict, call_id: Any,

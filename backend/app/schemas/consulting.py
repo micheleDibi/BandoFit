@@ -129,12 +129,20 @@ class ConsulenzaOut(BaseModel):
     # Valorizzate solo nel dettaglio.
     proposte: list[ProposalOut] = []
     appuntamento: BookingOut | None = None
+    # WP9 (W1): consulto chiesto dalla call di partenariato (null = da AI-check).
+    partner_call_id: UUID | None = None
 
 
 class RichiestaPoolOut(BaseModel):
     """Vista PARZIALE del progettista (requisito punto 3): ragione sociale,
     P.IVA, denominazione utente, email, bando ed esito dell'AI-check.
-    Tutto il resto arriva solo dopo l'assegnazione (dossier)."""
+    Tutto il resto arriva solo dopo l'assegnazione (dossier).
+
+    WP9: un consulto chiesto dalla call (`da_call`) nel pool dei progettisti
+    NON assegnati mostra solo «Consulto su call di partenariato» e il bando
+    (niente azienda, email, esito né report): la call è anonima e il consulto
+    non deve rivelare chi l'ha creata. L'assegnato vede i dati parziali come
+    per gli altri consulti e la call da `GET /progettista/richieste/{id}/call`."""
 
     id: UUID
     stato: str
@@ -151,6 +159,7 @@ class RichiestaPoolOut(BaseModel):
     assegnata_a_me: bool = False
     mia_proposta_stato: str | None = None
     appuntamento: BookingOut | None = None
+    da_call: bool = False
 
 
 class RichiestaPoolDetailOut(RichiestaPoolOut):

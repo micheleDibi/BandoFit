@@ -119,3 +119,20 @@ export function useAnnullaPrenotazione(requestId: string) {
     (await api.post<Consulenza>(`/me/consulenze/${requestId}/prenotazione/annulla`)).data,
   );
 }
+
+/** Consulto chiesto dalla call di partenariato (WP9, solo il titolare
+ *  dell'azienda che l'ha creata): stesso consumo dei consulti esistenti, e
+ *  l'AI-check è facoltativo. Scala un'unità dell'addon come
+ *  `useCreateConsulenza`. */
+export function useConsultoCall(callId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      (await api.post<Consulenza>(`/partenariati/call/${callId}/consulto`)).data,
+    onSuccess: (data) => {
+      queryClient.setQueryData(["consulenze", data.id], data);
+      queryClient.invalidateQueries({ queryKey: ["consulenze"], exact: true });
+      queryClient.invalidateQueries({ queryKey: ["my-addons"] });
+    },
+  });
+}

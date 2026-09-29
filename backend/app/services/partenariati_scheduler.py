@@ -53,6 +53,17 @@ Passo del WP7:
   `scaduta` (`fn_partner_scadi_inviti`, a lotti, saltando le righe bloccate da
   una decisione in corso); in lettura ci pensa anche la scadenza pigra. Se ne
   chiude qualcuno l'indice del matching si invalida.
+
+Passo del WP9:
+- `ricalcolo_validazioni`: l'esito del validatore salvato sulla call
+  (`validazione_esito`, base della metrica «consorzi validati in verde»)
+  resta vecchio dopo un'accettazione finché nessuno apre il consorzio (WP8
+  P13a). Ogni notte, a un blocco di `RICALCOLO_VALIDAZIONI_LIMITE` call
+  (pubblicate, scadute o completate, mai validate o con un membro scritto
+  dopo l'ultima validazione, le più vecchie prima:
+  `fn_partner_call_validazioni_da_ricalcolare`), si ricalcola con la vista
+  del creatore e si salva (`fn_partner_call_validazione_salva`), ogni call
+  isolata. Il resto alla notte dopo.
 """
 
 import asyncio
@@ -69,6 +80,7 @@ from app.services import (
     bando_fonti_service,
     partenariato_collegamenti,
     partenariato_candidature_service,
+    partenariato_consorzio_service,
     partenariato_indice,
     partenariato_notifiche,
     partenariato_service,
@@ -372,6 +384,37 @@ async def scadenza_inviti(primary) -> int:
     return totale
 
 
+RICALCOLO_VALIDAZIONI_LIMITE = 100
+
+
+def _id_call(valore) -> str | None:
+    """Un elemento di `setof uuid` come lo restituisce PostgREST (il valore,
+    o un oggetto con il nome della funzione)."""
+    if isinstance(valore, dict):
+        valore = next(iter(valore.values()), None)
+    return str(valore) if valore else None
+
+
+async def ricalcolo_validazioni(primary, secondary) -> dict:
+    """Validazioni dei consorzi da riallineare (WP8 P13a), un blocco a
+    notte, ogni call isolata (best-effort)."""
+    resp = await primary.rpc("fn_partner_call_validazioni_da_ricalcolare",
+                             {"p_limite": RICALCOLO_VALIDAZIONI_LIMITE}).execute()
+    ids = [i for i in (_id_call(v) for v in (resp.data if isinstance(resp.data, list) else []))
+           if i]
+    ricalcolate = errori = 0
+    for call_id in ids:
+        try:
+            if await partenariato_consorzio_service.ricalcola_validazione(primary, secondary,
+                                                                          call_id):
+                ricalcolate += 1
+        except Exception as exc:  # noqa: BLE001 — una call non ferma le altre
+            errori += 1
+            logger.warning("partenariati scheduler: validazione della call %s non ricalcolata "
+                           "(%s)", call_id, getattr(exc, "code", None) or type(exc).__name__)
+    return {"call": len(ids), "ricalcolate": ricalcolate, "errori": errori}
+
+
 async def backfill_collegamenti(primary) -> dict:
     """Chiavi dei collegamenti (solo con il flag, solo aziende idonee)."""
     esito = await partenariato_collegamenti.backfill(primary)
@@ -424,6 +467,7 @@ async def esegui_run(primary, secondary, ai, oggi: date, adesso: datetime | None
         ("scadenza_inviti", lambda: scadenza_inviti(primary)),
         ("batch_estrazioni", lambda: batch_estrazioni(primary, secondary, ai, oggi)),
         ("backfill_collegamenti", lambda: backfill_collegamenti(primary)),
+        ("ricalcolo_validazioni", lambda: ricalcolo_validazioni(primary, secondary)),
         ("fanout_pendenti", lambda: fanout_pendenti(primary, secondary)),
         ("digest_settimanale", lambda: digest_settimanale(primary, istante)),
     ]

@@ -1,16 +1,37 @@
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, Handshake } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ConsulenzaStatoBadge } from "../Consulenze";
 import { AiEsitoBadge } from "../../components/bandi/badges";
 import { Badge } from "../../components/ui/Badge";
 import { Card } from "../../components/ui/Card";
 import { EmptyState, ErrorState, Skeleton } from "../../components/ui/states";
+import { useFunzioni } from "../../hooks/useFunzioni";
 import { useRichiestePool } from "../../hooks/useProgettistaRichieste";
 import { apiErrorMessage } from "../../lib/api";
 import { PROPOSTA_STATO_LABELS } from "../../lib/copy";
 import { formatDate, formatSlotGiorno, formatSlotOra } from "../../lib/format";
 import { scoreColorClasses } from "../../lib/scoreColor";
 import type { RichiestaPool } from "../../types";
+
+/** Titolo della richiesta: per un consulto chiesto dalla call di
+ *  partenariato non ancora assegnato a chi guarda il server non manda i dati
+ *  dell'azienda (solo il bando). */
+export function titoloRichiesta(richiesta: RichiestaPool): string {
+  if (richiesta.da_call && !richiesta.assegnata_a_me && !richiesta.ragione_sociale) {
+    return "Consulto su call di partenariato";
+  }
+  return richiesta.ragione_sociale ?? richiesta.denominazione_utente;
+}
+
+/** Badge «Call di partenariato» (icona e testo). */
+export function BadgeDaCall() {
+  return (
+    <Badge tone="brand">
+      <Handshake className="size-3.5" aria-hidden />
+      Call di partenariato
+    </Badge>
+  );
+}
 
 function RichiestaCard({ richiesta }: { richiesta: RichiestaPool }) {
   return (
@@ -21,9 +42,7 @@ function RichiestaCard({ richiesta }: { richiesta: RichiestaPool }) {
       <Card className="p-5 transition-shadow hover:shadow-md">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="font-medium text-slate-900">
-              {richiesta.ragione_sociale ?? richiesta.denominazione_utente}
-            </p>
+            <p className="font-medium text-slate-900">{titoloRichiesta(richiesta)}</p>
             <p className="mt-0.5 text-xs text-slate-500">
               {richiesta.partita_iva && (
                 <span className="tabular">P.IVA {richiesta.partita_iva} · </span>
@@ -40,6 +59,11 @@ function RichiestaCard({ richiesta }: { richiesta: RichiestaPool }) {
           ) : null}
         </div>
         <p className="mt-2 text-sm text-slate-700">{richiesta.bando_titolo}</p>
+        {richiesta.da_call && (
+          <div className="mt-2">
+            <BadgeDaCall />
+          </div>
+        )}
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
           {richiesta.esito && <AiEsitoBadge esito={richiesta.esito} />}
           {richiesta.punteggio !== null && (
@@ -67,6 +91,7 @@ function RichiestaCard({ richiesta }: { richiesta: RichiestaPool }) {
  *  quelle assegnate a chi guarda. */
 export default function Richieste() {
   const { data, isPending, isError, error, refetch } = useRichiestePool();
+  const { partenariatiAttivo } = useFunzioni();
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -74,8 +99,10 @@ export default function Richieste() {
         Richieste di consulto
       </h1>
       <p className="mt-1 text-sm text-slate-500">
-        Le aziende che hanno chiesto un consulto dopo un AI-check. Invia una proposta:
-        se il titolare la accetta, la consulenza è assegnata a te.
+        {partenariatiAttivo
+          ? "Le aziende che hanno chiesto un consulto su un bando, dopo un AI-check o dalla loro call di partenariato."
+          : "Le aziende che hanno chiesto un consulto dopo un AI-check."}{" "}
+        Invia una proposta: se il titolare la accetta, la consulenza è assegnata a te.
       </p>
 
       {isPending ? (

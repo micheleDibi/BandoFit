@@ -66,15 +66,39 @@ def mini_app(*routers, utente=UTENTE, primary=None, secondary=None, ai=None) -> 
     return app
 
 
+# WP9: identificativi concreti nelle rotte (normalizzati sotto nei modelli).
+SEG = "5e000000-0000-4000-8000-000000000001"
+CALL_ADMIN = "e0000000-0000-4000-8000-00000000abcd"
+AZIENDA_ADMIN = "c0000000-0000-4000-8000-00000000abcd"
+ADMIN_P = "/api/v1/admin/partenariati"
+
 ROTTE_NUOVE = [
     ("GET", "/api/v1/bandi/un-bando/partenariato"),
     ("POST", "/api/v1/bandi/un-bando/partenariato/analisi"),
     ("GET", "/api/v1/partenariati/vocabolario"),
     ("GET", "/api/v1/partenariati/informativa"),  # WP4
     ("POST", "/api/v1/partenariati/segnalazioni"),  # WP5
+    ("GET", f"/api/v1/partenariati/segnalazioni/{SEG}"),  # WP9
+    ("POST", f"/api/v1/partenariati/segnalazioni/{SEG}/ricorso"),
     ("GET", "/api/v1/admin/partenariati/estrazioni"),
     ("POST", "/api/v1/admin/partenariati/estrazioni/12"),
     ("POST", "/api/v1/admin/partenariati/run"),
+    ("GET", f"{ADMIN_P}/segnalazioni"),  # WP9
+    ("GET", f"{ADMIN_P}/segnalazioni/{SEG}"),
+    ("POST", f"{ADMIN_P}/segnalazioni/{SEG}/prendi"),
+    ("POST", f"{ADMIN_P}/segnalazioni/{SEG}/anteprima"),
+    ("POST", f"{ADMIN_P}/segnalazioni/{SEG}/decidi"),
+    ("POST", f"{ADMIN_P}/segnalazioni/{SEG}/ricorso/decidi"),
+    ("GET", f"{ADMIN_P}/segnalazioni/{SEG}/contesto"),
+    ("POST", f"{ADMIN_P}/segnalazioni/{SEG}/contesto"),
+    ("GET", f"{ADMIN_P}/call"),
+    ("POST", f"{ADMIN_P}/call/{CALL_ADMIN}/sospendi"),
+    ("POST", f"{ADMIN_P}/call/{CALL_ADMIN}/ripristina"),
+    ("GET", f"{ADMIN_P}/metriche"),
+    ("GET", f"{ADMIN_P}/costi"),
+    ("GET", f"{ADMIN_P}/identita"),
+    ("POST", f"{ADMIN_P}/identita/{AZIENDA_ADMIN}/decidi"),
+    ("POST", f"{ADMIN_P}/identita/{AZIENDA_ADMIN}/revoca"),
 ]
 
 
@@ -129,7 +153,9 @@ class TestFlagSpento:
             for metodo in rotta.methods
         }
         normalizzate = {
-            (m, p.replace("un-bando", "{slug}").replace("/12", "/{bando_id}"))
+            (m, p.replace("un-bando", "{slug}").replace("/12", "/{bando_id}")
+             .replace(SEG, "{segnalazione_id}").replace(AZIENDA_ADMIN, "{company_id}")
+             .replace(f"/call/{CALL_ADMIN}/", "/{oggetto_tipo}/{oggetto_id}/"))
             for m, p in ROTTE_NUOVE
         }
         assert dichiarate == normalizzate

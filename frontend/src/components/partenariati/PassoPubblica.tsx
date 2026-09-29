@@ -33,6 +33,10 @@ type Destinazione = { passo: number } | { link: string; testo: string };
  *  servizio): il passo del wizard o una pagina. Codici nuovi: solo il testo. */
 const DESTINAZIONI: Record<string, Destinazione> = {
   identita_non_verificata: { link: "/app/azienda", testo: "Vai ai dati dell'azienda" },
+  // Call con il nome senza identità verificata (WP9): al passo 1 si rende
+  // anonima (o si chiede la verifica da lì).
+  identita_non_verificata_admin: { passo: 1 },
+  rappresentante_non_verificato: { passo: 1 },
   piano_non_include_call: { link: "/app/abbonamento", testo: CALL_COPY.vediPiani },
   limite_call_raggiunto: { link: "/app/abbonamento", testo: CALL_COPY.vediPiani },
   partenariato_non_ammesso: { passo: 1 },
@@ -238,7 +242,7 @@ export function PassoPubblica({ call, onIndietro, onDirty, onVai }: PassoProps) 
             },
           ]}
         />
-        <NotaAnonima />
+        <NotaAnonima anonima={call.anonima} />
         {bozza && (
           <>
             <RiepilogoLimiteCall limite={limite} />

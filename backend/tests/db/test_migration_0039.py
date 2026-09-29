@@ -1273,6 +1273,15 @@ class TestDecidi:
         assert audit(db, "partenariato.contatti_rivelati") == []
 
     def test_accettazione_con_rivelazione_tre_righe(self, db, sc):
+        # Dalla 0041 la rivelazione è simmetrica: entrambe le aziende con
+        # l'identità verificata dall'admin.
+        admin = new_user(db)
+        db.execute("update public.profiles set role = 'admin' where id = %s", (admin,))
+        for owner, company in ((sc.x_owner, sc.x), (sc.y_owner, sc.y)):
+            db.execute("select public.fn_identita_richiedi(%s, %s, %s, null)",
+                       (owner, company, owner))
+            db.execute("select public.fn_identita_decidi(%s, %s, 'verificata', 'pec', null)",
+                       (company, admin))
         k = candidatura_pendente(db, sc)
         out = decidi(db, sc.x_owner, sc.x, k, rivela=True)
         righe_audit = [a for a in audit(db, "partenariato.candidatura_accettata")

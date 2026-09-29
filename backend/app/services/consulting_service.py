@@ -9,13 +9,24 @@ Eventi (4, dal requisito): la notifica in-app è il canale AFFIDABILE e viene
 scritta per prima (dedup a DB); l'email è best-effort e parte in background
 (pattern _spawn di ai_check_service). Le transizioni sono irripetibili per
 costruzione (vincoli DB + RPC one-way): ogni evento scatta al più una volta.
+
+WP9 (partenariati, W1, Q19): consulto chiesto DALLA CALL
+(`create_request_da_call`: solo il titolare dell'azienda creatrice, AI-check
+facoltativo, stesso consumo dell'addon e stessa RPC con `partner_call_id`;
+coesiste con un consulto AI-check sullo stesso bando). Il progettista
+ASSEGNATO legge la call con `get_call_per_progettista` (proiezione dedicata
+`CallVistaProgettistaOut`, letture per id dell'azienda della richiesta, audit
+`consulenza.call_accessed` FAIL-CLOSED: senza audit niente dati, 502); nel
+pool dei non assegnati la richiesta mostra solo «Consulto su call di
+partenariato» e il bando (`_map_pool_row`).
 """
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import partial
-from typing import NoReturn
+from typing import Any, NoReturn
 from zoneinfo import ZoneInfo
 
 from decimal import Decimal
@@ -26,6 +37,7 @@ from app.core.config import get_settings
 from app.core.errors import (
     AppError,
     BadRequestError,
+    BandoRitiratoError,
     ConflictError,
     ForbiddenError,
     NotFoundError,
@@ -50,11 +62,13 @@ from app.schemas.consulting import (
 )
 from app.services import (
     ai_check_service,
+    bandi_risoluzione,
     company_service,
     email_service,
     family_service,
     notification_service,
     openapi_service,
+    partenariato_errori,
 )
 
 logger = logging.getLogger("bandofit.consulting")
@@ -68,8 +82,24 @@ SLOT_SELECT = "id,inizio,fine,serie_id"
 REQUEST_SELECT = (
     "id,cliente_id,family_parent_id,company_profile_id,ai_check_id,esito,punteggio,"
     "bando_id,bando_slug,bando_titolo,stato,assigned_progettista_id,assigned_at,"
-    "accepted_proposal_id,created_at"
+    "accepted_proposal_id,created_at,partner_call_id"
 )
+# WP9: nel pool dei progettisti non assegnati un consulto dalla call mostra
+# solo questa dicitura e il bando.
+CONSULTO_DA_CALL = "Consulto su call di partenariato"
+# Stati della call in cui il creatore può chiedere un consulto: in
+# preparazione, aperta, conclusa la ricerca o con il partenariato fatto (il
+# consorzio si lavora ancora). Mai annullata né sospesa per moderazione.
+STATI_CALL_CONSULTO = frozenset({"bozza", "pubblicata", "scaduta", "chiusa_completata"})
+MSG_CONSULTO_SOLO_TITOLARE = "Solo il titolare dell'azienda può richiedere un consulto"
+MSG_CALL_NON_CONSULTABILE = (
+    "Per una call annullata o sospesa non si può chiedere un consulto"
+)
+MSG_BANDO_RITIRATO_CONSULTO = (
+    "Il bando di questa call non è più disponibile nel catalogo: non si può chiedere un "
+    "consulto"
+)
+MSG_RICHIESTA_NON_TROVATA = "Richiesta non trovata"
 PROPOSAL_SELECT = "id,request_id,progettista_id,messaggio,stato,created_at"
 BOOKING_SELECT = "id,request_id,slot_id,cliente_id,progettista_id,inizio,fine,stato,videocall_token"
 
@@ -647,37 +677,9 @@ async def _progettista_pubblico(
     return ProgettistaPublicOut(codice=codici.get(assigned), nome=nome)
 
 
-async def create_request(primary, user: dict, ai_check_id: str) -> ConsulenzaOut:
-    """Attivazione dell'addon «Consulto esperto» su un AI-check completato.
-
-    PUNTO D'INNESTO DEL PAGAMENTO: quando l'acquisto dell'addon diventerà
-    reale, il checkout si inserisce in questa funzione, tra la verifica
-    dell'addon e l'insert — la richiesta nasce solo a pagamento riuscito.
-    Tutte le vie di creazione passano da qui (unico consumer del POST).
-    """
-    owner_id, editable = await family_service.owner_and_editable(primary, user)
-    if not editable:
-        raise ForbiddenError(
-            "Solo il titolare dell'azienda può richiedere un consulto"
-        )
-
-    check_resp = (
-        await primary.table("ai_checks")
-        .select(
-            "id,status,esito,punteggio,bando_id,bando_slug,bando_titolo,"
-            "company_profile_id,family_parent_id"
-        )
-        .eq("id", str(ai_check_id))
-        .eq("family_parent_id", owner_id)
-        .limit(1)
-        .execute()
-    )
-    if not check_resp.data:
-        raise NotFoundError("AI-check non trovato")
-    check = check_resp.data[0]
-    if check["status"] != "ready":
-        raise ConflictError("Il consulto si richiede su un AI-check completato")
-
+async def _addon_consulto(primary, user: dict) -> dict:
+    """L'addon «Consulto esperto» attivo, con il pre-check di cortesia del
+    credito. Comune ai consulti da AI-check e da call (stesso consumo)."""
     addon_resp = (
         await primary.table("addons")
         .select("id,slug,prezzo,tipo_prezzo,tipo_fruizione,is_active")
@@ -714,6 +716,41 @@ async def create_request(primary, user: dict, ai_check_id: str) -> ConsulenzaOut
             raise PaymentRequiredError(
                 "Il consulto esperto si attiva con un acquisto: passa dal checkout"
             )
+    return addon
+
+
+async def create_request(primary, user: dict, ai_check_id: str) -> ConsulenzaOut:
+    """Attivazione dell'addon «Consulto esperto» su un AI-check completato.
+
+    PUNTO D'INNESTO DEL PAGAMENTO: quando l'acquisto dell'addon diventerà
+    reale, il checkout si inserisce in questa funzione, tra la verifica
+    dell'addon e l'insert — la richiesta nasce solo a pagamento riuscito.
+    Tutte le vie di creazione passano da qui (unico consumer del POST).
+    """
+    owner_id, editable = await family_service.owner_and_editable(primary, user)
+    if not editable:
+        raise ForbiddenError(
+            "Solo il titolare dell'azienda può richiedere un consulto"
+        )
+
+    check_resp = (
+        await primary.table("ai_checks")
+        .select(
+            "id,status,esito,punteggio,bando_id,bando_slug,bando_titolo,"
+            "company_profile_id,family_parent_id"
+        )
+        .eq("id", str(ai_check_id))
+        .eq("family_parent_id", owner_id)
+        .limit(1)
+        .execute()
+    )
+    if not check_resp.data:
+        raise NotFoundError("AI-check non trovato")
+    check = check_resp.data[0]
+    if check["status"] != "ready":
+        raise ConflictError("Il consulto si richiede su un AI-check completato")
+
+    addon = await _addon_consulto(primary, user)
 
     # Insert richiesta + consumo di 1 unità in un'unica transazione (RPC 0028).
     try:
@@ -749,6 +786,126 @@ async def create_request(primary, user: dict, ai_check_id: str) -> ConsulenzaOut
             "bando_slug": request["bando_slug"],
             "ai_check_id": check["id"],
             "addon_slug": addon["slug"],
+        },
+    )
+    await _event_nuova_richiesta(primary, request)
+    return await get_my_request(primary, user, request["id"])
+
+
+@dataclass(frozen=True)
+class _AziendaInLettura:
+    """L'azienda della richiesta come «azienda attiva» in SOLA LETTURA
+    (`editable` falso): serve a riusare, dal lato del progettista, le
+    proiezioni del creatore della call (partner_call_service, consorzio),
+    che non scrivono mai per chi non è titolare."""
+
+    company_id: str
+    owner_id: str
+    editable: bool = False
+    is_multi: bool = False
+
+
+async def _bando_della_call(secondary, call: dict) -> dict:
+    """Il bando della call nel catalogo, risolto come il dettaglio (R0-b):
+    slug spostato → il master (id e slug canonici); ritirato → 410
+    `bando_ritirato` con un messaggio sul consulto (niente consulto su un
+    bando ritirato); assente → 404."""
+    try:
+        return await bandi_risoluzione.carica_per_slug(
+            secondary, str(call.get("bando_slug") or ""), "id,slug,titolo,titolo_breve"
+        )
+    except BandoRitiratoError as exc:
+        raise BandoRitiratoError(MSG_BANDO_RITIRATO_CONSULTO) from exc
+
+
+async def _ai_check_della_call(primary, owner_id: str, company_id: str, bando_ids) -> dict | None:
+    """L'ultimo AI-check `ready` dell'azienda sul bando della call (id
+    canonico, poi quello salvato nella call): facoltativo, se c'è se ne
+    prende lo snapshot di esito e punteggio."""
+    for bando_id in dict.fromkeys(int(b) for b in bando_ids if b is not None):
+        riga = await ai_check_service.ultimo_ready(
+            primary, owner_id=owner_id, company_id=company_id, bando_id=bando_id
+        )
+        if riga:
+            return riga
+    return None
+
+
+async def create_request_da_call(
+    primary, secondary, user: dict, active, call_id: Any
+) -> ConsulenzaOut:
+    """Consulto chiesto DALLA CALL di partenariato (WP9, W1, Q19): solo il
+    titolare dell'azienda creatrice (azienda attiva: un Advisor non chiede
+    per la call di un'altra sua azienda → 404). L'AI-check è FACOLTATIVO (se
+    ce n'è uno `ready` sulla coppia azienda × bando se ne prende lo snapshot
+    di esito e punteggio); consumo dell'addon come i consulti esistenti
+    (stesso pre-check, stessa RPC `fn_create_consultation_request` con
+    `partner_call_id`, che verifica la call e consuma nella stessa
+    transazione). Coesiste con un consulto AI-check sullo stesso bando;
+    uno solo aperto per call. Il bando ritirato dal catalogo → 410.
+
+    Errori: 403 (non titolare), 404 (call non dell'azienda attiva, bando o
+    addon non disponibili), 409 `call_non_attiva` (call annullata o sospesa),
+    409 `conflict` (consulto già aperto per la call), 409 `payment_required`,
+    410 `bando_ritirato`."""
+    from app.services.partenariato_accesso import RUOLI_SCRITTURA, carica_call_autorizzata
+
+    if not active.editable:
+        raise ForbiddenError(MSG_CONSULTO_SOLO_TITOLARE)
+    if not active.company_id:
+        raise NotFoundError("Nessuna azienda attiva: crea prima l'azienda")
+    call, _ = await carica_call_autorizzata(
+        primary, call_id, active, user, ammessi=RUOLI_SCRITTURA
+    )
+    if call.get("stato") not in STATI_CALL_CONSULTO or call.get("sospesa_at") is not None:
+        raise AppError(409, "call_non_attiva", MSG_CALL_NON_CONSULTABILE)
+    bando = await _bando_della_call(secondary, call)
+    addon = await _addon_consulto(primary, user)
+    owner_id = str(active.owner_id)
+    company_id = str(call["company_profile_id"])
+    check = await _ai_check_della_call(
+        primary, owner_id, company_id, (bando.get("id"), call.get("bando_id"))
+    )
+    titolo = (
+        bando.get("titolo") or bando.get("titolo_breve") or call.get("bando_titolo") or ""
+    ).strip()
+    try:
+        resp = await primary.rpc(
+            "fn_create_consultation_request",
+            {"p_payload": {
+                "cliente_id": str(user["id"]),
+                "family_parent_id": owner_id,
+                "company_profile_id": company_id,
+                "ai_check_id": check["id"] if check else None,
+                "esito": (check or {}).get("esito"),
+                "punteggio": (check or {}).get("punteggio"),
+                "bando_id": int(bando["id"]),
+                "bando_slug": bando.get("slug") or call.get("bando_slug"),
+                "bando_titolo": titolo,
+                "addon_id": addon["id"],
+                "partner_call_id": str(call["id"]),
+            }},
+        ).execute()
+    except APIError as exc:
+        # La mappa del modulo partenariati ha `call_non_trovata` e le stesse
+        # triple dei consulti per request_gia_aperta / credito / addon.
+        partenariato_errori.raise_from_rpc(exc)
+    request = (resp.data or {}).get("request")
+    if not request:
+        raise UpstreamError()
+
+    await _audit(
+        primary,
+        user["id"],
+        "consulenza.created",
+        family_parent_id=owner_id,
+        payload={
+            "request_id": request["id"],
+            "bando_id": request["bando_id"],
+            "bando_slug": request["bando_slug"],
+            "ai_check_id": check["id"] if check else None,
+            "addon_slug": addon["slug"],
+            "partner_call_id": str(call["id"]),
         },
     )
     await _event_nuova_richiesta(primary, request)
@@ -808,6 +965,7 @@ async def list_my_requests(primary, user: dict) -> list[ConsulenzaOut]:
                 progettista=await _progettista_pubblico(primary, row, codici),
                 proposte_aperte=aperte_per_request.get(row["id"], 0),
                 appuntamento=_map_booking(bookings.get(row["id"])),
+                partner_call_id=row.get("partner_call_id"),
             )
         )
     return items
@@ -856,6 +1014,7 @@ async def get_my_request(primary, user: dict, request_id: str) -> ConsulenzaOut:
             for row in proposte_rows
         ],
         appuntamento=_map_booking(bookings.get(request["id"])),
+        partner_call_id=request.get("partner_call_id"),
     )
 
 
@@ -1118,6 +1277,15 @@ def _denominazione(profilo: dict | None, company: dict | None) -> str:
     return "il titolare"
 
 
+def _anonima_nel_pool(row: dict, progettista_id: str) -> bool:
+    """WP9: un consulto dalla call si vede anonimo da chi non ne è
+    l'assegnato (la call è anonima: il consulto non deve rivelare chi l'ha
+    creata)."""
+    return bool(row.get("partner_call_id")) and (
+        row.get("assigned_progettista_id") != progettista_id
+    )
+
+
 def _map_pool_row(
     row: dict,
     companies: dict,
@@ -1127,6 +1295,21 @@ def _map_pool_row(
     mia_proposta: str | None,
     booking: dict | None,
 ) -> RichiestaPoolOut:
+    if _anonima_nel_pool(row, progettista_id):
+        # Solo la dicitura e il bando: niente azienda, P.IVA, email, esito né
+        # punteggio (lo snapshot dell'AI-check è dell'azienda).
+        return RichiestaPoolOut(
+            id=row["id"],
+            stato=row["stato"],
+            denominazione_utente=CONSULTO_DA_CALL,
+            bando_id=row["bando_id"],
+            bando_slug=row["bando_slug"],
+            bando_titolo=row["bando_titolo"],
+            created_at=row["created_at"],
+            assegnata_a_me=False,
+            mia_proposta_stato=mia_proposta,
+            da_call=True,
+        )
     company = companies.get(row["company_profile_id"])
     profilo = profili.get(row["cliente_id"])
     return RichiestaPoolOut(
@@ -1145,6 +1328,7 @@ def _map_pool_row(
         assegnata_a_me=row.get("assigned_progettista_id") == progettista_id,
         mia_proposta_stato=mia_proposta,
         appuntamento=_map_booking(booking),
+        da_call=bool(row.get("partner_call_id")),
     )
 
 
@@ -1229,7 +1413,9 @@ async def get_pool_request(
     companies, profili = await _partial_context(primary, [request])
 
     ai_check = None
-    if request.get("ai_check_id"):
+    # WP9: il report dell'AI-check di un consulto dalla call è dell'azienda
+    # della call anonima: solo per l'assegnato.
+    if request.get("ai_check_id") and not _anonima_nel_pool(request, str(progettista["id"])):
         check_resp = (
             await primary.table("ai_checks")
             .select(
@@ -1388,6 +1574,79 @@ async def get_full_company(
         payload={"request_id": request["id"]},
     )
     return FullCompanyOut(company=company, dossier=dossier)
+
+
+async def get_call_per_progettista(primary, secondary, progettista: dict, request_id: str):
+    """La call di un consulto chiesto dalla call (WP9, W1), SOLO per il
+    progettista ASSEGNATO: altrimenti, o se la richiesta non viene da una
+    call, 404 come una richiesta inesistente.
+
+    - Letture per id (Q23): la call deve essere dell'azienda e dell'owner
+      della RICHIESTA (difesa oltre alla verifica della RPC di creazione).
+    - Audit `consulenza.call_accessed` FAIL-CLOSED, scritto PRIMA di servire
+      i dati: se non si scrive → 502 e nessun dato.
+    - Proiezione dedicata `CallVistaProgettistaOut`
+      (`partenariato_accesso.vista_progettista`): la vista del creatore letta
+      con l'azienda della richiesta in sola lettura e il consorzio nella
+      proiezione del creatore, senza contatti, messaggi, candidature, valori
+      esatti né id interni di altre aziende."""
+    from app.schemas.partner_call import CallVistaCreatoreOut
+    from app.services import partenariato_consorzio_service
+    from app.services import partner_call_service as pcs
+    from app.services.partenariato_accesso import vista_progettista
+
+    request = await _fetch_request(primary, str(request_id))
+    if (
+        request is None
+        or not request.get("partner_call_id")
+        or request.get("assigned_progettista_id") != str(progettista["id"])
+    ):
+        raise NotFoundError(MSG_RICHIESTA_NON_TROVATA)
+    resp = (
+        await primary.table("partner_calls")
+        .select("id,company_profile_id,family_parent_id")
+        .eq("id", str(request["partner_call_id"]))
+        .eq("company_profile_id", str(request["company_profile_id"]))
+        .eq("family_parent_id", str(request["family_parent_id"]))
+        .limit(1)
+        .execute()
+    )
+    call = resp.data[0] if resp.data else None
+    if call is None:
+        raise NotFoundError(MSG_RICHIESTA_NON_TROVATA)
+
+    # Audit FAIL-CLOSED (non _audit, che è best-effort): senza traccia
+    # dell'accesso non si servono i dati della call di un cliente.
+    try:
+        await primary.table("audit_log").insert(
+            {
+                "actor_id": str(progettista["id"]),
+                "action": "consulenza.call_accessed",
+                "target_user_id": str(request["cliente_id"]),
+                "family_parent_id": str(request["family_parent_id"]),
+                "payload": {"request_id": str(request["id"]),
+                            "partner_call_id": str(call["id"])},
+            }
+        ).execute()
+    except Exception as exc:
+        logger.error(
+            "consulenze: audit dell'accesso alla call non scritto (richiesta %s, %s)",
+            request["id"], getattr(exc, "code", None) or type(exc).__name__,
+        )
+        raise UpstreamError() from exc
+
+    lettore = _AziendaInLettura(
+        company_id=str(call["company_profile_id"]), owner_id=str(call["family_parent_id"])
+    )
+    creatore = await pcs.dettaglio(primary, secondary, lettore, progettista, call["id"])
+    if not isinstance(creatore, CallVistaCreatoreOut):  # pragma: no cover — difesa
+        raise NotFoundError(MSG_RICHIESTA_NON_TROVATA)
+    consorzio = None
+    if creatore.stato != "bozza":
+        consorzio = await partenariato_consorzio_service.get_consorzio(
+            primary, secondary, lettore, progettista, call["id"]
+        )
+    return vista_progettista(request["id"], creatore, consorzio)
 
 
 async def list_appointments(primary, progettista: dict) -> list[AppuntamentoOut]:

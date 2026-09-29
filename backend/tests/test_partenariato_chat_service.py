@@ -45,10 +45,15 @@ TESTO_Y = "Ciao, sono Laura del laboratorio: il mio numero è 333 1234567."
 
 
 async def conversazione(fondo, *, rivela: bool = False, monkeypatch=None):
-    """Y si candida, X accetta: la conversazione aperta (email già smaltite)."""
+    """Y si candida, X accetta: la conversazione aperta (email già smaltite).
+    `rivela`: le due aziende hanno l'identità verificata dalla piattaforma
+    (rivelazione simmetrica, WP9)."""
     if rivela:
         monkeypatch.setattr(pps, "RIVELAZIONE_IDENTITA_DISPONIBILE", True)
     db, sec = await scenario_wp7()
+    if rivela:
+        db.verifica_identita(g.COMPANY["X"])
+        db.verifica_identita(g.COMPANY["Y"])
     await candida(db, sec)
     [riga] = db.tabelle["partner_candidature"]
     await svc.decidi(db, sec, attiva("X"), utente("X"), riga["id"], "accetta")

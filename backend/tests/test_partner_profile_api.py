@@ -49,6 +49,8 @@ ROTTE = [
     ("POST", "/api/v1/me/partner-profile/bozza-ai"),
     ("DELETE", "/api/v1/me/partner-profile/bozza-ai"),
     ("GET", "/api/v1/me/partner-profile/anteprima"),
+    ("GET", "/api/v1/me/partner-profile/identita"),
+    ("POST", "/api/v1/me/partner-profile/identita"),
     ("GET", "/api/v1/partenariati/informativa"),
 ]
 
@@ -57,6 +59,10 @@ CAMPI_PROFILO_OUT = {
     "informativa_versione_corrente", "riconsenso_suggerito", "identita", "profilo",
     "tipi_soggetto_dedotti", "completezza", "avvisi_anonimato", "referente",
     "referenti_possibili", "bozza_ai", "vocabolario_versione", "aggiornato_at",
+}
+CAMPI_VERIFICA = {
+    "stato", "verificata", "richiesta_at", "verificata_at", "puo_richiedere",
+    "motivo_non_richiedibile",
 }
 CAMPI_PROFILO_DATI = {
     "descrizione_competenze", "competenze", "competenze_libere", "tipi_soggetto",
@@ -178,8 +184,9 @@ class TestForme:
         assert set(corpo["profilo"]) == CAMPI_PROFILO_DATI
         assert set(corpo["identita"]) == {
             "verificata", "motivo", "denominazione_registro", "puo_essere_nominativo",
-            "motivo_nominativo",
+            "motivo_nominativo", "verifica",
         }
+        assert set(corpo["identita"]["verifica"]) == CAMPI_VERIFICA
         assert set(corpo["referente"]) == {"tipo", "nome", "sei_tu", "proposto"}
         assert {tuple(sorted(r)) for r in corpo["referenti_possibili"]} == {("nome", "user_id")}
         assert corpo["editable"] is True and corpo["esiste"] is True
@@ -343,7 +350,9 @@ class TestAnteprima:
     @pytest.mark.parametrize("anonimo", [True, False])
     async def test_canary(self, flag, anonimo):
         flag(True)
-        db = FakeDb().con_profilo(
+        # Il nominativo si vede solo con l'identità verificata dalla
+        # piattaforma (WP9): qui c'è.
+        db = FakeDb().verifica_identita().con_profilo(
             anonimo=anonimo, referente_user_id=MEMBRO,
             descrizione_competenze=f"Lavorazioni di precisione. Contatti: {EMAIL}",
             competenze=["meccanica_meccatronica"],
@@ -373,3 +382,58 @@ class TestAnteprima:
             assert corpo["denominazione"] == "ROSSI MECCANICA SRL"
             assert corpo["esperienze"][0]["anno"] == 2023
             assert corpo["fasce"]["dipendenti"] is not None
+
+
+# ------------------------------------------------ verifica dell'identità (WP9)
+
+
+class TestVerificaIdentita:
+    async def test_stato_e_richiesta(self, flag):
+        flag(True)
+        db = FakeDb()
+        async with _http(mini_app(db)) as client:
+            stato = await client.get("/api/v1/me/partner-profile/identita")
+            richiesta = await client.post("/api/v1/me/partner-profile/identita",
+                                          json={"nota": "Chiamate la sede"})
+            doppia = await client.post("/api/v1/me/partner-profile/identita")
+        assert stato.status_code == 200 and set(stato.json()) == CAMPI_VERIFICA
+        assert stato.json()["stato"] == "non_richiesta" and stato.json()["puo_richiedere"]
+        assert richiesta.status_code == 200 and richiesta.json()["stato"] == "richiesta"
+        assert db.chiamate("fn_identita_richiedi")[0]["p_nota"] == "Chiamate la sede"
+        assert (doppia.status_code, doppia.json()["error"]["code"]) == (
+            409, "identita_richiesta_aperta")
+
+    async def test_validazione_della_nota(self, flag):
+        flag(True)
+        db = FakeDb()
+        async with _http(mini_app(db)) as client:
+            lunga = await client.post("/api/v1/me/partner-profile/identita",
+                                      json={"nota": "x" * 501})
+            ignoto = await client.post("/api/v1/me/partner-profile/identita",
+                                       json={"metodo": "pec"})
+        assert lunga.status_code == 422 and ignoto.status_code == 422
+        assert db.chiamate("fn_identita_richiedi") == []
+
+    async def test_il_membro_legge_e_non_chiede(self, flag):
+        flag(True)
+        db = FakeDb().verifica_identita()
+        async with _http(mini_app(db, utente=USER_MEMBRO, editable=False)) as client:
+            stato = await client.get("/api/v1/me/partner-profile/identita")
+            richiesta = await client.post("/api/v1/me/partner-profile/identita")
+        assert stato.status_code == 200
+        assert stato.json()["verificata"] is True
+        assert stato.json()["motivo_non_richiedibile"] == "solo_titolare"
+        assert (richiesta.status_code, richiesta.json()["error"]["code"]) == (403, "forbidden")
+        # mai chi ha verificato né il metodo
+        assert "verificata_da" not in stato.text and "metodo" not in stato.text
+
+    async def test_nominativo_senza_verifica_409(self, flag):
+        flag(True)
+        db = FakeDb()
+        async with _http(mini_app(db)) as client:
+            resp = await client.post("/api/v1/me/partner-profile/consenso", json={
+                "azione": "concedi", "informativa_versione": INFORMATIVA_PARTNER_VERSIONE,
+                "origine": "pagina_azienda", "anonimo": False,
+            })
+        assert resp.status_code == 409
+        assert resp.json()["error"]["code"] == "identita_non_verificata_admin"

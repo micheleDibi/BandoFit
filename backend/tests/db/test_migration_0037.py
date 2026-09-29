@@ -175,6 +175,16 @@ def imposta_cf(db, user: str, cf: str = CF_TITOLARE, *, verificato: bool = True)
     )
 
 
+def verifica_identita_admin(db, owner: str, company: str) -> None:
+    """Dalla 0041 il nominativo richiede l'identità verificata dall'admin
+    (fn_partenariato_rappresentante_ok): richiesta del titolare e verifica."""
+    admin = new_user(db)
+    db.execute("update public.profiles set role = 'admin' where id = %s", (admin,))
+    db.execute("select public.fn_identita_richiedi(%s, %s, %s, null)", (owner, company, owner))
+    db.execute("select public.fn_identita_decidi(%s, %s, 'verificata', 'telefonata_sede', null)",
+               (company, admin))
+
+
 def azienda_pronta(db, owner: str | None = None, plan_slug: str = "smart"):
     """Titolare (Smart di default: 1 call attiva) + azienda con identità verificata."""
     owner = owner or new_user(db, plan_slug)
@@ -871,8 +881,10 @@ class TestSegnalazioni:
                    (sid,))
         with pytest.raises(psycopg.errors.UniqueViolation):
             self._segnala(db, oggetto_id=oggetto, segnalante_user_id=utente)
-        db.execute("update public.partner_segnalazioni set stato = 'decisa' where id = %s",
-                   (sid,))
+        # Dalla 0041 una segnalazione decisa ha decisione e motivazione.
+        db.execute("update public.partner_segnalazioni set stato = 'decisa', "
+                   "decisione = 'nessuna_azione', motivazione = 'Nessuna violazione riscontrata', "
+                   "deciso_da = %s, deciso_at = now() where id = %s", (utente, sid))
         self._segnala(db, oggetto_id=oggetto, segnalante_user_id=utente)
 
     def test_trigger_updated_at(self, db):
@@ -1790,6 +1802,11 @@ class TestPubblica:
         assert detail_of(exc) == "rappresentante_non_verificato"
         imposta_cf(db, owner)
         legale(db, company, " rssmra80a01h501u ")
+        # Dalla 0041 il CF tra i legali rappresentanti non basta più.
+        with pytest.raises(psycopg.errors.RaiseException) as exc:
+            pubblica(db, owner, company, c)
+        assert detail_of(exc) == "rappresentante_non_verificato"
+        verifica_identita_admin(db, owner, company)
         assert pubblica(db, owner, company, c)["stato"] == "pubblicata"
 
     def test_anonima_senza_rappresentante(self, db):
@@ -2770,11 +2787,13 @@ class TestIdentitaEquivalente:
         esito = _esito_consenso(db, owner, company, anonimo=False, non_sandbox=True)
         assert esito in ("ok", "rappresentante_non_verificato")
         assert mia is (esito == "ok")
-        atteso = caso in ("ok", "cf_visura_minuscolo", "due_righe_una_buona")
-        assert mia is atteso
+        # Dalla 0041 il CF non basta più in nessun caso: serve l'identità
+        # verificata dall'admin (l'equivalenza con fn_partner_consenso resta).
+        assert mia is False
 
     def test_rappresentante_di_un_altro_owner(self, db):
         owner, company = self._rappresentante(db, "ok")
+        verifica_identita_admin(db, owner, company)  # dalla 0041
         altro = new_user(db)
         imposta_cf(db, altro)  # stesso CF, ma non è il titolare indicato
         assert db.execute("select public.fn_partenariato_rappresentante_ok(%s, %s)",

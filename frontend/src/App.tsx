@@ -13,6 +13,7 @@ import AccettaInvito from "./pages/AccettaInvito";
 import Acquisti from "./pages/Acquisti";
 import AdminAddon from "./pages/AdminAddon";
 import AdminPagamenti from "./pages/AdminPagamenti";
+import AdminPartenariati from "./pages/AdminPartenariati";
 import AdminPiani from "./pages/AdminPiani";
 import AdminUtenti from "./pages/AdminUtenti";
 import AiCheck from "./pages/AiCheck";
@@ -43,6 +44,7 @@ import RecuperaPassword from "./pages/RecuperaPassword";
 import Register from "./pages/Register";
 import ReimpostaPassword from "./pages/ReimpostaPassword";
 import Salvati from "./pages/Salvati";
+import SegnalazionePartenariato from "./pages/SegnalazionePartenariato";
 
 export default function App() {
   return (
@@ -124,6 +126,14 @@ export default function App() {
           }
         />
         <Route
+          path="partenariati/segnalazioni/:id"
+          element={
+            <PartenariatiRoute>
+              <SegnalazionePartenariato />
+            </PartenariatiRoute>
+          }
+        />
+        <Route
           path="progettista/richieste"
           element={
             <ProgettistaRoute>
@@ -174,6 +184,17 @@ export default function App() {
           element={
             <AdminRoute>
               <AdminPagamenti />
+            </AdminRoute>
+          }
+        />
+        {/* Pannello admin dei partenariati (WP9): admin E modulo acceso. */}
+        <Route
+          path="admin/partenariati"
+          element={
+            <AdminRoute>
+              <PartenariatiRoute>
+                <AdminPartenariati />
+              </PartenariatiRoute>
             </AdminRoute>
           }
         />

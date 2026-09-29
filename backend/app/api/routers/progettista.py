@@ -1,8 +1,13 @@
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from app.api.deps import PrimaryClient, ProgettistaUser
+from app.api.deps import (
+    PrimaryClient,
+    ProgettistaUser,
+    SecondaryClient,
+    require_partenariati_attivo,
+)
 from app.schemas.consulting import (
     AppuntamentoOut,
     FullCompanyOut,
@@ -16,6 +21,7 @@ from app.schemas.consulting import (
     SlotOut,
 )
 from app.services import consulting_service
+from app.services.partenariato_accesso import CallVistaProgettistaOut
 
 router = APIRouter(prefix="/progettista", tags=["progettista"])
 
@@ -59,6 +65,26 @@ async def get_full_company(
     request_id: UUID, user: ProgettistaUser, primary: PrimaryClient
 ) -> FullCompanyOut:
     return await consulting_service.get_full_company(primary, user, str(request_id))
+
+
+# WP9 (partenariati): rotta aggiunta a un router ESISTENTE, quindi il flag sta
+# sulla SINGOLA rotta (a flag spento 404, anche prima dell'autenticazione) e
+# le altre rotte /progettista non cambiano (docs/partenariati.md T1).
+@router.get(
+    "/richieste/{request_id}/call",
+    response_model=CallVistaProgettistaOut,
+    dependencies=[Depends(require_partenariati_attivo)],
+)
+async def get_call_richiesta(
+    request_id: UUID, user: ProgettistaUser, primary: PrimaryClient, secondary: SecondaryClient
+) -> CallVistaProgettistaOut:
+    """La call di partenariato di un consulto chiesto dalla call, per il
+    progettista ASSEGNATO (404 per gli altri): proiezione dedicata senza
+    contatti né messaggi, con l'accesso registrato (502 se la registrazione
+    non riesce: nessun dato)."""
+    return await consulting_service.get_call_per_progettista(
+        primary, secondary, user, str(request_id)
+    )
 
 
 @router.get("/appuntamenti", response_model=list[AppuntamentoOut])

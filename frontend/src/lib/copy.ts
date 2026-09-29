@@ -10,12 +10,15 @@ import type {
   AmbitoRequisitoCall,
   BudgetFasciaCall,
   CategoriaCertificazione,
+  DecisioneSegnalazione,
   DimensioneImpresa,
   ErroreRichiestaBilancio,
   EsitoCoperturaCall,
+  EsitoRicorso,
   EsitoVoce,
   FaseDocumentoConsorzio,
   FiltroPartenariato,
+  MetodoVerificaIdentita,
   ModalitaPartenariato,
   MotivoBilanci,
   MotivoChiusuraCall,
@@ -23,6 +26,7 @@ import type {
   MotivoIdentitaPartner,
   MotivoNominativoPartner,
   MotivoSegnalazione,
+  OggettoSegnalazione,
   OrdineBacheca,
   OrigineRequisitoCall,
   RuoloCreatoreCall,
@@ -31,8 +35,10 @@ import type {
   StatoCall,
   StatoCandidatura,
   StatoDocumentoConsorzio,
+  StatoIdentitaAzienda,
   StatoMembro,
   StatoRichiestaBilancio,
+  StatoSegnalazione,
   TerritorioModalitaCall,
   TipoCandidatura,
   TipoCriterio,
@@ -45,6 +51,13 @@ import type {
 /** Il conteggio è un claim di marketing, NON un dato: la landing non interroga
  *  il catalogo. Aggiornarlo qui lo aggiorna in tutti e tre i punti. */
 const BANDI_MONITORATI = "4.000";
+
+/** Versione dei testi legali del WP9 scritti nel frontend (consenso del
+ *  consulto dalla call, ricorso e vie di ricorso): SEGNAPOSTO, «BOZZA — DA
+ *  RIVEDERE CON IL LEGALE» prima di accendere il modulo in produzione. La
+ *  motivazione formale delle decisioni la genera il backend
+ *  (`partenariato_moderazione_testi.SOR_VERSIONE`). */
+export const TESTI_LEGALI_WP9_VERSIONE = "2026-10-bozza-1";
 
 export const LANDING_COPY = {
   /** Fascia statistiche: valore + etichetta. */
@@ -172,6 +185,11 @@ export const CONSULENZE_COPY = {
   consenso:
     "Attivando il consulto, i progettisti della piattaforma vedranno la ragione sociale, la partita IVA, la tua email e il report completo dell'AI-check di questo bando, comprese le informazioni aziendali citate nelle sue verifiche. Il dossier certificato e gli altri dati aziendali restano riservati: li vedrà solo il progettista che sceglierai.",
   fusoOrario: "Gli orari sono mostrati nel tuo fuso orario.",
+  /** Consulto chiesto dalla call di partenariato (WP9). BOZZA — DA RIVEDERE
+   *  CON IL LEGALE (versione `TESTI_LEGALI_WP9_VERSIONE`): è parte della base
+   *  giuridica, come `consenso`. */
+  consensoCall:
+    "Chiedendo il consulto, i progettisti della piattaforma vedranno solo che hai chiesto un consulto su una call di partenariato e il titolo del bando. Il progettista che sceglierai vedrà anche la ragione sociale, la partita IVA, la tua email, il dossier certificato dell'azienda, il report dell'AI-check di questo bando se ne hai uno e la call (testi, regole, requisiti con le tue coperture, posizioni, budget e verifica del consorzio). Delle altre aziende della call vedrà solo esiti e fasce: mai i loro nomi, i contatti, i messaggi o i loro numeri.",
 } as const;
 
 /** Chiude la frase senza raddoppiare il punto: le ragioni sociali finiscono
@@ -405,6 +423,10 @@ export const PARTNER_COPY = {
     "Il titolare non ha ancora compilato il profilo partner di questa azienda.",
   sospeso:
     "Il profilo è sospeso dalla piattaforma: per ora non compare tra i partner suggeriti. Per chiarimenti scrivi all'assistenza.",
+  /** Profilo salvato con il nome ma senza la verifica dell'identità di oggi
+   *  (revocata o dati del registro cambiati): verso le altre aziende è anonimo. */
+  nomeSalvatoNonMostrato:
+    "Hai scelto di mostrare il nome, ma oggi le altre aziende non lo vedono: serve la verifica dell'identità da parte della piattaforma.",
 
   /** Dialog di consenso: la checkbox NON è mai preselezionata. */
   consensoTitolo: "Comparire come partner",
@@ -430,16 +452,17 @@ export const PARTNER_COPY = {
   informativaAggiornata:
     "L'informativa è stata aggiornata nel frattempo: leggi il nuovo testo e conferma di nuovo.",
 
-  /** Perché «Mostra il nome» non si può scegliere. */
+  /** Perché «Mostra il nome» non si può scegliere. Dal WP9 il nome si mostra
+   *  solo con l'identità verificata dalla piattaforma (la verifica del codice
+   *  fiscale non basta più: resta solo un dato informativo). */
   motiviNominativo: {
-    cf_non_verificato:
-      "Per mostrare il nome devi verificare il tuo codice fiscale nel profilo: così controlliamo che tu sia legale rappresentante dell'azienda.",
-    non_rappresentante:
-      "Per mostrare il nome devi risultare legale rappresentante dell'azienda nel Registro Imprese. Puoi comunque comparire in forma anonima.",
+    identita_non_verificata_admin:
+      "Per mostrare il nome serve la verifica dell'identità da parte della piattaforma. Intanto puoi comparire in forma anonima.",
     non_disponibile:
-      "Per ora le aziende compaiono solo in forma anonima: mostrare il nome sarà possibile più avanti, con una verifica di chi rappresenta l'impresa.",
+      "Per ora le aziende compaiono solo in forma anonima: mostrare il nome sarà possibile più avanti.",
   } satisfies Record<MotivoNominativoPartner, string>,
-  verificaCf: "Verifica il codice fiscale",
+  /** Link alla richiesta di verifica (riquadro «Verifica dell'identità»). */
+  chiediVerifica: "Chiedi la verifica dell'identità",
 
   /** Perché il consenso non si può ancora dare. */
   motiviIdentita: {
@@ -548,9 +571,26 @@ export const PARTNER_COPY = {
  *  della call, liste e card del bando. La nota sull'anonimato e i testi della
  *  segnalazione sono testi da far rivedere al legale: non riformularli senza. */
 export const CALL_COPY = {
-  /** Le call sono per ora solo anonime (scelta del WP4, docs §16). */
+  /** Call anonima (dal WP9 il nome si mostra solo con l'identità verificata
+   *  dalla piattaforma, e si rivela solo tra aziende verificate). */
   notaAnonima:
-    "Per ora le call sono pubblicate in forma anonima: il nome dell'azienda si rivela solo alle aziende che accetti.",
+    "La call è anonima: le altre aziende non vedono il nome della tua. Dopo che accetti un'azienda, i nomi si rivelano solo se tutte e due hanno l'identità verificata dalla piattaforma.",
+  /** Call con il nome (solo aziende verificate, WP9). Il backend del WP9 non
+   *  ha ancora la proiezione con il nome verso le altre aziende: la nota lo
+   *  dice (da aggiornare quando arriva). */
+  notaNominativa:
+    "Hai scelto la call con il nome dell'azienda. Per ora le altre aziende la vedono ancora in forma anonima: il nome comparirà quando la piattaforma mostrerà le call con il nome.",
+  sceltaNomeTitolo: "Come vuoi pubblicare la call?",
+  sceltaAnonima: "Anonima",
+  sceltaAnonimaNota: "Le altre aziende vedono regione, settore e dimensione, non il nome.",
+  sceltaNome: "Con il nome dell'azienda",
+  sceltaNomeNota:
+    "Il nome registrato al Registro Imprese. Per ora la call compare comunque in forma anonima.",
+  nomeNonDisponibile:
+    "Per pubblicare la call con il nome dell'azienda serve la verifica dell'identità da parte della piattaforma. Intanto la call è anonima.",
+  /** Call rimasta «con il nome» mentre la scelta è spenta (WP9). */
+  nomeNonAncoraVisibile:
+    "La call è impostata con il nome dell'azienda, ma per ora le call compaiono solo in forma anonima: puoi renderla anonima.",
   aziendaAnonima: "Azienda anonima",
   soloTitolare: "La call la gestisce il titolare dell'azienda: tu puoi solo consultarla.",
 
@@ -830,8 +870,10 @@ export const CANDIDATURE_COPY = {
 export const CHAT_COPY = {
   antitrust:
     "Non scambiate informazioni su prezzi, offerte o strategie commerciali: la collaborazione riguarda solo il progetto del bando.",
+  /** Dal WP9 la rivelazione è simmetrica: solo tra due aziende verificate. */
   identitaNonRivelata:
-    "La piattaforma non rivela e non verifica l'identità delle aziende: presentatevi in chat e verificate i dati sul Registro Imprese prima di condividere informazioni riservate.",
+    "L'identità si rivela solo tra aziende verificate dalla piattaforma: finché una delle due non lo è, restate anonime. Presentatevi in chat e verificate i dati sul Registro Imprese prima di condividere informazioni riservate.",
+  identitaVerificaCta: "Verifica l'identità della tua azienda",
   nuoviMessaggi: "Nuovi messaggi",
   oscurato: "Messaggio oscurato dalla moderazione.",
   tuaAzienda: "La tua azienda",
@@ -912,4 +954,174 @@ export const CONSORZIO_COPY = {
   esterno: "Fuori dalla piattaforma",
   notaEsterni:
     "Per un membro esterno nome, paese e tipo di soggetto li dichiari tu: la piattaforma non li verifica e non ne controlla collegamenti né bilanci.",
+  /** Call che la tua azienda non può consultare (sospesa per moderazione)
+   *  ma di cui fa ancora parte del consorzio (WP9): si può solo uscire. */
+  nonConsultabileTitolo: "Questa call al momento non è consultabile",
+  nonConsultabileTesto:
+    "La tua azienda fa ancora parte del suo consorzio. Se vuoi, puoi uscirne: da quel momento non sarai più impegnata su questo bando.",
+  nonConsultabileSoloTitolare: "Per uscire dal consorzio serve il titolare dell'azienda.",
+  esciDialogTitolo: "Uscire dal consorzio?",
+  esciDialogTesto:
+    "La tua azienda non farà più parte del consorzio di questa call. La conversazione resta; per rientrare servirà un nuovo accordo con chi ha creato la call.",
+  uscitaFatta: "La tua azienda è uscita dal consorzio.",
+} as const;
+
+/** Verifica dell'identità dell'azienda da parte della piattaforma (WP9,
+ *  decisione di Michele): cosa sblocca, stati e metodi in parole. */
+export const IDENTITA_COPY = {
+  titolo: "Verifica dell'identità",
+  spiegazione:
+    "Un amministratore della piattaforma controlla che tu rappresenti davvero l'azienda, per esempio con una telefonata alla sede o una PEC. Non costa nulla.",
+  sblocca: [
+    "mostrare il nome dell'azienda nel profilo partner;",
+    "rivelare i nomi dopo un'accettazione, quando anche l'altra azienda è verificata.",
+  ],
+  sbloccaTitolo: "Cosa sblocca",
+  stati: {
+    non_richiesta: "Non verificata",
+    richiesta: "Verifica in corso",
+    verificata: "Identità verificata",
+    rifiutata: "Verifica non riuscita",
+  } satisfies Record<StatoIdentitaAzienda, string>,
+  descrizioneStato: {
+    non_richiesta: "L'identità dell'azienda non è ancora verificata.",
+    richiesta:
+      "Hai chiesto la verifica: un amministratore ti contatterà. Ti avvisiamo appena l'avrà controllata.",
+    verificata:
+      "L'identità dell'azienda è verificata. Se cambi ragione sociale o partita IVA, la verifica si revoca da sola.",
+    rifiutata:
+      "Non siamo riusciti a verificare l'identità dell'azienda. Puoi chiedere di nuovo la verifica.",
+  } satisfies Record<StatoIdentitaAzienda, string>,
+  metodi: {
+    telefonata_sede: "Telefonata alla sede",
+    documento_legale_rappresentante: "Documento del legale rappresentante",
+    pec: "PEC dell'azienda",
+    altro: "Altro",
+  } satisfies Record<MetodoVerificaIdentita, string>,
+  chiedi: "Chiedi la verifica",
+  chiediDiNuovo: "Chiedi di nuovo la verifica",
+  richiestaTitolo: "Chiedi la verifica dell'identità",
+  notaEtichetta: "Come preferisci essere contattato? (facoltativo)",
+  notaAiuto:
+    "Per esempio: «di mattina, al numero della sede». Non servono dati personali: useremo i recapiti ufficiali dell'azienda.",
+  notaMax: 500,
+  inviata: "Richiesta inviata: ti avvisiamo appena l'avremo controllata.",
+  servonoDati:
+    "Per chiedere la verifica servono i dati ufficiali dell'azienda dal Registro Imprese.",
+  registroNonCoerente:
+    "I dati dell'azienda non corrispondono più al Registro Imprese: finché non li aggiorni, il nome non si può mostrare.",
+  soloTitolare: "La verifica la chiede il titolare dell'azienda.",
+} as const;
+
+/** Moderazione dei partenariati (WP9, DSA art. 16-20): stati, decisioni,
+ *  ricorso. I testi della motivazione e delle vie di ricorso sono SEGNAPOSTO:
+ *  BOZZA — DA RIVEDERE CON IL LEGALE (`TESTI_LEGALI_WP9_VERSIONE`). */
+export const MODERAZIONE_COPY = {
+  stati: {
+    ricevuta: "Ricevuta",
+    in_esame: "In esame",
+    decisa: "Decisa",
+    ricorso_presentato: "Ricorso presentato",
+    ricorso_deciso: "Ricorso deciso",
+  } satisfies Record<StatoSegnalazione, string>,
+  oggetti: {
+    call: "Call di partenariato",
+    profilo: "Profilo partner",
+    messaggio: "Messaggio in chat",
+  } satisfies Record<OggettoSegnalazione, string>,
+  /** Decisione, come la legge l'admin. */
+  decisioni: {
+    nessuna_azione: "Nessuna azione",
+    contenuto_rimosso: "Messaggio oscurato",
+    call_sospesa: "Call sospesa",
+    profilo_sospeso: "Profilo sospeso",
+  } satisfies Record<DecisioneSegnalazione, string>,
+  /** Decisione, come la legge chi ha segnalato. */
+  decisioniSegnalante: {
+    nessuna_azione:
+      "Abbiamo esaminato il contenuto e non abbiamo trovato violazioni: resta visibile.",
+    contenuto_rimosso: "Abbiamo oscurato il messaggio che hai segnalato.",
+    call_sospesa: "Abbiamo sospeso la call che hai segnalato.",
+    profilo_sospeso: "Abbiamo sospeso il profilo partner che hai segnalato.",
+  } satisfies Record<DecisioneSegnalazione, string>,
+  /** Decisione, come la legge l'azienda autrice (mai chi ha segnalato). */
+  decisioniAutore: {
+    nessuna_azione: "Abbiamo esaminato il contenuto e non abbiamo preso provvedimenti.",
+    contenuto_rimosso: "Abbiamo oscurato un messaggio della tua azienda.",
+    call_sospesa: "Abbiamo sospeso la call della tua azienda.",
+    profilo_sospeso: "Abbiamo sospeso il profilo partner della tua azienda.",
+  } satisfies Record<DecisioneSegnalazione, string>,
+  esitiRicorso: {
+    confermata: "Decisione confermata",
+    riformata: "Decisione cambiata",
+  } satisfies Record<EsitoRicorso, string>,
+  esitiRicorsoSpiegazione: {
+    confermata: "Abbiamo riesaminato il caso e la decisione resta la stessa.",
+    riformata: "Abbiamo riesaminato il caso e cambiato la decisione.",
+  } satisfies Record<EsitoRicorso, string>,
+  inAttesa:
+    "Stiamo esaminando la segnalazione: ti avvisiamo quando c'è una decisione.",
+  ricorsoTitolo: "Presenta un ricorso",
+  ricorsoSpiegazione:
+    "Se non sei d'accordo con la decisione puoi chiederci di riesaminarla. Il ricorso si presenta una sola volta, entro 6 mesi dalla decisione, e lo esamina il nostro staff.",
+  /** All'autore, quando la restrizione nasce dal ricorso accolto di chi
+   *  aveva segnalato. */
+  decisioneDalRicorso:
+    "In un primo momento non avevamo preso provvedimenti: abbiamo cambiato la decisione dopo aver riesaminato la segnalazione.",
+  ricorsoEtichetta: "Perché la decisione andrebbe cambiata",
+  ricorsoMin: 20,
+  ricorsoMax: 2000,
+  ricorsoInviato: "Ricorso inviato: ti avvisiamo quando lo avremo esaminato.",
+  ricorsoInAttesa: "Stiamo esaminando il ricorso: ti avvisiamo quando c'è una decisione.",
+  /** Vie di ricorso esterne, generiche (DSA art. 20-21). */
+  vieEsterne:
+    "Oltre al ricorso interno puoi rivolgerti a un organismo di risoluzione extragiudiziale delle controversie certificato o all'autorità giudiziaria.",
+  motivazioneMin: 20,
+  motivazioneMax: 2000,
+  /** Motivazione (statement of reasons) inviata all'azienda autrice. */
+  sorTitolo: "Motivazione della decisione",
+} as const;
+
+/** Pannello admin dei partenariati (WP9): schede, metriche e costi. */
+export const ADMIN_PARTENARIATI_COPY = {
+  schede: {
+    segnalazioni: "Segnalazioni",
+    identita: "Identità",
+    call: "Call",
+    metriche: "Metriche",
+    costi: "Costi",
+    estrazioni: "Estrazioni",
+  },
+  providers: {
+    anthropic: "Anthropic (AI)",
+    openapi: "openapi.it",
+  } as Record<string, string>,
+  servizi: {
+    partenariato_estrazione: "Estrazione delle regole dei bandi",
+    partner_profilo_ai: "Bozza del profilo partner",
+    partner_call_posizioni: "Posizioni proposte per le call",
+    partner_call_testi: "Testi proposti per le call",
+    partner_bozza: "Bozze dei documenti",
+    "IT-advanced": "Bilanci (IT-advanced)",
+    "bilancio-ottico": "Bilancio ufficiale",
+    "bilancio-ottico-stato": "Stato del bilancio ufficiale",
+    "visure-impresa": "Visura dell'impresa",
+  } as Record<string, string>,
+  esiti: {
+    success: "Riuscite",
+    error: "Errore",
+    timeout_unknown: "Esito incerto",
+  } as Record<string, string>,
+  notaValute:
+    "Gli importi sono nella valuta del fornitore: euro per openapi.it, dollari per Anthropic. Non si sommano tra loro.",
+  notaMetriche:
+    "Le metriche riguardano le call pubblicate nel periodo; candidature e inviti di quelle call contano in qualunque momento.",
+  motivazioneMin: 20,
+  motivazioneMax: 2000,
+  /** Sospensione d'ufficio: la motivazione arriva per intero all'azienda
+   *  nella notifica (e resta sul contenuto sospeso). */
+  motivazioneSospensioneMax: 500,
+  motivazioneSospensioneAiuto:
+    "La legge l'azienda nella notifica, insieme a come contestare la decisione: niente dati di altre persone.",
+  motivoRevocaMax: 500,
 } as const;

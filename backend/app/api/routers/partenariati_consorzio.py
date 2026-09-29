@@ -98,8 +98,9 @@ async def esci(
     secondary: SecondaryClient,
 ) -> ConsorzioOut:
     """Uscita dal consorzio: il creatore toglie un membro, un'azienda esce da
-    sé. 409 `membro_non_rimovibile` (il creatore resta),
-    `call_non_modificabile`."""
+    sé, anche da una call sospesa per moderazione (WP9: solo la propria riga;
+    la risposta ha solo quella). 409 `membro_non_rimovibile` (il creatore
+    resta), `call_non_modificabile`."""
     return await consorzio.esci(primary, secondary, active, user, call_id, membro_id)
 
 

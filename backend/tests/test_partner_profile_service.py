@@ -3,15 +3,18 @@
 bloccanti su TUTTI i testi liberi (identificativi se anonimo, cognomi solo
 avvisi), informativa superata, `p_richiedi_non_sandbox` da `openapi_env`,
 referente effettivo solo con la membership ancora valida, annullamento della
-sola proposta, profilo nominativo spento, bozza AI (input senza dati
+sola proposta, profilo nominativo solo con l'identità verificata dalla
+piattaforma (WP9: stato e richiesta della verifica, revoca che spegne il
+nome), bozza AI (input senza dati
 personali, `dati_insufficienti`, prenotazione + job, limite per titolare,
 chiusura atomica di bozza ed esecuzione, costi su ogni ramo come il WP3, un
 solo registro consumi per esecuzione anche con la cancellazione del task,
 failsafe in lettura), passo dello scheduler.
 
 Il primario è un gemello in memoria delle tabelle e delle RPC della 0035
-(stesse guardie e stessi detail) e di `fn_partenariati_ai_concludi` della
-0034; il modello è finto e NESSUNA chiamata esce verso Anthropic."""
+(stesse guardie e stessi detail, con la regola del nominativo della 0041),
+di `fn_partenariato_identita_forte` e `fn_identita_richiedi` della 0041 e di
+`fn_partenariati_ai_concludi` della 0034; il modello è finto e NESSUNA chiamata esce verso Anthropic."""
 
 import asyncio
 import uuid
@@ -61,6 +64,7 @@ OWNER = "a0000000-0000-0000-0000-000000000001"
 MEMBRO = "b0000000-0000-0000-0000-000000000002"
 ALTRO_MEMBRO = "b0000000-0000-0000-0000-000000000003"
 ESTRANEO = "b0000000-0000-0000-0000-000000000009"
+ADMIN = "d0000000-0000-0000-0000-0000000000ad"
 COMPANY = "c0000000-0000-0000-0000-000000000001"
 FM_MEMBRO = "f0000000-0000-0000-0000-000000000002"
 FM_ALTRO = "f0000000-0000-0000-0000-000000000003"
@@ -289,6 +293,7 @@ class FakeDb:
         }
         self.esecuzioni: dict[str, dict] = {}
         self.consensi: list[dict] = []
+        self.verifiche: list[dict] = []
         self.audit: list[dict] = []
         self.usage: list[dict] = []
         self.upserts: list[dict] = []
@@ -390,6 +395,67 @@ class FakeDb:
     def _registro(self, **riga):
         self.consensi.append({"company_profile_id": COMPANY, "family_parent_id": OWNER, **riga})
 
+    # -- identità (T5 e 0041)
+    def _registro_ok(self, richiedi_non_sandbox: bool) -> bool:
+        """fn_partenariato_identita_ok."""
+        azienda = self._azienda(COMPANY)
+        return any(
+            d["piva_fetched"] == azienda["partita_iva"]
+            and (d.get("stato_impresa") or "").strip().lower() == "attiva"
+            and not (richiedi_non_sandbox and d["sandbox"])
+            for d in self.tabelle["company_data"]
+        )
+
+    @property
+    def stato_identita(self) -> dict | None:
+        righe = self.tabelle.setdefault("company_identita_stato", [])
+        return righe[0] if righe else None
+
+    def verifica_identita(self) -> "FakeDb":
+        """fn_identita_decidi(verificata) dell'admin."""
+        self.tabelle["company_identita_stato"] = [{
+            "company_profile_id": COMPANY, "stato": "verificata", "metodo": "pec",
+            "verificata_at": _iso(), "verificata_da": ADMIN, "richiesta_at": _iso(60),
+        }]
+        return self
+
+    def revoca_identita(self) -> None:
+        """fn_identita_revoca o revoca automatica del trigger."""
+        self.stato_identita.update(stato="non_richiesta", metodo=None, verificata_at=None,
+                                   verificata_da=None)
+
+    def _identita_forte(self) -> bool:
+        stato = self.stato_identita
+        return bool(stato and stato["stato"] == "verificata" and self._registro_ok(False))
+
+    # -- RPC 0041
+    def _fn_partenariato_identita_forte(self, p):
+        return p["p_company"] == COMPANY and self._identita_forte()
+
+    def _fn_identita_richiedi(self, p):
+        nota = (p["p_nota"] or "").strip() or None
+        if nota and len(nota) > 500:
+            raise errore_rpc("parametri_non_validi")
+        if p["p_attore"] is None or p["p_attore"] != p["p_owner"]:
+            raise errore_rpc("attore_non_titolare")
+        if self._azienda(p["p_company"], p["p_owner"], viva=True) is None:
+            raise errore_rpc("company_not_found")
+        if not self._registro_ok(False):
+            raise errore_rpc("identita_non_verificata")
+        stato = self.stato_identita
+        if stato and stato["stato"] == "richiesta":
+            raise errore_rpc("identita_richiesta_aperta")
+        if stato and stato["stato"] == "verificata":
+            raise errore_rpc("identita_gia_verificata")
+        self.tabelle["company_identita_stato"] = [{
+            "company_profile_id": COMPANY, "stato": "richiesta", "metodo": None,
+            "verificata_at": None, "verificata_da": None, "richiesta_at": _iso(),
+        }]
+        self.verifiche.append({"azione": "richiesta", "nota": nota, "origine": "utente",
+                               "attore_user_id": p["p_attore"]})
+        return {"stato": dict(self.stato_identita), "family_parent_id": p["p_owner"],
+                "modificato": True}
+
     # -- RPC 0035
     def _fn_partner_consenso(self, p):
         if p["p_azione"] not in ("concedi", "revoca", "anonimato"):
@@ -410,24 +476,12 @@ class FakeDb:
                 raise errore_rpc("profilo_sospeso")
         if azione == "concedi" or (azione == "anonimato" and not anonimo and prof["anonimo"]
                                    and prof["visibile_come_partner"]):
-            azienda = self._azienda(COMPANY)
-            richiedi = p["p_richiedi_non_sandbox"] is not False
-            if not any(
-                d["piva_fetched"] == azienda["partita_iva"]
-                and (d.get("stato_impresa") or "").strip().lower() == "attiva"
-                and not (richiedi and d["sandbox"])
-                for d in self.tabelle["company_data"]
-            ):
+            if not self._registro_ok(p["p_richiedi_non_sandbox"] is not False):
                 raise errore_rpc("identita_non_verificata")
-            if not anonimo:
-                titolare = next(r for r in self.tabelle["profiles"] if r["id"] == p["p_owner"])
-                cf = (titolare.get("codice_fiscale") or "").strip().upper()
-                if not (titolare.get("cf_verified_at") and any(
-                    (pe.get("codice_fiscale") or "").strip().upper() == cf
-                    and pe["is_legale_rappresentante"]
-                    for pe in self.tabelle["company_people"]
-                )):
-                    raise errore_rpc("rappresentante_non_verificato")
+            # 0041: fn_partenariato_rappresentante_ok = identità verificata
+            # dall'admin (il CF del titolare non conta più).
+            if not anonimo and not self._identita_forte():
+                raise errore_rpc("rappresentante_non_verificato")
         cambiato = False
         if azione == "concedi":
             if not (prof["visibile_come_partner"] and prof["consenso_versione"] == p["p_versione"]
@@ -718,9 +772,15 @@ def catalogo(monkeypatch):
 
 @pytest.fixture
 def nominativo_attivo(monkeypatch):
-    """Il profilo nominativo come sarà con una verifica forte della
-    rappresentanza: oggi è spento (`NOMINATIVO_DISPONIBILE`)."""
+    """L'interruttore globale del nominativo acceso (il default dal WP9): i
+    test lo dichiarano esplicitamente. Serve comunque l'identità verificata
+    dalla piattaforma (`FakeDb.verifica_identita`)."""
     monkeypatch.setattr(pps, "NOMINATIVO_DISPONIBILE", True)
+
+
+@pytest.fixture
+def nominativo_spento(monkeypatch):
+    monkeypatch.setattr(pps, "NOMINATIVO_DISPONIBILE", False)
 
 
 @pytest.fixture
@@ -823,9 +883,14 @@ class TestTitolareEMembro:
         assert out.completezza == 10  # solo i tipi dedotti
         assert out.identita.verificata is True
         assert out.identita.denominazione_registro == "ROSSI MECCANICA SRL"
-        # Nominativo spento anche per un legale rappresentante con CF verificato.
+        # Il nome richiede l'identità verificata dalla piattaforma, anche per un
+        # legale rappresentante con il CF verificato (il CF non basta, WP9).
         assert out.identita.puo_essere_nominativo is False
-        assert out.identita.motivo_nominativo == "non_disponibile"
+        assert out.identita.motivo_nominativo == "identita_non_verificata_admin"
+        assert out.identita.verifica.model_dump() == {
+            "stato": "non_richiesta", "verificata": False, "richiesta_at": None,
+            "verificata_at": None, "puo_richiedere": True, "motivo_non_richiedibile": None,
+        }
 
 
 # ------------------------------------------------------------ salvataggio
@@ -1211,24 +1276,77 @@ class TestConsenso:
                                consenso_in("anonimato", anonimo=True))
         assert exc.value.code == "testo_non_conforme" and db.rpcs == []
 
-    async def test_nominativo_con_rappresentante_verificato(self, nominativo_attivo):
-        db = FakeDb()
-        assert (await leggi(db)).identita.puo_essere_nominativo is True
+    async def test_nominativo_con_identita_verificata(self, nominativo_attivo):
+        db = FakeDb().verifica_identita()
+        letto = await leggi(db)
+        assert letto.identita.puo_essere_nominativo is True
+        assert letto.identita.motivo_nominativo is None
+        assert letto.identita.verifica.verificata is True
         out = await pps.consenso(db, object(), titolare(), USER_OWNER, consenso_in(anonimo=False))
         assert out.visibile is True and out.anonimo is False
 
     @pytest.mark.parametrize("azione", ["concedi", "anonimato"])
-    async def test_nominativo_non_disponibile(self, azione):
-        """Oggi si compare solo in forma anonima: il nome non si mostra nemmeno
-        con un legale rappresentante dal CF verificato."""
+    async def test_nominativo_senza_verifica_409(self, azione):
+        """Registro coerente e legale rappresentante con il CF verificato, ma
+        nessuna verifica della piattaforma: 409 prima della RPC."""
         db = FakeDb().con_profilo(visibile_come_partner=True, consenso_at=_iso(60),
                                   consenso_versione=INFORMATIVA_PARTNER_VERSIONE)
         with pytest.raises(AppError) as exc:
             await pps.consenso(db, object(), titolare(), USER_OWNER,
                                consenso_in(azione, anonimo=False))
+        assert (exc.value.status_code, exc.value.code) == (409, "identita_non_verificata_admin")
+        assert "chiedila dalla pagina Azienda" in exc.value.message
+        assert db.chiamate("fn_partner_consenso") == [] and db.consensi == []
+        assert db.profilo["anonimo"] is True
+
+    async def test_verifica_revocata_spegne_il_nominativo(self):
+        db = FakeDb().verifica_identita()
+        await pps.consenso(db, object(), titolare(), USER_OWNER, consenso_in(anonimo=False))
+        db.revoca_identita()
+        out = await leggi(db)
+        assert out.identita.puo_essere_nominativo is False
+        assert out.identita.motivo_nominativo == "identita_non_verificata_admin"
+        assert out.identita.verifica.stato == "non_richiesta"
+        # Il profilo resta salvato come nominativo, ma verso terzi è anonimo.
+        assert db.profilo["anonimo"] is False
+        vista = await pps.anteprima(db, object(), titolare(), USER_OWNER)
+        assert vista.anonimo is True and vista.denominazione is None
+        assert "ROSSI MECCANICA" not in vista.model_dump_json()
+        # Tornare anonimi resta sempre possibile.
+        out = await pps.consenso(db, object(), titolare(), USER_OWNER,
+                                 consenso_in("anonimato", anonimo=True))
+        assert out.anonimo is True
+
+    async def test_verificata_ma_registro_non_piu_coerente(self):
+        """Stato `verificata` ma impresa non più attiva nel registro: l'identità
+        forte non vale (fn_partenariato_identita_forte) e il nome non si
+        mostra."""
+        db = FakeDb().verifica_identita()
+        db.tabelle["company_data"] = [company_data(stato_impresa="Cessata")]
+        out = await leggi(db)
+        assert out.identita.verifica.stato == "verificata"
+        assert out.identita.verifica.verificata is False
+        assert out.identita.motivo_nominativo == "identita_non_verificata_admin"
+
+    async def test_anteprima_nominativa_con_la_verifica(self):
+        db = FakeDb().verifica_identita().con_profilo(anonimo=False)
+        vista = await pps.anteprima(db, object(), titolare(), USER_OWNER)
+        assert vista.anonimo is False and vista.denominazione == "ROSSI MECCANICA SRL"
+
+    @pytest.mark.parametrize("azione", ["concedi", "anonimato"])
+    async def test_nominativo_non_disponibile(self, azione, nominativo_spento):
+        """Interruttore globale spento: il nome non si mostra nemmeno con
+        l'identità verificata dalla piattaforma."""
+        db = FakeDb().verifica_identita().con_profilo(
+            visibile_come_partner=True, consenso_at=_iso(60),
+            consenso_versione=INFORMATIVA_PARTNER_VERSIONE)
+        assert (await leggi(db)).identita.motivo_nominativo == "non_disponibile"
+        with pytest.raises(AppError) as exc:
+            await pps.consenso(db, object(), titolare(), USER_OWNER,
+                               consenso_in(azione, anonimo=False))
         assert (exc.value.status_code, exc.value.code) == (409, "nominativo_non_disponibile")
         assert "forma anonima" in exc.value.message
-        assert db.rpcs == [] and db.consensi == []
+        assert db.chiamate("fn_partner_consenso") == [] and db.consensi == []
         assert db.profilo["anonimo"] is True
 
     async def test_nominativo_richiede_il_consenso_sull_informativa_corrente(
@@ -1237,8 +1355,9 @@ class TestConsenso:
         """Consenso dato su un'informativa vecchia: il passaggio al nome non può
         registrare come letta la versione corrente, mai mostrata nel dialog
         breve. Serve una nuova concessione con l'informativa."""
-        db = FakeDb().con_profilo(visibile_come_partner=True, consenso_at=_iso(60),
-                                  consenso_versione="2025-01-vecchia")
+        db = FakeDb().verifica_identita().con_profilo(
+            visibile_come_partner=True, consenso_at=_iso(60),
+            consenso_versione="2025-01-vecchia")
         with pytest.raises(AppError) as exc:
             await pps.consenso(db, object(), titolare(), USER_OWNER,
                                consenso_in("anonimato", anonimo=False))
@@ -1260,21 +1379,40 @@ class TestConsenso:
         assert db.consensi[-1]["informativa_versione"] == "2025-01-vecchia"
 
     @pytest.mark.parametrize(
-        ("titolare_cf", "verificato", "motivo"),
-        [(CF_TITOLARE, None, "cf_non_verificato"), (CF_ALTRA, "2026-01-01", "non_rappresentante")],
+        ("titolare_cf", "verificato"),
+        [(CF_TITOLARE, None), (CF_ALTRA, "2026-01-01")],
     )
-    async def test_nominativo_senza_rappresentante(self, titolare_cf, verificato, motivo,
-                                                   nominativo_attivo):
+    async def test_il_cf_del_titolare_non_conta_piu(self, titolare_cf, verificato,
+                                                    nominativo_attivo):
+        """Dalla 0041 il CF verificato tra i legali rappresentanti è solo
+        informativo: conta la verifica dell'identità da parte della
+        piattaforma."""
         utente = {**USER_OWNER, "codice_fiscale": titolare_cf, "cf_verified_at": verificato}
-        db = FakeDb()
+        db = FakeDb().verifica_identita()
         db.tabelle["profiles"][0] = dict(utente)
         out = await pps.get_profilo(db, object(), titolare(), utente)
-        assert out.identita.puo_essere_nominativo is False
-        assert out.identita.motivo_nominativo == motivo
+        assert out.identita.puo_essere_nominativo is True
+        out = await pps.consenso(db, object(), titolare(), utente, consenso_in(anonimo=False))
+        assert out.anonimo is False
+
+    async def test_la_rpc_ricontrolla_la_verifica(self):
+        """Verifica revocata tra il controllo del servizio e la RPC: il detail
+        della 0041 esce col testo sulla verifica della piattaforma."""
+        db = FakeDb().verifica_identita()
+        db.rpc_errori["fn_partner_consenso"] = "rappresentante_non_verificato"
         with pytest.raises(AppError) as exc:
-            await pps.consenso(db, object(), titolare(), utente, consenso_in(anonimo=False))
+            await pps.consenso(db, object(), titolare(), USER_OWNER, consenso_in(anonimo=False))
         assert (exc.value.status_code, exc.value.code) == (409, "rappresentante_non_verificato")
+        assert "verifica dell'identità" in exc.value.message
         assert "forma anonima" in exc.value.message
+
+    async def test_lettura_della_verifica_non_riuscita_502(self):
+        db = FakeDb()
+        db.rpc_errori["fn_partenariato_identita_forte"] = "errore_interno"
+        with pytest.raises(AppError) as exc:
+            await pps.consenso(db, object(), titolare(), USER_OWNER, consenso_in(anonimo=False))
+        assert (exc.value.status_code, exc.value.code) == (502, "upstream_error")
+        assert db.chiamate("fn_partner_consenso") == []
 
     async def test_anonimato_obbligatorio(self):
         db = FakeDb()
@@ -1287,6 +1425,106 @@ class TestConsenso:
         with pytest.raises(AppError) as exc:
             await pps.consenso(db, object(), titolare(), USER_OWNER, consenso_in())
         assert (exc.value.status_code, exc.value.code) == (409, "profilo_sospeso")
+
+
+# ------------------------------------------------ verifica dell'identità (WP9)
+
+
+class TestVerificaIdentita:
+    async def test_stato_iniziale_per_titolare_e_membro(self):
+        db = FakeDb()
+        out = await pps.get_verifica(db, object(), titolare(), USER_OWNER)
+        assert (out.stato, out.verificata, out.puo_richiedere) == ("non_richiesta", False, True)
+        out = await pps.get_verifica(db, object(), membro(), USER_MEMBRO)
+        assert out.puo_richiedere is False and out.motivo_non_richiedibile == "solo_titolare"
+        # Senza verifica niente RPC dell'identità forte.
+        assert db.chiamate("fn_partenariato_identita_forte") == []
+
+    async def test_richiesta_del_titolare_con_nota(self):
+        db = FakeDb()
+        out = await pps.richiedi_verifica(
+            db, object(), titolare(), USER_OWNER,
+            pps.VerificaIdentitaIn(nota="  Chiamate la sede​ al mattino  "))
+        [p] = db.chiamate("fn_identita_richiedi")
+        assert p == {"p_owner": OWNER, "p_company": COMPANY, "p_attore": OWNER,
+                     "p_nota": "Chiamate la sede al mattino"}
+        assert out.stato == "richiesta" and out.richiesta_at is not None
+        assert out.puo_richiedere is False and out.motivo_non_richiedibile == "gia_richiesta"
+        # Una richiesta aperta alla volta (la RPC).
+        with pytest.raises(AppError) as exc:
+            await pps.richiedi_verifica(db, object(), titolare(), USER_OWNER)
+        assert (exc.value.status_code, exc.value.code) == (409, "identita_richiesta_aperta")
+
+    async def test_senza_nota(self):
+        db = FakeDb()
+        await pps.richiedi_verifica(db, object(), titolare(), USER_OWNER, None)
+        assert db.chiamate("fn_identita_richiedi")[0]["p_nota"] is None
+        db.tabelle["company_identita_stato"] = []
+        await pps.richiedi_verifica(db, object(), titolare(), USER_OWNER,
+                                    pps.VerificaIdentitaIn(nota="​ "))
+        assert db.chiamate("fn_identita_richiedi")[1]["p_nota"] is None
+
+    async def test_il_membro_non_chiede(self):
+        db = FakeDb()
+        with pytest.raises(AppError) as exc:
+            await pps.richiedi_verifica(db, object(), membro(), USER_MEMBRO)
+        assert (exc.value.status_code, exc.value.code) == (403, "forbidden")
+        assert "titolare" in exc.value.message and db.rpcs == []
+
+    async def test_senza_dati_del_registro(self):
+        db = FakeDb()
+        db.tabelle["company_data"] = []
+        out = await pps.get_verifica(db, object(), titolare(), USER_OWNER)
+        assert out.puo_richiedere is False and out.motivo_non_richiedibile == "dati_registro"
+        with pytest.raises(AppError) as exc:
+            await pps.richiedi_verifica(db, object(), titolare(), USER_OWNER)
+        assert (exc.value.status_code, exc.value.code) == (409, "identita_non_verificata")
+        assert "chiedere la verifica" in exc.value.message
+
+    async def test_dati_sandbox_non_impediscono_la_richiesta(self, monkeypatch):
+        """Come fn_identita_richiedi (T5 senza il controllo sandbox): il
+        requisito «non sandbox» resta alle RPC di consenso e pubblicazione."""
+        monkeypatch.setenv("OPENAPI_ENV", "production")
+        from app.core.config import get_settings
+
+        get_settings.cache_clear()
+        db = FakeDb()
+        db.tabelle["company_data"] = [company_data(sandbox=True)]
+        out = await pps.get_verifica(db, object(), titolare(), USER_OWNER)
+        assert out.puo_richiedere is True
+
+    async def test_verificata_senza_dati_dell_admin(self):
+        db = FakeDb().verifica_identita()
+        out = await pps.get_verifica(db, object(), titolare(), USER_OWNER)
+        assert (out.stato, out.verificata, out.motivo_non_richiedibile) == (
+            "verificata", True, "gia_verificata")
+        assert out.verificata_at is not None
+        profilo = (await leggi(db)).model_dump_json()
+        assert ADMIN not in profilo and "pec" not in out.model_dump_json()
+        with pytest.raises(AppError) as exc:
+            await pps.richiedi_verifica(db, object(), titolare(), USER_OWNER)
+        assert exc.value.code == "identita_gia_verificata"
+
+    async def test_rifiutata_si_richiede_di_nuovo(self):
+        db = FakeDb()
+        db.tabelle["company_identita_stato"] = [{
+            "company_profile_id": COMPANY, "stato": "rifiutata", "metodo": None,
+            "verificata_at": None, "verificata_da": None, "richiesta_at": _iso(600)}]
+        out = await pps.get_verifica(db, object(), titolare(), USER_OWNER)
+        assert out.stato == "rifiutata" and out.puo_richiedere is True
+        out = await pps.richiedi_verifica(db, object(), titolare(), USER_OWNER)
+        assert out.stato == "richiesta"
+
+    async def test_lettura_della_verifica_fail_closed_nelle_viste(self):
+        """Stato verificata ma RPC dell'identità forte non leggibile: nelle
+        viste l'identità non vale (niente nome), senza errori."""
+        db = FakeDb().verifica_identita().con_profilo(anonimo=False)
+        db.rpc_errori["fn_partenariato_identita_forte"] = "errore_interno"
+        out = await leggi(db)
+        assert out.identita.verifica.verificata is False
+        assert out.identita.puo_essere_nominativo is False
+        vista = await pps.anteprima(db, object(), titolare(), USER_OWNER)
+        assert vista.anonimo is True and vista.denominazione is None
 
 
 # ------------------------------------------------------------ referente

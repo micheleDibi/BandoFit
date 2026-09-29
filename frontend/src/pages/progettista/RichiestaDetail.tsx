@@ -1,7 +1,9 @@
-import { ArrowLeft, Building2, CalendarClock, Sparkles } from "lucide-react";
+import { ArrowLeft, Building2, CalendarClock, Handshake, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ConsulenzaStatoBadge } from "../Consulenze";
+import { BadgeDaCall, titoloRichiesta } from "./Richieste";
+import { CallProgettista } from "../../components/partenariati/CallProgettista";
 import { AiReportBody } from "../../components/bandi/AiReportBody";
 import { DossierView } from "../../components/company/dossier/DossierView";
 import { VideocallButton } from "../../components/consulenze/VideocallButton";
@@ -11,12 +13,13 @@ import { Card } from "../../components/ui/Card";
 import { TextareaField } from "../../components/ui/Field";
 import { ErrorState, Skeleton } from "../../components/ui/states";
 import {
+  useCallRichiesta,
   useDossierRichiesta,
   useInviaProposta,
   useRichiesta,
   useRitiraProposta,
 } from "../../hooks/useProgettistaRichieste";
-import { apiErrorMessage } from "../../lib/api";
+import { apiErrorCode, apiErrorMessage } from "../../lib/api";
 import { PROPOSTA_STATO_LABELS } from "../../lib/copy";
 import { formatDateTime, formatSlotGiorno, formatSlotOra } from "../../lib/format";
 
@@ -105,6 +108,56 @@ function DossierCompleto({ requestId }: { requestId: string }) {
   );
 }
 
+/** La call di partenariato del cliente (consulto chiesto dalla call, WP9):
+ *  solo per il progettista assegnato e su azione esplicita, perché ogni
+ *  lettura è registrata PRIMA di rispondere (se la registrazione non riesce il
+ *  server non manda nulla). */
+function CallDelCliente({ requestId }: { requestId: string }) {
+  const [visibile, setVisibile] = useState(false);
+  const { data, isPending, isError, error, refetch } = useCallRichiesta(requestId, visibile);
+
+  if (!visibile) {
+    return (
+      <Card className="p-5">
+        <h2 className="inline-flex items-center gap-1.5 font-display text-sm font-semibold text-slate-900">
+          <Handshake className="size-4 text-brand-500" aria-hidden />
+          La call di partenariato del cliente
+        </h2>
+        <p className="mt-1.5 text-sm text-slate-600">
+          Come progettista assegnato vedi la call: testi, regole del bando, requisiti, posizioni e
+          verifica del consorzio. Delle aziende partner vedi solo esiti e fasce, mai contatti,
+          messaggi o numeri esatti. Ogni accesso viene registrato.
+        </p>
+        <Button variant="secondary" className="mt-3" onClick={() => setVisibile(true)}>
+          Apri la call
+        </Button>
+      </Card>
+    );
+  }
+  if (isPending) {
+    return (
+      <div className="space-y-3" aria-hidden>
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-48 w-full" />
+      </div>
+    );
+  }
+  if (isError || !data) {
+    const codice = apiErrorCode(error);
+    return (
+      <ErrorState
+        message={
+          codice === "upstream_error"
+            ? "Non siamo riusciti a registrare l'accesso, quindi la call non si apre. Riprova tra poco."
+            : apiErrorMessage(error, "Impossibile aprire la call.")
+        }
+        onRetry={codice === "not_found" || codice === "forbidden" ? undefined : () => refetch()}
+      />
+    );
+  }
+  return <CallProgettista call={data} />;
+}
+
 export default function RichiestaDetail() {
   const { id } = useParams<{ id: string }>();
   const { data: richiesta, isPending, isError, error, refetch } = useRichiesta(id);
@@ -132,6 +185,10 @@ export default function RichiestaDetail() {
 
   const propostaAperta = richiesta.mie_proposte.find((p) => p.stato === "inviata");
   const report = richiesta.ai_check?.report ?? null;
+  // Consulto dalla call non ancora affidato a chi guarda: niente dati
+  // dell'azienda (li manda il server solo dopo l'assegnazione).
+  const senzaDatiAzienda =
+    !!richiesta.da_call && !richiesta.assegnata_a_me && !richiesta.ragione_sociale;
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,15 +215,26 @@ export default function RichiestaDetail() {
       <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
-            {richiesta.ragione_sociale ?? richiesta.denominazione_utente}
+            {titoloRichiesta(richiesta)}
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {richiesta.partita_iva && (
-              <span className="tabular">P.IVA {richiesta.partita_iva} · </span>
-            )}
-            {richiesta.denominazione_utente}
-            {richiesta.email && ` · ${richiesta.email}`}
-          </p>
+          {senzaDatiAzienda ? (
+            <p className="mt-1 text-sm text-slate-500">
+              I dati dell'azienda li vedi se il titolare ti affida la consulenza.
+            </p>
+          ) : (
+            <p className="mt-1 text-sm text-slate-500">
+              {richiesta.partita_iva && (
+                <span className="tabular">P.IVA {richiesta.partita_iva} · </span>
+              )}
+              {richiesta.denominazione_utente}
+              {richiesta.email && ` · ${richiesta.email}`}
+            </p>
+          )}
+          {richiesta.da_call && (
+            <div className="mt-2">
+              <BadgeDaCall />
+            </div>
+          )}
         </div>
         <ConsulenzaStatoBadge stato={richiesta.stato} />
       </div>
@@ -219,10 +287,31 @@ export default function RichiestaDetail() {
       ) : (
         <Card className="mt-4 p-5">
           <p className="text-sm text-slate-500">
-            Il report AI-check non è più disponibile; esito e punteggio della richiesta
-            restano quelli registrati alla creazione.
+            {senzaDatiAzienda
+              ? "Il consulto è stato chiesto dalla call di partenariato: i dettagli li vedi se il titolare ti affida la consulenza."
+              : richiesta.da_call
+                ? richiesta.esito
+                  ? "Il consulto è stato chiesto dalla call di partenariato: esito e punteggio sono quelli dell'ultimo AI-check del cliente su questo bando."
+                  : "Il consulto è stato chiesto dalla call di partenariato, senza un AI-check."
+                : "Il report AI-check non è più disponibile; esito e punteggio della richiesta restano quelli registrati alla creazione."}
           </p>
         </Card>
+      )}
+
+      {/* Consulto dalla call (WP9): la call solo per l'assegnato. */}
+      {richiesta.da_call && (
+        <section className="mt-4" aria-label="Call di partenariato del cliente">
+          {richiesta.assegnata_a_me ? (
+            <CallDelCliente requestId={richiesta.id} />
+          ) : !senzaDatiAzienda ? (
+            <Card className="p-5">
+              <p className="text-sm text-slate-500">
+                Il cliente ha chiesto un consulto sulla sua call di partenariato: la vedrai se ti
+                affida la consulenza.
+              </p>
+            </Card>
+          ) : null}
+        </section>
       )}
 
       {/* Proposta */}

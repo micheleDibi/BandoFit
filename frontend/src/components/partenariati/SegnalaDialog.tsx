@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { Link } from "react-router-dom";
 import { useSegnala } from "../../hooks/useCallPartenariato";
 import { apiErrorMessage } from "../../lib/api";
 import { CALL_COPY } from "../../lib/copy";
@@ -30,7 +31,8 @@ export function SegnalaDialog({
   const [motivo, setMotivo] = useState<MotivoSegnalazione | "">("");
   const [descrizione, setDescrizione] = useState("");
   const [buonaFede, setBuonaFede] = useState(false);
-  const [ricevuta, setRicevuta] = useState(false);
+  // Id della segnalazione ricevuta (conferma con il link per seguirla).
+  const [ricevuta, setRicevuta] = useState<string | null>(null);
   const [errore, setErrore] = useState<string | null>(null);
 
   // A ogni apertura si riparte da zero.
@@ -39,7 +41,7 @@ export function SegnalaDialog({
     setMotivo("");
     setDescrizione("");
     setBuonaFede(false);
-    setRicevuta(false);
+    setRicevuta(null);
     setErrore(null);
     segnala.reset();
     // Solo all'apertura (`segnala` cambia a ogni render).
@@ -56,14 +58,14 @@ export function SegnalaDialog({
     if (!motivo || !valida) return;
     setErrore(null);
     try {
-      await segnala.mutateAsync({
+      const esito = await segnala.mutateAsync({
         oggetto_tipo: oggettoTipo,
         oggetto_id: oggettoId,
         motivo,
         descrizione: descrizione.trim(),
         buona_fede: true,
       });
-      setRicevuta(true);
+      setRicevuta(esito.id);
     } catch (err) {
       // 409: segnalazione già aperta; 429: troppe segnalazioni oggi.
       setErrore(apiErrorMessage(err));
@@ -94,7 +96,14 @@ export function SegnalaDialog({
       <div role="status" aria-live="polite">
         {ricevuta && (
           <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-            {CALL_COPY.segnalaRicevuta}
+            {CALL_COPY.segnalaRicevuta}{" "}
+            {/* Stato, decisione ed eventuale ricorso (WP9). */}
+            <Link
+              to={`/app/partenariati/segnalazioni/${ricevuta}`}
+              className="font-medium text-emerald-900 underline underline-offset-2"
+            >
+              Segui la segnalazione
+            </Link>
           </p>
         )}
       </div>

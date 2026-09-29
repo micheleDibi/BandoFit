@@ -780,6 +780,25 @@ class FakeDb:
             for d in self.tabelle["company_data"]
         )
 
+    # -- 0041: identità verificata dall'admin
+    def verifica_identita(self, company=COMPANY) -> None:
+        self.tabelle.setdefault("company_identita_stato", []).append({
+            "company_profile_id": company, "stato": "verificata", "metodo": "pec",
+            "verificata_at": _iso(), "verificata_da": USER_ADMIN["id"], "richiesta_at": _iso(5),
+        })
+
+    def revoca_identita(self, company=COMPANY) -> None:
+        for r in self.righe("company_identita_stato", company_profile_id=company):
+            r.update(stato="non_richiesta", metodo=None, verificata_at=None, verificata_da=None)
+
+    def _identita_forte(self, company) -> bool:
+        return any(r["company_profile_id"] == company and r["stato"] == "verificata"
+                   for r in self.tabelle.get("company_identita_stato", [])
+                   ) and self._identita_ok(company, False)
+
+    def _fn_partenariato_identita_forte(self, p):
+        return self._identita_forte(p["p_company"])
+
     def _fn_partner_call_pubblica(self, p):
         self._attore(p)
         call = self._blocca(p)
@@ -787,7 +806,8 @@ class FakeDb:
             raise errore_rpc("stato_call_non_valido")
         if not self._identita_ok(p["p_company"], p["p_richiedi_non_sandbox"]):
             raise errore_rpc("identita_non_verificata")
-        if not call["anonima"]:
+        # 0041: fn_partenariato_rappresentante_ok = identità verificata dall'admin.
+        if not call["anonima"] and not self._identita_forte(p["p_company"]):
             raise errore_rpc("rappresentante_non_verificato")
         if (p["p_bando_stato"] or "").strip().lower() not in ("aperto",
                                                               "in apertura prossimamente"):
@@ -1227,11 +1247,52 @@ class TestCreaBozza:
         assert {"titolo_mancante", "regole_non_confermate", "posizioni_mancanti"} <= codici
         assert out.puo_pubblicare is False
 
-    async def test_anonima_forzata(self):
+    async def test_nominativa_senza_verifica_dell_identita_409(self):
+        """WP9: la call nominativa vale solo per un'azienda con l'identità
+        verificata dalla piattaforma (qui il registro è coerente ma manca la
+        verifica): 409 prima di qualunque scrittura."""
         db = FakeDb()
+        errore = await attendi_codice(
+            pcs.crea_bozza(db, FakeSecondary(), titolare(), USER_OWNER, crea_in(anonima=False)),
+            "identita_non_verificata_admin", 409,
+        )
+        assert "verifica dell'identità" in errore.message and "forma anonima" in errore.message
+        assert db.chiamate("fn_partner_call_crea_bozza") == []
+        assert db.chiamate("fn_partenariato_identita_forte") == [{"p_company": COMPANY}]
+
+    async def test_nominativa_con_l_interruttore_spento_409(self, monkeypatch):
+        monkeypatch.setattr(pcs.pps, "NOMINATIVO_DISPONIBILE", False)
+        db = FakeDb()
+        db.verifica_identita()
         await attendi_codice(
             pcs.crea_bozza(db, FakeSecondary(), titolare(), USER_OWNER, crea_in(anonima=False)),
             "nominativo_non_disponibile", 409,
+        )
+        assert db.chiamate("fn_partner_call_crea_bozza") == []
+
+    async def test_nominativa_di_un_azienda_verificata(self):
+        db = FakeDb()
+        db.verifica_identita()
+        out = await pcs.crea_bozza(db, FakeSecondary(), titolare(), USER_OWNER,
+                                   crea_in(anonima=False))
+        [p] = db.chiamate("fn_partner_call_crea_bozza")
+        assert p["p_dati"]["anonima"] is False and out.anonima is False
+        assert "identita_non_verificata_admin" not in {m.codice for m in out.motivi_blocco}
+
+    async def test_la_verifica_di_un_altra_azienda_dello_stesso_owner_non_vale(self):
+        db = FakeDb()
+        db.verifica_identita(COMPANY_B)
+        await attendi_codice(
+            pcs.crea_bozza(db, FakeSecondary(), titolare(), USER_OWNER, crea_in(anonima=False)),
+            "identita_non_verificata_admin", 409,
+        )
+
+    async def test_lettura_della_verifica_non_riuscita_502(self):
+        db = FakeDb()
+        db.rpc_errori["fn_partenariato_identita_forte"] = "errore_interno"
+        await attendi_codice(
+            pcs.crea_bozza(db, FakeSecondary(), titolare(), USER_OWNER, crea_in(anonima=False)),
+            "upstream_error", 502,
         )
         assert db.chiamate("fn_partner_call_crea_bozza") == []
 
@@ -1556,14 +1617,67 @@ class TestAggiorna:
         assert db.call(call["id"])["visibilita"] == "solo_invitati"
         assert db.call(call["id"])["ruolo_creatore"] == "cerco_capofila"
 
-    async def test_anonima_false_409(self):
+    async def test_anonima_false_senza_verifica_409(self):
         db = FakeDb()
         call = db.con_call()
         await attendi_codice(
             pcs.aggiorna(db, FakeSecondary(), titolare(), USER_OWNER, call["id"],
                          CallAggiornaIn(anonima=False)),
-            "nominativo_non_disponibile", 409,
+            "identita_non_verificata_admin", 409,
         )
+        assert db.chiamate("fn_partner_call_aggiorna") == []
+
+    async def test_anonima_false_con_verifica(self):
+        db = FakeDb()
+        db.verifica_identita()
+        call = db.con_call()
+        out = await pcs.aggiorna(db, FakeSecondary(), titolare(), USER_OWNER, call["id"],
+                                 CallAggiornaIn(anonima=False))
+        [p] = db.chiamate("fn_partner_call_aggiorna")
+        assert p["p_campi"] == {"anonima": False} and out.anonima is False
+
+    async def test_nominativa_revocata_non_si_pubblica(self):
+        """Verifica revocata dopo il salvataggio come nominativa: la bozza lo
+        dice nei motivi di blocco e la pubblicazione risponde 409 senza RPC;
+        tornata anonima si pubblica."""
+        db = FakeDb()
+        db.verifica_identita()
+        call = db.call_pronta(anonima=False)
+        vista = await leggi(db, call)
+        assert "identita_non_verificata_admin" not in {m.codice for m in vista.motivi_blocco}
+        db.revoca_identita()
+        vista = await leggi(db, call)
+        assert "identita_non_verificata_admin" in {m.codice for m in vista.motivi_blocco}
+        assert vista.puo_pubblicare is False
+        await attendi_codice(
+            pcs.pubblica(db, FakeSecondary(), titolare(), USER_OWNER, call["id"]),
+            "identita_non_verificata_admin", 409,
+        )
+        assert db.chiamate("fn_partner_call_pubblica") == []
+        await pcs.aggiorna(db, FakeSecondary(), titolare(), USER_OWNER, call["id"],
+                           CallAggiornaIn(anonima=True))
+        out = await pcs.pubblica(db, FakeSecondary(), titolare(), USER_OWNER, call["id"])
+        assert out.stato == "pubblicata" and out.anonima is True
+
+    async def test_nominativa_verificata_si_pubblica(self):
+        db = FakeDb()
+        db.verifica_identita()
+        call = db.call_pronta(anonima=False)
+        out = await pcs.pubblica(db, FakeSecondary(), titolare(), USER_OWNER, call["id"])
+        assert out.stato == "pubblicata" and out.anonima is False
+
+    async def test_revoca_tra_controllo_e_rpc_mappata_sulla_call(self):
+        """La RPC ricontrolla (fn_partenariato_rappresentante_ok della 0041):
+        il detail esce col messaggio della call."""
+        db = FakeDb()
+        db.verifica_identita()
+        call = db.call_pronta(anonima=False)
+        db.rpc_errori["fn_partner_call_pubblica"] = "rappresentante_non_verificato"
+        errore = await attendi_codice(
+            pcs.pubblica(db, FakeSecondary(), titolare(), USER_OWNER, call["id"]),
+            "rappresentante_non_verificato", 409,
+        )
+        assert "pubblicare la call con il nome" in errore.message
 
     @pytest.mark.parametrize(
         ("campi", "tipo"),
@@ -2869,6 +2983,9 @@ class TestSegnalazioni:
         assert notifica["user_id"] == ALTRO_OWNER
         assert notifica["tipo"] == "partenariato.segnalazione_ricevuta"
         assert notifica["dedup_key"] == f"segnalazione:{out.id}"
+        # WP9: la conferma porta alla pagina della segnalazione (stato,
+        # decisione, ricorso), l'unica traccia persistente per chi segnala.
+        assert notifica["url"] == f"/app/partenariati/segnalazioni/{out.id}"
 
     async def test_doppione_409(self):
         db = FakeDb()

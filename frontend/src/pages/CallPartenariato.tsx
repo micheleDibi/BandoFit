@@ -12,6 +12,8 @@ import {
 import { CandidaturaDialog } from "../components/partenariati/CandidaturaDialog";
 import { descriviCriterio, linkCall, mostraDecimale, percentuale } from "../components/partenariati/callDati";
 import { ConsorzioTab } from "../components/partenariati/ConsorzioTab";
+import { ConsultoCallCard } from "../components/partenariati/ConsultoCallCard";
+import { CallNonTrovata } from "../components/partenariati/UscitaCallSospesa";
 import { CoperturaBadge } from "../components/partenariati/PassoGap";
 import { NotaAnonima } from "../components/partenariati/PassoBando";
 import { paginaDa } from "../components/partenariati/FiltriBacheca";
@@ -300,9 +302,11 @@ function Panoramica({ call }: { call: CallVistaCreatore }) {
           {call.versione > 0 && <Voce titolo="Versione">{call.versione}</Voce>}
         </dl>
         <div className="mt-4">
-          <NotaAnonima />
+          <NotaAnonima anonima={call.anonima} />
         </div>
       </Sezione>
+
+      <ConsultoCallCard call={call} />
 
       <Sezione titolo={call.titolo || "Call senza titolo"}>
         <dl className="space-y-4">
@@ -796,8 +800,9 @@ function LaTuaCandidatura({
 }
 
 /** Per la controparte accettata: budget esatto e dettagli riservati della
- *  call e, solo con la rivelazione accesa (oggi spenta), l'identità
- *  dell'azienda. Mai i bilanci di nessuno. */
+ *  call e, solo se all'accettazione tutte e due le aziende avevano (e hanno
+ *  ancora) l'identità verificata dalla piattaforma, l'identità dell'azienda.
+ *  Mai i bilanci di nessuno. */
 function Riservati({ call }: { call: CallDettaglioAltraAzienda }) {
   const identita = call.identita_rivelata ? call.identita : null;
   const dettagli = call.dettagli_riservati ?? null;
@@ -883,12 +888,10 @@ export default function CallPartenariato() {
     );
   } else if (callQ.isError) {
     corpo =
-      apiErrorCode(callQ.error) === "not_found" ? (
-        <EmptyState
-          title="Call non trovata"
-          description="Non esiste, non è più aperta oppure non è visibile alla tua azienda."
-          action={<LinkButton to="/app/partenariati?vista=tutte">Tutte le call</LinkButton>}
-        />
+      apiErrorCode(callQ.error) === "not_found" && id ? (
+        // «Call non trovata», oppure (WP9) l'uscita dal consorzio di una
+        // call sospesa per moderazione di cui la tua azienda fa parte.
+        <CallNonTrovata callId={id} />
       ) : (
         <ErrorState
           message={apiErrorMessage(callQ.error, "Impossibile caricare la call.")}

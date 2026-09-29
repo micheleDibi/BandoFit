@@ -16,7 +16,9 @@ Tre famiglie:
     (`partner_profile_prompts.pulisci_bozza`).
   * DTO: `PartnerProfileOut` (vista del titolare e dei membri),
     `PartnerPubblicoOut` (proiezione a whitelist verso terzi, costruita solo da
-    `partner_profilo_pubblico.profilo_pubblico`), `InformativaPartnerOut`.
+    `partner_profilo_pubblico.profilo_pubblico`), `InformativaPartnerOut`,
+    `VerificaIdentitaOut` (WP9: verifica dell'identità da parte della
+    piattaforma, che sblocca il nominativo).
 
 Le liste di codici si deduplicano mantenendo l'ordine della prima comparsa.
 """
@@ -443,9 +445,46 @@ class ConsensoStatoOut(BaseModel):
 MotivoIdentita = Literal["dati_non_importati", "piva_diversa", "impresa_non_attiva", "dati_sandbox"]
 
 
-# `non_disponibile`: il profilo nominativo è spento in questa versione
-# (partner_profile_service.NOMINATIVO_DISPONIBILE), qualunque sia il titolare.
-MotivoNominativo = Literal["cf_non_verificato", "non_rappresentante", "non_disponibile"]
+# Perché il profilo non può mostrare il nome (WP9, decisione di Michele):
+# `non_disponibile` = interruttore globale spento
+# (partner_profile_service.NOMINATIVO_DISPONIBILE); `identita_non_verificata_admin`
+# = l'identità dell'azienda non è verificata dalla piattaforma (o i dati del
+# registro non sono più coerenti). Il nome si mostra solo ad aziende verificate.
+MotivoNominativo = Literal["non_disponibile", "identita_non_verificata_admin"]
+
+# Stato della verifica dell'identità da parte dell'admin (company_identita_stato,
+# 0041): nessuna riga = `non_richiesta`.
+StatoVerificaIdentita = Literal["non_richiesta", "richiesta", "verificata", "rifiutata"]
+# Perché il titolare non può chiedere la verifica adesso.
+MotivoVerificaNonRichiedibile = Literal[
+    "solo_titolare", "dati_registro", "gia_richiesta", "gia_verificata"
+]
+NOTA_VERIFICA_MAX = 500
+
+
+class VerificaIdentitaOut(BaseModel):
+    """GET/POST /me/partner-profile/identita (e `identita.verifica` del
+    profilo): stato della verifica dell'identità dell'azienda da parte della
+    piattaforma. `verificata` è l'identità FORTE di oggi (stato verificata e
+    dati del Registro Imprese ancora coerenti, `fn_partenariato_identita_forte`):
+    sblocca profilo nominativo, call nominative e rivelazione simmetrica. Mai
+    chi ha verificato né le note dell'admin."""
+
+    stato: StatoVerificaIdentita = "non_richiesta"
+    verificata: bool = False
+    richiesta_at: datetime | None = None
+    verificata_at: datetime | None = None
+    puo_richiedere: bool = False
+    motivo_non_richiedibile: MotivoVerificaNonRichiedibile | None = None
+
+
+class VerificaIdentitaIn(BaseModel):
+    """POST /me/partner-profile/identita: nota facoltativa per la piattaforma
+    («come preferisci essere contattato»), senza dati personali obbligatori."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nota: str | None = Field(default=None, max_length=NOTA_VERIFICA_MAX)
 
 
 class IdentitaPartnerOut(BaseModel):
@@ -454,6 +493,7 @@ class IdentitaPartnerOut(BaseModel):
     denominazione_registro: str | None = None
     puo_essere_nominativo: bool = False
     motivo_nominativo: MotivoNominativo | None = None
+    verifica: VerificaIdentitaOut = Field(default_factory=VerificaIdentitaOut)
 
 
 class EsperienzaPartnerOut(BaseModel):

@@ -127,6 +127,8 @@ const adminLinks: NavItem[] = [
   { to: "/app/admin/addon", label: "Add-on" },
   { to: "/app/admin/pagamenti", label: "Pagamenti" },
 ];
+// Solo a modulo acceso (WP9): moderazione, verifiche, call, metriche.
+const adminPartenariatiLink: NavItem = { to: "/app/admin/partenariati", label: "Partenariati" };
 
 const navLinkClasses = ({ isActive }: { isActive: boolean }) =>
   cn(
@@ -148,6 +150,7 @@ export function AppShell() {
   // anche gli Advisor multi-azienda gestiscono membri, con appartenenza e
   // visibilità per azienda). La pagina dedicata è /app/collegati.
   const isParent = me?.family?.role === "parent";
+  const linkAdmin = partenariatiAttivo ? [...adminLinks, adminPartenariatiLink] : adminLinks;
   const accountLinks: NavItem[] = isParent
     ? [...accountBase, { to: "/app/collegati", label: "Account collegati" }]
     : accountBase;
@@ -204,7 +207,7 @@ export function AppShell() {
             {isAdmin && (
               <NavMenu
                 label="Admin"
-                items={adminLinks}
+                items={linkAdmin}
                 icon={<ShieldCheck className="size-3.5" aria-hidden />}
               />
             )}
@@ -248,7 +251,7 @@ export function AppShell() {
             {isAdmin && (
               <>
                 <p className={mobileSectionLabel}>Amministrazione</p>
-                {adminLinks.map(mobileLink)}
+                {linkAdmin.map(mobileLink)}
               </>
             )}
           </nav>

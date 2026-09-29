@@ -327,6 +327,9 @@ export interface Consulenza {
   proposte_aperte: number;
   proposte: Proposta[];
   appuntamento: Appuntamento | null;
+  /** Consulto chiesto dalla call di partenariato (WP9): l'AI-check è
+   *  facoltativo, esito e punteggio ci sono solo se ce n'era uno pronto. */
+  partner_call_id: string | null;
 }
 
 /** Vista PARZIALE del progettista sul pool (requisito: ragione sociale,
@@ -347,6 +350,9 @@ export interface RichiestaPool {
   assegnata_a_me: boolean;
   mia_proposta_stato: PropostaStato | null;
   appuntamento: Appuntamento | null;
+  /** Consulto chiesto dalla call di partenariato (WP9): finché non è
+   *  assegnata a chi guarda, niente dati dell'azienda (solo il bando). */
+  da_call: boolean;
 }
 
 export interface RichiestaPoolDetail extends RichiestaPool {
@@ -1734,22 +1740,23 @@ export type MotivoIdentitaPartner =
   | "impresa_non_attiva"
   | "dati_sandbox";
 
-/** `non_disponibile`: il profilo nominativo è spento in questa versione (si
- *  compare solo in forma anonima), qualunque sia il titolare. */
-export type MotivoNominativoPartner =
-  | "cf_non_verificato"
-  | "non_rappresentante"
-  | "non_disponibile";
+/** Perché il nome dell'azienda non si può mostrare: dal WP9 serve la verifica
+ *  dell'identità da parte della piattaforma (`identita_non_verificata_admin`,
+ *  anche quando i dati del registro non sono più coerenti);
+ *  `non_disponibile` = interruttore globale spento. */
+export type MotivoNominativoPartner = "non_disponibile" | "identita_non_verificata_admin";
 
 /** Identità dal Registro Imprese: senza, il consenso non si può dare. */
 export interface IdentitaPartner {
   verificata: boolean;
   motivo: MotivoIdentitaPartner | null;
   denominazione_registro: string | null;
-  /** Il titolare risulta legale rappresentante con CF verificato: può
-   *  mostrare il nome dell'azienda. */
+  /** L'azienda ha l'identità verificata dalla piattaforma (WP9): può
+   *  mostrare il nome. */
   puo_essere_nominativo: boolean;
   motivo_nominativo: MotivoNominativoPartner | null;
+  /** Verifica dell'identità da parte della piattaforma (WP9). */
+  verifica: VerificaIdentita;
 }
 
 /** Proposta della bozza AI: diventa visibile solo dopo «Applica» e
@@ -2136,12 +2143,14 @@ export interface RegoleCallSnapshot {
 
 // ---- Input (corpi delle richieste; il server rifiuta i campi in più) ----------
 
-/** `POST /partenariati/call`. `anonima` non si manda: le call sono solo
- *  anonime (false → 409 `nominativo_non_disponibile`). */
+/** `POST /partenariati/call`. `anonima: false` (call con il nome) solo per
+ *  un'azienda con l'identità verificata dalla piattaforma (WP9), altrimenti
+ *  409 `identita_non_verificata_admin`. */
 export interface CallCreaInput {
   bando_slug: string;
   ruolo_creatore: RuoloCreatoreCall;
   forma_aggregazione_prevista?: FormaPrevistaCall | null;
+  anonima?: boolean;
   /** Solo se le regole del bando dicono «non ammesso» (almeno 20 caratteri). */
   override_non_ammesso_motivo?: string | null;
 }
@@ -2164,6 +2173,8 @@ export interface CallAggiornaInput {
   quota_creatore_pct?: string | null;
   ruolo_creatore?: RuoloCreatoreCall;
   forma_aggregazione_prevista?: FormaPrevistaCall | null;
+  /** Solo in bozza; `false` solo con l'identità verificata (WP9). */
+  anonima?: boolean;
   wizard_passo?: number;
   override_non_ammesso_motivo?: string | null;
 }
@@ -3114,4 +3125,403 @@ export interface DocumentoStatoInput {
   stato: StatoDocumentoConsorzio;
   /** Fino a 500 caratteri. */
   note: string | null;
+}
+
+// ---- WP9: consulto dalla call, moderazione DSA, admin e identità verificata --------
+
+/** Stato della verifica dell'identità dell'azienda da parte della
+ *  piattaforma (0041, decisione di Michele): sblocca il profilo con il nome,
+ *  le call con il nome e la rivelazione dell'identità dopo un'accettazione
+ *  (solo tra due aziende verificate). */
+export type StatoIdentitaAzienda = "non_richiesta" | "richiesta" | "verificata" | "rifiutata";
+
+/** Come l'admin ha verificato l'identità (obbligatorio con `verificata`). */
+export type MetodoVerificaIdentita =
+  | "telefonata_sede"
+  | "documento_legale_rappresentante"
+  | "pec"
+  | "altro";
+
+/** Perché il titolare non può chiedere la verifica adesso. */
+export type MotivoVerificaNonRichiedibile =
+  | "solo_titolare"
+  | "dati_registro"
+  | "gia_richiesta"
+  | "gia_verificata";
+
+/** `GET/POST /me/partner-profile/identita` (anche `identita.verifica` del
+ *  profilo partner): la verifica dell'azienda attiva. `verificata` è
+ *  l'identità FORTE di oggi (stato verificata e dati del Registro Imprese
+ *  ancora coerenti): è quella che sblocca il nome. */
+export interface VerificaIdentita {
+  stato: StatoIdentitaAzienda;
+  verificata: boolean;
+  richiesta_at: string | null;
+  verificata_at: string | null;
+  puo_richiedere: boolean;
+  motivo_non_richiedibile: MotivoVerificaNonRichiedibile | null;
+}
+
+/** `POST /me/partner-profile/identita`: la nota dice come preferisci essere
+ *  contattato (facoltativa, al massimo 500 caratteri, niente dati personali
+ *  obbligatori). */
+export interface VerificaIdentitaInput {
+  nota: string | null;
+}
+
+/** Dati del Registro Imprese per la verifica (recapiti della SEDE dal
+ *  registro, mai quelli inseriti dall'utente). */
+export interface RegistroIdentitaAdmin {
+  denominazione: string | null;
+  partita_iva: string | null;
+  stato_impresa: string | null;
+  comune: string | null;
+  provincia: string | null;
+  pec: string | null;
+  telefono: string | null;
+}
+
+/** Riga della coda admin delle verifiche (`GET /admin/partenariati/identita`). */
+export interface IdentitaAdmin {
+  company_profile_id: string;
+  ragione_sociale: string | null;
+  denominazione_registro: string | null;
+  partita_iva: string | null;
+  stato: StatoIdentitaAzienda;
+  metodo: MetodoVerificaIdentita | null;
+  richiesta_at: string | null;
+  verificata_at: string | null;
+  aggiornato_at: string | null;
+  /** Nota del titolare all'ultima richiesta. */
+  nota: string | null;
+  titolare: { nome: string | null; email: string | null } | null;
+  /** Dati del registro coerenti (T5): altrimenti non si verifica. */
+  registro_ok: boolean;
+  registro_motivo: MotivoIdentitaPartner | null;
+  registro: RegistroIdentitaAdmin;
+}
+
+/** Filtro della coda delle verifiche (`tutte` = qualunque stato). */
+export type FiltroIdentitaAdmin = StatoIdentitaAzienda | "tutte";
+
+/** `POST /admin/partenariati/identita/{company_id}/decidi`. */
+export interface IdentitaDecisioneInput {
+  esito: "verificata" | "rifiutata";
+  /** Obbligatorio con `verificata`, ignorato con `rifiutata`. */
+  metodo: MetodoVerificaIdentita | null;
+  /** Al massimo 500 caratteri, mai dati personali oltre il necessario. */
+  nota: string | null;
+}
+
+/** `POST /admin/partenariati/identita/{company_id}/revoca` (motivo 1..500). */
+export interface IdentitaRevocaInput {
+  motivo: string;
+}
+
+/** Esito di una decisione o di una revoca dell'admin. */
+export interface IdentitaEsito {
+  company_profile_id: string;
+  stato: StatoIdentitaAzienda;
+  metodo: MetodoVerificaIdentita | null;
+  verificata_at: string | null;
+  modificato: boolean;
+}
+
+/** Decisione motivata su una segnalazione, coerente con l'oggetto (call →
+ *  `call_sospesa`, messaggio → `contenuto_rimosso`, profilo →
+ *  `profilo_sospeso`, oppure `nessuna_azione`). */
+export type DecisioneSegnalazione =
+  | "nessuna_azione"
+  | "contenuto_rimosso"
+  | "call_sospesa"
+  | "profilo_sospeso";
+
+export type EsitoRicorso = "confermata" | "riformata";
+
+/** Il ricorso di una segnalazione (uno solo, entro 6 mesi dalla decisione).
+ *  `testo` solo a chi l'ha presentato e all'admin. */
+export interface RicorsoSegnalazione {
+  da: "autore" | "segnalante";
+  testo: string | null;
+  at: string | null;
+  esito: EsitoRicorso | null;
+  motivazione: string | null;
+  deciso_at: string | null;
+}
+
+/** `GET /partenariati/segnalazioni/{id}`: la segnalazione vista da chi l'ha
+ *  fatta o dall'azienda autrice del contenuto (solo se una restrizione l'ha
+ *  riguardata). Mai l'identità dell'altra parte. */
+export interface SegnalazioneEsito {
+  id: string;
+  /** Codice breve (quello della notifica di ricezione). */
+  codice: string;
+  ruolo: "segnalante" | "autore";
+  oggetto_tipo: OggettoSegnalazione;
+  motivo: MotivoSegnalazione;
+  stato: StatoSegnalazione;
+  created_at: string | null;
+  /** Solo a chi ha segnalato: la sua descrizione. */
+  descrizione: string | null;
+  decisione: DecisioneSegnalazione | null;
+  /** La decisione dopo il ricorso: un ricorso accolto la ribalta. Per
+   *  l'autore di un contenuto sospeso dal ricorso di chi aveva segnalato è la
+   *  restrizione, mentre `decisione` resta `nessuna_azione`. */
+  decisione_effettiva: DecisioneSegnalazione | null;
+  motivazione: string | null;
+  deciso_at: string | null;
+  /** Solo all'autore: la motivazione formale (statement of reasons). */
+  sor_testo: string | null;
+  ricorso: RicorsoSegnalazione | null;
+  /** Chi guarda può presentare il ricorso adesso. */
+  ricorso_possibile: boolean;
+  /** Termine del ricorso, per chi ne ha diritto. */
+  ricorso_entro: string | null;
+  /** Chi guarda può agire (il segnalante; per l'autore solo il titolare). */
+  editable: boolean;
+}
+
+/** `POST /partenariati/segnalazioni/{id}/ricorso` (20..2000 caratteri). */
+export interface RicorsoInput {
+  testo: string;
+}
+
+/** Filtro della coda admin: `aperte` = ricevute, in esame e con un ricorso
+ *  da decidere (default), `tutte` = qualunque stato. */
+export type FiltroCodaSegnalazioni = "aperte" | StatoSegnalazione | "tutte";
+
+/** Riga della coda admin (`GET /admin/partenariati/segnalazioni`). Lo
+ *  snapshot è ciò che il segnalante vedeva quando ha segnalato; mai id di
+ *  utenti. */
+export interface SegnalazioneAdmin {
+  id: string;
+  codice: string;
+  oggetto_tipo: OggettoSegnalazione;
+  oggetto_id: string;
+  motivo: MotivoSegnalazione;
+  descrizione: string;
+  contenuto_snapshot: Record<string, unknown>;
+  stato: StatoSegnalazione;
+  created_at: string | null;
+  autore: { company_profile_id: string; ragione_sociale: string | null } | null;
+  decisione: DecisioneSegnalazione | null;
+  /** La decisione dopo il ricorso (vedi `SegnalazioneEsito`). */
+  decisione_effettiva: DecisioneSegnalazione | null;
+  motivazione: string | null;
+  /** Lo statement of reasons inviato all'autore (anche quello della
+   *  restrizione nata dal ricorso di chi aveva segnalato). */
+  sor_testo: string | null;
+  deciso_at: string | null;
+  ricorso_entro: string | null;
+  ricorso: RicorsoSegnalazione | null;
+  /** Effetto sull'oggetto dell'ultima operazione (solo nelle risposte alle
+   *  POST): applicato, gia_applicato, annullato, mantenuto, … */
+  effetto: string | null;
+}
+
+/** `POST /admin/partenariati/segnalazioni/{id}/decidi` e `…/anteprima`
+ *  (motivazione 20..2000). */
+export interface DecisioneSegnalazioneInput {
+  decisione: DecisioneSegnalazione;
+  motivazione: string;
+}
+
+/** `POST /admin/partenariati/segnalazioni/{id}/anteprima`: la motivazione
+ *  formale che riceverebbe l'autore (null con `nessuna_azione`). */
+export interface AnteprimaStatement {
+  versione: string;
+  testo: string | null;
+}
+
+/** `POST /admin/partenariati/segnalazioni/{id}/ricorso/decidi` (20..2000). */
+export interface DecisioneRicorsoInput {
+  esito: EsitoRicorso;
+  motivazione: string;
+}
+
+/** Un messaggio del contesto di una segnalazione: dell'azienda autrice del
+ *  messaggio segnalato o dell'altra (mai id di utenti o aziende). */
+export interface MessaggioContesto {
+  id: number;
+  lato: "autore" | "altra";
+  testo: string | null;
+  oscurato: boolean;
+  segnalato: boolean;
+  created_at: string | null;
+}
+
+/** `GET /admin/partenariati/segnalazioni/{id}/contesto?completo=&motivazione=`:
+ *  ±10 messaggi o, con una motivazione (20..2000) registrata, la
+ *  conversazione intera. */
+export interface ContestoSegnalazione {
+  completo: boolean;
+  messaggi: MessaggioContesto[];
+  /** La finestra non arriva all'inizio / alla fine della conversazione. */
+  altri_prima: boolean;
+  altri_dopo: boolean;
+  /** La conversazione intera supera il tetto di lettura. */
+  troncato: boolean;
+}
+
+/** Oggetto che l'admin sospende o ripristina direttamente. */
+export type OggettoModerazione = OggettoSegnalazione;
+
+/** `POST /admin/partenariati/{oggetto_tipo}/{id}/sospendi|ripristina`
+ *  (motivazione 20..2000). */
+export interface SospensioneInput {
+  motivazione: string;
+}
+
+export interface EsitoSospensione {
+  oggetto_tipo: OggettoSegnalazione;
+  oggetto_id: string;
+  esito: string;
+  stato: string | null;
+  modificato: boolean;
+}
+
+/** Riga dell'elenco admin delle call (`GET /admin/partenariati/call`). */
+export interface CallAdmin {
+  id: string;
+  titolo: string | null;
+  stato: StatoCall;
+  stato_prima_sospensione: StatoCall | null;
+  visibilita: VisibilitaCall | null;
+  anonima: boolean | null;
+  bando: { id: number | null; slug: string | null; titolo: string | null };
+  creatore: { company_profile_id: string; ragione_sociale: string | null };
+  pubblicata_at: string | null;
+  scadenza_call: string | null;
+  created_at: string | null;
+  sospesa_at: string | null;
+  sospeso_motivo: string | null;
+  validazione_esito: EsitoVoce | null;
+  /** Candidature spontanee e inviti (in qualunque stato). */
+  candidature: number;
+  inviti: number;
+  /** Membri del consorzio non usciti. */
+  membri: number;
+  segnalazioni_aperte: number;
+}
+
+/** Tasso di accettazione di un tipo (candidature spontanee o inviti). */
+export interface AccettazionePartenariati {
+  accettate: number;
+  rifiutate: number;
+  /** accettate / (accettate + rifiutate), tra 0 e 1; null senza decisioni. */
+  tasso: number | null;
+}
+
+/** `GET /admin/partenariati/metriche?da=&a=` (coorte delle call pubblicate
+ *  nel periodo, giorni Europe/Rome, estremi compresi). */
+export interface MetrichePartenariati {
+  da: string;
+  a: string;
+  call_pubblicate: number;
+  candidature: number;
+  inviti: number;
+  candidature_per_call: number | null;
+  /** Call pubblicate da almeno 30 giorni (le sole osservabili). */
+  call_osservabili_30_giorni: number;
+  call_con_candidatura_30_giorni: number;
+  /** Già in percentuale (0..100). */
+  percentuale_call_con_candidatura_30_giorni: number | null;
+  accettazione: Partial<Record<"candidatura" | "invito", AccettazionePartenariati>> | null;
+  ore_mediane_prima_candidatura: number | null;
+  /** Media dei requisiti cercati coperti, tra 0 e 1. */
+  copertura_media_gap: number | null;
+  consorzi_validati: number;
+  consorzi_validati_verde: number;
+}
+
+export type ValutaCosti = "EUR" | "USD";
+
+export interface VoceCostoPartenariati {
+  provider: string;
+  service: string;
+  outcome: string;
+  valuta: ValutaCosti;
+  eventi: number;
+  /** Centesimi nella valuta della voce. */
+  cost_cents: number;
+}
+
+export interface TotaleCostoPartenariati {
+  valuta: ValutaCosti;
+  eventi: number;
+  cost_cents: number;
+}
+
+/** `GET /admin/partenariati/costi?da=&a=`: per provider, servizio, esito e
+ *  valuta; i totali sono per valuta (mai sommati tra EUR e USD). */
+export interface CostiPartenariati {
+  da: string;
+  a: string;
+  voci: VoceCostoPartenariati[];
+  totali: TotaleCostoPartenariati[];
+}
+
+/** `GET /admin/partenariati/estrazioni` (WP3): stato dell'estrazione delle
+ *  regole per bando (mai output grezzo). */
+export interface EstrazioneAdmin {
+  bando_id: number;
+  bando_slug: string;
+  bando_titolo: string;
+  stato: "in_corso" | "pronta" | "errore";
+  esito: "estratta" | "nessun_segnale" | null;
+  fase: FasePartenariato | null;
+  modalita_effettiva: ModalitaPartenariato | null;
+  model: string | null;
+  cost_cents: number;
+  input_tokens: number;
+  output_tokens: number;
+  estratta_at: string | null;
+  verificata_at: string | null;
+  ultima_esecuzione_at: string | null;
+  errore_codice: string | null;
+  tentativi_falliti: number;
+  prossimo_tentativo_at: string | null;
+  updated_at: string | null;
+}
+
+/** `POST /admin/partenariati/run`: esiti dei passi dello scheduler. */
+export interface PartenariatiRun {
+  giorno: string;
+  riepilogo: Record<string, unknown>;
+}
+
+/** `GET /progettista/richieste/{id}/call`: la call del cliente per il
+ *  progettista ASSEGNATO (ogni lettura è registrata; senza registrazione il
+ *  server non risponde). È la vista del creatore a whitelist; nel consorzio
+ *  le altre aziende in piattaforma sono solo «Azienda anonima» con esiti e
+ *  fasce (niente pseudonimo né profilo), nessuna azione possibile. */
+export interface CallVistaProgettista {
+  richiesta_id: string;
+  id: string;
+  stato: StatoCall;
+  motivo_chiusura: MotivoChiusuraCall | null;
+  bando: BandoCall;
+  ruolo_creatore: RuoloCreatoreCall;
+  forma_aggregazione_prevista: FormaPrevistaCall | null;
+  anonima: boolean;
+  titolo: string | null;
+  descrizione_pubblica: string | null;
+  dettagli_riservati: string | null;
+  profilo_partner_ideale: string | null;
+  budget_fascia: BudgetFasciaCall | null;
+  budget_progetto_eur: string | null;
+  quota_creatore_pct: string | null;
+  scadenza_call: string | null;
+  visibilita: VisibilitaCall;
+  regole_partenariato: RegoleCallSnapshot | null;
+  regole_confermate_at: string | null;
+  esclusivita: boolean;
+  posizioni: PosizioneCall[];
+  requisiti: RequisitoCall[];
+  riepilogo: RiepilogoGap;
+  partenariato: GapCall["partenariato"];
+  pubblicata_at: string | null;
+  chiusa_at: string | null;
+  /** null per una bozza (il consorzio nasce alla pubblicazione). */
+  consorzio: Consorzio | null;
 }

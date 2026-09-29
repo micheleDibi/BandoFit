@@ -9,7 +9,9 @@ Unico punto in cui si decide CHI vede una call e COSA vede:
   call, non sospesa), `candidato` / `invitato` (WP7: ha una candidatura o
   un invito IN ATTESA; call non sospesa di un'azienda viva), `pubblico` (qualunque
   altra azienda, solo per call pubblicate e visibili a tutti di aziende
-  vive), `admin`. WP9 aggiungerà `progettista`. La call dell'azienda creatrice si riconosce da
+  vive), `admin`. Il progettista (WP9) non è un ruolo di questa funzione:
+  legge solo dalla rotta dedicata del consulto (`vista_progettista`, audit
+  fail-closed in `consulting_service`). La call dell'azienda creatrice si riconosce da
   `company_profile_id = azienda attiva` E `family_parent_id = owner`: un
   Advisor con l'azienda A attiva NON è creatore delle call di B;
 - `carica_call_autorizzata`: fuori autorizzazione (o fuori dai ruoli ammessi
@@ -41,10 +43,13 @@ WP7 (candidature, inviti e chat): la controparte accettata vede la
 budget esatto; mai i bilanci esatti di nessuno); chi si è candidato o è
 stato invitato vede la vista pubblica con lo stato della propria candidatura
 (`CandidaturaPropriaOut`). L'IDENTITÀ si rivela solo con la rivelazione
-accesa (`partner_profile_service.RIVELAZIONE_IDENTITA_DISPONIBILE`, oggi
-spenta) e dopo l'audit scritto dalla RPC all'accettazione
-(`IdentitaRivelataOut`); spenta, anche i dettagli riservati escono senza
-gli identificativi dell'azienda.
+SIMMETRICA (WP9, decisione di Michele: interruttore
+`partner_profile_service.RIVELAZIONE_IDENTITA_DISPONIBILE` acceso, audit di
+rivelazione scritto dalla RPC all'accettazione perché ENTRAMBE le aziende
+erano verificate dalla piattaforma, ed entrambe ancora verificate OGGI:
+`partenariato_candidature_service.identita_se_rivelata`, unico punto che
+produce `IdentitaRivelataOut`); altrimenti anche i dettagli riservati escono
+senza gli identificativi dell'azienda.
 
 WP8 (consorzio): i membri della call (`partner_call_membri`) escono SOLO da
 `proietta_membro`: la propria azienda col suo nome, gli altri membri in
@@ -58,13 +63,22 @@ Un'azienda USCITA dal consorzio (da sé o tolta dal creatore) non è più
 controparte: la sua candidatura resta accettata (non si ritira), ma la riga
 uscita prevale, come per l'esclusività sul bando.
 
+WP9 (consulto dalla call): il progettista ASSEGNATO vede la
+`CallVistaProgettistaOut` (`vista_progettista`): la vista del creatore a
+whitelist (regole, requisiti con la copertura del creatore, posizioni,
+riservati e budget del creatore) e il consorzio nella proiezione del
+creatore, con i partner in piattaforma SOLO come «Azienda anonima» con i loro
+esiti (niente pseudonimo né profilo); mai contatti, messaggi, candidature,
+valori esatti o id interni di altre aziende, mai i limiti del piano né i job
+AI del cliente.
+
 Modulo PURO salvo `carica_call_autorizzata`, `candidatura_su_call` e
 `uscita_dal_consorzio`.
 """
 
 import base64
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
@@ -73,14 +87,32 @@ from pydantic import BaseModel, ConfigDict, create_model
 
 from app.core.errors import NotFoundError
 from app.core.privacy import hmac_dominio
-from app.schemas.partenariato_consorzio import MembroOut, PosizioneMembroOut, ProfiloMembroOut
+from app.schemas.partenariato_consorzio import (
+    ConsorzioOut,
+    MembroOut,
+    PosizioneMembroOut,
+    ProfiloMembroOut,
+)
 from app.schemas.partner_call import (
+    BandoCallOut,
     BandoPubblicoCallOut,
+    BudgetFascia,
     CallCardOut,
     CallPubblicaOut,
+    CallVistaCreatoreOut,
     CreatoreCallOut,
+    FormaPrevista,
+    MotivoChiusura,
+    PartenariatoGapOut,
+    PosizioneOut,
     PosizionePubblicaOut,
+    RegoleCallSnapshot,
+    RequisitoOut,
     RequisitoPubblicoOut,
+    RiepilogoGapOut,
+    RuoloCreatore,
+    StatoCall,
+    Visibilita,
 )
 from app.schemas.partner_profile import AtecoSezioneOut, PartnerPubblicoOut
 from app.services import partenariato_vocabolario as voc
@@ -1058,4 +1090,96 @@ def proietta_membro(
         puo_modificare=modifica,
         puo_confermare=conferma,
         puo_uscire=uscita,
+    )
+
+
+# ------------------------------------------------------------ WP9
+
+
+class CallVistaProgettistaOut(_Uscita):
+    """GET /progettista/richieste/{id}/call (WP9, W1, Q19): la call di un
+    consulto chiesto dalla call, per il progettista ASSEGNATO. È la vista del
+    creatore a whitelist (il progettista lavora per lui): regole confermate,
+    requisiti con la copertura del creatore, posizioni, dettagli riservati e
+    budget del creatore, più il consorzio nella proiezione del creatore
+    (validazione e matrice) con i partner in piattaforma SOLO come «Azienda
+    anonima» con i loro esiti e fasce: niente pseudonimo né profilo pubblico,
+    mai contatti, messaggi, candidature, valori esatti o id interni di altre
+    aziende. Fuori anche i limiti del piano, i job AI e i motivi di blocco del
+    cliente (non servono al consulto)."""
+
+    richiesta_id: UUID
+    id: UUID
+    stato: StatoCall
+    motivo_chiusura: MotivoChiusura | None = None
+    bando: BandoCallOut
+    ruolo_creatore: RuoloCreatore
+    forma_aggregazione_prevista: FormaPrevista | None = None
+    anonima: bool = True
+    titolo: str | None = None
+    descrizione_pubblica: str | None = None
+    dettagli_riservati: str | None = None
+    profilo_partner_ideale: str | None = None
+    budget_fascia: BudgetFascia | None = None
+    budget_progetto_eur: Decimal | None = None
+    quota_creatore_pct: Decimal | None = None
+    scadenza_call: date | None = None
+    visibilita: Visibilita = "pubblica"
+    regole_partenariato: RegoleCallSnapshot | None = None
+    regole_confermate_at: datetime | None = None
+    esclusivita: bool = False
+    posizioni: list[PosizioneOut] = []
+    requisiti: list[RequisitoOut] = []
+    riepilogo: RiepilogoGapOut = RiepilogoGapOut()
+    partenariato: PartenariatoGapOut = PartenariatoGapOut()
+    pubblicata_at: datetime | None = None
+    chiusa_at: datetime | None = None
+    # None per una bozza (il consorzio nasce alla pubblicazione).
+    consorzio: ConsorzioOut | None = None
+
+
+# I campi della vista del creatore che passano al progettista (whitelist).
+CAMPI_VISTA_PROGETTISTA: frozenset[str] = frozenset({
+    "id", "stato", "motivo_chiusura", "bando", "ruolo_creatore",
+    "forma_aggregazione_prevista", "anonima", "titolo", "descrizione_pubblica",
+    "dettagli_riservati", "profilo_partner_ideale", "budget_fascia", "budget_progetto_eur",
+    "quota_creatore_pct", "scadenza_call", "visibilita", "regole_partenariato",
+    "regole_confermate_at", "esclusivita", "posizioni", "pubblicata_at", "chiusa_at",
+})
+
+
+def consorzio_per_progettista(consorzio: ConsorzioOut) -> ConsorzioOut:
+    """Il consorzio nella proiezione del CREATORE (validazione, matrice,
+    documenti e budget del creatore: dei partner già solo esiti e fasce),
+    ridotto per il progettista: gli altri membri in piattaforma senza
+    pseudonimo né profilo pubblico, nessuna azione possibile, nessun «sei tu»
+    (il progettista non è un membro)."""
+    membri = [
+        m.model_copy(update={
+            "sei_tu": False, "pseudonimo": None, "profilo": None,
+            "puo_modificare": False, "puo_confermare": False, "puo_uscire": False,
+        })
+        for m in consorzio.membri
+    ]
+    return consorzio.model_copy(update={
+        "membri": membri,
+        "editable": False,
+        "modificabile": False,
+        "budget": consorzio.budget.model_copy(update={"modificabile": False}),
+    })
+
+
+def vista_progettista(
+    richiesta_id: Any, creatore: CallVistaCreatoreOut, consorzio: ConsorzioOut | None
+) -> CallVistaProgettistaOut:
+    """`CallVistaProgettistaOut` dalla vista del creatore (letta con
+    un'azienda attiva in sola lettura) e dal consorzio nella proiezione del
+    creatore: whitelist campo per campo."""
+    return CallVistaProgettistaOut(
+        richiesta_id=richiesta_id,
+        **{campo: getattr(creatore, campo) for campo in CAMPI_VISTA_PROGETTISTA},
+        requisiti=creatore.gap.requisiti,
+        riepilogo=creatore.gap.riepilogo,
+        partenariato=creatore.gap.partenariato,
+        consorzio=consorzio_per_progettista(consorzio) if consorzio is not None else None,
     )

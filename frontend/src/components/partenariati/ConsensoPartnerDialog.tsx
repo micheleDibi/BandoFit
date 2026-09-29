@@ -8,6 +8,7 @@ import type { OrigineConsensoPartner, PartnerProfile } from "../../types";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Skeleton } from "../ui/states";
+import { ANCORA_IDENTITA } from "./IdentitaAziendaBox";
 
 // ---- Testo dell'informativa -----------------------------------------------
 
@@ -276,15 +277,19 @@ export function ConsensoPartnerDialog({
           </label>
           {!nominativoPossibile && identita.motivo_nominativo && (
             <p id={idMotivoNome} className="px-1 text-xs text-slate-600">
-              {PARTNER_COPY.motiviNominativo[identita.motivo_nominativo]}
-              {identita.motivo_nominativo === "cf_non_verificato" && (
+              {PARTNER_COPY.motiviNominativo[identita.motivo_nominativo] ??
+                PARTNER_COPY.motiviNominativo.identita_non_verificata_admin}
+              {identita.motivo_nominativo !== "non_disponibile" && (
                 <>
                   {" "}
+                  {/* Il riquadro «Verifica dell'identità» sta nella pagina
+                      Azienda: si chiude il consenso e ci si va. */}
                   <Link
-                    to="/app/profilo"
+                    to={`/app/azienda#${ANCORA_IDENTITA}`}
+                    onClick={onClose}
                     className="font-medium text-brand-600 hover:text-brand-700"
                   >
-                    {PARTNER_COPY.verificaCf} →
+                    {PARTNER_COPY.chiediVerifica} →
                   </Link>
                 </>
               )}

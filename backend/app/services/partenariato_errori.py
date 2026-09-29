@@ -54,11 +54,13 @@ RPC_ERRORS: dict[str, tuple[int, str, str]] = {
         "Per comparire come partner importa prima i dati ufficiali dell'azienda dalla "
         "partita IVA: l'impresa deve risultare attiva nel Registro Imprese",
     ),
+    # Dalla 0041 la RPC lo solleva quando manca l'identità verificata dall'admin
+    # (fn_partenariato_rappresentante_ok): stesso status e code, testo aggiornato.
     "rappresentante_non_verificato": (
         409,
         "rappresentante_non_verificato",
-        "Per mostrare il nome dell'azienda devi risultarne legale rappresentante: verifica "
-        "il tuo codice fiscale nel profilo. Puoi comunque comparire in forma anonima",
+        "Per mostrare il nome dell'azienda serve la verifica dell'identità da parte della "
+        "piattaforma: chiedila dalla pagina Azienda. Puoi comunque comparire in forma anonima",
     ),
     "profilo_sospeso": (
         409,
@@ -279,6 +281,112 @@ RPC_ERRORS: dict[str, tuple[int, str, str]] = {
         400,
         "documento_non_valido",
         "Documento non previsto dalla checklist di questa call",
+    ),
+    # WP9 — consulto dalla call, moderazione, metriche e identità verificata
+    # dall'admin (migration 0041). Restano NON mappati di proposito (bug del
+    # backend → 502): parametri_non_validi, campo_protetto, registro_append_only.
+    # Consulto dalla call (fn_create_consultation_request): gli ultimi tre
+    # hanno la stessa tripla di consulting_service._RPC_ERRORS.
+    "call_non_trovata": (404, "not_found", "Call di partenariato non trovata"),
+    "request_gia_aperta": (
+        409,
+        "conflict",
+        "C'è già una richiesta di consulto aperta per questa call",
+    ),
+    "addon_credit_esaurito": (
+        409,
+        "payment_required",
+        "Il consulto esperto si attiva con un acquisto: passa dal checkout",
+    ),
+    "addon_not_available": (
+        404,
+        "not_found",
+        "Il consulto esperto non è al momento disponibile",
+    ),
+    # Moderazione (admin) e ricorso (autore o segnalante).
+    "admin_non_autorizzato": (403, "forbidden", "Operazione riservata agli amministratori"),
+    "segnalazione_non_trovata": (404, "not_found", "Segnalazione non trovata"),
+    "segnalazione_gia_decisa": (
+        409,
+        "segnalazione_gia_decisa",
+        "Questa segnalazione è già stata decisa",
+    ),
+    "decisione_non_valida": (
+        400,
+        "decisione_non_valida",
+        "Questa decisione non vale per questo tipo di contenuto",
+    ),
+    "motivazione_non_valida": (
+        400,
+        "motivazione_non_valida",
+        "La motivazione deve avere tra 20 e 2000 caratteri",
+    ),
+    "statement_mancante": (
+        400,
+        "statement_mancante",
+        "Per sospendere o rimuovere un contenuto serve la motivazione da inviare all'autore",
+    ),
+    "oggetto_non_trovato": (404, "not_found", "Il contenuto non esiste più"),
+    "oggetto_non_sospendibile": (
+        409,
+        "oggetto_non_sospendibile",
+        "Questo contenuto non si può sospendere nel suo stato attuale",
+    ),
+    "ricorso_testo_non_valido": (
+        400,
+        "ricorso_testo_non_valido",
+        "Il ricorso deve avere tra 20 e 2000 caratteri",
+    ),
+    "ricorso_non_ammesso": (
+        409,
+        "ricorso_non_ammesso",
+        "Non puoi presentare un ricorso su questa decisione: si presenta una sola volta, "
+        "entro 6 mesi dalla decisione",
+    ),
+    "ricorso_non_in_attesa": (
+        409,
+        "ricorso_non_in_attesa",
+        "Non c'è un ricorso da decidere per questa segnalazione",
+    ),
+    # Metriche e costi (admin).
+    "periodo_non_valido": (
+        400,
+        "periodo_non_valido",
+        "Periodo non valido: la data di inizio deve venire prima di quella di fine",
+    ),
+    # Identità verificata dall'admin (decisione di Michele, Q9 rivista).
+    # `identita_non_verificata_admin` lo solleva il backend prima delle RPC
+    # (profilo nominativo, call nominativa): stessa tripla per tutti.
+    "identita_non_verificata_admin": (
+        409,
+        "identita_non_verificata_admin",
+        "Per mostrare il nome dell'azienda serve la verifica dell'identità da parte della "
+        "piattaforma: chiedila dalla pagina Azienda. Intanto puoi comparire in forma anonima",
+    ),
+    "identita_richiesta_aperta": (
+        409,
+        "identita_richiesta_aperta",
+        "Hai già chiesto la verifica dell'identità: ti avviseremo appena l'avremo controllata",
+    ),
+    "identita_gia_verificata": (
+        409,
+        "identita_gia_verificata",
+        "L'identità dell'azienda è già verificata",
+    ),
+    "identita_non_richiesta": (
+        409,
+        "identita_non_richiesta",
+        "Per questa azienda non c'è una richiesta di verifica in attesa",
+    ),
+    "metodo_obbligatorio": (
+        400,
+        "metodo_obbligatorio",
+        "Indica come hai verificato l'identità dell'azienda",
+    ),
+    "motivo_obbligatorio": (
+        400,
+        "motivo_obbligatorio",
+        "Indica il motivo della revoca (al massimo 500 caratteri)",
     ),
 }
 

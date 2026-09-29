@@ -36,8 +36,10 @@ export function ConsultoCard({ slug }: { slug: string }) {
   // Il CTA vive solo accanto a un AI-check completato, con l'addon a catalogo.
   if (!addon || latest?.status !== "ready") return null;
 
+  // Il consulto chiesto dalla call di partenariato (WP9) coesiste con quello
+  // dall'AI-check sullo stesso bando: qui conta solo il secondo.
   const esistente = consulenze?.find(
-    (c) => c.bando_id === latest.bando_id && c.stato !== "annullata",
+    (c) => c.bando_id === latest.bando_id && c.stato !== "annullata" && !c.partner_call_id,
   );
 
   // Gating: consumabile a pagamento senza unità in inventario = bloccato.

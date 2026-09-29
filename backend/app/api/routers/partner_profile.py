@@ -4,6 +4,12 @@ Router NUOVO del modulo partenariati: il flag sta sul router e sulla route
 class, quindi a flag spento ogni rotta risponde 404 anche senza token e con un
 corpo malformato (T1). Scrive solo il titolare; i membri con visibilità
 leggono; la risposta alla proposta di referente è del membro proposto.
+
+WP9: la verifica dell'identità da parte della piattaforma (che sblocca
+profilo nominativo, call nominative e rivelazione simmetrica) sta in
+`/me/partner-profile/identita` (GET stato, POST richiesta del titolare) e non
+in un router `/me/identita-azienda` separato: stesso flag, stessa azienda
+attiva, nessun router nuovo da registrare.
 """
 
 from fastapi import APIRouter, Depends
@@ -24,6 +30,8 @@ from app.schemas.partner_profile import (
     PartnerPubblicoOut,
     ReferenteIn,
     ReferenteRispostaIn,
+    VerificaIdentitaIn,
+    VerificaIdentitaOut,
 )
 from app.services import partner_profile_service
 
@@ -96,6 +104,33 @@ async def risposta_referente_partner(
 ) -> PartnerProfileOut:
     """Il membro proposto accetta o rifiuta; il referente può rinunciare."""
     return await partner_profile_service.risposta_referente(
+        primary, secondary, active, user, data
+    )
+
+
+@router.get("/identita", response_model=VerificaIdentitaOut)
+async def stato_verifica_identita(
+    user: CurrentUser,
+    active: ActiveCompanyDep,
+    primary: PrimaryClient,
+    secondary: SecondaryClient,
+) -> VerificaIdentitaOut:
+    """Stato della verifica dell'identità dell'azienda attiva da parte della
+    piattaforma (titolare e membri con visibilità)."""
+    return await partner_profile_service.get_verifica(primary, secondary, active, user)
+
+
+@router.post("/identita", response_model=VerificaIdentitaOut)
+async def richiedi_verifica_identita(
+    user: CurrentUser,
+    active: ActiveCompanyDep,
+    primary: PrimaryClient,
+    secondary: SecondaryClient,
+    data: VerificaIdentitaIn | None = None,
+) -> VerificaIdentitaOut:
+    """Il titolare chiede la verifica dell'identità (nota facoltativa per la
+    piattaforma, al massimo 500 caratteri). La decide un amministratore."""
+    return await partner_profile_service.richiedi_verifica(
         primary, secondary, active, user, data
     )
 

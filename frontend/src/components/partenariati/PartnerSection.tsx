@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Download, Eye, EyeOff, Handshake, Loader2, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { useCompany } from "../../hooks/useCompany";
 import { useFunzioni } from "../../hooks/useFunzioni";
 import {
@@ -23,6 +23,7 @@ import { EmptyState, ErrorState, Skeleton } from "../ui/states";
 import { AnteprimaPartnerCard } from "./AnteprimaPartnerCard";
 import { BozzaAiDialog, type SceltaBozza } from "./BozzaAiDialog";
 import { ConsensoPartnerDialog } from "./ConsensoPartnerDialog";
+import { ANCORA_IDENTITA, IdentitaAziendaBox } from "./IdentitaAziendaBox";
 import { firmaProfilo, MAX_COMPETENZE, PartnerProfileForm } from "./PartnerProfileForm";
 import { ReferenteMembro, ReferentePartner } from "./ReferentePartner";
 
@@ -152,7 +153,12 @@ function StatoVisibilita({
                   : "Visibile come partner."}{" "}
                 {profilo.anonimo
                   ? "Le altre aziende non vedono il nome."
-                  : "Le altre aziende vedono il nome dell'azienda."}
+                  : identita.verifica.verificata
+                    ? "Le altre aziende vedono il nome dell'azienda."
+                    : // Salvato con il nome, ma senza la verifica di oggi
+                      // (revocata, o dati del registro cambiati) le altre
+                      // aziende lo vedono anonimo.
+                      PARTNER_COPY.nomeSalvatoNonMostrato}
               </p>
               <div className="flex flex-wrap gap-2">
                 {profilo.anonimo ? (
@@ -194,16 +200,18 @@ function StatoVisibilita({
               <p className="text-xs text-slate-500">{PARTNER_COPY.revocaSuCambioAzienda}</p>
               {profilo.anonimo && !identita.puo_essere_nominativo && identita.motivo_nominativo && (
                 <p id="partner-motivo-nome" className="text-xs text-slate-500">
-                  {PARTNER_COPY.motiviNominativo[identita.motivo_nominativo]}
-                  {identita.motivo_nominativo === "cf_non_verificato" && (
+                  {PARTNER_COPY.motiviNominativo[identita.motivo_nominativo] ??
+                    PARTNER_COPY.motiviNominativo.identita_non_verificata_admin}
+                  {identita.motivo_nominativo !== "non_disponibile" && (
                     <>
                       {" "}
-                      <Link
-                        to="/app/profilo"
+                      {/* Il riquadro della verifica è in questa stessa sezione. */}
+                      <a
+                        href={`#${ANCORA_IDENTITA}`}
                         className="font-medium text-brand-600 hover:text-brand-700"
                       >
-                        {PARTNER_COPY.verificaCf} →
-                      </Link>
+                        {PARTNER_COPY.chiediVerifica} →
+                      </a>
                     </>
                   )}
                 </p>
@@ -332,12 +340,13 @@ export function PartnerSection({ onImporta }: { onImporta?: () => void }) {
     identitaVista.current = identitaAzienda;
   }, [identitaAzienda, queryClient]);
 
-  // Link diretto a #partner (menu «Profilo partner»): la sezione c'è solo a
-  // dati arrivati, quindi lo scroll si fa allora.
+  // Link diretto a #partner (menu «Profilo partner») o a #identita (verifica
+  // dell'identità, dalle notifiche e dai motivi di «Mostra il nome»): la
+  // sezione c'è solo a dati arrivati, quindi lo scroll si fa allora.
   const pronto = !!data;
   useEffect(() => {
-    if (hash !== `#${ANCORA}` || !pronto) return;
-    document.getElementById(ANCORA)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if ((hash !== `#${ANCORA}` && hash !== `#${ANCORA_IDENTITA}`) || !pronto) return;
+    document.getElementById(hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [hash, pronto]);
 
   if (!partenariatiAttivo || (isError && apiErrorCode(error) === "not_found")) return null;
@@ -442,6 +451,13 @@ export function PartnerSection({ onImporta }: { onImporta?: () => void }) {
             <p className="mt-3 text-sm text-slate-500">{PARTNER_COPY.soloTitolare}</p>
           </Card>
         )}
+
+        {/* Verifica dell'identità da parte della piattaforma (WP9): sblocca il
+            nome dell'azienda e la rivelazione tra aziende verificate. */}
+        <IdentitaAziendaBox
+          onImporta={data.editable ? onImporta : undefined}
+          motivoRegistro={identita.motivo}
+        />
 
         {data.editable && <ReferentePartner profilo={data} />}
 

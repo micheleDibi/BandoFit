@@ -120,11 +120,23 @@ def azienda_pronta(db, owner: str | None = None, plan_slug: str | None = None):
     return owner, company
 
 
+def verifica_identita_admin(db, owner: str, company: str) -> None:
+    """Dalla 0041 il nominativo richiede l'identità verificata dall'admin
+    (fn_partenariato_rappresentante_ok): richiesta del titolare e verifica."""
+    admin = new_user(db)
+    db.execute("update public.profiles set role = 'admin' where id = %s", (admin,))
+    db.execute("select public.fn_identita_richiedi(%s, %s, %s, null)", (owner, company, owner))
+    db.execute("select public.fn_identita_decidi(%s, %s, 'verificata', 'telefonata_sede', null)",
+               (company, admin))
+
+
 def nominativa_pronta(db, owner: str | None = None, plan_slug: str | None = None):
-    """Come azienda_pronta, con il titolare legale rappresentante verificato."""
+    """Come azienda_pronta, con il titolare legale rappresentante verificato e,
+    dalla 0041, l'identità verificata dall'admin."""
     owner, company = azienda_pronta(db, owner, plan_slug)
     imposta_cf(db, owner)
     legale(db, company, CF_TITOLARE)
+    verifica_identita_admin(db, owner, company)
     return owner, company
 
 
@@ -911,6 +923,7 @@ class TestConsenso:
         consenso(db, owner, company, "anonimato", anonimo=True, versione=None)  # invariato
         imposta_cf(db, owner)
         legale(db, company, CF_TITOLARE)
+        verifica_identita_admin(db, owner, company)  # dalla 0041
         consenso(db, owner, company, "anonimato", anonimo=False, versione=None)
         assert registro(db, company)[-1]["informativa_versione"] == VERSIONE
 
@@ -1065,6 +1078,11 @@ class TestConsenso:
         owner, company = azienda_pronta(db)
         imposta_cf(db, owner)
         legale(db, company, "  rssmra80a01h501u ")  # minuscolo e con spazi nella visura
+        # Dalla 0041 il CF tra i legali rappresentanti non basta più.
+        with pytest.raises(psycopg.errors.RaiseException) as exc:
+            consenso(db, owner, company, anonimo=False)
+        assert detail_of(exc) == "rappresentante_non_verificato"
+        verifica_identita_admin(db, owner, company)
         out = consenso(db, owner, company, anonimo=False)
         assert out["visibile"] is True and out["anonimo"] is False
         assert registro(db, company)[-1]["anonimo"] is False

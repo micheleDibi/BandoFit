@@ -1219,3 +1219,80 @@ async def send_partner_messaggi_email(
         footer="Ricevi questa email perché la tua azienda partecipa a questa conversazione.",
         unsubscribe_token=unsubscribe_token,
     )
+
+
+# -------------------------------------------- partenariati: moderazione (WP9)
+#
+# Statement of reasons (DSA art. 17) all'autore di un contenuto sospeso,
+# oscurato o rimosso. È un avviso OBBLIGATORIO sulle decisioni che lo
+# riguardano: nessuna disiscrizione (il servizio lo manda solo al titolare
+# dell'azienda autrice e solo a indirizzi recapitabili, `filtra_recapitabili`).
+# Il testo è quello generato dal template (`partenariato_moderazione_testi`),
+# che non contiene mai l'identità di chi ha segnalato. Oggetto fisso, così nei
+# log di `_dispatch` non finisce nessun dato; l'indirizzo sempre mascherato.
+
+_OGGETTI_MODERAZIONE = {
+    "call": "una call di partenariato",
+    "profilo": "il profilo partner",
+    "messaggio": "un messaggio della chat di partenariato",
+}
+
+
+async def send_moderazione_decisione_email(
+    to_email: str,
+    *,
+    oggetto_tipo: str,
+    statement: str,
+    cta_url: str,
+    azienda_destinataria: str | None = None,
+) -> bool:
+    """Decisione di moderazione con lo statement of reasons completo (anche
+    nella piattaforma, dal link). Con un tipo di contenuto sconosciuto o uno
+    statement vuoto non invia (False). Mai solleva."""
+    oggetto = _OGGETTI_MODERAZIONE.get(oggetto_tipo)
+    testo = (statement or "").strip()
+    if oggetto is None or not testo:
+        logger.warning("Email di moderazione non inviata a %s: contenuto o motivazione "
+                       "mancanti", mask_email(to_email))
+        return False
+    di_chi_html = (
+        f" della tua azienda <strong>{html.escape(azienda_destinataria)}</strong>"
+        if azienda_destinataria else " della tua azienda"
+    )
+    di_chi_testo = (
+        f" della tua azienda «{azienda_destinataria}»" if azienda_destinataria
+        else " della tua azienda"
+    )
+    spiegazione = (
+        "Qui sotto trovi la motivazione completa, con le istruzioni per contestare la "
+        "decisione. La ritrovi anche nella piattaforma."
+    )
+    blocco = (
+        '<span style="display:block;white-space:pre-wrap;font-size:13px;line-height:1.5;'
+        'background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">'
+        f"{html.escape(testo)}</span>"
+    )
+    heading = "Decisione di moderazione su un tuo contenuto"
+    html_body = _branded_html(
+        heading,
+        [
+            f"Abbiamo preso una decisione di moderazione su {oggetto}{di_chi_html}.",
+            spiegazione,
+            blocco,
+        ],
+        "Vedi la decisione",
+        html.escape(cta_url, quote=True),
+        "Ricevi questa email perché la decisione riguarda un contenuto della tua azienda "
+        "su BandoFit: è un avviso obbligatorio e non si disattiva dalle preferenze.",
+    )
+    text = (
+        f"{heading}.\n\n"
+        f"Abbiamo preso una decisione di moderazione su {oggetto}{di_chi_testo}.\n\n"
+        f"{spiegazione}\n\n{testo}\n\nVedi la decisione: {cta_url}"
+    )
+    return await _dispatch(
+        to_email,
+        "Decisione di moderazione su un tuo contenuto — BandoFit",
+        html_body,
+        text,
+    )

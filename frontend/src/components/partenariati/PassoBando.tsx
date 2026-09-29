@@ -1,15 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CalendarClock, EyeOff, Loader2, Search } from "lucide-react";
+import { AlertTriangle, CalendarClock, Eye, EyeOff, Loader2, Search } from "lucide-react";
 import { useEffect, useId, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useBando } from "../../hooks/useBandi";
 import { useCompany } from "../../hooks/useCompany";
 import { useAggiornaCall, useCreaCall, useMieCall } from "../../hooks/useCallPartenariato";
 import { useDebounce } from "../../hooks/useDebounce";
+import { identitaVerificata, useIdentitaAzienda } from "../../hooks/useIdentitaAzienda";
 import { usePartenariatiVocabolario } from "../../hooks/usePartenariatiVocabolario";
 import { analisiInCorso, usePartenariatoBando } from "../../hooks/usePartenariatoBando";
 import { api, apiErrorCode, apiErrorMessage } from "../../lib/api";
-import { CALL_COPY, PARTENARIATO_COPY } from "../../lib/copy";
+import { CALL_COPY, PARTENARIATO_COPY, PARTNER_COPY } from "../../lib/copy";
 import { formatDate } from "../../lib/format";
 import type {
   BandoListItem,
@@ -24,6 +25,7 @@ import { Skeleton } from "../ui/states";
 import { BarraPasso } from "./CallStepper";
 import { callAperta, bandoAperto, LIMITI_CALL, linkCall } from "./callDati";
 import { SceltaRadio, TestoLungo } from "./CampiCall";
+import { ANCORA_IDENTITA } from "./IdentitaAziendaBox";
 import { AvvisoLimiteCall, statoLimite, useLimiteCall } from "./LimitiCall";
 import { ModalitaBadge } from "./ModalitaBadge";
 import { avanzamento, soloCambiati, vuoto, type PassoProps } from "./passoComune";
@@ -34,16 +36,91 @@ const NOTE_RUOLO: Record<RuoloCreatoreCall, string> = {
   cerco_capofila: "Vuoi partecipare come partner: cerchi chi guidi il progetto e presenti la domanda.",
 };
 
-/** Nota fissa sull'anonimato (le call sono solo anonime, WP4). */
-export function NotaAnonima() {
+/** Nota su come la call compare alle altre aziende: anonima (default) o, dal
+ *  WP9, con il nome per le aziende con l'identità verificata. */
+export function NotaAnonima({ anonima = true }: { anonima?: boolean }) {
+  const Icona = anonima ? EyeOff : Eye;
   return (
     <p
       role="note"
       className="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600"
     >
-      <EyeOff className="mt-0.5 size-4 shrink-0 text-slate-400" aria-hidden />
-      {CALL_COPY.notaAnonima}
+      <Icona className="mt-0.5 size-4 shrink-0 text-slate-400" aria-hidden />
+      {anonima ? CALL_COPY.notaAnonima : CALL_COPY.notaNominativa}
     </p>
+  );
+}
+
+type SceltaNome = "anonima" | "nome";
+
+/** Scelta «Con il nome dell'azienda» nel wizard: SPENTA. Il backend la salva
+ *  (solo per aziende verificate) ma non esiste ancora una proiezione della
+ *  call con il nome verso le altre aziende, che la vedrebbero comunque
+ *  anonima: finché non c'è, la scelta non si offre (perimetro da confermare
+ *  con Michele; per riaccenderla basta questa costante). */
+const SCELTA_NOME_CALL = false;
+
+/** Anonima o con il nome (WP9): con `SCELTA_NOME_CALL` la scelta c'è solo se
+ *  l'azienda ha l'identità verificata dalla piattaforma; altrimenti la call è
+ *  anonima. Una call rimasta «con il nome» (per esempio dopo una revoca della
+ *  verifica) si può solo rendere anonima. */
+function SceltaNomeCall({
+  anonima,
+  onChange,
+  disabled,
+}: {
+  anonima: boolean;
+  onChange: (anonima: boolean) => void;
+  disabled: boolean;
+}) {
+  const nome = useId();
+  const { data: identita } = useIdentitaAzienda();
+  const verificata = identitaVerificata(identita);
+  if (!SCELTA_NOME_CALL || !verificata) {
+    return (
+      <div className="space-y-2">
+        <NotaAnonima />
+        {SCELTA_NOME_CALL && identita && (
+          <p className="px-1 text-xs text-slate-500">
+            {CALL_COPY.nomeNonDisponibile}{" "}
+            <Link
+              to={`/app/azienda#${ANCORA_IDENTITA}`}
+              className="font-medium text-brand-600 hover:text-brand-700"
+            >
+              {PARTNER_COPY.chiediVerifica} →
+            </Link>
+          </p>
+        )}
+        {!anonima && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <p className="min-w-0 flex-1">
+              {verificata
+                ? CALL_COPY.nomeNonAncoraVisibile
+                : "La call è impostata con il nome dell'azienda, ma l'identità non risulta verificata: per pubblicarla rendila anonima."}
+            </p>
+            <Button variant="secondary" size="sm" onClick={() => onChange(true)} disabled={disabled}>
+              Rendi anonima
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <SceltaRadio<SceltaNome>
+        legenda={CALL_COPY.sceltaNomeTitolo}
+        nome={nome}
+        valore={anonima ? "anonima" : "nome"}
+        onChange={(v) => onChange(v === "anonima")}
+        disabled={disabled}
+        opzioni={[
+          { valore: "anonima", etichetta: CALL_COPY.sceltaAnonima, nota: CALL_COPY.sceltaAnonimaNota },
+          { valore: "nome", etichetta: CALL_COPY.sceltaNome, nota: CALL_COPY.sceltaNomeNota },
+        ]}
+      />
+      <NotaAnonima anonima={anonima} />
+    </div>
   );
 }
 
@@ -283,6 +360,7 @@ export function PassoBandoNuova({
   const crea = useCreaCall();
   const [ruolo, setRuolo] = useState<RuoloCreatoreCall>("capofila");
   const [forma, setForma] = useState<FormaPrevistaCall | "">("");
+  const [anonima, setAnonima] = useState(true);
   const [override, setOverride] = useState("");
   const [serveOverride, setServeOverride] = useState(false);
   const [erroreOverride, setErroreOverride] = useState<string | undefined>();
@@ -330,6 +408,9 @@ export function PassoBandoNuova({
         ruolo_creatore: ruolo,
         forma_aggregazione_prevista: forma || null,
         override_non_ammesso_motivo: mostraOverride ? motivo : null,
+        // «Con il nome» solo se scelto (azienda verificata): il server lo
+        // ricontrolla.
+        ...(anonima ? {} : { anonima: false }),
       });
       navigate(`/app/partenariati/call/${call.id}/modifica?passo=2`, { replace: true });
     } catch (err) {
@@ -379,7 +460,7 @@ export function PassoBandoNuova({
             disabled={bloccato}
             erroreOverride={erroreOverride}
           />
-          <NotaAnonima />
+          <SceltaNomeCall anonima={anonima} onChange={setAnonima} disabled={bloccato} />
           <BarraPasso
             onAvanti={() => void invia()}
             etichettaAvanti="Crea la bozza e continua"
@@ -409,6 +490,7 @@ export function PassoBando({ call, onAvanti, onDirty }: PassoProps) {
   const aggiorna = useAggiornaCall(call.id);
   const [ruolo, setRuolo] = useState<RuoloCreatoreCall>(call.ruolo_creatore);
   const [forma, setForma] = useState<FormaPrevistaCall | "">(call.forma_aggregazione_prevista ?? "");
+  const [anonima, setAnonima] = useState(call.anonima);
   const [override, setOverride] = useState(call.override_non_ammesso_motivo ?? "");
   const [erroreOverride, setErroreOverride] = useState<string | undefined>();
 
@@ -418,6 +500,7 @@ export function PassoBando({ call, onAvanti, onDirty }: PassoProps) {
   const campi = soloCambiati(call, {
     ruolo_creatore: ruolo,
     forma_aggregazione_prevista: forma || null,
+    anonima,
     ...(mostraOverride ? { override_non_ammesso_motivo: override.trim() || null } : {}),
   });
   const dirty = bozza && !vuoto(campi);
@@ -467,7 +550,11 @@ export function PassoBando({ call, onAvanti, onDirty }: PassoProps) {
           disabled={!bozza}
           erroreOverride={erroreOverride}
         />
-        <NotaAnonima />
+        {bozza ? (
+          <SceltaNomeCall anonima={anonima} onChange={setAnonima} disabled={false} />
+        ) : (
+          <NotaAnonima anonima={call.anonima} />
+        )}
         <BarraPasso
           onAvanti={() => void salva()}
           etichettaAvanti={bozza ? "Salva e continua" : "Continua"}

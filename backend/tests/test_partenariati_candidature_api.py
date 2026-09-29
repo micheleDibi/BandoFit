@@ -205,6 +205,9 @@ class TestFlusso:
     async def test_rivelazione_accesa(self, fondo, monkeypatch):
         monkeypatch.setattr(pps, "RIVELAZIONE_IDENTITA_DISPONIBILE", True)
         db, sec = await scenario_wp7()
+        # Rivelazione simmetrica (WP9): entrambe verificate dalla piattaforma.
+        db.verifica_identita(g.COMPANY["X"])
+        db.verifica_identita(g.COMPANY["Y"])
         cand = (await candida(db, sec)).json()
         conv = (await chiama(db, sec, "X", "POST",
                              f"/partenariati/candidature/{cand['id']}/accetta")).json()[

@@ -393,7 +393,13 @@ def test_partner_profile_out_forma_del_contratto():
     assert set(dati["profilo"]) == set(PartnerProfileIn.model_fields)
     assert set(dati["identita"]) == {
         "verificata", "motivo", "denominazione_registro", "puo_essere_nominativo",
-        "motivo_nominativo",
+        "motivo_nominativo", "verifica",
+    }
+    # WP9: stato della verifica dell'identità da parte della piattaforma, mai
+    # chi ha verificato né come.
+    assert dati["identita"]["verifica"] == {
+        "stato": "non_richiesta", "verificata": False, "richiesta_at": None,
+        "verificata_at": None, "puo_richiedere": False, "motivo_non_richiedibile": None,
     }
     assert set(dati["referente"]) == {"tipo", "nome", "sei_tu", "proposto"}
     assert set(dati["bozza_ai"]) == {"stato", "avviata_at", "pronta_at", "errore", "proposta"}
@@ -516,3 +522,18 @@ class TestInformative:
             "referente_versione": inf.INFORMATIVA_REFERENTE_VERSIONE,
             "referente_testo": inf.INFORMATIVA_REFERENTE_TESTO,
         }
+
+
+def test_motivi_nominativo_e_verifica_dell_identita():
+    """WP9: il CF del titolare non è più un motivo; la nota della richiesta
+    di verifica è facoltativa e al massimo 500 caratteri, senza campi extra."""
+    assert set(get_args(sp.MotivoNominativo)) == {"non_disponibile",
+                                                   "identita_non_verificata_admin"}
+    assert set(get_args(sp.StatoVerificaIdentita)) == {"non_richiesta", "richiesta",
+                                                        "verificata", "rifiutata"}
+    assert sp.VerificaIdentitaIn().nota is None
+    assert sp.VerificaIdentitaIn(nota="x" * 500).nota == "x" * 500
+    with pytest.raises(ValidationError):
+        sp.VerificaIdentitaIn(nota="x" * 501)
+    with pytest.raises(ValidationError):
+        sp.VerificaIdentitaIn.model_validate({"nota": None, "metodo": "pec"})

@@ -9,8 +9,9 @@ l'azienda A attiva non tocca le call di B.
 Flusso del wizard (7 passi, stato nella bozza lato server):
 1. `crea_bozza`: bando dal catalogo, stato LIVE da `bando_pubblico` (aperto o
    in apertura), estrazione WP3 `non_ammesso` → serve un motivo
-   (`partenariato_non_ammesso` altrimenti); call SOLO anonime (WP4,
-   `NOMINATIVO_DISPONIBILE`);
+   (`partenariato_non_ammesso` altrimenti); call nominativa solo con
+   l'identità dell'azienda verificata dalla piattaforma (WP9, `_nominativo`;
+   verso terzi il creatore resta comunque «Azienda anonima»);
 2. `conferma_regole`: snapshot delle regole confermate; una voce `confermata`
    deve coincidere con una voce VERIFICATA dell'estrazione corrente, e la
    `fonte` la scrive il servizio dalla riga `bando_partenariato`;
@@ -79,7 +80,7 @@ import functools
 import logging
 import uuid
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, NoReturn
@@ -220,6 +221,11 @@ MSG_NOMINATIVO_NON_DISPONIBILE = (
     "Per ora le call si pubblicano solo in forma anonima: il nome dell'azienda si rivela "
     "solo alle aziende che accetti"
 )
+MSG_IDENTITA_NON_VERIFICATA_ADMIN = (
+    "Per pubblicare la call con il nome dell'azienda serve la verifica dell'identità da "
+    "parte della piattaforma: chiedila dalla pagina Azienda. Intanto puoi pubblicarla in "
+    "forma anonima"
+)
 MSG_AI_NON_CONFIGURATA = "Generazione automatica non configurata su questo ambiente"
 MSG_NON_AMMESSO = (
     "Secondo l'analisi del bando il partenariato non è ammesso: se sei sicuro che lo "
@@ -244,6 +250,11 @@ TIPO_NOTIFICA_SEGNALAZIONE = "partenariato.segnalazione_ricevuta"
 # profilo: qui si parla della call. Il code resta quello della mappa.
 _ERRORI_CALL: dict[str, tuple[int, str, str]] = {
     "attore_non_titolare": (403, "forbidden", MSG_SOLO_TITOLARE),
+    # Call nominativa senza identità verificata oggi (la RPC di pubblicazione,
+    # dopo il controllo del servizio: verifica revocata nel frattempo).
+    "rappresentante_non_verificato": (
+        409, "rappresentante_non_verificato", MSG_IDENTITA_NON_VERIFICATA_ADMIN,
+    ),
     "identita_non_verificata": (
         409,
         "identita_non_verificata",
@@ -382,10 +393,17 @@ def _richiedi_azienda(active) -> str:
     return str(active.company_id)
 
 
-def _nominativo(anonima: Any) -> None:
-    """Call solo anonime (stessa scelta del profilo partner, WP4)."""
-    if anonima is False and not pps.NOMINATIVO_DISPONIBILE:
+async def _nominativo(primary, active, anonima: Any) -> None:
+    """Call nominativa (`anonima` false) solo con l'interruttore globale
+    acceso e l'identità dell'azienda attiva verificata dalla piattaforma
+    (WP9, stessa regola del profilo partner): altrimenti 409. La RPC di
+    pubblicazione lo ricontrolla (`fn_partenariato_rappresentante_ok`)."""
+    if anonima is not False:
+        return
+    if not pps.NOMINATIVO_DISPONIBILE:
         raise AppError(409, "nominativo_non_disponibile", MSG_NOMINATIVO_NON_DISPONIBILE)
+    if not await pps.identita_forte(primary, active.company_id):
+        raise pps.errore_identita_non_verificata(MSG_IDENTITA_NON_VERIFICATA_ADMIN)
 
 
 async def _rpc(primary, nome: str, parametri: dict) -> Any:
@@ -926,8 +944,10 @@ def _motivi_blocco(
     posizioni: list[dict],
     rilievi: list[RilievoOut],
     limiti,
+    identita_verificata: bool = True,
 ) -> list[MotivoBloccoOut]:
-    """Perché la bozza non si può pubblicare ORA (la RPC resta l'arbitro)."""
+    """Perché la bozza non si può pubblicare ORA (la RPC resta l'arbitro).
+    `identita_verificata` conta solo per una call nominativa (WP9)."""
     motivi: list[MotivoBloccoOut] = []
 
     def blocca(codice: str, messaggio: str) -> None:
@@ -938,6 +958,8 @@ def _motivi_blocco(
     identita = _identita_motivo(az)
     if identita:
         blocca("identita_non_verificata", _MOTIVI_IDENTITA[identita])
+    if call.get("anonima") is False and not identita_verificata:
+        blocca("identita_non_verificata_admin", MSG_IDENTITA_NON_VERIFICATA_ADMIN)
     if bando_letto and not _aperto(stato_bando):
         blocca("bando_non_disponibile", RPC_ERRORS["bando_non_disponibile"][2])
     if _non_ammesso(riga_bp) and not call.get("override_non_ammesso_motivo"):
@@ -1033,10 +1055,15 @@ async def _vista(
                          letti=True)
     motivi: list[MotivoBloccoOut] = []
     if call.get("stato") == "bozza":
+        # Call nominativa (WP9): pubblicabile solo con l'identità verificata oggi.
+        verificata = call.get("anonima") is not False or (
+            pps.NOMINATIVO_DISPONIBILE and await pps.identita_forte_o_no(primary, az.company_id)
+        )
         motivi = _motivi_blocco(
             active, call, az, stato_bando=stato_bando, bando_letto=bando_letto, riga_bp=riga_bp,
             requisiti=requisiti, posizioni=posizioni,
             rilievi=rilievi_pubblici(call, requisiti, posizioni, az.ident), limiti=limiti,
+            identita_verificata=verificata,
         )
     forma = call.get("forma_aggregazione_prevista")
     return CallVistaCreatoreOut(
@@ -1313,12 +1340,12 @@ def _ref_partenariato(riga_bp: Mapping | None) -> dict | None:
 async def crea_bozza(primary, secondary, active, user: dict, dati: CallCreaIn
                      ) -> CallVistaCreatoreOut:
     """Nuova bozza sull'azienda attiva (titolare). Errori: 403, 404 (bando o
-    azienda), 409 `nominativo_non_disponibile` / `bando_non_disponibile` /
-    `partenariato_non_ammesso` / `call_gia_presente` / `troppe_bozze`, 403
-    `piano_non_include_call`."""
+    azienda), 409 `nominativo_non_disponibile` / `identita_non_verificata_admin`
+    / `bando_non_disponibile` / `partenariato_non_ammesso` / `call_gia_presente`
+    / `troppe_bozze`, 403 `piano_non_include_call`."""
     _richiedi_titolare(active)
     _richiedi_azienda(active)
-    _nominativo(dati.anonima)
+    await _nominativo(primary, active, dati.anonima)
     bando = await _bando_catalogo(secondary, dati.bando_slug)
     bando_id = int(bando["id"])
     stato_bando, letto = await _stato_bando(secondary, bando_id)
@@ -1343,7 +1370,8 @@ async def crea_bozza(primary, secondary, active, user: dict, dati: CallCreaIn
     p_dati = {
         "ruolo_creatore": dati.ruolo_creatore,
         "forma_aggregazione_prevista": dati.forma_aggregazione_prevista,
-        "anonima": True,
+        # Nominativa solo dopo `_nominativo` (identità verificata, WP9).
+        "anonima": dati.anonima is not False,
         "override_non_ammesso_motivo": dati.override_non_ammesso_motivo,
         "partenariato_ref": _ref_partenariato(riga_bp),
         # Il passo 1 (bando) si salva creando la bozza: si riprende dal 2.
@@ -1369,7 +1397,7 @@ async def aggiorna(primary, secondary, active, user: dict, call_id: Any, dati: C
     whitelist e crea una nuova versione."""
     call = await _carica_scrittura(primary, active, user, call_id)
     campi = dati.campi()
-    _nominativo(campi.get("anonima"))
+    await _nominativo(primary, active, campi.get("anonima"))
     if not campi:
         return await _vista(primary, active, call, secondary=secondary)
     az = await carica_azienda(primary, active.company_id, active.owner_id)
@@ -1715,11 +1743,13 @@ async def pubblica(primary, secondary, active, user: dict, call_id: Any,
     """Pubblica la bozza. Controlli in Python prima della RPC: stato LIVE del
     bando, `non_ammesso` senza motivo, rilievi bloccanti nei testi pubblici,
     regole finanziarie dei requisiti ancora nello snapshot, scadenza di
-    default `min(scadenza del bando, oggi + N giorni)`. La RPC ricontrolla
+    default `min(scadenza del bando, oggi + N giorni)`; call nominativa solo
+    con l'identità verificata dalla piattaforma (WP9). La RPC ricontrolla
     tutto sotto i lock e applica identità e limiti del piano."""
     call = await _carica_scrittura(primary, active, user, call_id)
     if call.get("stato") != "bozza":
         raise AppError(409, "stato_call_non_valido", "Si può pubblicare solo una bozza")
+    await _nominativo(primary, active, call.get("anonima"))
     stato_bando, letto = await _stato_bando(secondary, call["bando_id"])
     if not letto:
         raise UpstreamError(MSG_BANDO_NON_VERIFICABILE)
@@ -1930,7 +1960,8 @@ async def segnala(primary, secondary, active, user: dict, dati: SegnalazioneIn
     messaggio della chat che il segnalante può vedere (404 altrimenti), con
     lo snapshot di ciò che ha visto. Rate limit anti-abuso (fail-open, non è
     un tetto di spesa); una segnalazione aperta per contenuto e segnalante
-    (409). Conferma di ricezione in-app (art. 16 c.4)."""
+    (409). Conferma di ricezione in-app (art. 16 c.4), con il link alla
+    pagina della segnalazione (WP9: stato, decisione e ricorso)."""
     settings = get_settings()
     chiave = rate_limit_service.bucket("partner_segnalazione", str(user["id"]))
     if not await rate_limit_service.allow(
@@ -1980,7 +2011,7 @@ async def segnala(primary, secondary, active, user: dict, dati: SegnalazioneIn
             "La esamineremo e ti faremo sapere la decisione. Codice della segnalazione: "
             f"{identificativo[:8]}."
         ),
-        url=None,
+        url=f"/app/partenariati/segnalazioni/{identificativo}",
         dedup_key=f"segnalazione:{identificativo}",
     )
     return SegnalazioneOut(id=identificativo, stato="ricevuta", created_at=creata)
@@ -2256,8 +2287,12 @@ async def suggeriti(primary, secondary, active, user: dict, call_id: Any, *, pag
     )
     contatti = await _stati_contatto(primary, cid, [m.company_id for m in pagina])
     items = [
-        candidato_suggerito(m, call_id=cid, profilo=profili[m.company_id],
-                            stato_contatto=contatti.get(m.company_id))
+        # Un profilo nominativo senza l'identità verificata oggi esce anonimo
+        # (WP9): anche il match allora mostra solo la fascia di fatturato.
+        candidato_suggerito(
+            replace(m, anonimo=True) if profili[m.company_id].anonimo else m, call_id=cid,
+            profilo=profili[m.company_id], stato_contatto=contatti.get(m.company_id),
+        )
         for m in pagina
         if m.company_id in profili
     ]
@@ -2308,7 +2343,8 @@ async def _profili_pubblici(primary, secondary, ids: list[str], candidati: Mappi
     suggeriti, letti a blocco (profilo, azienda, registro, persone: quattro
     letture per pagina). Le fasce vengono dal profilo di matching (stessi
     bilanci); gli identificativi dell'azienda tolgono i riferimenti dai testi
-    liberi degli anonimi. Un'azienda sparita nel frattempo manca."""
+    liberi degli anonimi. Un'azienda sparita nel frattempo manca. Un profilo
+    nominativo senza l'identità verificata oggi esce anonimo (WP9)."""
     if not ids:
         return {}
     profili, aziende, dati, persone, lookups = await asyncio.gather(
@@ -2321,7 +2357,9 @@ async def _profili_pubblici(primary, secondary, ids: list[str], candidati: Mappi
         .in_("company_profile_id", ids).execute(),
         _lookups(secondary),
     )
-    per_id = {str(r["company_profile_id"]): r for r in profili.data or []}
+    per_id = await pps.profili_per_terzi(
+        primary, {str(r["company_profile_id"]): r for r in profili.data or []}
+    )
     registri = {str(r["company_profile_id"]): r for r in dati.data or []}
     nomi: dict[str, list[dict]] = {}
     for riga in persone.data or []:

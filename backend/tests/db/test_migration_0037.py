@@ -830,7 +830,7 @@ class TestSegnalazioni:
             "'public.partner_segnalazioni'::regclass and contype = 'f'").fetchone()[0] == 0
 
     @pytest.mark.parametrize(("colonne", "vincolo"), [
-        ({"oggetto_tipo": "messaggio"}, "ps_oggetto_tipo_check"),
+        ({"oggetto_tipo": "conversazione"}, "ps_oggetto_tipo_check"),  # «messaggio» dalla 0039
         ({"oggetto_id": ""}, "ps_oggetto_id_check"),
         ({"oggetto_id": "x" * 101}, "ps_oggetto_id_check"),
         ({"motivo": "offensivo"}, "ps_motivo_check"),
@@ -2991,6 +2991,7 @@ class TestSicurezza0037:
         ).fetchall()}
         assert trigger == {
             ("trg_partner_calls_updated_at", "partner_calls"),
+            ("trg_partner_calls_chiudi_candidature", "partner_calls"),  # della 0039
             ("trg_pcr_updated_at", "partner_call_requisiti"),
             ("trg_pcp_updated_at", "partner_call_posizioni"),
             ("trg_pcv_immutabile", "partner_call_versioni"),

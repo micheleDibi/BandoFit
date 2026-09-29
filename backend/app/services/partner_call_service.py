@@ -24,7 +24,8 @@ Flusso del wizard (7 passi, stato nella bozza lato server):
 6. `anteprima`: la proiezione pubblica e i rilievi anti-contatti;
 7. `pubblica`: controlli in Python (stato live del bando, `non_ammesso`,
    rilievi, Q11, scadenza di default) e poi la RPC (identità dal registro,
-   completezza, limiti del piano sul pool dell'owner).
+   completezza, limiti del piano sul pool dell'owner e, dalla 0039,
+   esclusività sulle candidature accettate: `409 esclusivita_violata`).
 
 Anti-contatti (C7): i testi pubblici (titolo, descrizione, profilo ideale,
 titoli e note delle posizioni, etichette dei requisiti, testi dei requisiti
@@ -53,6 +54,18 @@ pubblicazione: indice invalidato e, in background, chiavi dei collegamenti
 del creatore e fan-out delle notifiche proattive; dopo una modifica della
 call pubblicata o la sua chiusura: indice invalidato e notifica a chi l'ha
 salvata.
+
+WP7: il dettaglio riconosce anche la controparte accettata
+(`CallVistaControparteOut`: vista pubblica più riservati e budget esatto;
+identità solo con la rivelazione accesa e il suo audit; mai per una call
+sospesa) e chi ha una candidatura o un invito in attesa (vista pubblica con
+lo stato della propria candidatura, anche per una call solo su invito; una
+riga già chiusa si vede solo finché la call è visibile a tutti) e porta i
+requisiti dichiarabili; i suggeriti portano lo stato del contatto; il
+riepilogo conta inviti
+ricevuti, candidature da decidere e messaggi non letti; si segnalano anche i
+messaggi della chat (solo quelli dell'altra azienda, solo dalle parti della
+conversazione).
 
 Log: mai testi, P.IVA, nomi o importi; solo id e codici.
 """
@@ -137,6 +150,7 @@ from app.services.partenariato_accesso import (
     RUOLI_SCRITTURA,
     CallBachecaOut,
     CallPubblicaDettaglioOut,
+    CallVistaControparteOut,
     PerTeOut,
     RiepilogoOut,
     SuggeritiOut,
@@ -144,14 +158,19 @@ from app.services.partenariato_accesso import (
     call_card,
     call_pubblica,
     candidato_suggerito,
+    candidatura_propria,
+    candidatura_su_call,
     carica_call_autorizzata,
     creatore_pubblico,
     nomi_regioni,
     normalizza_id,
     proietta_versione,
     pubblicamente_visibile,
+    requisiti_dichiarabili,
     requisito_visibile,
     rilievi_testo,
+    stato_effettivo,
+    vista_controparte,
 )
 from app.services.partenariato_anonimato import (
     ETICHETTE_RILIEVO,
@@ -1141,14 +1160,18 @@ def _posti(posizione: Mapping) -> int:
 
 async def dettaglio(
     primary, secondary, active, user: dict, call_id: Any
-) -> CallVistaCreatoreOut | CallPubblicaDettaglioOut:
+) -> CallVistaCreatoreOut | CallPubblicaDettaglioOut | CallVistaControparteOut:
     """GET della call. Per l'azienda creatrice (titolare e membri) la vista
     completa, con il failsafe dei job AI e il controllo in lettura delle
-    chiusure automatiche; per le altre aziende (WP6) la vista PUBBLICA con il
-    proprio match (`_dettaglio_pubblico`)."""
+    chiusure automatiche; per la controparte accettata (WP7) la vista
+    controparte; per le altre aziende (WP6) la vista PUBBLICA con il proprio
+    match e, per chi si è candidato o è stato invitato, la propria
+    candidatura (`_dettaglio_pubblico`)."""
     call, ruolo = await carica_call_autorizzata(primary, call_id, active, user)
+    if ruolo == "controparte":
+        return await _vista_controparte(primary, secondary, active, call)
     if ruolo not in RUOLI_AZIENDA:
-        return await _dettaglio_pubblico(primary, secondary, active, call)
+        return await _dettaglio_pubblico(primary, secondary, active, call, ruolo=ruolo)
     call = await _failsafe_ai(primary, call)
     call, stato_bando, letto = await _controlla_in_lettura(primary, secondary, call)
     return await _vista(primary, active, call, stato_bando=stato_bando, bando_letto=letto)
@@ -1805,13 +1828,47 @@ async def _profilo_segnalabile(primary, secondary, codice_pubblico: str) -> dict
     ).model_dump(mode="json")
 
 
+async def _messaggio_segnalabile(primary, active, messaggio_id: str) -> dict:
+    """Snapshot di un messaggio della chat (WP7) che l'azienda attiva può
+    segnalare: di una conversazione di cui è parte e scritto dall'ALTRA
+    azienda; altrimenti 404 come un contenuto inesistente. Mai id di utenti
+    né di aziende nello snapshot."""
+    if not active.company_id:
+        raise NotFoundError("Contenuto non trovato")
+    messaggio = await _una(
+        primary.table("partner_messaggi")
+        .select("id,conversazione_id,mittente_company_profile_id,testo,nascosto_moderazione_at,"
+                "created_at")
+        .eq("id", int(messaggio_id))
+    )
+    conversazione = await _una(
+        primary.table("partner_conversazioni").select("id,company_creatore_id,company_partner_id")
+        .eq("id", str(messaggio["conversazione_id"]))
+    ) if messaggio else None
+    parti = {str((conversazione or {}).get(c)) for c in ("company_creatore_id",
+                                                           "company_partner_id")}
+    if (
+        messaggio is None or conversazione is None or str(active.company_id) not in parti
+        or str(messaggio.get("mittente_company_profile_id")) == str(active.company_id)
+    ):
+        raise NotFoundError("Contenuto non trovato")
+    nascosto = messaggio.get("nascosto_moderazione_at") is not None
+    return {
+        "conversazione_id": str(conversazione["id"]),
+        "messaggio_id": int(messaggio["id"]),
+        "testo": None if nascosto else messaggio.get("testo"),
+        "nascosto": nascosto,
+        "created_at": messaggio.get("created_at"),
+    }
+
+
 async def segnala(primary, secondary, active, user: dict, dati: SegnalazioneIn
                   ) -> SegnalazioneOut:
-    """Segnalazione DSA (art. 16) di una call o di un profilo che il
-    segnalante può vedere (404 altrimenti), con lo snapshot di ciò che ha
-    visto. Rate limit anti-abuso (fail-open, non è un tetto di spesa); una
-    segnalazione aperta per contenuto e segnalante (409). Conferma di
-    ricezione in-app (art. 16 c.4)."""
+    """Segnalazione DSA (art. 16) di una call, di un profilo o (WP7) di un
+    messaggio della chat che il segnalante può vedere (404 altrimenti), con
+    lo snapshot di ciò che ha visto. Rate limit anti-abuso (fail-open, non è
+    un tetto di spesa); una segnalazione aperta per contenuto e segnalante
+    (409). Conferma di ricezione in-app (art. 16 c.4)."""
     settings = get_settings()
     chiave = rate_limit_service.bucket("partner_segnalazione", str(user["id"]))
     if not await rate_limit_service.allow(
@@ -1823,6 +1880,9 @@ async def segnala(primary, secondary, active, user: dict, dati: SegnalazioneIn
         call, _ = await carica_call_autorizzata(primary, dati.oggetto_id, active, user)
         oggetto_id = normalizza_id(call["id"])
         snapshot = (await _proiezione_pubblica(primary, secondary, call)).model_dump(mode="json")
+    elif dati.oggetto_tipo == "messaggio":
+        oggetto_id = dati.oggetto_id
+        snapshot = await _messaggio_segnalabile(primary, active, oggetto_id)
     else:
         oggetto_id = dati.oggetto_id
         snapshot = await _profilo_segnalabile(primary, secondary, oggetto_id)
@@ -2038,7 +2098,8 @@ async def per_te(primary, secondary, active, user: dict, *, page: int = 1,
     """«Per te»: le call che l'azienda attiva completerebbe (almeno un
     requisito cercato o una posizione coperti), ordinate come i suggeriti e
     con al massimo 2 call dello stesso owner per pagina. Anche senza opt-in
-    (solo scoperta, Q25: `opt_in` false e CTA); per candidarsi serve."""
+    (solo scoperta, Q25: `opt_in` false e CTA); per candidarsi serve. Le call
+    solo su invito compaiono solo all'azienda invitata (WP7)."""
     company_id = _richiedi_azienda_per_te(active)
     oggi = _oggi()
     idx = await partenariato_indice.indice(primary, secondary)
@@ -2049,10 +2110,23 @@ async def per_te(primary, secondary, active, user: dict, *, page: int = 1,
                         opt_in=opt_in)
     pesi = _pesi()
     risultati = pm.per_te(idx.matching, profilo, oggi=oggi, pesi=pesi)
+    # WP7: le call solo su invito compaiono all'azienda invitata (invito in
+    # attesa o accettato): il ricontrollo live le ammette solo per lei.
+    su_invito = {cid for cid, aziende in idx.matching.inviti.items() if company_id in aziende}
+
+    async def controlla(ids: list[str]) -> set[str]:
+        vive = await partenariato_indice.ricontrollo_call_live(
+            primary, [i for i in ids if i not in su_invito], oggi=oggi)
+        invitate = [i for i in ids if i in su_invito]
+        if invitate:
+            vive |= await partenariato_indice.ricontrollo_call_live(
+                primary, invitate, oggi=oggi, solo_pubbliche=False)
+        return vive
+
     pagina, restanti, n_pagine = await _pagina_viva(
         risultati, page,
         chiave=lambda m: m.call_id,
-        controlla=lambda ids: partenariato_indice.ricontrollo_call_live(primary, ids, oggi=oggi),
+        controlla=controlla,
         impagina=lambda elementi: pm.impagina(
             elementi, dimensione=page_size, max_per_owner=pesi.max_per_owner_pagina,
             owner=pm.owner_call,
@@ -2079,9 +2153,10 @@ async def suggeriti(primary, secondary, active, user: dict, call_id: Any, *, pag
     """Aziende suggerite al creatore della call (titolare e membri in
     lettura): solo call pubblicate; pseudonimo per call, mai
     `company_profile_id`; match in vista «terzi»; al massimo 2 aziende dello
-    stesso owner per pagina; ricontrollo live di opt-in, sospensione,
-    azienda viva (e `accetta_inviti` per le call solo su invito) su ogni
-    pagina, anche con l'indice fresco (revoca immediata)."""
+    stesso owner sull'intera lista (`pm.suggeriti_per_call`); ricontrollo
+    live di opt-in, sospensione, azienda viva (e `accetta_inviti` per le call
+    solo su invito) su ogni pagina, anche con l'indice fresco (revoca
+    immediata)."""
     call, _ = await carica_call_autorizzata(primary, call_id, active, user, ammessi=RUOLI_AZIENDA)
     dimensione = max(1, get_settings().partenariato_suggeriti_pagina)
     vuota = SuggeritiOut(items=[], total=0, page=page, page_size=dimensione, total_pages=0)
@@ -2113,13 +2188,46 @@ async def suggeriti(primary, secondary, active, user: dict, call_id: Any, *, pag
     profili = await _profili_pubblici(
         primary, secondary, [m.company_id for m in pagina], idx.matching.candidati
     )
+    contatti = await _stati_contatto(primary, cid, [m.company_id for m in pagina])
     items = [
-        candidato_suggerito(m, call_id=cid, profilo=profili[m.company_id])
+        candidato_suggerito(m, call_id=cid, profilo=profili[m.company_id],
+                            stato_contatto=contatti.get(m.company_id))
         for m in pagina
         if m.company_id in profili
     ]
     return SuggeritiOut(items=items, total=len(restanti), page=page, page_size=dimensione,
                         total_pages=n_pagine)
+
+
+# Quale stato del contatto mostrare se con la stessa azienda ce n'è più di uno.
+_PRIORITA_CONTATTO = {"accettata": 0, "inviata": 1, "rifiutata": 2}
+
+
+async def _stati_contatto(primary, call_id: str, ids: list[str]) -> dict[str, str]:
+    """Stato del contatto della call con le aziende di una pagina di
+    suggeriti (WP7), con una lettura: `accettata`, poi `inviata` (in attesa;
+    un invito oltre la scadenza non conta), poi `rifiutata` solo per un
+    INVITO rifiutato (non si reinvita). Nulla per le righe ritirate o
+    scadute: si può invitare di nuovo."""
+    if not ids:
+        return {}
+    resp = (
+        await primary.table("partner_candidature")
+        .select("company_profile_id,tipo,stato,scade_at")
+        .eq("partner_call_id", call_id)
+        .in_("company_profile_id", ids)
+        .execute()
+    )
+    stati: dict[str, str] = {}
+    for riga in resp.data or []:
+        stato = stato_effettivo(riga)
+        if stato not in _PRIORITA_CONTATTO or (stato == "rifiutata"
+                                               and riga.get("tipo") != "invito"):
+            continue
+        azienda = str(riga.get("company_profile_id"))
+        if azienda not in stati or _PRIORITA_CONTATTO[stato] < _PRIORITA_CONTATTO[stati[azienda]]:
+            stati[azienda] = stato
+    return stati
 
 
 PROFILO_PUBBLICO_SELECT = (
@@ -2180,8 +2288,10 @@ async def _match_proprio(primary, secondary, active, call: Mapping):
         profilo = await partenariato_indice.profilo_azienda(primary, idx, active.company_id)
         if profilo is None:
             return None
+        # WP7: una call solo su invito è compatibile per chi è stato invitato.
         m = pm.valuta_coppia(snapshot, profilo, oggi=_oggi(), pesi=_pesi(),
-                             direzione="per_te", dettaglio_proprio=True)
+                             direzione="per_te", dettaglio_proprio=True,
+                             invitati=idx.matching.inviti.get(str(call["id"]), ()))
     except Exception as exc:  # noqa: BLE001 — il match è un di più
         logger.warning("call: match non calcolato (call %s, %s)", call.get("id"),
                        getattr(exc, "code", None) or type(exc).__name__)
@@ -2194,21 +2304,61 @@ def _visibile_ora(call: Mapping) -> bool:
     return pubblicamente_visibile(call) and not (scadenza is not None and scadenza < _oggi())
 
 
-async def _dettaglio_pubblico(primary, secondary, active, call: dict) -> CallPubblicaDettaglioOut:
+async def _dettaglio_pubblico(
+    primary, secondary, active, call: dict, *, ruolo: str = "pubblico"
+) -> CallPubblicaDettaglioOut:
     """La call di un'altra azienda: proiezione pubblica (whitelist del WP5),
     il proprio match, se è salvata e se l'azienda attiva ha l'opt-in. Solo
     call visibili adesso (una call scaduta ma non ancora chiusa dallo
     scheduler è 404, senza scritture); l'admin qui è un visitatore come gli
-    altri."""
-    if not _visibile_ora(call):
+    altri. WP7: chi ha una candidatura o un invito IN ATTESA (`ruolo`) la
+    vede anche se è solo su invito o scaduta; una candidatura chiusa
+    (rifiutata, ritirata, scaduta) si vede con la call solo finché la call
+    è visibile a tutti."""
+    if ruolo in ("candidato", "invitato"):
+        riga = await candidatura_su_call(primary, call["id"], active.company_id)
+        if riga is None:
+            raise NotFoundError("Call di partenariato non trovata")
+    elif not _visibile_ora(call):
         raise NotFoundError("Call di partenariato non trovata")
-    pubblica = await _proiezione_pubblica(primary, secondary, call)
+    else:
+        riga = await candidatura_su_call(primary, call["id"], active.company_id)
+    candidatura = candidatura_propria(riga, editable=bool(active.editable)) if riga else None
+    az = await carica_azienda(primary, call["company_profile_id"], call["family_parent_id"],
+                              viva=False)
+    requisiti, posizioni = await asyncio.gather(
+        _requisiti(primary, call["id"]), _posizioni(primary, call["id"])
+    )
+    pubblica = await _proiezione_pubblica(primary, secondary, call, az, requisiti=requisiti,
+                                          posizioni=posizioni)
     salvate = await _salvate(primary, active.company_id)
     return CallPubblicaDettaglioOut(
         **pubblica.model_dump(),
         match=await _match_proprio(primary, secondary, active, call),
         salvata=str(call["id"]) in salvate,
         opt_in=await _opt_in(primary, active.company_id),
+        candidatura=candidatura,
+        requisiti_dichiarabili=requisiti_dichiarabili(requisiti, az.ident),
+    )
+
+
+async def _vista_controparte(primary, secondary, active, call: dict) -> CallVistaControparteOut:
+    """La call per la controparte accettata (WP7): proiezione pubblica più
+    dettagli riservati e budget esatto; l'identità del creatore solo con la
+    rivelazione accesa e il suo audit (`identita_se_rivelata`)."""
+    # Import locale: il servizio delle candidature importa questo modulo.
+    from app.services import partenariato_candidature_service as candidature
+
+    riga = await candidatura_su_call(primary, call["id"], active.company_id)
+    if riga is None or riga.get("stato") != "accettata":
+        raise NotFoundError("Call di partenariato non trovata")
+    az = await carica_azienda(primary, call["company_profile_id"], call["family_parent_id"],
+                              viva=False)
+    pubblica = await _proiezione_pubblica(primary, secondary, call, az)
+    identita = await candidature.identita_se_rivelata(primary, riga["id"], az.company_id)
+    return vista_controparte(
+        pubblica, call, candidatura_propria(riga, editable=bool(active.editable)),
+        ident=az.ident, identita=identita,
     )
 
 
@@ -2287,4 +2437,10 @@ async def riepilogo_partenariati(primary, secondary, active, user: dict) -> Riep
         if cid in idx.bacheca
         and _in_bacheca(idx.bacheca[cid], idx.matching.calls.get(cid), active, oggi)
     )
-    return RiepilogoOut(per_te_nuove=nuove, call_attive=attive.count or 0, salvate=visibili)
+    # WP7 (import locale: quei servizi importano questo modulo).
+    from app.services import partenariato_candidature_service, partenariato_chat_service
+
+    candidature = await partenariato_candidature_service.conteggi_riepilogo(primary, active)
+    non_letti = await partenariato_chat_service.non_letti_totali(primary, active, user)
+    return RiepilogoOut(per_te_nuove=nuove, call_attive=attive.count or 0, salvate=visibili,
+                        messaggi_non_letti=non_letti, **candidature)

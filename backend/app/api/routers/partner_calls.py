@@ -46,6 +46,7 @@ from app.services import partner_call_service
 from app.services.partenariato_accesso import (
     CallBachecaOut,
     CallPubblicaDettaglioOut,
+    CallVistaControparteOut,
     SuggeritiOut,
 )
 from app.services.partenariato_matching import MatchOut
@@ -104,17 +105,23 @@ async def crea_call(
     return await partner_call_service.crea_bozza(primary, secondary, active, user, data)
 
 
-@router.get("/{call_id}", response_model=CallVistaCreatoreOut | CallPubblicaDettaglioOut)
+@router.get(
+    "/{call_id}",
+    response_model=CallVistaCreatoreOut | CallVistaControparteOut | CallPubblicaDettaglioOut,
+)
 async def get_call(
     call_id: str,
     user: CurrentUser,
     active: ActiveCompanyDep,
     primary: PrimaryClient,
     secondary: SecondaryClient,
-) -> CallVistaCreatoreOut | CallPubblicaDettaglioOut:
+) -> CallVistaCreatoreOut | CallVistaControparteOut | CallPubblicaDettaglioOut:
     """La call per l'azienda creatrice (poll-on-read dei job AI e controllo
-    delle chiusure automatiche); per le altre aziende la vista pubblica con
-    il proprio match (senza `editable`)."""
+    delle chiusure automatiche); per la controparte accettata (WP7) la vista
+    controparte (`vista: "controparte"`); per le altre aziende la vista
+    pubblica con il proprio match (senza `editable`), i requisiti
+    dichiarabili e la propria candidatura (in attesa anche su una call solo
+    su invito; chiusa solo finché la call è visibile a tutti)."""
     return await partner_call_service.dettaglio(primary, secondary, active, user, call_id)
 
 

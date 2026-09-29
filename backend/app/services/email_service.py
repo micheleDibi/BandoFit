@@ -11,6 +11,8 @@ import logging
 from email.headerregistry import Address
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid, parseaddr
+from typing import Literal
+from uuid import UUID
 
 import httpx
 
@@ -888,4 +890,332 @@ async def send_partner_digest_email(
             "List-Unsubscribe": f"<{unsubscribe_url}>",
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
         },
+    )
+
+
+# ------------------------------------------------ partenariati: email di evento
+#
+# Inviti, candidature, esiti e nuovi messaggi (WP7, K1-K3). Il servizio le
+# manda SOLO agli utenti con `eventi_abilitati` e recapitabili
+# (`filtra_recapitabili`): qui si compongono e si spediscono. Dati ammessi: il
+# titolo del bando (catalogo pubblico), lo pseudonimo per call della
+# controparte e il nome dell'azienda DESTINATARIA (la propria: serve
+# all'Advisor con più aziende). Mai nome, P.IVA, sede o contatti di un'altra
+# azienda, mai il testo dei messaggi, della candidatura, dell'invito o del
+# motivo di un rifiuto: le firme non li accettano. Oggetti fissi, così nei log
+# di `_dispatch` non finisce nessun dato. Ogni email porta il link e gli
+# header RFC 8058 della disiscrizione dagli EVENTI (`tipo=eventi`, mai quella
+# del digest); senza un token valido l'email non parte.
+
+EsitoPartner = Literal["accettata", "rifiutata"]
+TipoCandidaturaPartner = Literal["candidatura", "invito"]
+
+_NOTA_CHAT = (
+    "Ora potete scrivervi nella chat della piattaforma: prima di condividere "
+    "informazioni riservate, verificate i dati dell'altra azienda sul Registro Imprese."
+)
+
+
+def _url_disiscrizione_eventi(unsubscribe_token: object) -> str | None:
+    """Link pubblico di disiscrizione dalle email di evento dei partenariati
+    (`routers/partenariati_email.py`, `tipo=eventi`) dal token della riga di
+    `partner_email_settings`. None se il token non è un UUID."""
+    try:
+        token = str(UUID(str(unsubscribe_token)))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    api = get_settings().api_public_url.rstrip("/")
+    return f"{api}/partenariati/email/unsubscribe?token={token}&tipo=eventi"
+
+
+class _Frasi:
+    """Pezzi di frase in due forme, HTML (dati escapati) e testo semplice."""
+
+    def __init__(self, bando_titolo: str | None, azienda: str | None,
+                 pseudonimo: str | None) -> None:
+        self.bando_html = (
+            f" per il bando <strong>«{html.escape(bando_titolo)}»</strong>" if bando_titolo else ""
+        )
+        self.bando_testo = f" per il bando «{bando_titolo}»" if bando_titolo else ""
+        self.azienda_html = (
+            f"la tua azienda <strong>{html.escape(azienda)}</strong>" if azienda
+            else "la tua azienda"
+        )
+        self.azienda_testo = f"la tua azienda «{azienda}»" if azienda else "la tua azienda"
+        self.della_azienda_html = "del" + self.azienda_html  # «della tua azienda…»
+        self.della_azienda_testo = "del" + self.azienda_testo
+        # La propria call: «alla call della tua azienda X» (Advisor) o «alla tua call».
+        self.tua_call_html = (
+            f"alla call di partenariato della tua azienda <strong>{html.escape(azienda)}</strong>"
+            if azienda else "alla tua call di partenariato"
+        )
+        self.tua_call_testo = (
+            f"alla call di partenariato della tua azienda «{azienda}»" if azienda
+            else "alla tua call di partenariato"
+        )
+        # Come la card dei suggeriti: lo pseudonimo vale solo per quella call.
+        self.riferimento_html = (
+            " (riferimento per questa call: "
+            '<span style="font-family:monospace;letter-spacing:.05em">'
+            f"{html.escape(pseudonimo)}</span>)" if pseudonimo else ""
+        )
+        self.riferimento_testo = (
+            f" (riferimento per questa call: {pseudonimo})" if pseudonimo else ""
+        )
+
+
+async def _invia_evento_partner(
+    to_email: str,
+    *,
+    subject: str,
+    heading: str,
+    paragrafi_html: list[str],
+    paragrafi_testo: list[str],
+    cta_label: str,
+    cta_url: str,
+    footer: str,
+    unsubscribe_token: object,
+) -> bool:
+    """Busta comune delle email di evento: disiscrizione dagli eventi nel
+    corpo e negli header RFC 8058, poi `_dispatch` (mai solleva)."""
+    unsubscribe_url = _url_disiscrizione_eventi(unsubscribe_token)
+    if unsubscribe_url is None:
+        logger.warning("Email di evento dei partenariati non inviata a %s: token di "
+                       "disiscrizione non valido", mask_email(to_email))
+        return False
+    unsubscribe_href = html.escape(unsubscribe_url, quote=True)
+    html_body = _branded_html(
+        heading,
+        [
+            *paragrafi_html,
+            '<span style="font-size:12px;color:#94a3b8">Non vuoi più ricevere queste email? '
+            f'<a href="{unsubscribe_href}" style="color:#64748b">Disattivale con un clic</a> '
+            "o dalle Preferenze della piattaforma: le notifiche nella piattaforma "
+            "restano.</span>",
+        ],
+        cta_label,
+        html.escape(cta_url, quote=True),
+        footer,
+    )
+    text = (
+        f"{heading}.\n\n"
+        + "\n\n".join(paragrafi_testo)
+        + f"\n\n{cta_label}: {cta_url}"
+        + f"\n\nPer non ricevere più queste email: {unsubscribe_url}"
+    )
+    return await _dispatch(
+        to_email,
+        subject,
+        html_body,
+        text,
+        headers={
+            "List-Unsubscribe": f"<{unsubscribe_url}>",
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
+    )
+
+
+async def send_partner_invito_email(
+    to_email: str,
+    *,
+    bando_titolo: str | None,
+    cta_url: str,
+    unsubscribe_token: object,
+    azienda_destinataria: str | None = None,
+    scadenza: str | None = None,
+) -> bool:
+    """All'azienda INVITATA (titolare e membri con visibilità): un'azienda
+    l'ha invitata alla sua call. Del creatore nessun dato (resta anonimo),
+    nemmeno il messaggio dell'invito. `scadenza` arriva già formattata
+    («gg/mm/aaaa»); `cta_url` porta `?azienda=`. Mai solleva."""
+    f = _Frasi(bando_titolo, azienda_destinataria, None)
+    decidi = (
+        "Apri l'invito per leggere la call e decidere se accettarlo: se accetti, "
+        "potrete scrivervi nella chat della piattaforma."
+    )
+    paragrafi_html = [
+        f"Un'azienda che cerca partner{f.bando_html} ha invitato {f.azienda_html} "
+        "a partecipare alla sua call di partenariato.",
+        decidi,
+    ]
+    paragrafi_testo = [
+        f"Un'azienda che cerca partner{f.bando_testo} ha invitato {f.azienda_testo} "
+        "a partecipare alla sua call di partenariato.",
+        decidi,
+    ]
+    if scadenza:
+        paragrafi_html.append(f"L'invito scade il <strong>{html.escape(scadenza)}</strong>.")
+        paragrafi_testo.append(f"L'invito scade il {scadenza}.")
+    return await _invia_evento_partner(
+        to_email,
+        subject="Hai ricevuto un invito a una call di partenariato — BandoFit",
+        heading="Hai ricevuto un invito a una call di partenariato",
+        paragrafi_html=paragrafi_html,
+        paragrafi_testo=paragrafi_testo,
+        cta_label="Vedi l'invito",
+        cta_url=cta_url,
+        footer="Ricevi questa email perché la tua azienda è visibile come partner su "
+        "BandoFit e accetta inviti.",
+        unsubscribe_token=unsubscribe_token,
+    )
+
+
+async def send_partner_candidatura_email(
+    to_email: str,
+    *,
+    bando_titolo: str | None,
+    pseudonimo: str | None,
+    cta_url: str,
+    unsubscribe_token: object,
+    azienda_destinataria: str | None = None,
+) -> bool:
+    """All'azienda che ha creato la call: una nuova candidatura. Della
+    candidata solo lo pseudonimo per QUESTA call; il messaggio della
+    candidatura resta nella piattaforma. Mai solleva."""
+    f = _Frasi(bando_titolo, azienda_destinataria, pseudonimo)
+    dettagli = (
+        "Nella pagina della call trovi il suo profilo, il confronto con i requisiti e il "
+        "messaggio che ti ha scritto: da lì puoi accettare o rifiutare la candidatura."
+    )
+    return await _invia_evento_partner(
+        to_email,
+        subject="Una nuova candidatura alla tua call di partenariato — BandoFit",
+        heading="Hai ricevuto una candidatura",
+        paragrafi_html=[
+            f"Un'azienda{f.riferimento_html} si è candidata {f.tua_call_html}{f.bando_html}.",
+            dettagli,
+        ],
+        paragrafi_testo=[
+            f"Un'azienda{f.riferimento_testo} si è candidata {f.tua_call_testo}{f.bando_testo}.",
+            dettagli,
+        ],
+        cta_label="Vedi la candidatura",
+        cta_url=cta_url,
+        footer="Ricevi questa email perché la tua azienda ha pubblicato questa call di "
+        "partenariato.",
+        unsubscribe_token=unsubscribe_token,
+    )
+
+
+async def send_partner_esito_email(
+    to_email: str,
+    *,
+    esito: EsitoPartner,
+    tipo: TipoCandidaturaPartner,
+    bando_titolo: str | None,
+    cta_url: str,
+    unsubscribe_token: object,
+    pseudonimo: str | None = None,
+    azienda_destinataria: str | None = None,
+) -> bool:
+    """Esito di una candidatura (`tipo='candidatura'`: la decide il creatore,
+    l'email va alla candidata) o di un invito (`tipo='invito'`: lo decide
+    l'invitata, l'email va al creatore con lo pseudonimo dell'invitata). Lo
+    pseudonimo si mostra solo per gli inviti: chi ha creato la call non ne ha.
+    Mai il motivo di un rifiuto (testo libero della controparte). Con
+    `esito`/`tipo` fuori vocabolario non invia (False). Mai solleva."""
+    if esito not in ("accettata", "rifiutata") or tipo not in ("candidatura", "invito"):
+        logger.warning("Email di esito dei partenariati non inviata: esito o tipo non validi")
+        return False
+    accettata = esito == "accettata"
+    if tipo == "candidatura":
+        f = _Frasi(bando_titolo, azienda_destinataria, None)
+        verbo = "ha accettato" if accettata else "non ha accolto"
+        primo_html = (
+            f"L'azienda che ha pubblicato la call di partenariato{f.bando_html} {verbo} "
+            f"la candidatura {f.della_azienda_html}."
+        )
+        primo_testo = (
+            f"L'azienda che ha pubblicato la call di partenariato{f.bando_testo} {verbo} "
+            f"la candidatura {f.della_azienda_testo}."
+        )
+        subject, heading = (
+            ("La tua candidatura è stata accettata — BandoFit",
+             "La tua candidatura è stata accettata")
+            if accettata else
+            ("Aggiornamento sulla tua candidatura — BandoFit",
+             "La tua candidatura non è stata accolta")
+        )
+        seguito = _NOTA_CHAT if accettata else (
+            "Trovi il dettaglio nella piattaforma, dove puoi cercare altre call adatte "
+            "alla tua azienda."
+        )
+        cta = "Apri la conversazione" if accettata else "Vedi la candidatura"
+        footer = "Ricevi questa email perché la tua azienda si è candidata a questa call."
+    else:
+        f = _Frasi(bando_titolo, azienda_destinataria, pseudonimo)
+        verbo = "ha accettato" if accettata else "ha rifiutato"
+        # «l'invito alla tua call…» / «l'invito alla call della tua azienda X…»
+        primo_html = (
+            f"Un'azienda{f.riferimento_html} {verbo} l'invito {f.tua_call_html}{f.bando_html}."
+        )
+        primo_testo = (
+            f"Un'azienda{f.riferimento_testo} {verbo} l'invito {f.tua_call_testo}"
+            f"{f.bando_testo}."
+        )
+        subject, heading = (
+            ("Il tuo invito è stato accettato — BandoFit", "Il tuo invito è stato accettato")
+            if accettata else
+            ("Aggiornamento sul tuo invito — BandoFit", "Il tuo invito non è stato accettato")
+        )
+        seguito = _NOTA_CHAT if accettata else (
+            "Nella pagina della call trovi altri partner suggeriti da invitare."
+        )
+        cta = "Apri la conversazione" if accettata else "Vedi la call"
+        footer = "Ricevi questa email perché la tua azienda ha invitato un partner a questa call."
+    return await _invia_evento_partner(
+        to_email,
+        subject=subject,
+        heading=heading,
+        paragrafi_html=[primo_html, seguito],
+        paragrafi_testo=[primo_testo, seguito],
+        cta_label=cta,
+        cta_url=cta_url,
+        footer=footer,
+        unsubscribe_token=unsubscribe_token,
+    )
+
+
+async def send_partner_messaggi_email(
+    to_email: str,
+    *,
+    bando_titolo: str | None,
+    cta_url: str,
+    unsubscribe_token: object,
+    pseudonimo: str | None = None,
+    azienda_destinataria: str | None = None,
+) -> bool:
+    """Nuovi messaggi in una conversazione: UNA email per raffica (lo decide
+    prima il claim `fn_partner_claim_email_chat`). MAI il testo dei messaggi
+    né quanti sono. `pseudonimo` = quello dell'altra azienda, solo se ne ha
+    uno per la call (quando l'email va al creatore). Mai solleva."""
+    f = _Frasi(bando_titolo, azienda_destinataria, pseudonimo)
+    con_html = f", con l'azienda{f.riferimento_html}" if pseudonimo else ""
+    con_testo = f", con l'azienda{f.riferimento_testo}" if pseudonimo else ""
+    per_html = f" per {f.azienda_html}" if azienda_destinataria else ""
+    per_testo = f" per {f.azienda_testo}" if azienda_destinataria else ""
+    altri = [
+        "Per leggerli e rispondere apri la conversazione nella piattaforma: per "
+        "riservatezza il testo dei messaggi non viene inviato via email.",
+        "Non ti scriveremo di nuovo per questa conversazione finché non avrai letto "
+        "questi messaggi.",
+    ]
+    return await _invia_evento_partner(
+        to_email,
+        subject="Hai nuovi messaggi su una call di partenariato — BandoFit",
+        heading="Hai nuovi messaggi",
+        paragrafi_html=[
+            f"Ci sono nuovi messaggi{per_html} nella conversazione sulla call di "
+            f"partenariato{f.bando_html}{con_html}.",
+            *altri,
+        ],
+        paragrafi_testo=[
+            f"Ci sono nuovi messaggi{per_testo} nella conversazione sulla call di "
+            f"partenariato{f.bando_testo}{con_testo}.",
+            *altri,
+        ],
+        cta_label="Leggi i messaggi",
+        cta_url=cta_url,
+        footer="Ricevi questa email perché la tua azienda partecipa a questa conversazione.",
+        unsubscribe_token=unsubscribe_token,
     )

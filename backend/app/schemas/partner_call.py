@@ -21,6 +21,7 @@ Le call sono per ora SOLO anonime (WP4, `NOMINATIVO_DISPONIBILE = False`):
 """
 
 import math
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal
@@ -31,6 +32,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -130,7 +132,7 @@ FonteCopertura = Literal["registro", "bilanci", "dichiarato", "ai_check", "nessu
 TerritorioModalita = Literal["qualsiasi", "sede_attuale", "sede_entro_erogazione"]
 StatoJobAi = Literal["nessuno", "in_corso", "pronta", "errore"]
 OrigineVoce = Literal["confermata", "modificata", "aggiunta"]
-OggettoSegnalazione = Literal["call", "profilo"]
+OggettoSegnalazione = Literal["call", "profilo", "messaggio"]
 MotivoSegnalazione = Literal[
     "contenuto_illecito",
     "dati_personali",
@@ -863,8 +865,8 @@ class SegnalazioneIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     oggetto_tipo: OggettoSegnalazione
-    # Id della call o codice pubblico del profilo (uuid); testo nella tabella
-    # perché il WP7 aggiungerà i messaggi.
+    # Id della call o codice pubblico del profilo (uuid) oppure, dal WP7, id
+    # del messaggio della chat (intero positivo): testo nella tabella.
     oggetto_id: str
     motivo: MotivoSegnalazione
     descrizione: str
@@ -883,7 +885,11 @@ class SegnalazioneIn(BaseModel):
 
     @field_validator("oggetto_id")
     @classmethod
-    def _oggetto(cls, valore: str) -> str:
+    def _oggetto(cls, valore: str, info: ValidationInfo) -> str:
+        if info.data.get("oggetto_tipo") == "messaggio":
+            if not re.fullmatch(r"[0-9]{1,18}", valore.strip()) or int(valore) <= 0:
+                raise BadRequestError("Contenuto da segnalare non valido")
+            return str(int(valore))
         try:
             return str(UUID(valore.strip()))
         except ValueError:

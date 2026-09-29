@@ -2196,7 +2196,8 @@ export interface ChiudiCallInput {
   esito: "completata" | "annullata";
 }
 
-export type OggettoSegnalazione = "call" | "profilo";
+/** `messaggio` dal WP7: `oggetto_id` è l'id del messaggio (numero, come testo). */
+export type OggettoSegnalazione = "call" | "profilo" | "messaggio";
 export type MotivoSegnalazione =
   | "contenuto_illecito"
   | "dati_personali"
@@ -2540,7 +2541,13 @@ export interface MatchOut {
   dettaglio?: string[] | null;
 }
 
-export type VistaPartenariati = "per-te" | "tutte" | "mie" | "salvate";
+export type VistaPartenariati =
+  | "per-te"
+  | "tutte"
+  | "mie"
+  | "salvate"
+  | "candidature"
+  | "conversazioni";
 export type OrdineBacheca = "affinita" | "recenti" | "scadenza";
 
 /** Filtri della bacheca (`vista=tutte`), nei searchParams. */
@@ -2594,11 +2601,18 @@ export interface PartnerSuggerito {
   match: MatchOut;
 }
 
-/** `GET /partenariati/riepilogo`: numeri per il badge del menu. */
+/** `GET /partenariati/riepilogo`: numeri per il badge del menu. Dal WP7
+ *  anche le cose da fare (facoltativi: un server del WP6 non li manda). */
 export interface RiepilogoPartenariati {
   per_te_nuove: number;
   call_attive: number;
   salvate: number;
+  /** Inviti ricevuti ancora da decidere. */
+  inviti_ricevuti?: number;
+  /** Candidature spontanee ricevute sulle tue call, ancora da decidere. */
+  candidature_da_decidere?: number;
+  /** Messaggi non letti da te, su tutte le conversazioni dell'azienda. */
+  messaggi_non_letti?: number;
 }
 
 /** `GET/PUT /me/partenariati/email-settings` (per utente). */
@@ -2607,4 +2621,259 @@ export interface PartnerEmailSettings {
   digest_abilitato: boolean;
   /** Email sulle attività (inviti, candidature, risposte, messaggi). */
   eventi_abilitati: boolean;
+}
+
+// ---- Partenariati: candidature, inviti e chat (WP7) --------------------------------
+// Una sola entità per candidature spontanee e inviti (`tipo`). Verso l'altra
+// azienda mai l'id interno dell'azienda: l'azienda candidata o invitata ha lo
+// pseudonimo della call, chi ha creato la call resta «Azienda anonima» (la
+// rivelazione dell'identità è spenta, docs/partenariati.md §16).
+
+export type TipoCandidatura = "candidatura" | "invito";
+export type StatoCandidatura = "inviata" | "accettata" | "rifiutata" | "ritirata" | "scaduta";
+/** Perché una candidatura o un invito si è chiuso senza una decisione. */
+export type MotivoChiusuraCandidatura = "call_chiusa" | "ttl" | "opt_out" | "moderazione";
+/** Filtro delle liste: quelle mandate dalla tua azienda o quelle ricevute. */
+export type DirezioneCandidature = "inviate" | "ricevute";
+/** Da che parte sta l'azienda attiva: ha creato la call (`creatore`) oppure
+ *  è l'azienda candidata o invitata (`partner`). */
+export type LatoPartenariato = "creatore" | "partner";
+
+/** La call in breve, dentro candidature e conversazioni (`CallRiferimentoOut`:
+ *  solo dati pubblici, mai il creatore). */
+export interface CallRiferimento {
+  id: string;
+  titolo: string | null;
+  bando: BandoPubblicoCall;
+  stato: StatoCall;
+  scadenza_call: string | null;
+  visibilita: VisibilitaCall;
+}
+
+/** Profilo pubblico dell'azienda candidata o invitata, come nei suggeriti
+ *  (senza il codice pubblico). */
+export type ProfiloPartnerCall = Omit<PartnerPubblico, "codice_pubblico">;
+
+/** L'azienda candidata o invitata vista dal creatore (`CandidatoOut`): lo
+ *  pseudonimo della call e, solo nel dettaglio, il profilo pubblico finché
+ *  è visibile. `disponibile` false: ha tolto la visibilità o non è più
+ *  attiva («Azienda non più disponibile», senza dati). */
+export interface CandidatoCandidatura {
+  pseudonimo: string;
+  disponibile: boolean;
+  profilo?: ProfiloPartnerCall | null;
+}
+
+/** Requisito cercato che l'azienda dichiara di avere (una dichiarazione,
+ *  non una verifica). */
+export interface RequisitoDichiarato {
+  requisito_id: string;
+  etichetta: string;
+}
+
+/** `CandidaturaOut`: una candidatura o un invito come lo vede l'azienda
+ *  attiva (`lato`). Dal lato del creatore l'altra azienda è solo `candidato`
+ *  (pseudonimo) con la `valutazione` salvata all'invio (vista «terzi»: esiti
+ *  e fasce) finché è disponibile; `compatibile` false = non risultava
+ *  compatibile con i filtri della call. Dal lato partner nessun dato del
+ *  creatore. `puo_decidere` / `puo_ritirare` li calcola il server (titolare,
+ *  in attesa). Un invito in attesa oltre la scadenza arriva già `scaduta`. */
+export interface Candidatura {
+  id: string;
+  tipo: TipoCandidatura;
+  lato: LatoPartenariato;
+  stato: StatoCandidatura;
+  motivo_chiusura: MotivoChiusuraCandidatura | null;
+  call: CallRiferimento;
+  posizione: { id: string; titolo: string } | null;
+  messaggio: string | null;
+  requisiti_dichiarati: RequisitoDichiarato[];
+  candidato: CandidatoCandidatura | null;
+  valutazione: MatchOut | null;
+  compatibile: boolean | null;
+  motivo_rifiuto: string | null;
+  scade_at: string | null;
+  decisa_at: string | null;
+  chiusa_at: string | null;
+  created_at: string | null;
+  /** Dopo l'accettazione. */
+  conversazione_id: string | null;
+  puo_decidere: boolean;
+  puo_ritirare: boolean;
+  /** Solo nella risposta dell'invio: candidature del mese (null = illimitate). */
+  quota?: { usate: number; limite: number | null } | null;
+  /** Solo nella risposta dell'invito: inviti in attesa sulla call. */
+  inviti?: { attivi: number; massimo: number } | null;
+}
+
+/** `POST /partenariati/call/{id}/candidature` (solo il titolare). */
+export interface CandidaturaInput {
+  posizione_id: string;
+  /** Da 50 a 2000 caratteri, senza contatti. */
+  messaggio: string;
+  /** Id dei requisiti visibili della call (cercati o validi per ogni membro). */
+  requisiti_dichiarati: string[];
+}
+
+/** `POST /partenariati/call/{id}/inviti` (solo il titolare della call):
+ *  l'azienda si indica con lo pseudonimo dei suggeriti. */
+export interface InvitoInput {
+  pseudonimo: string;
+  posizione_id: string | null;
+  /** Facoltativo, fino a 1000 caratteri, senza contatti. */
+  messaggio: string | null;
+}
+
+/** `POST /partenariati/candidature/{id}/rifiuta`: motivo facoltativo. */
+export interface RifiutoInput {
+  motivo: string | null;
+}
+
+/** Filtri della lista `GET /partenariati/candidature`. */
+export interface FiltriCandidature {
+  direzione: DirezioneCandidature;
+  stato: StatoCandidatura | null;
+  /** Solo le candidature di una call (scheda della call del creatore). */
+  call_id?: string | null;
+}
+
+/** `CandidaturaPropriaOut`: la candidatura (o l'invito) della tua azienda
+ *  su una call di altri, dentro il dettaglio della call. Un invito in attesa
+ *  oltre la scadenza arriva già come `scaduta`. `puo_decidere` (inviti) e
+ *  `puo_ritirare` (candidature) li calcola il server per il titolare. */
+export interface CandidaturaPropria {
+  id: string;
+  tipo: TipoCandidatura;
+  stato: StatoCandidatura;
+  posizione_id: string | null;
+  scade_at: string | null;
+  motivo_chiusura: MotivoChiusuraCandidatura | null;
+  /** Il motivo del rifiuto è rivolto a te. */
+  motivo_rifiuto: string | null;
+  conversazione_id: string | null;
+  created_at: string | null;
+  decisa_at: string | null;
+  /** Quando si è chiusa senza decisione (ritirata o scaduta). */
+  chiusa_at?: string | null;
+  puo_decidere: boolean;
+  puo_ritirare: boolean;
+}
+
+/** Requisito visibile della call che chi si candida può dichiarare: l'id da
+ *  mandare e l'etichetta (la stessa di `requisiti`). */
+export interface RequisitoDichiarabile {
+  id: string;
+  etichetta: string;
+}
+
+/** La call vista da un'altra azienda (`GET /partenariati/call/{id}`):
+ *  - `CallPubblicaDettaglioOut` (pubblico, candidata o invitata): confronto,
+ *    «salvata», visibilità come partner, i requisiti dichiarabili e la
+ *    propria candidatura (in attesa; una già chiusa solo finché la call è
+ *    visibile a tutti, altrimenti la call è 404);
+ *  - `CallVistaControparteOut` (`vista: "controparte"`, candidatura
+ *    accettata): in più dettagli riservati e budget esatto, l'identità solo
+ *    con la rivelazione accesa (oggi spenta); niente confronto né «salvata».
+ *  Mai i bilanci di nessuno. */
+export interface CallDettaglioAltraAzienda extends CallPubblica {
+  match?: MatchOut | null;
+  salvata?: boolean;
+  opt_in?: boolean;
+  candidatura?: CandidaturaPropria | null;
+  /** Requisiti che si possono dichiarare candidandosi (non nella vista
+   *  della controparte). */
+  requisiti_dichiarabili?: RequisitoDichiarabile[];
+  vista?: "controparte";
+  dettagli_riservati?: string | null;
+  /** Decimale come stringa. */
+  budget_progetto_eur?: string | null;
+  identita_rivelata?: boolean;
+  identita?: IdentitaRivelata | null;
+}
+
+/** Un'azienda suggerita con lo stato del contatto sulla call
+ *  (`stato_contatto`, WP7): `accettata`, `inviata` (candidatura o invito in
+ *  attesa) o `rifiutata` (un tuo invito che ha rifiutato: non si reinvita);
+ *  null se si può invitare. Facoltativo: un server del WP6 non lo manda. */
+export interface PartnerSuggeritoContatto extends PartnerSuggerito {
+  stato_contatto?: "accettata" | "inviata" | "rifiutata" | null;
+}
+
+export type StatoConversazione = "aperta" | "chiusa";
+
+/** `IdentitaRivelataOut`: identità rivelata dopo l'accettazione (oggi
+ *  spenta: sempre null). Dati d'impresa dal Registro Imprese, nome e ruolo
+ *  del referente; mai l'email personale del referente. */
+export interface IdentitaRivelata {
+  ragione_sociale: string | null;
+  sito_web: string | null;
+  pec: string | null;
+  referente_nome: string | null;
+  referente_ruolo: "titolare" | "referente" | null;
+}
+
+/** L'altra azienda della conversazione (`ControparteOut`): per il creatore
+ *  lo pseudonimo dell'azienda partner per quella call; per l'azienda
+ *  partner nessun handle (è «chi ha creato la call»). `attiva` false:
+ *  eliminata o archiviata (conversazione in sola lettura). */
+export interface ControparteConversazione {
+  pseudonimo: string | null;
+  attiva: boolean;
+}
+
+/** Una conversazione nella lista (`GET /partenariati/conversazioni`). */
+export interface ConversazioneCard {
+  id: string;
+  stato: StatoConversazione;
+  lato: LatoPartenariato;
+  call: CallRiferimento;
+  controparte: ControparteConversazione;
+  /** Messaggi dell'altra azienda che non hai ancora letto. */
+  non_letti: number;
+  ultimo_messaggio_at: string | null;
+  created_at: string | null;
+  chiusa_at: string | null;
+  /** Chiusa, una delle due aziende non più attiva, o non sei il titolare. */
+  sola_lettura: boolean;
+}
+
+/** `GET /partenariati/conversazioni/{id}` (solo le due aziende). */
+export interface Conversazione extends ConversazioneCard {
+  candidatura_id: string;
+  identita_rivelata: boolean;
+  identita: IdentitaRivelata | null;
+  /** Fin dove hai letto (id dell'ultimo messaggio letto, 0 = nulla): serve
+   *  al separatore «Nuovi messaggi». */
+  letto_fino_a_id: number;
+  puo_scrivere: boolean;
+  /** Solo il titolare dell'azienda che ha creato la call. */
+  puo_chiudere: boolean;
+}
+
+/** Un messaggio (`MessaggioOut`): immutabile; oscurato dalla moderazione →
+ *  `testo` null e `nascosto` true. Mai chi l'ha scritto. */
+export interface Messaggio {
+  id: number;
+  /** Scritto dalla tua azienda. */
+  propria: boolean;
+  testo: string | null;
+  nascosto: boolean;
+  created_at: string | null;
+  /** Solo per i propri. */
+  client_msg_id?: string | null;
+}
+
+/** `GET …/conversazioni/{id}/messaggi?dopo=&prima=&limite=`: in ordine di
+ *  id crescente; `ha_altri` = ce ne sono altri oltre il blocco (più vecchi
+ *  senza cursore o con `prima`, più nuovi con `dopo`). */
+export interface MessaggiPage {
+  items: Messaggio[];
+  ha_altri: boolean;
+}
+
+/** `POST …/conversazioni/{id}/messaggi`: `client_msg_id` rende l'invio
+ *  idempotente (un secondo invio con la stessa chiave non duplica). */
+export interface MessaggioInput {
+  testo: string;
+  client_msg_id: string;
 }

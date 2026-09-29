@@ -42,10 +42,13 @@ function Chips({ voci }: { voci: string[] }) {
 export function SuggeritoCard({
   suggerito,
   testi,
+  azione,
 }: {
   suggerito: PartnerSuggerito;
   /** Testo dei requisiti per etichetta, dalla call del proponente. */
   testi?: ReadonlyMap<string, string>;
+  /** Azione sull'azienda (WP7: «Invita» o lo stato dell'invito), in alto a destra. */
+  azione?: ReactNode;
 }) {
   const { profilo, match, pseudonimo } = suggerito;
   const classe = profilo.classe_dimensionale
@@ -101,6 +104,7 @@ export function SuggeritoCard({
               Riferimento per questa call: <span className="font-mono tracking-wide">{pseudonimo}</span>
             </p>
           </div>
+          {azione && <div className="shrink-0">{azione}</div>}
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-1.5">

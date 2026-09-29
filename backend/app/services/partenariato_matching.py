@@ -37,11 +37,14 @@ un codice interno mai mostrato al creatore per le aziende di terzi:
   7. `finanziaria_non_soddisfatta` (su OGNI posizione rimasta: le regole per
      ciascun partner sempre, quelle del capofila solo sulle posizioni da
      capofila; le regole aggregate sono del validatore, WP8);
-  8. `esclusivita` (call esclusiva e candidato già impegnato sullo stesso
-     bando);
+  8. `esclusivita`: il candidato ha già un impegno sullo stesso bando (una
+     sua call pubblicata o una candidatura accettata, WP7) e o questa call o
+     quella dell'impegno è esclusiva (`impegni_esclusivi`): la stessa regola
+     di `fn_partner_esclusivita_violata` (0039), che resta l'arbitro
+     all'accettazione;
   9. `solo_invitati`: verso il candidato («Per te») la call compare solo con
-     un invito (WP7; nel WP6 mai); tra i suggeriti del creatore sparisce chi
-     non accetta inviti.
+     un invito in attesa o accettato (`IndiceMatching.inviti`, WP7); tra i
+     suggeriti del creatore sparisce chi non accetta inviti.
 `dato_mancante` e `incerto` non escludono: diventano voci «attenzione» e
 penalità.
 
@@ -63,8 +66,15 @@ Punteggio (M3), con i pesi `PesiMatching` (dalle Settings):
   - rotazione = max(0, 1 − esposizioni degli ultimi 7 giorni / esposizioni_max).
 Ordine: requisiti cercati coperti (desc), punteggio (desc), poi
 `sha256(f"{call_id}:{codice_pubblico}:{settimana_iso}")`: deterministico e
-diverso ogni settimana. Al massimo `max_per_owner_pagina` aziende dello stesso
-owner per pagina (`impagina`).
+diverso ogni settimana. Suggeriti: al massimo `max_per_owner_pagina` aziende
+dello stesso owner sull'INTERA lista (`limita_per_owner`, dentro
+`suggeriti_per_call`, prima dei filtri facoltativi): le altre non compaiono.
+Un limite per pagina le farebbe slittare alle pagine successive, e un'azienda
+spostata, migliore della coda della pagina prima, rivelerebbe al creatore
+quali anonimi hanno lo stesso owner. Il limite riguarda solo la lista
+esposta: le notifiche proattive («Nuova call per te») non lo applicano.
+«Per te»: al massimo
+`max_per_owner_pagina` call dello stesso owner per pagina (`impagina`).
 
 Spiegazioni da template: «Copri «A» e «C», che mancano al capofila.»
 («…al proponente.» se il creatore cerca un capofila). Verso terzi solo fasce
@@ -216,8 +226,9 @@ class ProfiloMatching(ProfiloCandidato):
     `collegate` = aziende collegate (certo o possibile, Q17) secondo
     `partenariato_collegamenti`; `ruoli_disponibili` None = nessun profilo
     partner (non si esclude per ruolo); `impegni_bando` = bandi su cui
-    l'azienda è già impegnata (call pubblicate; WP7-WP8 aggiungono candidature
-    accettate e membri)."""
+    l'azienda è già impegnata (call pubblicate e, dal WP7, candidature
+    accettate; WP8 aggiungerà i membri), `impegni_esclusivi` = quelli dei
+    bandi in cui almeno uno di questi impegni è su una call esclusiva."""
 
     company_id: str = ""
     owner_id: str = ""
@@ -237,6 +248,7 @@ class ProfiloMatching(ProfiloCandidato):
     collegate: frozenset[str] = frozenset()
     collegamenti_ok: bool = False
     impegni_bando: frozenset[int] = frozenset()
+    impegni_esclusivi: frozenset[int] = frozenset()
     esposizioni_7g: int = 0
 
 
@@ -264,6 +276,7 @@ def profilo_matching_da(
     collegate: Iterable[str] = (),
     collegamenti_ok: bool = False,
     impegni_bando: Iterable[int] = (),
+    impegni_esclusivi: Iterable[int] = (),
     esposizioni_7g: int = 0,
 ) -> ProfiloMatching:
     """`ProfiloMatching` da un `ProfiloCandidato` (`profilo_candidato_da`) e
@@ -297,6 +310,7 @@ def profilo_matching_da(
         collegate=frozenset(str(c) for c in collegate),
         collegamenti_ok=bool(collegamenti_ok),
         impegni_bando=_interi(list(impegni_bando)),
+        impegni_esclusivi=_interi(list(impegni_esclusivi)),
         esposizioni_7g=max(0, int(esposizioni_7g or 0)),
     )
 
@@ -462,8 +476,9 @@ def call_snapshot_da(
 @dataclass(frozen=True)
 class IndiceMatching:
     """Dati puri dell'indice: call pubblicate e aziende candidabili (opt-in
-    visibile), per id. `inviti` = call → aziende invitate (WP7; vuoto nel
-    WP6). Lo costruisce e lo tiene aggiornato `partenariato_indice`."""
+    visibile), per id. `inviti` = call → aziende con un invito in attesa (non
+    scaduto) o accettato (WP7). Lo costruisce e lo tiene aggiornato
+    `partenariato_indice`."""
 
     calls: Mapping[str, CallSnapshot] = field(default_factory=dict)
     candidati: Mapping[str, ProfiloMatching] = field(default_factory=dict)
@@ -975,8 +990,10 @@ def _analizza(
         return "finanziaria_non_soddisfatta", None
     rimaste = [s for s in superate if s is not None]
 
-    # 8. esclusività
-    if call.esclusivita and call.bando_id in cand.impegni_bando:
+    # 8. esclusività (simmetrica, come fn_partner_esclusivita_violata)
+    if call.bando_id in cand.impegni_bando and (
+        call.esclusivita or call.bando_id in cand.impegni_esclusivi
+    ):
         return "esclusivita", None
     # 9. call solo su invito
     if call.visibilita == "solo_invitati":
@@ -1176,6 +1193,26 @@ def owner_call(m: MatchInterno) -> str:
     return m.call_owner_id
 
 
+def limita_per_owner(
+    items: Iterable[MatchInterno],
+    *,
+    max_per_owner: int = MAX_PER_OWNER_PAGINA,
+    owner: Callable[[MatchInterno], str] = owner_candidato,
+) -> list[MatchInterno]:
+    """Le prime `max_per_owner` voci di ogni owner, nell'ordine dato; le altre
+    ESCONO dalla lista (non slittano più avanti, a differenza di `impagina`):
+    nessuna pagina, conteggio o filtro successivo le rivela."""
+    massimo = max(1, max_per_owner)
+    conteggi: Counter[str] = Counter()
+    tenute: list[MatchInterno] = []
+    for m in items:
+        chiave = owner(m)
+        if conteggi[chiave] < massimo:
+            tenute.append(m)
+            conteggi[chiave] += 1
+    return tenute
+
+
 def impagina(
     items: Sequence[MatchInterno],
     *,
@@ -1186,7 +1223,9 @@ def impagina(
     """Pagine nell'ordine dato con al massimo `max_per_owner` elementi dello
     stesso owner per pagina: chi non entra slitta alle pagine successive
     (conservando l'ordine). Una pagina si chiude piena o quando nessun
-    elemento rimasto può entrarci."""
+    elemento rimasto può entrarci. Serve a «Per te» (owner delle call); sui
+    suggeriti il limite vale già sull'intera lista (`limita_per_owner`) e qui
+    non sposta nulla."""
     dimensione = max(1, dimensione)
     massimo = max(1, max_per_owner)
     restanti = list(items)
@@ -1241,26 +1280,39 @@ def suggeriti_per_call(
     *,
     oggi: date,
     pesi: PesiMatching = PESI_PREDEFINITI,
+    limita_owner: bool = True,
 ) -> list[MatchInterno]:
-    """Aziende da suggerire al creatore della call, ordinate (senza il cap
-    per owner: lo applica `impagina`). Solo match rilevanti."""
+    """Aziende da suggerire al creatore della call, ordinate e con al massimo
+    `pesi.max_per_owner_pagina` aziende dello stesso owner sull'INTERA lista
+    (`limita_per_owner`): le altre non compaiono in nessuna pagina né nel
+    totale. Il limite si applica PRIMA dei filtri facoltativi, così un filtro
+    (per esempio per posizione) non fa comparire un'azienda che la lista
+    completa nasconde. Solo match rilevanti.
+
+    `limita_owner=False` solo dove la lista NON si mostra al creatore: le
+    notifiche proattive (`partenariato_notifiche.fan_out_pubblicazione`, con
+    le soglie di `filtri`) arrivano a ogni azienda idonea, anche oltre la
+    seconda dello stesso owner, come nel WP6. La rotta dei suggeriti e la
+    validazione degli inviti tengono il limite (le due liste coincidono)."""
     call = indice.calls.get(str(call_id))
     if call is None:
         return []
     filtri = filtri or FiltriSuggeriti()
-    risultati: list[MatchInterno] = []
+    rilevanti: list[MatchInterno] = []
     for cand in indice.candidati.values():
         m = valuta_coppia(call, cand, oggi=oggi, pesi=pesi, direzione="suggeriti")
-        if m is None or not m.rilevante:
-            continue
-        if filtri.posizione_id is not None and all(
-            p.id != filtri.posizione_id for p in m.posizioni
-        ):
-            continue
-        if m.coperti < filtri.min_coperti or m.punteggio < filtri.min_punteggio:
-            continue
-        risultati.append(m)
-    return ordina(risultati, oggi=oggi)
+        if m is not None and m.rilevante:
+            rilevanti.append(m)
+    esposti = ordina(rilevanti, oggi=oggi)
+    if limita_owner:
+        esposti = limita_per_owner(esposti, max_per_owner=pesi.max_per_owner_pagina)
+    return [
+        m
+        for m in esposti
+        if (filtri.posizione_id is None or any(p.id == filtri.posizione_id for p in m.posizioni))
+        and m.coperti >= filtri.min_coperti
+        and m.punteggio >= filtri.min_punteggio
+    ]
 
 
 def per_te(

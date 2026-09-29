@@ -7,6 +7,7 @@ import { useMe } from "../../hooks/useMe";
 import { useRiepilogoPartenariati } from "../../hooks/usePartenariati";
 import { cn } from "../../lib/cn";
 import { hasAreaProgettista } from "../../lib/roles";
+import type { RiepilogoPartenariati } from "../../types";
 import { InviteBanner } from "../shared/InviteBanner";
 import { PoweredBy } from "../shared/PoweredBy";
 import { UpgradeBanner } from "../shared/UpgradeBanner";
@@ -30,10 +31,47 @@ const directLinks: NavItem[] = [
 // pagina «non esiste», come le rotte del backend), con il badge delle novità.
 const partenariatiLink: NavItem = { to: "/app/partenariati", label: "Partenariati" };
 
-/** Link «Partenariati» con il numero delle call «Per te» pubblicate negli
- *  ultimi 7 giorni (dal riepilogo; non è un contatore di non lette: scende da
- *  solo quando una call esce dalla settimana): numero visibile e, per i
- *  lettori di schermo, in parole. */
+/** Frase del badge per i lettori di schermo e il `title`: le cose da fare
+ *  (messaggi non letti, inviti e candidature da decidere, dal WP7) oppure,
+ *  se non ce ne sono, le call «Per te» pubblicate negli ultimi 7 giorni. */
+function fraseBadge(r: RiepilogoPartenariati | undefined): {
+  numero: number;
+  frase: string;
+  daFare: boolean;
+} {
+  const messaggi = r?.messaggi_non_letti ?? 0;
+  const inviti = r?.inviti_ricevuti ?? 0;
+  const candidature = r?.candidature_da_decidere ?? 0;
+  const daFare = messaggi + inviti + candidature;
+  if (daFare > 0) {
+    const parti = [
+      messaggi ? (messaggi === 1 ? "1 messaggio non letto" : `${messaggi} messaggi non letti`) : null,
+      inviti ? (inviti === 1 ? "1 invito da decidere" : `${inviti} inviti da decidere`) : null,
+      candidature
+        ? candidature === 1
+          ? "1 candidatura da decidere"
+          : `${candidature} candidature da decidere`
+        : null,
+    ].filter(Boolean);
+    return { numero: daFare, frase: parti.join(", "), daFare: true };
+  }
+  const nuove = r?.per_te_nuove ?? 0;
+  return {
+    numero: nuove,
+    frase:
+      nuove === 1
+        ? "1 call per te pubblicata negli ultimi 7 giorni"
+        : `${nuove} call per te pubblicate negli ultimi 7 giorni`,
+    daFare: false,
+  };
+}
+
+/** Link «Partenariati» con un numero (dal riepilogo): le cose da fare
+ *  (messaggi non letti, inviti e candidature da decidere) con un badge
+ *  rosso; se non ce ne sono, le call «Per te» pubblicate negli ultimi 7
+ *  giorni (non è un contatore di non lette: scende da solo quando una call
+ *  esce dalla settimana). Numero visibile e, per i lettori di schermo, in
+ *  parole. */
 function PartenariatiNavLink({
   className,
   onClick,
@@ -42,24 +80,23 @@ function PartenariatiNavLink({
   onClick?: () => void;
 }) {
   const { data: riepilogo } = useRiepilogoPartenariati();
-  const nuove = riepilogo?.per_te_nuove ?? 0;
+  const { numero, frase, daFare } = fraseBadge(riepilogo);
   return (
     <NavLink to={partenariatiLink.to} className={className} onClick={onClick}>
       {partenariatiLink.label}
-      {nuove > 0 && (
+      {numero > 0 && (
         <>
           <span
-            className="ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full bg-brand-500 px-1.5 text-xs font-semibold text-white tabular"
-            title="Call per te pubblicate negli ultimi 7 giorni"
+            className={cn(
+              "ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold text-white tabular",
+              daFare ? "bg-red-600" : "bg-brand-500",
+            )}
+            title={frase}
             aria-hidden
           >
-            {nuove > 99 ? "99+" : nuove}
+            {numero > 99 ? "99+" : numero}
           </span>
-          <span className="sr-only">
-            {nuove === 1
-              ? ", 1 call per te pubblicata negli ultimi 7 giorni"
-              : `, ${nuove} call per te pubblicate negli ultimi 7 giorni`}
-          </span>
+          <span className="sr-only">, {frase}</span>
         </>
       )}
     </NavLink>

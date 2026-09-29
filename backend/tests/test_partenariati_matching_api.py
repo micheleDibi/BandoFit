@@ -12,6 +12,7 @@ sul primario finto di `test_partenariato_indice` caricato con l'esempio
 guida."""
 
 import copy
+import json
 import re
 
 import httpx
@@ -23,7 +24,7 @@ from app.api.deps import ActiveCompany
 from app.api.routers import partenariati_email, partenariati_scoperta, partner_calls
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
-from app.services import partenariato_indice
+from app.services import partenariato_accesso, partenariato_indice
 from tests.fixtures.partenariati import esempio_guida as g
 from tests.test_partenariato_indice import (  # noqa: F401 — fixture autouse
     PIVA,
@@ -359,7 +360,8 @@ class TestSuggeriti:
         corpo = resp.json()
         assert resp.status_code == 200 and corpo["total"] == 2
         y, t = corpo["items"]
-        assert set(y) == {"pseudonimo", "profilo", "match"}
+        assert set(y) == {"pseudonimo", "profilo", "match", "stato_contatto"}
+        assert y["stato_contatto"] is None  # nessun contatto ancora (WP7)
         assert re.fullmatch(r"[A-Z2-7]{16}", y["pseudonimo"])
         profilo = y["profilo"]
         assert "codice_pubblico" not in profilo  # handle stabile: mai al creatore
@@ -411,6 +413,54 @@ class TestSuggeriti:
                             f"/partenariati/call/{g.CALL_GUIDA_ID}/suggeriti?posizione=nessuna")
         assert resp.json()["items"] == []
 
+    async def test_al_massimo_due_aziende_dello_stesso_owner_su_tutta_la_lista(self):
+        """Il titolare di Y ha altre due aziende uguali a Y: al creatore ne
+        arrivano due in tutto (non due per pagina), e il totale non conta la
+        terza, nemmeno con il filtro per posizione."""
+        db, sec = await scenario_guida()
+        copie = {}
+        for n in (1, 2):
+            company = f"c0000000-0000-4000-8000-0000000009{n:02d}"
+            codice = f"d0000000-0000-4000-8000-0000000009{n:02d}"
+            piva = f"3000000009{n}"
+            for tabella, campo in (("company_profiles", "id"), ("company_data",
+                                   "company_profile_id"), ("company_partner_profiles",
+                                   "company_profile_id"), ("company_financials",
+                                   "company_profile_id"), ("company_financials_stato",
+                                   "company_profile_id")):
+                for riga in [r for r in db.tabelle[tabella] if r[campo] == g.COMPANY["Y"]]:
+                    nuova = copy.deepcopy(riga)
+                    nuova[campo] = company
+                    db.tabelle[tabella].append(nuova)
+            db.una("company_profiles", id=company).update(
+                ragione_sociale=f"Copia {n} Sintetica Srl", partita_iva=piva,
+                codice_fiscale=piva)
+            dati = db.una("company_data", company_profile_id=company)
+            dati.update(piva_fetched=piva, denominazione=f"COPIA {n} SINTETICA SRL")
+            dati["raw"]["companyDetails"].update(companyName=f"COPIA {n} SINTETICA SRL",
+                                                 vatCode=piva, taxCode=piva)
+            db.una("company_partner_profiles", company_profile_id=company)[
+                "codice_pubblico"] = codice
+            copie[company] = codice
+        from app.services import partenariato_collegamenti
+
+        assert (await partenariato_collegamenti.backfill(db))["errori"] == 0
+        percorso = f"/partenariati/call/{g.CALL_GUIDA_ID}/suggeriti"
+        stesso_owner = {
+            partenariato_accesso.pseudonimo(g.CALL_GUIDA_ID, codice)
+            for codice in [g.CODICE_PUBBLICO["Y"], *copie.values()]
+        }
+        for query in ("", f"?posizione={g.POS_P1}"):
+            prima = (await chiama(db, sec, "X", "GET", percorso + query)).json()
+            seconda = (await chiama(db, sec, "X", "GET", percorso + query + (
+                "&" if query else "?") + "page=2")).json()
+            visti = [i["pseudonimo"] for i in prima["items"] + seconda["items"]]
+            assert prima["total"] == 3 and len(visti) == 3, query  # 2 dell'owner + T
+            assert len(stesso_owner & set(visti)) == 2, query
+            senza_canary(json.dumps([prima, seconda]), "Y", "T")
+            for company in copie:
+                assert company not in json.dumps([prima, seconda])
+
 
 # ------------------------------------------------------ salva e riepilogo
 
@@ -425,7 +475,9 @@ class TestSalvaERiepilogo:
         assert [i["id"] for i in salvate.json()["items"]] == [g.CALL_GUIDA_ID]
         assert salvate.json()["items"][0]["salvata"] is True
         riepilogo = await chiama(db, sec, "Y", "GET", "/partenariati/riepilogo")
-        assert riepilogo.json() == {"per_te_nuove": 2, "call_attive": 0, "salvate": 1}
+        assert riepilogo.json() == {"per_te_nuove": 2, "call_attive": 0, "salvate": 1,
+                                    "inviti_ricevuti": 0, "candidature_da_decidere": 0,
+                                    "messaggi_non_letti": 0}
         [riga] = db.tabelle["partner_call_salvate"]
         assert riga["user_id"] == g.OWNER["Y"]
         assert (await chiama(db, sec, "Y", "DELETE", base)).status_code == 204
@@ -454,7 +506,9 @@ class TestSalvaERiepilogo:
         db, sec = await scenario_guida()
         senza = ActiveCompany(company_id=None, owner_id=g.OWNER["V"], editable=True)
         resp = await chiama(db, sec, "V", "GET", "/partenariati/riepilogo", active=senza)
-        assert resp.json() == {"per_te_nuove": 0, "call_attive": 0, "salvate": 0}
+        assert resp.json() == {"per_te_nuove": 0, "call_attive": 0, "salvate": 0,
+                               "inviti_ricevuti": 0, "candidature_da_decidere": 0,
+                               "messaggi_non_letti": 0}
 
 
 # ------------------------------------------------------------ Advisor

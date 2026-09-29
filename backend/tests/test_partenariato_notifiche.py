@@ -131,6 +131,27 @@ async def test_soglia_del_punteggio(monkeypatch):
     assert {n["company_profile_id"] for n in notifiche(db)} == {g.COMPANY["Y"]}
 
 
+async def test_nessun_limite_per_owner_sulle_notifiche(monkeypatch):
+    """Il limite di 2 aziende dello stesso owner vale per la lista mostrata
+    al creatore, non per chi riceve la notifica (WP7): con tre aziende dello
+    stesso owner la notifica arriva alla terza, l'unica sopra la soglia,
+    anche se le prime due nell'ordine non la superano."""
+    from app.services import partenariato_matching as pm
+    from tests.test_partenariato_matching import _m
+
+    imposta(monkeypatch, PARTENARIATO_NOTIFICHE_SOGLIA=50)
+    match = {
+        g.COMPANY["Y"]: _m(g.COMPANY["Y"], "advisor", 3, 40, call_id=g.CALL_GUIDA_ID),
+        g.COMPANY["T"]: _m(g.COMPANY["T"], "advisor", 3, 45, call_id=g.CALL_GUIDA_ID),
+        g.COMPANY["U"]: _m(g.COMPANY["U"], "advisor", 2, 80, call_id=g.CALL_GUIDA_ID),
+    }
+    monkeypatch.setattr(pm, "valuta_coppia", lambda call, cand, **_: match.get(cand.company_id))
+    db, sec = await scenario_guida()
+    esito = await pn.fan_out_pubblicazione(db, sec, g.CALL_GUIDA_ID)
+    assert esito["notificate"] == 1
+    assert {n["company_profile_id"] for n in notifiche(db)} == {g.COMPANY["U"]}
+
+
 async def test_tetto_settimanale_per_azienda(monkeypatch):
     imposta(monkeypatch, PARTENARIATO_NOTIFICHE_TETTO_SETTIMANA=2)
     db, sec = await scenario_guida()

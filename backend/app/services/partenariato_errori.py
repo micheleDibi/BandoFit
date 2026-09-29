@@ -155,6 +155,80 @@ RPC_ERRORS: dict[str, tuple[int, str, str]] = {
         "bad_request",
         "Posizioni non valide: controlla i dati e i requisiti collegati",
     ),
+    # WP7 — candidature, inviti e chat (migration 0039). Resta NON mappato di
+    # proposito, come nel WP5, `parametri_non_validi`: il servizio valida
+    # prima della RPC, quindi arriva solo da un bug del backend (→ 502).
+    "azienda_non_disponibile": (404, "not_found", "Azienda non disponibile"),
+    "call_non_attiva": (409, "call_non_attiva", "La call non è più aperta"),
+    "call_solo_invitati": (
+        409,
+        "call_solo_invitati",
+        "Questa call accetta solo aziende invitate",
+    ),
+    "stesso_gruppo": (
+        409,
+        "stesso_gruppo",
+        "Non puoi collaborare con un'altra azienda del tuo stesso account",
+    ),
+    "profilo_partner_non_attivo": (
+        409,
+        "profilo_partner_non_attivo",
+        "Per candidarti attiva la visibilità come partner della tua azienda",
+    ),
+    "funzione_non_inclusa": (
+        409,
+        "funzione_non_inclusa",
+        "Il tuo piano non include le candidature di tua iniziativa: puoi comunque ricevere "
+        "inviti e accettarli",
+    ),
+    "candidature_esaurite": (
+        409,
+        "candidature_esaurite",
+        "Hai usato tutte le candidature di questo mese",
+    ),
+    "posizione_non_valida": (400, "bad_request", "Posizione non valida per questa call"),
+    "candidatura_gia_attiva": (
+        409,
+        "candidatura_gia_attiva",
+        "C'è già una candidatura attiva per questa call",
+    ),
+    "partner_non_disponibile": (
+        409,
+        "partner_non_disponibile",
+        "L'azienda non è al momento disponibile per un invito",
+    ),
+    "inviti_esauriti_call": (
+        409,
+        "inviti_esauriti_call",
+        "Hai troppi inviti in attesa di risposta per questa call",
+    ),
+    "invito_gia_attivo": (409, "invito_gia_attivo", "C'è già un invito attivo per questa call"),
+    "candidatura_non_trovata": (404, "not_found", "Candidatura non trovata"),
+    "candidatura_gia_decisa": (
+        409,
+        "candidatura_gia_decisa",
+        "La richiesta è già stata gestita",
+    ),
+    "invito_scaduto": (409, "invito_scaduto", "L'invito è scaduto"),
+    "esclusivita_violata": (
+        409,
+        "esclusivita_violata",
+        "Il bando ammette un solo partenariato per azienda e l'azienda è già impegnata su "
+        "questo bando",
+    ),
+    "conversazione_non_trovata": (404, "not_found", "Conversazione non trovata"),
+    "conversazione_chiusa": (409, "conversazione_chiusa", "La conversazione è chiusa"),
+    "controparte_non_disponibile": (
+        409,
+        "controparte_non_disponibile",
+        "L'altra azienda non è più disponibile",
+    ),
+    "posizione_con_candidature": (
+        409,
+        "posizione_con_candidature",
+        "Una posizione con candidature attive non si può rimuovere",
+    ),
+    "messaggio_immutabile": (409, "messaggio_immutabile", "I messaggi non si modificano"),
 }
 
 

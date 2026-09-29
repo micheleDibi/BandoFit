@@ -28,6 +28,7 @@ import CheckoutEsito from "./pages/CheckoutEsito";
 import ConfermaEmail from "./pages/ConfermaEmail";
 import Consulenze from "./pages/Consulenze";
 import ConsulenzaDetail from "./pages/ConsulenzaDetail";
+import ConversazionePartenariato from "./pages/ConversazionePartenariato";
 import Fatturazione from "./pages/Fatturazione";
 import Landing from "./pages/Landing";
 import Richieste from "./pages/progettista/Richieste";
@@ -111,6 +112,14 @@ export default function App() {
           element={
             <PartenariatiRoute>
               <CallPartenariato />
+            </PartenariatiRoute>
+          }
+        />
+        <Route
+          path="partenariati/conversazioni/:id"
+          element={
+            <PartenariatiRoute>
+              <ConversazionePartenariato />
             </PartenariatiRoute>
           }
         />

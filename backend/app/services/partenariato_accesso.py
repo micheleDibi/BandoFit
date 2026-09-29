@@ -5,9 +5,11 @@ Unico punto in cui si decide CHI vede una call e COSA vede:
 
 - `ruolo_su_call`: `creatore` (titolare dell'azienda creatrice attiva),
   `titolare_o_membro` (membro con visibilità su quell'azienda, sola lettura),
-  `pubblico` (qualunque altra azienda, solo per call pubblicate e visibili a
-  tutti di aziende vive), `admin`. WP7+ aggiungerà `controparte`,
-  `candidato`, `progettista`. La call dell'azienda creatrice si riconosce da
+  `controparte` (WP7: l'azienda attiva ha una candidatura ACCETTATA sulla
+  call, non sospesa), `candidato` / `invitato` (WP7: ha una candidatura o
+  un invito IN ATTESA; call non sospesa di un'azienda viva), `pubblico` (qualunque
+  altra azienda, solo per call pubblicate e visibili a tutti di aziende
+  vive), `admin`. WP9 aggiungerà `progettista`. La call dell'azienda creatrice si riconosce da
   `company_profile_id = azienda attiva` E `family_parent_id = owner`: un
   Advisor con l'azienda A attiva NON è creatore delle call di B;
 - `carica_call_autorizzata`: fuori autorizzazione (o fuori dai ruoli ammessi
@@ -34,11 +36,23 @@ sospese); le card della bacheca portano il match dell'azienda attiva (vista
 PSEUDONIMO per call (`pseudonimo`), mai con `company_profile_id` né con il
 `codice_pubblico` stabile, e con i soli dati del registro ammessi (Q12).
 
-Modulo PURO salvo `carica_call_autorizzata` (due letture).
+WP7 (candidature, inviti e chat): la controparte accettata vede la
+`CallVistaControparteOut` (la vista pubblica più i dettagli riservati e il
+budget esatto; mai i bilanci esatti di nessuno); chi si è candidato o è
+stato invitato vede la vista pubblica con lo stato della propria candidatura
+(`CandidaturaPropriaOut`). L'IDENTITÀ si rivela solo con la rivelazione
+accesa (`partner_profile_service.RIVELAZIONE_IDENTITA_DISPONIBILE`, oggi
+spenta) e dopo l'audit scritto dalla RPC all'accettazione
+(`IdentitaRivelataOut`); spenta, anche i dettagli riservati escono senza
+gli identificativi dell'azienda.
+
+Modulo PURO salvo `carica_call_autorizzata` e `candidatura_su_call`.
 """
 
 import base64
 from collections.abc import Iterable, Mapping
+from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
@@ -68,9 +82,12 @@ from app.services.partenariato_anonimato import (  # noqa: F401 — riesportati
 )
 from app.services.partenariato_criteri import criterio_da_json
 from app.services.partenariato_matching import MatchInterno, MatchOut, proietta_match
+from app.services.openapi_mapping import build_dossier
 from app.services.partner_profilo_pubblico import CLASSI_DIMENSIONALI, ateco_sezione
 
-Ruolo = Literal["creatore", "titolare_o_membro", "pubblico", "admin"]
+Ruolo = Literal[
+    "creatore", "titolare_o_membro", "controparte", "candidato", "invitato", "pubblico", "admin"
+]
 # Ruoli che vedono la call dall'interno (vista del creatore).
 RUOLI_AZIENDA: frozenset[str] = frozenset({"creatore", "titolare_o_membro"})
 # Chi scrive: solo il titolare dell'azienda creatrice attiva (T4, Q14).
@@ -165,12 +182,20 @@ def _obbligatorio(testo: Any, ident: Identificativi | None) -> str:
 # ----------------------------------------------------------------- ruoli
 
 
-def ruolo_su_call(call: Mapping, active, user: Mapping) -> Ruolo | None:
+def ruolo_su_call(
+    call: Mapping, active, user: Mapping, *, candidatura: Mapping | None = None
+) -> Ruolo | None:
     """Ruolo dell'utente sulla call (None = non autorizzato).
 
     Prima l'azienda creatrice (la call è dell'azienda ATTIVA e dell'owner),
-    poi l'admin, poi il pubblico: solo call pubblicate, visibili a tutti e
-    non sospese."""
+    poi la riga di `partner_candidature` dell'azienda attiva sulla call
+    (`candidatura`, WP7), solo su una call non sospesa: accettata →
+    `controparte`; ancora in attesa (e, se invito, non scaduta) → `invitato`
+    o `candidato`. Una riga chiusa (rifiutata, ritirata, scaduta) non dà
+    nessun ruolo: vale il resto, cioè l'admin, poi il pubblico (solo call
+    pubblicate, visibili a tutti e non sospese). Così un invito ritirato o
+    scaduto non lascia leggere una call solo su invito, e una call sospesa
+    per moderazione non si legge nemmeno dalla controparte."""
     company_id = getattr(active, "company_id", None)
     if (
         company_id
@@ -178,6 +203,18 @@ def ruolo_su_call(call: Mapping, active, user: Mapping) -> Ruolo | None:
         and str(call.get("family_parent_id")) == str(getattr(active, "owner_id", ""))
     ):
         return "creatore" if getattr(active, "editable", False) else "titolare_o_membro"
+    if (
+        candidatura is not None
+        and company_id
+        and str(candidatura.get("company_profile_id")) == str(company_id)
+        and str(candidatura.get("partner_call_id")) == str(call.get("id"))
+        and call.get("stato") not in ("bozza", "sospesa_moderazione")
+        and call.get("sospesa_at") is None
+    ):
+        if candidatura.get("stato") == "accettata":
+            return "controparte"
+        if candidatura.get("stato") == "inviata" and not invito_scaduto(candidatura):
+            return "invitato" if candidatura.get("tipo") == "invito" else "candidato"
     if (user or {}).get("role") == "admin":
         return "admin"
     if pubblicamente_visibile(call):
@@ -209,12 +246,42 @@ async def _azienda_viva(primary, company_id: Any) -> bool:
     return bool(resp.data)
 
 
+CANDIDATURA_PROPRIA_SELECT = (
+    "id,partner_call_id,company_profile_id,tipo,stato,posizione_id,scade_at,motivo_chiusura,"
+    "motivo_rifiuto,conversazione_id,decisa_at,chiusa_at,created_at"
+)
+# Quale riga conta se l'azienda ne ha più di una sulla stessa call.
+_PRIORITA_STATO = {"accettata": 0, "inviata": 1}
+
+
+async def candidatura_su_call(primary, call_id: Any, company_id: Any) -> dict | None:
+    """La riga di `partner_candidature` dell'azienda sulla call che ne decide
+    il ruolo: l'accettata, altrimenti quella in attesa, altrimenti la più
+    recente (rifiutata, ritirata o scaduta). None se non ce ne sono."""
+    if not company_id:
+        return None
+    resp = (
+        await primary.table("partner_candidature")
+        .select(CANDIDATURA_PROPRIA_SELECT)
+        .eq("partner_call_id", str(call_id))
+        .eq("company_profile_id", str(company_id))
+        .execute()
+    )
+    righe = [r for r in resp.data or [] if isinstance(r, dict)]
+    if not righe:
+        return None
+    righe.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    return min(righe, key=lambda r: _PRIORITA_STATO.get(r.get("stato"), 2))
+
+
 async def carica_call_autorizzata(
     primary, call_id: Any, active, user: Mapping, *, ammessi: Iterable[str] | None = None
 ) -> tuple[dict, Ruolo]:
     """(riga della call, ruolo). Fuori autorizzazione — o con un ruolo che la
-    rotta non ammette — 404 come una call inesistente. Il pubblico vede solo
-    le call di aziende vive."""
+    rotta non ammette — 404 come una call inesistente. Il pubblico (e chi ha
+    una candidatura o un invito in attesa) vede solo le call di aziende vive;
+    la controparte accettata anche dopo (la conversazione resta, in sola
+    lettura), ma non una call sospesa per moderazione."""
     identificativo = normalizza_id(call_id)
     resp = (
         await primary.table("partner_calls")
@@ -225,7 +292,14 @@ async def carica_call_autorizzata(
     )
     call = resp.data[0] if resp.data else None
     ruolo = ruolo_su_call(call, active, user) if isinstance(call, dict) else None
-    if ruolo == "pubblico" and not await _azienda_viva(primary, call.get("company_profile_id")):
+    company_id = getattr(active, "company_id", None)
+    if isinstance(call, dict) and ruolo not in RUOLI_AZIENDA and company_id:
+        candidatura = await candidatura_su_call(primary, identificativo, company_id)
+        if candidatura is not None:
+            ruolo = ruolo_su_call(call, active, user, candidatura=candidatura)
+    if ruolo in ("pubblico", "candidato", "invitato") and not await _azienda_viva(
+        primary, call.get("company_profile_id")
+    ):
         ruolo = None
     consentiti = None if ammessi is None else frozenset(ammessi)
     if ruolo is None or (consentiti is not None and ruolo not in consentiti):
@@ -467,14 +541,90 @@ class CallBachecaOut(CallCardOut):
     posti: int = 0
 
 
+StatoCandidatura = Literal["inviata", "accettata", "rifiutata", "ritirata", "scaduta"]
+
+
+class CandidaturaPropriaOut(_Uscita):
+    """La candidatura (o l'invito) dell'azienda attiva su una call di altri
+    (WP7), come la vede lei: stato (un invito in attesa oltre la scadenza vale
+    già «scaduta»), scadenza dell'invito, motivo del rifiuto (è rivolto a
+    lei), conversazione se accettata, e cosa può fare adesso il titolare."""
+
+    id: UUID
+    tipo: Literal["candidatura", "invito"]
+    stato: StatoCandidatura
+    posizione_id: UUID | None = None
+    scade_at: datetime | None = None
+    motivo_chiusura: str | None = None
+    motivo_rifiuto: str | None = None
+    conversazione_id: UUID | None = None
+    created_at: datetime | None = None
+    decisa_at: datetime | None = None
+    chiusa_at: datetime | None = None
+    puo_decidere: bool = False
+    puo_ritirare: bool = False
+
+
+class RequisitoDichiarabileOut(_Uscita):
+    """Un requisito visibile della call (cercato o valido per ogni membro) che
+    chi si candida può dichiarare di avere (WP7): l'id da mandare in
+    `requisiti_dichiarati` e l'etichetta, la stessa di `requisiti`."""
+
+    id: UUID
+    etichetta: str
+
+
+def requisiti_dichiarabili(
+    requisiti: Iterable[Mapping], ident: Identificativi | None
+) -> list[RequisitoDichiarabileOut]:
+    return [
+        RequisitoDichiarabileOut(id=r["id"], etichetta=_obbligatorio(r.get("etichetta"), ident))
+        for r in requisiti
+        if isinstance(r, Mapping) and r.get("id") and requisito_visibile(r)
+    ]
+
+
 class CallPubblicaDettaglioOut(CallPubblicaOut):
     """GET /partenariati/call/{id} per un'azienda che non l'ha creata: la
     proiezione pubblica, il proprio match (vista «proprio»), se l'ha salvata
-    e se ha l'opt-in visibile (per candidarsi serve, Q25)."""
+    e se ha l'opt-in visibile (per candidarsi serve, Q25). WP7: la propria
+    candidatura (se c'è) e i requisiti che si possono dichiarare
+    candidandosi, con il loro id (gli stessi di `requisiti`, anche quando il
+    match manca)."""
 
     match: MatchOut | None = None
     salvata: bool = False
     opt_in: bool = False
+    candidatura: CandidaturaPropriaOut | None = None
+    requisiti_dichiarabili: list[RequisitoDichiarabileOut] = []
+
+
+class IdentitaRivelataOut(_Uscita):
+    """Identità della controparte, SOLO con la rivelazione accesa e l'audit
+    scritto all'accettazione (K2, Q13): ragione sociale, sito e PEC dal
+    Registro Imprese (se i dati importati sono dell'azienda, T5), nome e
+    ruolo del referente. MAI l'email personale del referente."""
+
+    ragione_sociale: str | None = None
+    sito_web: str | None = None
+    pec: str | None = None
+    referente_nome: str | None = None
+    referente_ruolo: Literal["titolare", "referente"] | None = None
+
+
+class CallVistaControparteOut(CallPubblicaOut):
+    """GET /partenariati/call/{id} per la controparte ACCETTATA (WP7): la
+    proiezione pubblica più i dettagli riservati e il budget esatto del
+    progetto (mai i bilanci esatti di nessuno, mai id interni). Con la
+    rivelazione spenta il creatore resta «Azienda anonima» e i dettagli
+    riservati escono senza gli identificativi dell'azienda."""
+
+    vista: Literal["controparte"] = "controparte"
+    dettagli_riservati: str | None = None
+    budget_progetto_eur: Decimal | None = None
+    identita_rivelata: bool = False
+    identita: IdentitaRivelataOut | None = None
+    candidatura: CandidaturaPropriaOut
 
 
 class PerTeOut(_Uscita):
@@ -509,11 +659,14 @@ class CandidatoSuggeritoOut(_Uscita):
     della call (mai `company_profile_id` né `codice_pubblico`), profilo
     pubblico del WP4 (per gli anonimi: niente denominazione, sola fascia di
     fatturato, esperienze col solo programma, certificazioni per categoria)
-    e match in vista «terzi» (solo fasce ed esiti)."""
+    e match in vista «terzi» (solo fasce ed esiti). WP7: `stato_contatto`
+    della call con lei (accettata, in attesa, invito rifiutato), null se non
+    c'è un contatto che impedisca un invito."""
 
     pseudonimo: str
     profilo: ProfiloSuggeritoOut  # type: ignore[valid-type]
     match: MatchOut
+    stato_contatto: Literal["accettata", "inviata", "rifiutata"] | None = None
 
 
 class SuggeritiOut(_Uscita):
@@ -529,11 +682,15 @@ class SuggeritiOut(_Uscita):
 class RiepilogoOut(_Uscita):
     """GET /partenariati/riepilogo (badge del menu): call «Per te» pubblicate
     negli ultimi 7 giorni, call pubblicate dell'azienda attiva, call salvate
-    ancora visibili."""
+    ancora visibili; dal WP7 inviti ricevuti in attesa (non scaduti),
+    candidature ricevute da decidere e messaggi non letti dall'utente."""
 
     per_te_nuove: int = 0
     call_attive: int = 0
     salvate: int = 0
+    inviti_ricevuti: int = 0
+    candidature_da_decidere: int = 0
+    messaggi_non_letti: int = 0
 
 
 def call_bacheca(
@@ -554,7 +711,8 @@ def call_bacheca(
 
 
 def candidato_suggerito(
-    m: MatchInterno, *, call_id: Any, profilo: PartnerPubblicoOut
+    m: MatchInterno, *, call_id: Any, profilo: PartnerPubblicoOut,
+    stato_contatto: str | None = None,
 ) -> CandidatoSuggeritoOut:
     """Proiezione del candidato verso il creatore: `profilo` è la proiezione
     pubblica del WP4 (`partner_profilo_pubblico.profilo_pubblico`)."""
@@ -562,6 +720,7 @@ def candidato_suggerito(
         pseudonimo=pseudonimo(call_id, m.codice_pubblico),
         profilo=ProfiloSuggeritoOut(**profilo.model_dump(exclude={"codice_pubblico"})),
         match=proietta_match(m, vista="terzi"),
+        stato_contatto=stato_contatto,
     )
 
 
@@ -608,3 +767,111 @@ def proietta_versione(snapshot: Any) -> dict:
             _solo(p, CAMPI_VERSIONE_POSIZIONE) for p in _lista(snapshot.get("posizioni"))
         ],
     }
+
+
+# ------------------------------------------------------------ WP7
+
+
+def _istante(valore: Any) -> datetime | None:
+    if isinstance(valore, datetime):
+        return valore if valore.tzinfo else valore.replace(tzinfo=timezone.utc)
+    if not valore:
+        return None
+    try:
+        letto = datetime.fromisoformat(str(valore).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return letto if letto.tzinfo else letto.replace(tzinfo=timezone.utc)
+
+
+def invito_scaduto(riga: Mapping, adesso: datetime | None = None) -> bool:
+    """Un invito ancora `inviata` oltre la sua scadenza (lo scheduler o la
+    lettura pigra non l'hanno ancora marcato): vale già come scaduto."""
+    scade = _istante(riga.get("scade_at"))
+    return (
+        riga.get("tipo") == "invito"
+        and riga.get("stato") == "inviata"
+        and scade is not None
+        and scade <= (adesso or datetime.now(timezone.utc))
+    )
+
+
+def stato_effettivo(riga: Mapping, adesso: datetime | None = None) -> str:
+    return "scaduta" if invito_scaduto(riga, adesso) else str(riga.get("stato"))
+
+
+def candidatura_propria(
+    riga: Mapping, *, editable: bool, adesso: datetime | None = None
+) -> CandidaturaPropriaOut:
+    """La riga dell'azienda che si è candidata o è stata invitata (Y), vista
+    da lei: decide gli inviti, ritira le candidature (solo il titolare)."""
+    stato = stato_effettivo(riga, adesso)
+    in_attesa = stato == "inviata"
+    return CandidaturaPropriaOut(
+        id=riga["id"],
+        tipo=riga["tipo"],
+        stato=stato,
+        posizione_id=riga.get("posizione_id"),
+        scade_at=riga.get("scade_at"),
+        motivo_chiusura=riga.get("motivo_chiusura")
+        or ("ttl" if stato != riga.get("stato") else None),
+        motivo_rifiuto=testo_pubblico(riga.get("motivo_rifiuto"), None),
+        conversazione_id=riga.get("conversazione_id"),
+        created_at=riga.get("created_at"),
+        decisa_at=riga.get("decisa_at"),
+        chiusa_at=riga.get("chiusa_at"),
+        puo_decidere=bool(editable and in_attesa and riga.get("tipo") == "invito"),
+        puo_ritirare=bool(editable and in_attesa and riga.get("tipo") == "candidatura"),
+    )
+
+
+def identita_rivelata(
+    company: Mapping | None, company_data: Mapping | None, *, referente_nome: str | None,
+    referente_ruolo: str | None,
+) -> IdentitaRivelataOut:
+    """Dati d'impresa della controparte dal Registro Imprese, solo se i dati
+    importati sono dell'azienda (T5); mai recapiti diversi da sito e PEC."""
+    piva = (company or {}).get("partita_iva")
+    coerente = bool(company_data and piva and company_data.get("piva_fetched") == piva)
+    contatti: Mapping = {}
+    if coerente and isinstance(company_data.get("raw"), dict):
+        contatti = build_dossier(company_data["raw"]).get("contatti") or {}
+    ruolo = referente_ruolo if referente_ruolo in ("titolare", "referente") else None
+    return IdentitaRivelataOut(
+        ragione_sociale=(str(company_data.get("denominazione") or "").strip() or None)
+        if coerente else None,
+        sito_web=contatti.get("sito_web") if coerente else None,
+        pec=contatti.get("pec") if coerente else None,
+        referente_nome=referente_nome,
+        referente_ruolo=ruolo,
+    )
+
+
+def vista_controparte(
+    pubblica: CallPubblicaOut,
+    call: Mapping,
+    candidatura: CandidaturaPropriaOut,
+    *,
+    ident: Identificativi | None,
+    identita: IdentitaRivelataOut | None,
+) -> CallVistaControparteOut:
+    """La call per la controparte accettata (whitelist): la proiezione
+    pubblica più riservati e budget esatto. Senza identità rivelata i
+    riservati passano da `testo_pubblico` con gli identificativi del creatore
+    (`ident`): nessuna identità in nessuna vista, nemmeno se il creatore
+    l'aveva scritta lì; con l'identità rivelata solo senza caratteri
+    invisibili (i contatti sono già vietati al salvataggio)."""
+    riservati = call.get("dettagli_riservati")
+    if identita is None:
+        riservati = testo_pubblico(riservati, ident)
+    elif isinstance(riservati, str):
+        riservati = senza_invisibili(riservati).strip() or None
+    budget = call.get("budget_progetto_eur")
+    return CallVistaControparteOut(
+        **pubblica.model_dump(),
+        dettagli_riservati=riservati if isinstance(riservati, str) else None,
+        budget_progetto_eur=Decimal(str(budget)) if budget is not None else None,
+        identita_rivelata=identita is not None,
+        identita=identita,
+        candidatura=candidatura,
+    )

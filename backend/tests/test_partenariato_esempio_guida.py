@@ -1,5 +1,8 @@
 """Esempio guida (docs/partenariati.md §10, criterio 4) — parte PURA e, in
-fondo, parte di SERVIZIO (indice, servizi, fan-out e API del WP6).
+fondo, parte di SERVIZIO (indice, servizi, fan-out e API del WP6) e il
+seguito del WP7: Y (piano a pagamento) si candida, X accetta, si apre la
+conversazione con l'audit e Y scrive; variante con Y sul Gratuito (criterio
+6): la candidatura spontanea no, l'invito sì.
 
 Scenario e numeri in `tests/fixtures/partenariati/esempio_guida.py`: X
 pubblica la call con i requisiti A–D (copre B e D, cerca A e C) e i vincoli
@@ -12,6 +15,9 @@ import uuid
 
 import pytest
 
+from app.core.errors import AppError
+from app.services import partenariato_candidature_service as candidature
+from app.services import partenariato_chat_service as chat
 from app.services import (
     partenariato_collegamenti,
     partenariato_indice,
@@ -25,6 +31,12 @@ from app.services.partenariato_criteri import criterio_da_json
 from app.services.partenariato_matching import CoperturaOut
 from tests.fixtures.partenariati import esempio_guida as g
 from tests.test_partenariati_matching_api import attiva, chiama, utente
+from tests.test_partenariato_candidature_service import (  # noqa: F401 — fixture
+    MEMBRO_X,
+    candidatura_in,
+    fixture_fondo,
+    scenario_wp7,
+)
 from tests.test_partenariato_indice import ambiente_wp6, scenario_guida  # noqa: F401
 
 
@@ -222,3 +234,69 @@ async def test_api_per_te_di_y_e_suggeriti_di_x():
     assert suggeriti.json()["items"][0]["pseudonimo"] == pseudonimo(
         g.CALL_GUIDA_ID, g.CODICE_PUBBLICO["Y"])
     assert g.COMPANY["Y"] not in suggeriti.text and g.COMPANY["X"] not in per_te.text
+
+
+# ------------------------------------------------ parte di SERVIZIO (WP7)
+#
+# Lo stesso scenario sul primario finto del WP7 (le RPC della 0039): X ha un
+# membro con visibilità; Y ha il piano Smart (5 candidature al mese) oppure,
+# nella variante, il Gratuito (0).
+
+
+async def test_wp7_y_si_candida_x_accetta_conversazione_audit_messaggio(fondo):
+    db, sec = await scenario_wp7()
+    per_te = await pcs.per_te(db, sec, attiva("Y"), utente("Y"))
+    assert str(per_te.items[0].id) == g.CALL_GUIDA_ID
+    # Y si candida alla call in cima al suo «Per te»
+    inviata = await candidature.invia_candidatura(db, sec, attiva("Y"), utente("Y"),
+                                                  g.CALL_GUIDA_ID, candidatura_in())
+    assert inviata.quota.model_dump() == {"usate": 1, "limite": 5}
+    # X la trova tra le ricevute con lo pseudonimo e la spiegazione della guida
+    [ricevuta] = (await candidature.lista(db, sec, attiva("X"), utente("X"),
+                                          direzione="ricevute")).items
+    assert ricevuta.candidato.pseudonimo == pseudonimo(g.CALL_GUIDA_ID, g.CODICE_PUBBLICO["Y"])
+    assert ricevuta.valutazione.spiegazione == g.SPIEGAZIONE_GUIDA
+    assert ricevuta.valutazione.copertura.model_dump() == {"coperti": 2, "cercati": 2}
+    # X accetta: conversazione e audit nella stessa RPC, nessuna rivelazione
+    accettata = await candidature.decidi(db, sec, attiva("X"), utente("X"), ricevuta.id,
+                                         "accetta")
+    [conv] = db.tabelle["partner_conversazioni"]
+    assert str(accettata.conversazione_id) == conv["id"]
+    azioni = [a["action"] for a in db.tabelle["audit_log"]]
+    assert azioni == ["partenariato.candidatura_inviata", "partenariato.candidatura_accettata"]
+    # Y scrive: X (titolare e membro) avvisato una volta, senza il testo
+    await fondo.azzera()
+    scritto = await chat.invia(db, sec, attiva("Y"), utente("Y"), conv["id"], chat.MessaggioIn(
+        testo="Grazie! Possiamo partire con il laboratorio.", client_msg_id=uuid.uuid4()))
+    await fondo.esegui()
+    assert scritto.propria is True
+    [x] = (await chat.lista_conversazioni(db, sec, attiva("X"), utente("X"))).items
+    assert x.non_letti == 1 and x.controparte.pseudonimo == ricevuta.candidato.pseudonimo
+    assert {n["user_id"] for n in db.righe("notifications", tipo=chat.TIPO_NUOVI_MESSAGGI)} == {
+        g.OWNER["X"], MEMBRO_X}
+    assert all("laboratorio" not in e["text"] for e in fondo.email)
+    # il bando della guida è ora un impegno di Y (esclusività nell'indice)
+    idx = await partenariato_indice.indice(db, sec)
+    assert g.BANDO_GUIDA in idx.impegni[g.COMPANY["Y"]]
+
+
+async def test_wp7_variante_y_gratuito_l_invito_passa_la_candidatura_no(fondo):
+    db, sec = await scenario_wp7(Y=0)
+    with pytest.raises(AppError) as exc:
+        await candidature.invia_candidatura(db, sec, attiva("Y"), utente("Y"), g.CALL_GUIDA_ID,
+                                            candidatura_in())
+    assert exc.value.code == "funzione_non_inclusa"
+    # X invita Y dai suoi suggeriti (con lo pseudonimo)
+    suggeriti = await pcs.suggeriti(db, sec, attiva("X"), utente("X"), g.CALL_GUIDA_ID)
+    invito = await candidature.invita(
+        db, sec, attiva("X"), utente("X"), g.CALL_GUIDA_ID,
+        candidature.InvitoIn(pseudonimo=suggeriti.items[0].pseudonimo))
+    assert invito.tipo == "invito" and invito.candidato.pseudonimo == suggeriti.items[0].pseudonimo
+    # Y (Gratuito) accetta l'invito: si apre la conversazione
+    [ricevuto] = (await candidature.lista(db, sec, attiva("Y"), utente("Y"),
+                                          direzione="ricevute")).items
+    accettato = await candidature.decidi(db, sec, attiva("Y"), utente("Y"), ricevuto.id,
+                                         "accetta")
+    assert accettato.stato == "accettata" and accettato.conversazione_id is not None
+    assert len(db.tabelle["partner_conversazioni"]) == 1
+    assert db.usate(g.OWNER["Y"]) == 0  # l'invito non consuma la quota

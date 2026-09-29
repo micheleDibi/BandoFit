@@ -1,26 +1,45 @@
-import { ArrowRight, CalendarClock, Handshake, Plus } from "lucide-react";
+import { ArrowRight, CalendarClock, EyeOff, Handshake, MessagesSquare, Plus } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { BannerOptIn } from "../components/partenariati/BannerOptIn";
 import { CallCard } from "../components/partenariati/CallCard";
 import { CallStatoBadge } from "../components/partenariati/CallStatoBadge";
+import { CandidaturaCard, SceltaDirezione } from "../components/partenariati/CandidaturaCard";
 import { linkCall, passoDa } from "../components/partenariati/callDati";
 import { FiltriBacheca, paginaDa, useFiltriBacheca } from "../components/partenariati/FiltriBacheca";
 import { AvvisoLimiteCall, RiepilogoLimiteCall, statoLimite, useLimiteCall } from "../components/partenariati/LimitiCall";
 import { Schede } from "../components/partenariati/Schede";
+import { Badge } from "../components/ui/Badge";
 import { Button, LinkButton } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { SelectField } from "../components/ui/Field";
 import { Pagination } from "../components/ui/Pagination";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
 import { useAziendaDaLink } from "../hooks/useAziendaDaLink";
 import { useMieCall } from "../hooks/useCallPartenariato";
+import { useCandidature } from "../hooks/useCandidature";
+import { useConversazioni } from "../hooks/useConversazioni";
 import { useCompany } from "../hooks/useCompany";
 import { useBacheca, usePerTe, useRiepilogoPartenariati } from "../hooks/usePartenariati";
 import { apiErrorCode, apiErrorMessage } from "../lib/api";
-import { BACHECA_COPY, CALL_COPY } from "../lib/copy";
-import { formatDate } from "../lib/format";
-import type { CallCard as CallCardDati, VistaPartenariati } from "../types";
+import { BACHECA_COPY, CALL_COPY, CANDIDATURE_COPY, PARTNER_COPY } from "../lib/copy";
+import { formatDate, formatDateTime } from "../lib/format";
+import type {
+  CallCard as CallCardDati,
+  ConversazioneCard,
+  DirezioneCandidature,
+  StatoCandidatura,
+  VistaPartenariati,
+} from "../types";
 
-const VISTE: VistaPartenariati[] = ["per-te", "tutte", "mie", "salvate"];
+const VISTE: VistaPartenariati[] = [
+  "per-te",
+  "tutte",
+  "mie",
+  "salvate",
+  "candidature",
+  "conversazioni",
+];
+const STATI_CANDIDATURA = Object.keys(CANDIDATURE_COPY.stati) as StatoCandidatura[];
 /** «Per te» è la vista di partenza: anche senza visibilità come partner. */
 const VISTA_PREDEFINITA: VistaPartenariati = "per-te";
 
@@ -273,7 +292,208 @@ function Bacheca({ vista, editable }: { vista: "tutte" | "salvate"; editable: bo
   );
 }
 
-/** Pagina del modulo partenariati (`?vista=per-te|tutte|mie|salvate`). */
+/** «Candidature»: candidature e inviti ricevuti (default: ciò che c'è da
+ *  decidere è lì) o mandati, con il filtro per stato; direzione, stato e
+ *  pagina nei searchParams. */
+function Candidature({ editable }: { editable: boolean }) {
+  const [params, setParams] = useSearchParams();
+  const { pagina, vaiA } = usePagina();
+  const direzione: DirezioneCandidature = params.get("direzione") === "inviate" ? "inviate" : "ricevute";
+  const statoRichiesto = params.get("stato") as StatoCandidatura | null;
+  const stato = statoRichiesto && STATI_CANDIDATURA.includes(statoRichiesto) ? statoRichiesto : null;
+  const lista = useCandidature({ direzione, stato }, pagina);
+
+  const aggiorna = (chiave: string, valore: string | null) =>
+    setParams(
+      (prima) => {
+        const dopo = new URLSearchParams(prima);
+        if (valore) dopo.set(chiave, valore);
+        else dopo.delete(chiave);
+        // I filtri cambiano la lista: si riparte dalla prima pagina.
+        dopo.delete("page");
+        return dopo;
+      },
+      { replace: true },
+    );
+
+  let corpo;
+  if (lista.isPending) {
+    corpo = <ListaInCaricamento />;
+  } else if (lista.isError) {
+    corpo = (
+      <ErrorState
+        message={apiErrorMessage(lista.error, "Impossibile caricare candidature e inviti.")}
+        onRetry={() => void lista.refetch()}
+      />
+    );
+  } else if (lista.data.items.length === 0) {
+    corpo = stato ? (
+      <EmptyState title="Nessuna con questo stato" description="Prova a scegliere «Tutte»." />
+    ) : direzione === "ricevute" ? (
+      <EmptyState
+        title="Niente da decidere per ora"
+        description="Qui arrivano le candidature delle altre aziende alle tue call e gli inviti che la tua azienda riceve."
+      />
+    ) : (
+      <EmptyState
+        title="Non hai ancora mandato candidature né inviti"
+        description="Candidati alle call delle altre aziende, oppure invita le aziende suggerite dalle tue call."
+        action={
+          <LinkButton to="/app/partenariati?vista=per-te" variant="secondary">
+            Vedi le call per te
+          </LinkButton>
+        }
+      />
+    );
+  } else {
+    corpo = (
+      <div className="space-y-3">
+        <p className="text-sm text-slate-500" role="status" aria-live="polite">
+          {lista.isPlaceholderData ? "Aggiornamento…" : lista.data.total === 1 ? "1 risultato" : `${lista.data.total} risultati`}
+        </p>
+        <ul
+          className={`space-y-3 transition-opacity ${lista.isPlaceholderData ? "opacity-60" : ""}`}
+          aria-busy={lista.isPlaceholderData}
+        >
+          {lista.data.items.map((c) => (
+            <CandidaturaCard key={c.id} candidatura={c} />
+          ))}
+        </ul>
+        <Pagination page={lista.data.page} totalPages={lista.data.total_pages} onChange={vaiA} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <SceltaDirezione
+          valore={direzione}
+          onChange={(d) => aggiorna("direzione", d === "inviate" ? d : null)}
+          etichette={{ ricevute: "Ricevute", inviate: "Inviate" }}
+        />
+        <div className="w-full sm:w-56">
+          <SelectField
+            label="Stato"
+            value={stato ?? ""}
+            onChange={(e) => aggiorna("stato", e.target.value || null)}
+          >
+            <option value="">Tutti</option>
+            {STATI_CANDIDATURA.map((s) => (
+              <option key={s} value={s}>
+                {CANDIDATURE_COPY.stati[s]}
+              </option>
+            ))}
+          </SelectField>
+        </div>
+      </div>
+      <p className="text-sm text-slate-500">
+        {direzione === "ricevute"
+          ? "Le candidature arrivate alle tue call e gli inviti ricevuti dalla tua azienda."
+          : "Le candidature che hai mandato e gli inviti fatti dalle tue call."}
+        {!editable && ` ${CANDIDATURE_COPY.soloTitolare}`}
+      </p>
+      {corpo}
+    </div>
+  );
+}
+
+/** Una conversazione nella lista: l'altra azienda (anonima), la call, i
+ *  messaggi non letti in parole e numero. La riga è un `<li>`. */
+function RigaConversazione({ conversazione: c }: { conversazione: ConversazioneCard }) {
+  const nome = PARTNER_COPY.aziendaAnonima;
+  const link = `/app/partenariati/conversazioni/${c.id}`;
+  return (
+    <li>
+      <Card className="p-4 transition-colors hover:border-brand-300">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              {c.non_letti > 0 && (
+                <Badge tone="brand">
+                  {c.non_letti === 1 ? "1 messaggio non letto" : `${c.non_letti} messaggi non letti`}
+                </Badge>
+              )}
+              {c.stato === "chiusa" && <Badge tone="slate">Chiusa</Badge>}
+              {c.stato === "aperta" && !c.controparte.attiva && (
+                <Badge tone="slate">Sola lettura</Badge>
+              )}
+            </div>
+            <h3 className="mt-1.5 font-display text-base font-semibold text-slate-900">
+              <Link
+                to={link}
+                className="inline-flex items-center gap-1.5 rounded hover:text-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
+              >
+                <EyeOff className="size-4 shrink-0 text-slate-400" aria-hidden />
+                {nome}
+                {c.controparte.pseudonimo && (
+                  <span className="font-mono text-xs font-normal tracking-wide text-slate-400">
+                    {c.controparte.pseudonimo}
+                  </span>
+                )}
+              </Link>
+            </h3>
+            <p className="mt-0.5 text-sm text-slate-600">
+              {c.lato === "creatore" ? "Sulla tua call" : "Sulla call"} «{c.call.titolo || "Call senza titolo"}» · Bando:{" "}
+              {c.call.bando.titolo}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              {c.ultimo_messaggio_at
+                ? `Ultimo messaggio: ${formatDateTime(c.ultimo_messaggio_at)}`
+                : c.created_at
+                  ? `Aperta il ${formatDate(c.created_at)}, ancora senza messaggi`
+                  : "Ancora senza messaggi"}
+            </p>
+          </div>
+          <LinkButton to={link} variant="secondary" size="sm" aria-label={`Apri la conversazione con ${nome}`}>
+            <MessagesSquare className="size-4" aria-hidden />
+            Apri
+          </LinkButton>
+        </div>
+      </Card>
+    </li>
+  );
+}
+
+/** «Conversazioni»: quelle dell'azienda attiva, dalla più recente, con i
+ *  non letti (si aggiornano da sole ogni minuto). */
+function Conversazioni() {
+  const { pagina, vaiA } = usePagina();
+  const lista = useConversazioni(pagina);
+  if (lista.isPending) return <ListaInCaricamento />;
+  if (lista.isError) {
+    return (
+      <ErrorState
+        message={apiErrorMessage(lista.error, "Impossibile caricare le conversazioni.")}
+        onRetry={() => void lista.refetch()}
+      />
+    );
+  }
+  if (lista.data.items.length === 0) {
+    return (
+      <EmptyState
+        title="Nessuna conversazione"
+        description="Una conversazione si apre quando una candidatura o un invito viene accettato."
+      />
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <ul className="space-y-3">
+        {lista.data.items.map((c) => (
+          <RigaConversazione key={c.id} conversazione={c} />
+        ))}
+      </ul>
+      <Pagination page={lista.data.page} totalPages={lista.data.total_pages} onChange={vaiA} />
+    </div>
+  );
+}
+
+/** Solo i numeri maggiori di zero (un contatore a zero non dice nulla). */
+const seMaggioreDiZero = (n: number | undefined) => (n && n > 0 ? n : undefined);
+
+/** Pagina del modulo partenariati
+ *  (`?vista=per-te|tutte|mie|salvate|candidature|conversazioni`). */
 export default function Partenariati() {
   const [params, setParams] = useSearchParams();
   const { avviso } = useAziendaDaLink();
@@ -342,6 +562,18 @@ export default function Partenariati() {
           { id: "tutte", etichetta: BACHECA_COPY.viste.tutte },
           { id: "mie", etichetta: BACHECA_COPY.viste.mie, conteggio: mie.data?.total },
           { id: "salvate", etichetta: BACHECA_COPY.viste.salvate, conteggio: riepilogo.data?.salvate },
+          {
+            id: "candidature",
+            etichetta: BACHECA_COPY.viste.candidature,
+            conteggio: seMaggioreDiZero(
+              (riepilogo.data?.inviti_ricevuti ?? 0) + (riepilogo.data?.candidature_da_decidere ?? 0),
+            ),
+          },
+          {
+            id: "conversazioni",
+            etichetta: BACHECA_COPY.viste.conversazioni,
+            conteggio: seMaggioreDiZero(riepilogo.data?.messaggi_non_letti),
+          },
         ]}
         attiva={vista}
         onCambia={cambiaVista}
@@ -351,6 +583,8 @@ export default function Partenariati() {
           <Bacheca key={vista} vista={vista} editable={editable} />
         )}
         {vista === "mie" && <LeMieCall />}
+        {vista === "candidature" && <Candidature editable={editable} />}
+        {vista === "conversazioni" && <Conversazioni />}
       </Schede>
     </div>
   );

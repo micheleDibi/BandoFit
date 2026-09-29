@@ -440,8 +440,8 @@ class TestSegnalazioneIn:
         errore_400(SegnalazioneIn, **self.BASE, oggetto_id="42", buona_fede=True)
         errore_400(SegnalazioneIn, **{**self.BASE, "descrizione": "breve"},
                    oggetto_id=str(uuid4()), buona_fede=True)
-        with pytest.raises(ValidationError):
-            SegnalazioneIn(**{**self.BASE, "oggetto_tipo": "messaggio"},
+        with pytest.raises(ValidationError):  # dal WP7 «messaggio» è ammesso
+            SegnalazioneIn(**{**self.BASE, "oggetto_tipo": "conversazione"},
                            oggetto_id=str(uuid4()), buona_fede=True)
         with pytest.raises(ValidationError):
             SegnalazioneIn(**self.BASE, oggetto_id=str(uuid4()), buona_fede=True,

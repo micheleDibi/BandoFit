@@ -1,6 +1,6 @@
 import { Handshake } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
-import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { CallStatoBadge } from "../components/partenariati/CallStatoBadge";
 import { CallStepper } from "../components/partenariati/CallStepper";
 import { callModificabile, NUMERO_PASSI, passoDa } from "../components/partenariati/callDati";
@@ -15,6 +15,7 @@ import { PassoTesti } from "../components/partenariati/PassoTesti";
 import { Button, LinkButton } from "../components/ui/Button";
 import { Dialog } from "../components/ui/Dialog";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
+import { useAziendaDaLink } from "../hooks/useAziendaDaLink";
 import { isVistaCreatore, useCall } from "../hooks/useCallPartenariato";
 import { apiErrorCode, apiErrorMessage } from "../lib/api";
 import { CALL_COPY } from "../lib/copy";
@@ -61,10 +62,12 @@ function Intestazione({ titolo, sotto }: { titolo: string; sotto?: ReactNode }) 
  *  sul server (regge il ricaricamento); il passo è nei searchParams
  *  (`?passo=`) e a ogni cambio il focus va sul titolo del passo. Ogni passo
  *  salva prima di andare avanti; uscire con modifiche non salvate chiede
- *  conferma. */
+ *  conferma. Deep link `?azienda=` come le altre pagine del modulo. */
 export default function CallWizard() {
   const { id } = useParams();
   const [params, setParams] = useSearchParams();
+  const location = useLocation();
+  const { avviso } = useAziendaDaLink();
   const callQ = useCall(id);
   const [dirty, setDirty] = useState(false);
   const [uscita, setUscita] = useState<number | null>(null);
@@ -73,6 +76,11 @@ export default function CallWizard() {
 
   const call = isVistaCreatore(callQ.data) ? callQ.data : undefined;
   const passo = passoDa(params.get("passo"), call?.wizard_passo ?? 1);
+  const avvisoLink = avviso ? (
+    <p role="status" className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
+      {avviso}
+    </p>
+  ) : null;
 
   // Focus sul titolo del passo quando cambia (non al primo caricamento).
   useEffect(() => {
@@ -120,6 +128,7 @@ export default function CallWizard() {
           titolo="Nuova call di partenariato"
           sotto={<p className="mt-1 text-sm text-slate-500">{DESCRIZIONI[1]}</p>}
         />
+        {avvisoLink}
         <CallStepper passo={1} salvatiFinoA={1} abilitato={(n) => n === 1} onVai={() => undefined} />
         <h2 className="font-display text-lg font-semibold text-slate-900">
           Passo 1 di {NUMERO_PASSI}: {CALL_COPY.passi[0]}
@@ -150,7 +159,8 @@ export default function CallWizard() {
   }
   if (callQ.isError) {
     return (
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-4xl space-y-5">
+        {avvisoLink}
         {apiErrorCode(callQ.error) === "not_found" ? (
           <EmptyState
             title="Call non trovata"
@@ -167,12 +177,20 @@ export default function CallWizard() {
     );
   }
   // Non è la vista del creatore (dal WP6: la call di un'altra azienda).
-  if (!call) return <Navigate to={`/app/partenariati/call/${id}`} replace />;
+  // La query string resta (`?azienda=`, `?passo=`): se il deep link non è
+  // ancora risolto (call letta con l'azienda attiva di prima), lo risolve la
+  // pagina della call.
+  if (!call) {
+    return (
+      <Navigate to={{ pathname: `/app/partenariati/call/${id}`, search: location.search }} replace />
+    );
+  }
 
   if (!callModificabile(call)) {
     return (
       <div className="mx-auto max-w-4xl space-y-5">
         <Intestazione titolo={call.titolo || call.bando.titolo} />
+        {avvisoLink}
         <EmptyState
           title={call.editable ? "Questa call non si può più modificare" : "Non puoi modificare questa call"}
           description={
@@ -213,6 +231,7 @@ export default function CallWizard() {
           </div>
         }
       />
+      {avvisoLink}
       <CallStepper
         passo={passo}
         salvatiFinoA={bozza ? call.wizard_passo : NUMERO_PASSI + 1}

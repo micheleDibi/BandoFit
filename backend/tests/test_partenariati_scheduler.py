@@ -234,6 +234,7 @@ class TestClaim:
         esiti = await sched.esegui_se_dovuto(db, SecondarioVietato(), FakeAi(), dopo)
         assert esiti == {"failsafe_estrazioni": 2, "failsafe_bozze_profilo": 2,
                          "failsafe_ai_call": 2, "chiusura_call": NESSUNA_CALL,
+                         "scadenza_inviti": 2,
                          "batch_estrazioni": {"eseguite": 0, "motivo": "spento"},
                          **ESITI_WP6}
         # seconda volta nello stesso giorno: già rivendicata
@@ -258,7 +259,8 @@ class TestPassi:
         esiti = await sched.esegui_run(db, object(), FakeAi(), OGGI)
         assert esiti == {"failsafe_estrazioni": "errore", "failsafe_bozze_profilo": 2,
                          "failsafe_ai_call": 2, "chiusura_call": NESSUNA_CALL,
-                         "batch_estrazioni": {"eseguite": 0}, **ESITI_WP6}
+                         "scadenza_inviti": 2, "batch_estrazioni": {"eseguite": 0},
+                         **ESITI_WP6}
         assert chiamato == [OGGI]
         [aggiornamento] = [op for op in db.ops if op[0] == "partenariati_runs" and op[1] == "update"]
         assert aggiornamento[2] == {"riepilogo": esiti}

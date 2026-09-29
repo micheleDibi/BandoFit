@@ -119,6 +119,15 @@ MSG_LIMITE_BOZZE_UTENTE = "Hai raggiunto le bozze di oggi: riprova domani"
 # sola non basta a dimostrarlo, quindi oggi si compare solo in forma anonima.
 # Si riaccende SOLO insieme a quella verifica (non è una setting d'ambiente).
 NOMINATIVO_DISPONIBILE = False
+# Rivelazione dell'IDENTITÀ all'accettazione di una candidatura o di un invito
+# (WP7, K2, Q13): implementata ma SPENTA per la stessa ragione del profilo
+# nominativo. Spenta, le due aziende restano anonime l'una per l'altra anche
+# dopo l'accettazione (proiezioni anonime e pseudonimo, chat con il banner
+# sull'identità non verificata) e `fn_partner_decidi` non scrive l'audit di
+# rivelazione. Accesa: ragione sociale, sito e PEC dal registro, nome e ruolo
+# del referente (mai la sua email), con l'audit nella RPC. Costante, non
+# setting: si riaccende solo insieme alla verifica della rappresentanza.
+RIVELAZIONE_IDENTITA_DISPONIBILE = False
 # Tempo massimo per chiudere la bozza quando il task viene cancellato
 # (spegnimento del processo): poi ci pensa il failsafe.
 CHIUSURA_SU_CANCELLAZIONE_SECONDI = 5.0

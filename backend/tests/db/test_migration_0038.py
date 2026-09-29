@@ -1369,6 +1369,7 @@ class TestSicurezza0038:
             ("trg_partner_email_settings_updated_at", "partner_email_settings"),
             ("trg_partner_digest_invii_updated_at", "partner_digest_invii"),
             ("trg_partner_calls_updated_at", "partner_calls"),  # della 0037, invariato
+            ("trg_partner_calls_chiudi_candidature", "partner_calls"),  # della 0039
         }
 
     @pytest.mark.parametrize("tabella", sorted(TABELLE_NUOVE))

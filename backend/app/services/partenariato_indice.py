@@ -26,9 +26,20 @@ e `in_` a blocchi di 100 id:
    speciali, ATECO) e, SOLO per i creatori, P.IVA e sito del registro per
    ripulire i testi delle loro call: mai `raw` intero, mai il CF di una
    persona, nulla di questo resta nell'indice;
-6. esposizioni degli ultimi 7 giorni (notifiche proattive);
+6. esposizioni degli ultimi 7 giorni: notifiche proattive e, dal WP7, inviti
+   ricevuti;
 7. stato LIVE dei bandi dal secondario (cache di 10 minuti): una call su un
-   bando non aperto (o sparito dal catalogo) non entra nell'indice.
+   bando non aperto (o sparito dal catalogo) non entra nell'indice;
+8. (WP7) candidature e inviti ATTIVI (`inviata` o `accettata`) in una sola
+   lettura: gli inviti in attesa non scaduti e quelli accettati aprono le call
+   solo su invito all'azienda invitata («Per te», `IndiceMatching.inviti`);
+   le candidature accettate sono impegni sul bando (esclusività, con la
+   stessa regola simmetrica di `fn_partner_esclusivita_violata`: non su una
+   call annullata); gli inviti di questa lettura creati negli ultimi 7
+   giorni contano nelle esposizioni. Gli inviti già chiusi (rifiutati,
+   ritirati, scaduti) negli ultimi 7 giorni NON contano: leggerli costerebbe
+   un'altra query oltre il budget. Il bando di una call non pubblicata con
+   una candidatura accettata si legge a parte, solo se ce n'è una.
 Budget: ≤ 20 query per 500 aziende e 200 call (`Indice.query`).
 
 T5: i dati del registro valgono solo se sono dell'azienda
@@ -76,6 +87,9 @@ CALL_INDICE_SELECT = (
     "esclusivita,pubblicata_at,sospesa_at"
 )
 REQUISITO_INDICE_SELECT = "id,call_id,etichetta,criterio,ambito,cercato,ordine"
+# Candidature e inviti attivi (WP7): mai messaggi, valutazioni né utenti.
+CANDIDATURA_INDICE_SELECT = "id,partner_call_id,company_profile_id,tipo,stato,scade_at,created_at"
+STATI_CANDIDATURA_ATTIVI = ("inviata", "accettata")
 POSIZIONE_INDICE_SELECT = (
     "id,call_id,titolo,ruolo,tipi_soggetto,competenze,ateco_divisioni,regioni,"
     "territorio_modalita,paesi,dimensioni,quota_ipotizzata_pct,numero,ordine"
@@ -185,6 +199,7 @@ class Indice:
     chiavi: Mapping[str, tuple[ChiaveCollegamento, ...]] = field(default_factory=dict)
     per_chiave: Mapping[str, frozenset[str]] = field(default_factory=dict)
     impegni: Mapping[str, frozenset[int]] = field(default_factory=dict)
+    impegni_esclusivi: Mapping[str, frozenset[int]] = field(default_factory=dict)
     esposizioni: Mapping[str, int] = field(default_factory=dict)
     query: int = 0
 
@@ -395,6 +410,7 @@ def _profilo_matching(
     collegate: Iterable[str],
     impegni: Iterable[int],
     esposizioni: int,
+    impegni_esclusivi: Iterable[int] = (),
 ) -> pm.ProfiloMatching:
     coerente = _coerente(az.riga, az.dati)
     dati = az.dati or {}
@@ -418,6 +434,7 @@ def _profilo_matching(
         collegate=collegate,
         collegamenti_ok=_marker_ok(az),
         impegni_bando=impegni,
+        impegni_esclusivi=impegni_esclusivi,
         esposizioni_7g=esposizioni,
     )
 
@@ -510,6 +527,90 @@ async def _esposizioni(cont: _Contatore, primary) -> dict[str, int]:
     return conteggi
 
 
+def _ts(valore: Any) -> datetime | None:
+    if isinstance(valore, datetime):
+        return valore if valore.tzinfo else valore.replace(tzinfo=timezone.utc)
+    if not valore:
+        return None
+    try:
+        letto = datetime.fromisoformat(str(valore).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return letto if letto.tzinfo else letto.replace(tzinfo=timezone.utc)
+
+
+@dataclass
+class _Candidature:
+    """Ciò che l'indice ricava da candidature e inviti attivi (WP7)."""
+
+    inviti: dict[str, set[str]] = field(default_factory=dict)
+    accettate: list[tuple[str, str]] = field(default_factory=list)  # (azienda, call)
+    esposizioni: dict[str, int] = field(default_factory=dict)
+
+
+async def _candidature_attive(cont: _Contatore, primary) -> _Candidature:
+    """Una lettura (a keyset) delle righe `inviata` e `accettata` di
+    `partner_candidature`: inviti in attesa NON scaduti e accettati per le
+    call solo su invito, candidature accettate (impegni), inviti degli ultimi
+    7 giorni (esposizioni)."""
+    righe = await _tutte(
+        cont,
+        lambda: primary.table("partner_candidature").select(CANDIDATURA_INDICE_SELECT)
+        .in_("stato", list(STATI_CANDIDATURA_ATTIVI)),
+        "id",
+    )
+    adesso = _adesso()
+    da = adesso - FINESTRA_ESPOSIZIONI
+    esito = _Candidature()
+    for riga in righe:
+        azienda, call = str(riga.get("company_profile_id")), str(riga.get("partner_call_id"))
+        stato, tipo = riga.get("stato"), riga.get("tipo")
+        if stato == "accettata":
+            esito.accettate.append((azienda, call))
+        if tipo != "invito":
+            continue
+        scade = _ts(riga.get("scade_at"))
+        if stato == "accettata" or (scade is not None and scade > adesso):
+            esito.inviti.setdefault(call, set()).add(azienda)
+        creata = _ts(riga.get("created_at"))
+        if creata is not None and creata >= da:
+            esito.esposizioni[azienda] = esito.esposizioni.get(azienda, 0) + 1
+    return esito
+
+
+async def _impegni_da_accettate(
+    cont: _Contatore,
+    primary,
+    accettate: list[tuple[str, str]],
+    note: Mapping[str, Mapping],
+    impegni: dict[str, set[int]],
+    esclusivi: dict[str, set[int]],
+) -> None:
+    """Le candidature accettate come impegni sul bando della loro call, con
+    la stessa regola della RPC (`fn_partner_esclusivita_violata`): in
+    qualunque stato della call tranne `chiusa_annullata` (il progetto non
+    c'è più e l'accettata non si ritira). Le call già lette (pubblicate) non
+    si rileggono; le altre a blocchi, solo se ce ne sono."""
+    mancanti = sorted({call for _, call in accettate if call not in note})
+    lette = dict(note)
+    for riga in await _per_blocchi(
+        cont, mancanti,
+        lambda b: primary.table("partner_calls").select("id,bando_id,esclusivita,stato")
+        .in_("id", b),
+        "id",
+    ) if mancanti else []:
+        lette[str(riga["id"])] = riga
+    for azienda, call in accettate:
+        riga = lette.get(call)
+        if (riga is None or riga.get("bando_id") is None
+                or riga.get("stato") == "chiusa_annullata"):
+            continue
+        bando = int(riga["bando_id"])
+        impegni.setdefault(azienda, set()).add(bando)
+        if riga.get("esclusivita") is True:
+            esclusivi.setdefault(azienda, set()).add(bando)
+
+
 def _collegate(chiavi: Mapping[str, tuple[ChiaveCollegamento, ...]]) -> dict[str, set[str]]:
     grado = partenariato_collegamenti.collegamenti_tra(chiavi)
     return {cid: set(altre) for cid, altre in grado.items()}
@@ -524,10 +625,15 @@ async def _ricarica(primary, secondary) -> Indice:
         "id",
     )
     stati = await _stati_bandi(secondary, [int(c["bando_id"]) for c in righe_call], cont)
+    candidature = await _candidature_attive(cont, primary)
     impegni: dict[str, set[int]] = {}
+    impegni_esclusivi: dict[str, set[int]] = {}
     attive: list[dict] = []
     for call in righe_call:
         impegni.setdefault(str(call["company_profile_id"]), set()).add(int(call["bando_id"]))
+        if call.get("esclusivita") is True:
+            impegni_esclusivi.setdefault(str(call["company_profile_id"]), set()).add(
+                int(call["bando_id"]))
         aperto, scadenza = _bando_aperto(call, stati)
         if aperto:
             attive.append({**call, "bando_scadenza": scadenza})
@@ -567,6 +673,12 @@ async def _ricarica(primary, secondary) -> Indice:
         cont, primary, set(profili) | creatori, creatori=creatori, profili=profili
     )
     esposizioni = await _esposizioni(cont, primary)
+    for cid, inviti in candidature.esposizioni.items():
+        esposizioni[cid] = esposizioni.get(cid, 0) + inviti
+    await _impegni_da_accettate(
+        cont, primary, candidature.accettate, {str(c["id"]): c for c in righe_call}, impegni,
+        impegni_esclusivi,
+    )
 
     chiavi = {cid: _chiavi(az.riga) for cid, az in aziende.items()}
     chiavi = {cid: c for cid, c in chiavi.items() if c}
@@ -582,6 +694,7 @@ async def _ricarica(primary, secondary) -> Indice:
             collegate=collegate.get(cid, ()),
             impegni=impegni.get(cid, ()),
             esposizioni=esposizioni.get(cid, 0),
+            impegni_esclusivi=impegni_esclusivi.get(cid, ()),
         )
         for cid, az in aziende.items()
     }
@@ -643,13 +756,14 @@ async def _ricarica(primary, secondary) -> Indice:
         if riga.get("visibile_come_partner") is True and cid in profili_matching
     ]
     return Indice(
-        matching=pm.IndiceMatching.da_liste(snapshots, candidati),
+        matching=pm.IndiceMatching.da_liste(snapshots, candidati, candidature.inviti),
         bacheca=bacheca,
         profili=profili_matching,
         vetrine=vetrine,
         chiavi=chiavi,
         per_chiave={k: frozenset(v) for k, v in per_chiave.items()},
         impegni={k: frozenset(v) for k, v in impegni.items()},
+        impegni_esclusivi={k: frozenset(v) for k, v in impegni_esclusivi.items()},
         esposizioni=esposizioni,
         query=cont.n,
     )
@@ -752,6 +866,7 @@ async def profilo_azienda(primary, idx: Indice, company_id: str) -> pm.ProfiloMa
         collegate=collegate,
         impegni=idx.impegni.get(cid, ()),
         esposizioni=idx.esposizioni.get(cid, 0),
+        impegni_esclusivi=idx.impegni_esclusivi.get(cid, ()),
     )
 
 

@@ -1,15 +1,22 @@
-import { CalendarClock, Eye, Flag, Handshake, Lock, Pencil, Scale } from "lucide-react";
+import { CalendarClock, Check, Eye, Flag, Handshake, Lock, Pencil, Scale, Send, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { BannerOptIn } from "../components/partenariati/BannerOptIn";
 import { CallPubblicaCard } from "../components/partenariati/CallPubblicaCard";
 import { CallStatoBadge } from "../components/partenariati/CallStatoBadge";
+import {
+  CandidaturaCard,
+  CandidaturaPropriaCard,
+  SceltaDirezione,
+} from "../components/partenariati/CandidaturaCard";
+import { CandidaturaDialog } from "../components/partenariati/CandidaturaDialog";
 import { descriviCriterio, linkCall, mostraDecimale, percentuale } from "../components/partenariati/callDati";
 import { CoperturaBadge } from "../components/partenariati/PassoGap";
 import { NotaAnonima } from "../components/partenariati/PassoBando";
 import { paginaDa } from "../components/partenariati/FiltriBacheca";
 import { AttenzioneBadge, MatchBadge } from "../components/partenariati/MatchBadge";
 import { MatchSpiegazione } from "../components/partenariati/MatchSpiegazione";
+import { InvitaDialog } from "../components/partenariati/InvitaDialog";
 import { etichettaForma } from "../components/partenariati/PartenariatoRegole";
 import { SalvaCallButton } from "../components/partenariati/SalvaCallButton";
 import { Schede } from "../components/partenariati/Schede";
@@ -23,6 +30,7 @@ import { Dialog } from "../components/ui/Dialog";
 import { Pagination } from "../components/ui/Pagination";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
 import { useAziendaDaLink } from "../hooks/useAziendaDaLink";
+import { useCandidature } from "../hooks/useCandidature";
 import {
   isVistaCreatore,
   useCall,
@@ -33,31 +41,49 @@ import { useCompany } from "../hooks/useCompany";
 import { useSuggeriti } from "../hooks/usePartenariati";
 import { usePartenariatiVocabolario } from "../hooks/usePartenariatiVocabolario";
 import { apiErrorCode, apiErrorMessage } from "../lib/api";
-import { CALL_COPY, PARTENARIATO_COPY } from "../lib/copy";
+import { CALL_COPY, CANDIDATURE_COPY, PARTENARIATO_COPY } from "../lib/copy";
 import { formatDate, formatDateTime, formatEur } from "../lib/format";
-import type { CallPubblica, CallPubblicaDettaglio, CallVistaCreatore, MatchOut } from "../types";
+import type {
+  CandidaturaPropria,
+  CallDettaglioAltraAzienda,
+  CallPubblica,
+  CallPubblicaDettaglio,
+  CallVistaCreatore,
+  DirezioneCandidature,
+  MatchOut,
+  PartnerSuggerito,
+  PartnerSuggeritoContatto,
+} from "../types";
 
-type Tab = "panoramica" | "suggeriti";
+type Tab = "panoramica" | "suggeriti" | "candidature";
 
 /** Schede per l'azienda che ha creato la call: i suggeriti solo quando la
- *  call è pubblicata (prima nessuna azienda la vede, dopo non si propone). */
+ *  call è pubblicata (prima nessuna azienda la vede, dopo non si propone);
+ *  candidature e inviti da quando è stata pubblicata (restano consultabili
+ *  anche dopo la chiusura). */
 function schedeCreatore(call: CallVistaCreatore): Array<{ id: Tab; etichetta: string }> {
   const schede: Array<{ id: Tab; etichetta: string }> = [{ id: "panoramica", etichetta: "Panoramica" }];
   if (call.stato === "pubblicata") schede.push({ id: "suggeriti", etichetta: "Aziende suggerite" });
+  if (call.pubblicata_at) schede.push({ id: "candidature", etichetta: "Candidature e inviti" });
   return schede;
 }
 
 /** I campi della vista pubblica per l'azienda attiva (`CallPubblicaDettaglio`:
- *  confronto, «salvata», visibilità come partner); l'hook del dettaglio la
- *  tipizza come `CallPubblica`, che serve anche all'anteprima. */
+ *  confronto, «salvata», visibilità come partner; dal WP7 la sua candidatura
+ *  e, per la controparte accettata, i dettagli riservati); l'hook del
+ *  dettaglio la tipizza come `CallPubblica`, che serve anche all'anteprima. */
 function perLaTuaAzienda(call: CallPubblica): Pick<CallPubblicaDettaglio, "match" | "salvata"> & {
   opt_in: boolean | undefined;
+  candidatura: CandidaturaPropria | null;
+  controparte: boolean;
 } {
-  const dettaglio = call as Partial<CallPubblicaDettaglio>;
+  const dettaglio = call as Partial<CallDettaglioAltraAzienda>;
   return {
     match: dettaglio.match ?? null,
     salvata: dettaglio.salvata === true,
     opt_in: dettaglio.opt_in,
+    candidatura: dettaglio.candidatura ?? null,
+    controparte: dettaglio.vista === "controparte",
   };
 }
 
@@ -383,13 +409,79 @@ function Panoramica({ call }: { call: CallVistaCreatore }) {
   );
 }
 
+/** Cosa mostrare accanto a un'azienda suggerita: lo stato del contatto se
+ *  c'è già (dal server o appena invitata da qui), altrimenti «Invita» per il
+ *  titolare; chi preferisce non ricevere inviti lo dice il suo profilo. */
+function AzioneSuggerito({
+  suggerito,
+  invitata,
+  puoInvitare,
+  onInvita,
+}: {
+  suggerito: PartnerSuggerito;
+  invitata: boolean;
+  puoInvitare: boolean;
+  onInvita: () => void;
+}) {
+  const contatto = (suggerito as PartnerSuggeritoContatto).stato_contatto ?? null;
+  if (contatto === "accettata") {
+    return (
+      <Badge tone="emerald">
+        <Check className="size-3.5" aria-hidden />
+        Accettata
+      </Badge>
+    );
+  }
+  if (contatto === "rifiutata" && !invitata) {
+    // Ha già rifiutato un tuo invito su questa call: non si reinvita.
+    return (
+      <Badge tone="slate">
+        <X className="size-3.5" aria-hidden />
+        Ha rifiutato l'invito
+      </Badge>
+    );
+  }
+  if (contatto === "inviata" || invitata) {
+    return (
+      <Badge tone="amber">
+        <Send className="size-3.5" aria-hidden />
+        {invitata && contatto !== "inviata" ? "Invito inviato" : "In attesa di risposta"}
+      </Badge>
+    );
+  }
+  if (!suggerito.profilo.accetta_inviti) {
+    return <p className="max-w-32 text-right text-xs text-slate-500">Preferisce non ricevere inviti</p>;
+  }
+  if (!puoInvitare) return null;
+  return (
+    <Button
+      size="sm"
+      variant="secondary"
+      onClick={onInvita}
+      aria-label={`Invita l'azienda con riferimento ${suggerito.pseudonimo}`}
+    >
+      <Send className="size-4" aria-hidden />
+      Invita
+    </Button>
+  );
+}
+
 /** Scheda «Aziende suggerite» (solo per l'azienda che ha creato la call; i
  *  membri la leggono): aziende visibili come partner che coprono qualcosa di
- *  ciò che cerchi, con un riferimento valido solo per questa call. */
+ *  ciò che cerchi, con un riferimento valido solo per questa call, e
+ *  «Invita» per il titolare. */
 function Suggeriti({ call }: { call: CallVistaCreatore }) {
   const [params, setParams] = useSearchParams();
   const pagina = paginaDa(params);
   const suggeriti = useSuggeriti(call.id, pagina);
+  // Il dialog tiene l'ultima azienda scelta anche mentre si chiude.
+  const [invito, setInvito] = useState<{ suggerito: PartnerSuggerito | null; aperto: boolean }>({
+    suggerito: null,
+    aperto: false,
+  });
+  // Invitate da questa pagina, finché i suggeriti non si rileggono.
+  const [invitate, setInvitate] = useState<ReadonlySet<string>>(new Set());
+  const puoInvitare = call.editable && call.stato === "pubblicata";
   // Testo dei requisiti cercati per etichetta, per spiegare «A», «C»…
   const testi = new Map(
     call.gap.requisiti.flatMap((r) => (r.etichetta ? [[r.etichetta, r.testo] as const] : [])),
@@ -448,10 +540,136 @@ function Suggeriti({ call }: { call: CallVistaCreatore }) {
         aria-busy={suggeriti.isPlaceholderData}
       >
         {dati.items.map((s) => (
-          <SuggeritoCard key={s.pseudonimo} suggerito={s} testi={testi} />
+          <SuggeritoCard
+            key={s.pseudonimo}
+            suggerito={s}
+            testi={testi}
+            azione={
+              <AzioneSuggerito
+                suggerito={s}
+                invitata={invitate.has(s.pseudonimo)}
+                puoInvitare={puoInvitare}
+                onInvita={() => setInvito({ suggerito: s, aperto: true })}
+              />
+            }
+          />
         ))}
       </ul>
       <Pagination page={dati.page} totalPages={dati.total_pages} onChange={vaiA} />
+      <InvitaDialog
+        open={invito.aperto}
+        onClose={() => setInvito((prima) => ({ ...prima, aperto: false }))}
+        callId={call.id}
+        suggerito={invito.suggerito}
+        posizioni={call.posizioni}
+        onInvitata={(pseudonimo) => setInvitate((prima) => new Set(prima).add(pseudonimo))}
+      />
+    </div>
+  );
+}
+
+/** Scheda «Candidature e inviti» (azienda che ha creato la call; i membri
+ *  leggono): le candidature ricevute da decidere e gli inviti mandati, con
+ *  la valutazione in vista «terzi» (solo esiti e fasce). */
+function CandidatureCall({ call }: { call: CallVistaCreatore }) {
+  const [params, setParams] = useSearchParams();
+  const pagina = paginaDa(params);
+  const direzione: DirezioneCandidature = params.get("direzione") === "inviate" ? "inviate" : "ricevute";
+  const lista = useCandidature({ direzione, stato: null, call_id: call.id }, pagina);
+  const testi = new Map(
+    call.gap.requisiti.flatMap((r) => (r.etichetta ? [[r.etichetta, r.testo] as const] : [])),
+  );
+  const aggiorna = (modifica: (p: URLSearchParams) => void) =>
+    setParams(
+      (prima) => {
+        const dopo = new URLSearchParams(prima);
+        modifica(dopo);
+        return dopo;
+      },
+      { replace: true },
+    );
+  const cambiaDirezione = (d: DirezioneCandidature) =>
+    aggiorna((p) => {
+      if (d === "inviate") p.set("direzione", d);
+      else p.delete("direzione");
+      p.delete("page");
+    });
+  const vaiA = (n: number) => {
+    aggiorna((p) => {
+      if (n > 1) p.set("page", String(n));
+      else p.delete("page");
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  let corpo: ReactNode;
+  if (lista.isPending) {
+    corpo = (
+      <div className="space-y-3" aria-hidden>
+        <Skeleton className="h-40 w-full" />
+        <Skeleton className="h-40 w-full" />
+      </div>
+    );
+  } else if (lista.isError) {
+    corpo = (
+      <ErrorState
+        message={apiErrorMessage(lista.error, "Impossibile caricare candidature e inviti.")}
+        onRetry={() => void lista.refetch()}
+      />
+    );
+  } else if (lista.data.items.length === 0) {
+    corpo =
+      direzione === "ricevute" ? (
+        <EmptyState
+          title="Nessuna candidatura per ora"
+          description={
+            call.visibilita === "solo_invitati"
+              ? "La call è visibile solo alle aziende che inviti: invitale dalle aziende suggerite."
+              : "Quando un'azienda si candida alla call, la trovi qui. Intanto puoi invitare le aziende suggerite."
+          }
+        />
+      ) : (
+        <EmptyState
+          title="Nessun invito mandato"
+          description="Puoi invitare le aziende dalla scheda «Aziende suggerite», finché la call è pubblicata."
+        />
+      );
+  } else {
+    corpo = (
+      <div className="space-y-3">
+        <p className="text-sm text-slate-500" role="status" aria-live="polite">
+          {lista.isPlaceholderData
+            ? "Aggiornamento…"
+            : lista.data.total === 1
+              ? direzione === "ricevute"
+                ? "1 candidatura"
+                : "1 invito"
+              : direzione === "ricevute"
+                ? `${lista.data.total} candidature`
+                : `${lista.data.total} inviti`}
+        </p>
+        <ul
+          className={`space-y-3 transition-opacity ${lista.isPlaceholderData ? "opacity-60" : ""}`}
+          aria-busy={lista.isPlaceholderData}
+        >
+          {lista.data.items.map((c) => (
+            <CandidaturaCard key={c.id} candidatura={c} mostraCall={false} testi={testi} />
+          ))}
+        </ul>
+        <Pagination page={lista.data.page} totalPages={lista.data.total_pages} onChange={vaiA} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <SceltaDirezione
+        valore={direzione}
+        onChange={cambiaDirezione}
+        etichette={{ ricevute: "Candidature ricevute", inviate: "Inviti mandati" }}
+      />
+      {!call.editable && <p className="text-sm text-slate-500">{CANDIDATURE_COPY.soloTitolare}</p>}
+      {corpo}
     </div>
   );
 }
@@ -490,10 +708,120 @@ function Confronto({ call, match }: { call: CallPubblica; match: MatchOut | null
   );
 }
 
-/** Pagina della call (`?tab=panoramica|suggeriti`; poi candidature,
- *  consorzio…). Per l'azienda che l'ha creata: vista completa e aziende
- *  suggerite; per le altre la proiezione pubblica con il proprio confronto,
- *  «Salva» (titolare) e «Segnala». */
+/** La propria candidatura (o l'invito ricevuto) sulla call di un'altra
+ *  azienda, con le azioni del titolare; se non c'è e la call è aperta a
+ *  tutti, «Candidati». Dopo che chi ha creato la call ha rifiutato la tua
+ *  candidatura non si ripropone (lo ha deciso lui); dopo un ritiro, una
+ *  scadenza o un invito che hai rifiutato tu sì. */
+function LaTuaCandidatura({
+  call,
+  propria,
+  editable,
+}: {
+  call: CallDettaglioAltraAzienda;
+  propria: CandidaturaPropria | null;
+  editable: boolean;
+}) {
+  const [aperto, setAperto] = useState(false);
+  const [annuncio, setAnnuncio] = useState<string | null>(null);
+  const attiva = propria?.stato === "inviata" || propria?.stato === "accettata";
+  const rifiutataDalCreatore = propria?.tipo === "candidatura" && propria.stato === "rifiutata";
+  const puoCandidarsi =
+    call.stato === "pubblicata" && call.visibilita === "pubblica" && !attiva && !rifiutataDalCreatore;
+
+  if (!propria && !puoCandidarsi && !annuncio) return null;
+  const titolo = propria?.tipo === "invito" ? "L'invito ricevuto" : "La tua candidatura";
+
+  return (
+    <section aria-label={titolo} className="space-y-3">
+      <div role="status" aria-live="polite">
+        {annuncio && (
+          <p className="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{annuncio}</p>
+        )}
+      </div>
+      {propria && (
+        <div>
+          <h2 className="mb-2 font-display text-base font-semibold text-slate-900">{titolo}</h2>
+          <CandidaturaPropriaCard candidatura={propria} callId={call.id} posizioni={call.posizioni} />
+        </div>
+      )}
+      {puoCandidarsi && (
+        <Card className="p-5">
+          <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
+            <Send className="size-4 text-brand-500" aria-hidden />
+            {propria?.tipo === "candidatura" ? "Candidati di nuovo" : "Ti interessa?"}
+          </h2>
+          <p className="mt-2 text-sm text-slate-600">
+            Candidati con un messaggio: chi ha creato la call vede il profilo partner della tua
+            azienda, in forma anonima, e decide se aprire una conversazione.
+          </p>
+          {editable ? (
+            <Button className="mt-3 w-full" onClick={() => setAperto(true)}>
+              Candidati
+            </Button>
+          ) : (
+            <p className="mt-2 text-xs text-slate-500">{CANDIDATURE_COPY.soloTitolare}</p>
+          )}
+        </Card>
+      )}
+      {editable && (
+        <CandidaturaDialog
+          open={aperto}
+          onClose={() => setAperto(false)}
+          call={call}
+          onInviata={(inviata) =>
+            setAnnuncio(
+              "Candidatura inviata: ti avvisiamo quando arriva una risposta." +
+                (inviata.quota ? ` ${CANDIDATURE_COPY.quota(inviata.quota.usate, inviata.quota.limite)}.` : ""),
+            )
+          }
+        />
+      )}
+    </section>
+  );
+}
+
+/** Per la controparte accettata: budget esatto e dettagli riservati della
+ *  call e, solo con la rivelazione accesa (oggi spenta), l'identità
+ *  dell'azienda. Mai i bilanci di nessuno. */
+function Riservati({ call }: { call: CallDettaglioAltraAzienda }) {
+  const identita = call.identita_rivelata ? call.identita : null;
+  const dettagli = call.dettagli_riservati ?? null;
+  const budget = call.budget_progetto_eur ?? null;
+  return (
+    <Card className="p-5">
+      <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
+        <Lock className="size-4 text-slate-400" aria-hidden />
+        Riservato alle aziende accettate
+      </h2>
+      <dl className="mt-3 space-y-4">
+        {identita?.ragione_sociale && (
+          <Voce titolo="Azienda">
+            {identita.ragione_sociale}
+            {identita.sito_web ? ` · ${identita.sito_web}` : ""}
+            {identita.pec ? ` · PEC ${identita.pec}` : ""}
+          </Voce>
+        )}
+        {identita?.referente_nome && <Voce titolo="Referente">{identita.referente_nome}</Voce>}
+        <Voce titolo="Budget esatto del progetto">{budget ? formatEur(budget) : "Non indicato"}</Voce>
+        <Voce titolo="Dettagli riservati">
+          {dettagli ? (
+            <span className="whitespace-pre-line">{dettagli}</span>
+          ) : (
+            <span className="text-slate-500">Nessun dettaglio riservato.</span>
+          )}
+        </Voce>
+      </dl>
+    </Card>
+  );
+}
+
+/** Pagina della call (`?tab=panoramica|suggeriti|candidature`; poi
+ *  consorzio…). Per l'azienda che l'ha creata: vista completa, aziende
+ *  suggerite con «Invita», candidature e inviti; per le altre la proiezione
+ *  pubblica con la propria candidatura («Candidati»), il proprio confronto,
+ *  «Salva» (titolare) e «Segnala»; dopo l'accettazione anche i dettagli
+ *  riservati. */
 export default function CallPartenariato() {
   const { id } = useParams();
   const [params, setParams] = useSearchParams();
@@ -544,12 +872,22 @@ export default function CallPartenariato() {
     corpo = (
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
         <h1 className="sr-only">{pubblica.titolo || "Call di partenariato"}</h1>
-        <CallPubblicaCard call={pubblica} />
+        <div className="min-w-0 space-y-4">
+          <CallPubblicaCard call={pubblica} />
+          {tua.controparte && <Riservati call={pubblica as CallDettaglioAltraAzienda} />}
+        </div>
         <aside className="space-y-4" aria-label="Per la tua azienda">
-          <Confronto call={pubblica} match={tua.match} />
-          <BannerOptIn optIn={tua.opt_in} />
+          <LaTuaCandidatura
+            call={pubblica as CallDettaglioAltraAzienda}
+            propria={tua.candidatura}
+            editable={azienda?.editable ?? false}
+          />
+          {/* La controparte accettata non ha confronto né «salvata»: il
+              partenariato c'è già. */}
+          {!tua.controparte && <Confronto call={pubblica} match={tua.match} />}
+          {!tua.controparte && <BannerOptIn optIn={tua.opt_in} />}
           <div className="flex flex-wrap items-start justify-end gap-2">
-            {azienda?.editable && (
+            {azienda?.editable && !tua.controparte && (
               <SalvaCallButton
                 id={pubblica.id}
                 titolo={pubblica.titolo || "Call senza titolo"}
@@ -609,6 +947,7 @@ export default function CallPartenariato() {
         >
           {tab === "panoramica" && <Panoramica call={call} />}
           {tab === "suggeriti" && <Suggeriti call={call} />}
+          {tab === "candidature" && <CandidatureCall call={call} />}
         </Schede>
       </div>
     );

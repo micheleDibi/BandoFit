@@ -236,6 +236,16 @@ class Settings(BaseSettings):
     partenariato_indice_ttl_seconds: int = 60
     partenariato_digest_giorno: int = 0
     partenariato_digest_ora: str = "08:30"
+    # Candidature, inviti e chat (WP7, docs/partenariati.md K1-K3): giorni di
+    # validità di un invito (1..90, lo verifica la RPC) e inviti in attesa per
+    # call. Limiti ANTI-ABUSO per utente (rate_limit_service, fail-open: non
+    # sono tetti di spesa né la quota del piano, che conta la RPC): candidature
+    # e inviti al giorno, messaggi all'ora.
+    partner_invito_ttl_giorni: int = 14
+    partner_inviti_max_per_call: int = 30
+    partner_candidature_limite_giorno: int = 10
+    partner_inviti_limite_giorno: int = 50
+    partner_messaggi_limite_ora: int = 120
 
     @model_validator(mode="after")
     def _segreti_obbligatori_in_produzione(self) -> "Settings":

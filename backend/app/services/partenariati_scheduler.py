@@ -47,6 +47,12 @@ Passi del WP6:
   dall'ora configurati (lunedì 08:30), con claim per settimana su
   `partner_digest_runs`. Il loop si sveglia anche all'ora del digest, oltre
   che a quella della run giornaliera.
+
+Passo del WP7:
+- `scadenza_inviti`: gli inviti in attesa oltre la loro scadenza diventano
+  `scaduta` (`fn_partner_scadi_inviti`, a lotti, saltando le righe bloccate da
+  una decisione in corso); in lettura ci pensa anche la scadenza pigra. Se ne
+  chiude qualcuno l'indice del matching si invalida.
 """
 
 import asyncio
@@ -62,6 +68,7 @@ from app.services import (
     bandi_service,
     bando_fonti_service,
     partenariato_collegamenti,
+    partenariato_candidature_service,
     partenariato_indice,
     partenariato_notifiche,
     partenariato_service,
@@ -353,6 +360,18 @@ async def batch_estrazioni(primary, secondary, ai, oggi: date) -> dict:
     }
 
 
+async def scadenza_inviti(primary) -> int:
+    """Inviti scaduti marcati a lotti (al più `SCADENZA_GIRI_MAX` lotti per
+    run: il resto alla run dopo o alla lettura). → quanti."""
+    totale = 0
+    for _ in range(partenariato_candidature_service.SCADENZA_GIRI_MAX):
+        chiusi = await partenariato_candidature_service.scadi_inviti(primary)
+        totale += chiusi
+        if chiusi < partenariato_candidature_service.SCADENZA_LOTTO:
+            break
+    return totale
+
+
 async def backfill_collegamenti(primary) -> dict:
     """Chiavi dei collegamenti (solo con il flag, solo aziende idonee)."""
     esito = await partenariato_collegamenti.backfill(primary)
@@ -402,6 +421,7 @@ async def esegui_run(primary, secondary, ai, oggi: date, adesso: datetime | None
         ("failsafe_bozze_profilo", lambda: failsafe_bozze_profilo(primary)),
         ("failsafe_ai_call", lambda: failsafe_ai_call(primary)),
         ("chiusura_call", lambda: chiusura_call(primary, secondary, oggi)),
+        ("scadenza_inviti", lambda: scadenza_inviti(primary)),
         ("batch_estrazioni", lambda: batch_estrazioni(primary, secondary, ai, oggi)),
         ("backfill_collegamenti", lambda: backfill_collegamenti(primary)),
         ("fanout_pendenti", lambda: fanout_pendenti(primary, secondary)),

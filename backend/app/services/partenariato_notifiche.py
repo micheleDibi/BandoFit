@@ -185,6 +185,9 @@ async def fan_out_pubblicazione(primary, secondary, call_id: str) -> dict:
             pm.FiltriSuggeriti(min_coperti=1, min_punteggio=settings.partenariato_notifiche_soglia),
             oggi=bandi_service.today_italy(),
             pesi=pm.PesiMatching.da_settings(settings),
+            # Il limite per owner è della lista mostrata al creatore, non di
+            # chi riceve la notifica (WP7).
+            limita_owner=False,
         )
         vivi = await partenariato_indice.ricontrollo_live(
             primary, [m.company_id for m in risultati]

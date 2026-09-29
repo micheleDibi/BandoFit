@@ -9,7 +9,9 @@ Proprietà difese:
 - formula del punteggio con numeri calcolati a mano, arrotondamento half-up;
 - ordine: requisiti coperti, punteggio, tie-break sha256 settimanale
   (stesso ordine nella settimana, rotazione alla successiva); determinismo;
-- al massimo 2 aziende dello stesso owner per pagina;
+- suggeriti: al massimo 2 aziende dello stesso owner sull'INTERA lista (le
+  altre non compaiono in nessuna pagina, nemmeno con un filtro); «Per te»: al
+  massimo 2 call dello stesso owner per pagina;
 - spiegazioni esatte da template (capofila e «cerco capofila»);
 - vista terzi senza nessun numero di bilancio (canary sul JSON), profili
   anonimi con la sola fascia di fatturato;
@@ -560,14 +562,98 @@ class TestCapPerOwner:
         pagine = pm.impagina(items, dimensione=10, owner=pm.owner_call)
         assert [len(p) for p in pagine] == [2, 1]
 
+    def test_limita_per_owner_sull_intera_lista(self):
+        items = pm.ordina(
+            [_m(f"a{i}", "advisor", 3, 90 - i) for i in range(5)]
+            + [_m("b", "ob", 2, 80), _m("c", "oc", 2, 70), _m("b2", "ob", 1, 60)],
+            oggi=OGGI,
+        )
+        tenute = pm.limita_per_owner(items)
+        # Le prime due di ogni owner, nell'ordine dato; le altre escono (non
+        # slittano più avanti come con `impagina`).
+        assert [m.company_id for m in tenute] == ["a0", "a1", "b", "c", "b2"]
+        assert [m.company_id for m in pm.limita_per_owner(items, max_per_owner=1)] == [
+            "a0", "b", "c"]
+        assert pm.limita_per_owner(items, max_per_owner=0) == pm.limita_per_owner(
+            items, max_per_owner=1)  # almeno una per owner, come `impagina`
+        call_stesso_owner = [_m("y", "oy", 1, 90 - i, call_id=f"call{i}", call_owner="advisor")
+                             for i in range(3)]
+        assert [m.call_id for m in pm.limita_per_owner(call_stesso_owner, owner=pm.owner_call)] \
+            == ["call0", "call1"]
+
     def test_suggeriti_di_un_advisor_con_tante_aziende(self):
         stesse = [replace(c, owner_id=g.OWNER["Y"]) for c in _cloni(5)]
         indice = IndiceMatching.da_liste([g.call_guida()], stesse + [g.profilo("T")])
         risultati = pm.suggeriti_per_call(indice, CALL_ID, oggi=OGGI)
-        prima, altre = pm.pagina(risultati, 1, dimensione=3)
-        assert altre
-        assert [m.company_id for m in prima].count(g.COMPANY["T"]) == 1
-        assert sum(1 for m in prima if m.candidato_owner_id == g.OWNER["Y"]) == 2
+        # Dell'Advisor compaiono solo le sue due aziende migliori nell'ordine
+        # completo: le altre tre non ci sono in nessuna pagina né nel totale.
+        tutte = pm.ordina(
+            [pm.valuta_coppia(g.call_guida(), c, oggi=OGGI, direzione="suggeriti")
+             for c in stesse], oggi=OGGI,
+        )
+        assert [m.company_id for m in risultati] == [
+            tutte[0].company_id, tutte[1].company_id, g.COMPANY["T"]]
+        pagine = pm.impagina(risultati, dimensione=1)
+        assert len(pagine) == 3  # nessuna pagina in più con le aziende nascoste
+        visti = {m.company_id for p in pagine for m in p}
+        assert {m.company_id for m in tutte[2:]}.isdisjoint(visti)
+
+    def test_il_limite_segue_i_pesi(self):
+        stesse = [replace(c, owner_id=g.OWNER["Y"]) for c in _cloni(3)]
+        indice = IndiceMatching.da_liste([g.call_guida()], stesse)
+        uno = pm.suggeriti_per_call(indice, CALL_ID, oggi=OGGI,
+                                    pesi=replace(pm.PESI_PREDEFINITI, max_per_owner_pagina=1))
+        tre = pm.suggeriti_per_call(indice, CALL_ID, oggi=OGGI,
+                                    pesi=replace(pm.PESI_PREDEFINITI, max_per_owner_pagina=3))
+        assert len(uno) == 1 and len(tre) == 3
+
+    def test_il_limite_vale_prima_dei_filtri(self, monkeypatch):
+        """Un filtro non fa comparire un'azienda che la lista completa nasconde:
+        altrimenti basterebbe filtrare per scoprire quali anonimi hanno lo
+        stesso owner delle prime due."""
+        p1 = pm.PosizioneMatch("p1", "Prima", True)
+        p2 = pm.PosizioneMatch("p2", "Seconda", True)
+        match = {
+            "o1": replace(_m("o1", "advisor", 2, 60), posizioni=(p1,)),
+            "o2": replace(_m("o2", "advisor", 2, 55), posizioni=(p1,)),
+            "o3": replace(_m("o3", "advisor", 1, 95), posizioni=(p2,)),
+            "b": replace(_m("b", "ob", 1, 70), posizioni=(p2,)),
+        }
+        monkeypatch.setattr(pm, "valuta_coppia",
+                            lambda call, cand, **_: match[cand.company_id])
+        indice = IndiceMatching.da_liste(
+            [g.call_guida()], [Y(company_id=c, owner_id="x") for c in match]
+        )
+        ids = [m.company_id for m in pm.suggeriti_per_call(indice, CALL_ID, oggi=OGGI)]
+        assert ids == ["o1", "o2", "b"]
+        per_p2 = pm.suggeriti_per_call(indice, CALL_ID, FiltriSuggeriti(posizione_id="p2"),
+                                       oggi=OGGI)
+        soglia = pm.suggeriti_per_call(indice, CALL_ID, FiltriSuggeriti(min_punteggio=80),
+                                       oggi=OGGI)
+        assert [m.company_id for m in per_p2] == ["b"]
+        assert soglia == []
+
+    def test_le_notifiche_non_hanno_il_limite(self, monkeypatch):
+        """Il limite è della lista mostrata al creatore. Le notifiche proattive
+        (`limita_owner=False`) arrivano anche alla terza azienda dello stesso
+        owner che supera le soglie, quando le prime due non le superano."""
+        match = {
+            "o1": _m("o1", "advisor", 3, 40),
+            "o2": _m("o2", "advisor", 3, 45),
+            "o3": _m("o3", "advisor", 2, 80),
+        }
+        monkeypatch.setattr(pm, "valuta_coppia",
+                            lambda call, cand, **_: match[cand.company_id])
+        indice = IndiceMatching.da_liste(
+            [g.call_guida()], [Y(company_id=c, owner_id="x") for c in match]
+        )
+        soglie = FiltriSuggeriti(min_coperti=1, min_punteggio=50)
+        assert pm.suggeriti_per_call(indice, CALL_ID, soglie, oggi=OGGI) == []
+        notificabili = pm.suggeriti_per_call(indice, CALL_ID, soglie, oggi=OGGI,
+                                             limita_owner=False)
+        assert [m.company_id for m in notificabili] == ["o3"]
+        tutte = pm.suggeriti_per_call(indice, CALL_ID, oggi=OGGI, limita_owner=False)
+        assert [m.company_id for m in tutte] == ["o2", "o1", "o3"]
 
 
 # ============================================================== spiegazioni

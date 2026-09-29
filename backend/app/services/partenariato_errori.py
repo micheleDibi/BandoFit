@@ -229,6 +229,57 @@ RPC_ERRORS: dict[str, tuple[int, str, str]] = {
         "Una posizione con candidature attive non si può rimuovere",
     ),
     "messaggio_immutabile": (409, "messaggio_immutabile", "I messaggi non si modificano"),
+    "posizione_con_membri": (
+        409,
+        "posizione_con_membri",
+        "Una posizione assegnata a un membro del consorzio non si può rimuovere: spostalo "
+        "prima su un'altra posizione dalla scheda Consorzio",
+    ),
+    # WP8 — consorzio della call e checklist documentale (migration 0040).
+    # `parametri_non_validi` resta NON mappato (il servizio valida prima).
+    "membro_non_trovato": (404, "not_found", "Membro del consorzio non trovato"),
+    "call_non_modificabile": (
+        409,
+        "call_non_modificabile",
+        "Il consorzio di questa call non si può più modificare",
+    ),
+    "capofila_gia_presente": (
+        409,
+        "capofila_gia_presente",
+        "Il consorzio ha già un capofila: cambia prima il suo ruolo",
+    ),
+    "quota_mancante": (
+        409,
+        "quota_mancante",
+        "Per confermare serve la quota del membro",
+    ),
+    "membro_non_rimovibile": (
+        409,
+        "membro_non_rimovibile",
+        "Chi ha creato la call resta nel proprio consorzio",
+    ),
+    "membro_uscito": (409, "membro_uscito", "Il membro è uscito dal consorzio"),
+    "membro_modificato": (
+        409,
+        "membro_modificato",
+        "Ruolo, posizione o quota sono cambiati nel frattempo: controlla i nuovi valori e "
+        "conferma di nuovo",
+    ),
+    "limite_membri": (
+        409,
+        "limite_membri",
+        "Il consorzio ha raggiunto il numero massimo di membri",
+    ),
+    "ruolo_non_ammesso": (
+        409,
+        "ruolo_non_ammesso",
+        "Chi ha creato la call partecipa come capofila o come partner",
+    ),
+    "documento_non_valido": (
+        400,
+        "documento_non_valido",
+        "Documento non previsto dalla checklist di questa call",
+    ),
 }
 
 

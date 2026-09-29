@@ -2877,3 +2877,227 @@ export interface MessaggioInput {
   testo: string;
   client_msg_id: string;
 }
+
+// ---- Partenariati: consorzio della call e validatore (WP8) ---------------------------
+// Specchio di `backend/app/schemas/partenariato_consorzio.py` (fonte unica dei
+// DTO). Id dei membri = `partner_call_membri.id` (mai l'id di un'azienda);
+// quote e budget come STRINGHE decimali, il rapporto di copertura come numero.
+
+/** Ruolo nel consorzio (nella UI «Entità affiliata» e «Partner associato»). */
+export type RuoloMembro = "capofila" | "partner" | "affiliated_entity" | "associated_partner";
+/** `proposto ⇄ confermato → uscito → proposto`. */
+export type StatoMembro = "proposto" | "confermato" | "uscito";
+export type EsitoVoce = "verde" | "rosso" | "grigio";
+/** Chi ha stabilito la regola di una voce: il bando (voce confermata, con la
+ *  sua citazione) o chi ha creato la call. */
+export type FonteRegolaVoce = "bando" | "creatore";
+export type CodiceVoce =
+  | "regole"
+  | "numero_partner"
+  | "composizione"
+  | "somma_quote"
+  | "quota_partner"
+  | "quota_categoria"
+  | "quota_capofila"
+  | "indipendenza"
+  | "paesi_distinti"
+  | "regola_finanziaria"
+  | "media_pesata"
+  | "esclusivita"
+  | "vincolo_membro"
+  | "vincolo_da_verificare"
+  | "membri_attivi";
+export type StatoDocumentoConsorzio = "da_fare" | "in_corso" | "fatto" | "non_applicabile";
+/** Quando serve il documento. */
+export type FaseDocumentoConsorzio =
+  | "accordo_preliminare"
+  | "domanda"
+  | "concessione"
+  | "prima_erogazione";
+/** Da dove viene il documento: base (ogni forma), forma, richiesto dal bando. */
+export type FonteDocumentoConsorzio = "base" | "forma" | "bando";
+
+export interface PosizioneMembro {
+  id: string;
+  titolo: string;
+}
+
+/** `MembroOut`: un membro come lo vede chi guarda. `nome` = denominazione
+ *  dichiarata per gli esterni, il nome della propria azienda, lo pseudonimo
+ *  della call per gli altri membri in piattaforma (con i soli dati anonimi di
+ *  `profilo`). `tipi_soggetto` solo per gli esterni (dichiarati dal creatore).
+ *  Mai id di aziende, contatti o importi di bilancio. */
+export interface MembroConsorzio {
+  id: string;
+  esterno: boolean;
+  creatore: boolean;
+  sei_tu: boolean;
+  nome: string;
+  pseudonimo: string | null;
+  profilo: ProfiloPartnerCall | null;
+  paese: string | null;
+  tipi_soggetto: TipoSoggettoPartenariato[];
+  ruolo: RuoloMembro;
+  posizione: PosizioneMembro | null;
+  quota_percentuale: string | null;
+  stato: StatoMembro;
+  confermato_at: string | null;
+  puo_modificare: boolean;
+  puo_confermare: boolean;
+  puo_uscire: boolean;
+}
+
+/** Origine della regola di una voce: `citazione` solo per le voci del bando
+ *  confermate con il passaggio ritrovato. */
+export interface RegolaOrigineVoce {
+  fonte: FonteRegolaVoce;
+  citazione: CitazioneCall | null;
+}
+
+/** Esito di una voce su un membro (sulle fasce per gli altri membri, sui
+ *  propri numeri per te). */
+export interface EsitoMembroVoce {
+  membro_id: string;
+  esito: EsitoVoce;
+  dichiarato: boolean;
+}
+
+/** `VoceOut`: una voce della checklist. `dettaglio_privato` esiste solo per i
+ *  tuoi dati; `membri_coinvolti` = membri per cui la voce non è in regola (o
+ *  che la determinano). */
+export interface VoceValidazione {
+  id: string;
+  codice: CodiceVoce;
+  esito: EsitoVoce;
+  titolo: string;
+  dettaglio_pubblico: string;
+  dettaglio_privato: string | null;
+  regola: RegolaOrigineVoce | null;
+  membri_coinvolti: string[];
+  esiti_membri: EsitoMembroVoce[];
+  dichiarato: boolean;
+}
+
+export interface RiepilogoValidazione {
+  verde: number;
+  rosso: number;
+  grigio: number;
+}
+
+/** `ValidazioneOut`: rosso se c'è un rosso, altrimenti grigio se c'è un
+ *  grigio, altrimenti verde. */
+export interface ValidazioneConsorzio {
+  esito: EsitoVoce;
+  voci: VoceValidazione[];
+  riepilogo: RiepilogoValidazione;
+}
+
+/** `CellaMatriceOut`: copertura di un requisito da parte di un membro;
+ *  `testo_privato` solo nella tua colonna; `si_applica` falso per i
+ *  requisiti «di ogni membro» sui partner associati. */
+export interface CellaMatrice {
+  membro_id: string;
+  esito: EsitoCoperturaCall;
+  fonte: "registro" | "bilanci" | "dichiarato" | null;
+  testo: string;
+  testo_privato: string | null;
+  si_applica: boolean;
+}
+
+export interface RigaMatrice {
+  requisito_id: string;
+  etichetta: string;
+  testo: string | null;
+  ambito: AmbitoRequisitoCall;
+  cercato: boolean;
+  esito: EsitoVoce;
+  celle: CellaMatrice[];
+}
+
+/** `MatriceOut`: requisiti × membri; `copertura_gap_ratio` = requisiti
+ *  cercati coperti / cercati (null senza requisiti cercati). */
+export interface MatriceCoperturaConsorzio {
+  membri: string[];
+  righe: RigaMatrice[];
+  copertura_gap_ratio: number | null;
+}
+
+/** `DocumentoConsorzioOut`: documento della checklist per forma con il suo
+ *  stato (lo cambia solo il creatore). */
+export interface DocumentoConsorzio {
+  codice: string;
+  titolo: string;
+  fase: FaseDocumentoConsorzio;
+  obbligatorio: boolean;
+  nota: string | null;
+  fonte: FonteDocumentoConsorzio;
+  stato: StatoDocumentoConsorzio;
+  note: string | null;
+  updated_at: string | null;
+}
+
+/** `BudgetOut`: fascia pubblica ed esatto riservato (null per chi non lo vede). */
+export interface BudgetConsorzio {
+  fascia: BudgetFasciaCall | null;
+  esatto: string | null;
+  modificabile: boolean;
+}
+
+/** `GET /partenariati/call/{id}/consorzio` (creatore e controparti). */
+export interface Consorzio {
+  membri: MembroConsorzio[];
+  validazione: ValidazioneConsorzio;
+  matrice: MatriceCoperturaConsorzio;
+  documenti: DocumentoConsorzio[];
+  budget: BudgetConsorzio;
+  forma: FormaAggregazione | null;
+  editable: boolean;
+  sei_creatore: boolean;
+  /** Titolare dell'azienda creatrice e call in uno stato in cui il consorzio
+   *  si modifica (pubblicata, scaduta, completata): esterni e documenti. */
+  modificabile: boolean;
+  validazione_at: string | null;
+  membri_max: number;
+}
+
+/** `PUT …/consorzio/membri/{mid}` (solo il creatore): i tre campi insieme. */
+export interface MembroAggiornaInput {
+  posizione_id: string | null;
+  ruolo: RuoloMembro;
+  quota_percentuale: string | null;
+}
+
+/** `POST …/consorzio/membri/{mid}/conferma`: ruolo, posizione e quota COME LI
+ *  MOSTRA la pagina. Se nel frattempo sono cambiati il server risponde 409
+ *  `membro_modificato` (si rilegge il consorzio e si conferma di nuovo). */
+export interface MembroConfermaInput {
+  ruolo: RuoloMembro;
+  posizione_id: string | null;
+  quota_percentuale: string | null;
+}
+
+/** `POST …/consorzio/esterni` e `PUT …/consorzio/esterni/{mid}` (solo il
+ *  creatore): membro non in piattaforma, con i dati che dichiari tu. */
+export interface EsternoInput {
+  denominazione: string;
+  /** ISO 3166-1 alpha-2. */
+  paese: string;
+  /** Da 1 a 5. */
+  tipi_soggetto: TipoSoggettoPartenariato[];
+  ruolo: RuoloMembro;
+  posizione_id: string | null;
+  quota_percentuale: string | null;
+}
+
+/** `PUT …/consorzio/budget` (solo il creatore). */
+export interface BudgetConsorzioInput {
+  budget_fascia: BudgetFasciaCall;
+  budget_progetto_eur: string | null;
+}
+
+/** `PUT …/consorzio/documenti/{codice}` (solo il creatore). */
+export interface DocumentoStatoInput {
+  stato: StatoDocumentoConsorzio;
+  /** Fino a 500 caratteri. */
+  note: string | null;
+}

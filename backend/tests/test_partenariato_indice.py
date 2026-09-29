@@ -64,6 +64,9 @@ RELAZIONI = {
         ("company_collegamenti", "id", "company_profile_id", "molti"),
     ("company_profiles", "company_collegamenti_stato"):
         ("company_collegamenti_stato", "id", "company_profile_id", "uno"),
+    # WP8: la riga del consorzio nata da una candidatura (indice unico).
+    ("partner_candidature", "partner_call_membri"):
+        ("partner_call_membri", "id", "candidatura_id", "uno"),
 }
 
 

@@ -67,6 +67,10 @@ ricevuti, candidature da decidere e messaggi non letti; si segnalano anche i
 messaggi della chat (solo quelli dell'altra azienda, solo dalle parti della
 conversazione).
 
+WP8: le card (le mie, bacheca, «Per te») contano le candidature spontanee
+ricevute (in attesa o accettate), con una lettura per pagina fuori dalla
+ricarica dell'indice.
+
 Log: mai testi, P.IVA, nomi o importi; solo id e codici.
 """
 
@@ -1138,6 +1142,7 @@ async def lista_mie(
         conta_posizioni[chiave] = conta_posizioni.get(chiave, 0) + 1
         conta_posti[chiave] = conta_posti.get(chiave, 0) + _posti(riga)
     creatore = creatore_pubblico(az.dati_registro, az.dossier, nomi_regioni(lookups))
+    ricevute = await candidature_ricevute(primary, ids)
     items = [
         call_bacheca(
             call_card(
@@ -1146,10 +1151,52 @@ async def lista_mie(
                 ident=az.ident,
             ),
             posti=conta_posti.get(str(c["id"]), 0),
+            candidature_ricevute=ricevute.get(str(c["id"]), 0),
         )
         for c in calls
     ]
     return Page.build(items, resp.count or len(items), page, page_size)
+
+
+# Candidature ricevute (WP8, prerequisito): spontanee, in attesa o accettate.
+STATI_CANDIDATURE_RICEVUTE = ("inviata", "accettata")
+_PAGINA_CONTEGGI = 1000
+
+
+async def candidature_ricevute(primary, call_ids: Iterable[Any]) -> dict[str, int]:
+    """Candidature SPONTANEE ricevute per call (`tipo = candidatura`, in
+    attesa o accettate; gli inviti sono del creatore e non contano) per le
+    card di UNA pagina: una lettura per blocco di 100 call (a keyset oltre le
+    1000 righe, il max-rows di PostgREST), fuori dalla ricarica dell'indice
+    (il suo budget di query non cambia). Best-effort: un errore vale 0 per
+    tutte (le card non si rompono per un contatore)."""
+    ids = sorted({str(c) for c in call_ids if c})
+    conteggi: dict[str, int] = {}
+    try:
+        for inizio in range(0, len(ids), 100):
+            blocco = ids[inizio : inizio + 100]
+            ultimo = None
+            while True:
+                query = (
+                    primary.table("partner_candidature").select("id,partner_call_id")
+                    .in_("partner_call_id", blocco).eq("tipo", "candidatura")
+                    .in_("stato", list(STATI_CANDIDATURE_RICEVUTE))
+                )
+                if ultimo is not None:
+                    query = query.gt("id", ultimo)
+                resp = await query.order("id").limit(_PAGINA_CONTEGGI).execute()
+                righe = [r for r in resp.data or [] if isinstance(r, dict)]
+                for riga in righe:
+                    chiave = str(riga.get("partner_call_id"))
+                    conteggi[chiave] = conteggi.get(chiave, 0) + 1
+                if len(righe) < _PAGINA_CONTEGGI:
+                    break
+                ultimo = righe[-1]["id"]
+    except Exception as exc:  # noqa: BLE001 — contatore informativo
+        logger.warning("call: candidature ricevute non contate (%s)",
+                       getattr(exc, "code", None) or type(exc).__name__)
+        return {}
+    return conteggi
 
 
 def _posti(posizione: Mapping) -> int:
@@ -1343,6 +1390,21 @@ async def aggiorna(primary, secondary, active, user: dict, call_id: Any, dati: C
     aggiornata = await _ricarica(primary, call["id"])
     await _dopo_modifica(primary, call, aggiornata)
     return await _vista(primary, active, aggiornata, az=az, secondary=secondary)
+
+
+async def aggiorna_budget(primary, active, user: dict, call: Mapping, campi: dict) -> dict:
+    """Budget della call dal consorzio (WP8: `budget_fascia` pubblica e
+    `budget_progetto_eur` RISERVATO, già validati da `BudgetIn`) con la
+    stessa RPC e gli stessi effetti del PATCH: whitelist e versione nella RPC
+    (in `chiusa_completata` → 409 `stato_call_non_valido`), indice
+    invalidato, «modificata» a chi segue la call solo se cambia la
+    proiezione pubblica. La call l'ha già caricata il chiamante come
+    creatore (titolare). Ritorna la call riletta."""
+    await _rpc(primary, "fn_partner_call_aggiorna", {**_parametri(active, user, call),
+                                                     "p_campi": campi})
+    aggiornata = await _ricarica(primary, call["id"])
+    await _dopo_modifica(primary, call, aggiornata)
+    return aggiornata
 
 
 async def _dopo_modifica(primary, prima: Mapping, dopo: Mapping) -> None:
@@ -2081,12 +2143,14 @@ async def bacheca(
         impagina=_a_fette(page_size),
     )
     regioni = nomi_regioni(await _lookups(secondary))
+    ricevute = await candidature_ricevute(primary, [ci.id for ci, _snapshot in pagina])
     items = [
         call_bacheca(
             _card(ci, idx, regioni),
             match=pm.proietta_match(match[ci.id], vista="proprio") if match.get(ci.id) else None,
             salvata=ci.id in salvate,
             posti=ci.posti,
+            candidature_ricevute=ricevute.get(ci.id, 0),
         )
         for ci, _snapshot in pagina
     ]
@@ -2134,12 +2198,14 @@ async def per_te(primary, secondary, active, user: dict, *, page: int = 1,
     )
     salvate = await _salvate(primary, company_id)
     regioni = nomi_regioni(await _lookups(secondary))
+    ricevute = await candidature_ricevute(primary, [m.call_id for m in pagina])
     items = [
         call_bacheca(
             _card(idx.bacheca[m.call_id], idx, regioni),
             match=pm.proietta_match(m, vista="proprio"),
             salvata=m.call_id in salvate,
             posti=idx.bacheca[m.call_id].posti,
+            candidature_ricevute=ricevute.get(m.call_id, 0),
         )
         for m in pagina
         if m.call_id in idx.bacheca

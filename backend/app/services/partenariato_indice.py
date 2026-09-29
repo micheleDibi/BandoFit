@@ -35,7 +35,10 @@ e `in_` a blocchi di 100 id:
    solo su invito all'azienda invitata («Per te», `IndiceMatching.inviti`);
    le candidature accettate sono impegni sul bando (esclusività, con la
    stessa regola simmetrica di `fn_partner_esclusivita_violata`: non su una
-   call annullata); gli inviti di questa lettura creati negli ultimi 7
+   call annullata). WP8: nella stessa lettura (embed, nessuna query in più)
+   la riga del consorzio nata dalla candidatura: se c'è prevale, e un membro
+   USCITO non è più impegnato (le righe dei membri nascono solo dalle
+   accettazioni, 0040); gli inviti di questa lettura creati negli ultimi 7
    giorni contano nelle esposizioni. Gli inviti già chiusi (rifiutati,
    ritirati, scaduti) negli ultimi 7 giorni NON contano: leggerli costerebbe
    un'altra query oltre il budget. Il bando di una call non pubblicata con
@@ -87,8 +90,12 @@ CALL_INDICE_SELECT = (
     "esclusivita,pubblicata_at,sospesa_at"
 )
 REQUISITO_INDICE_SELECT = "id,call_id,etichetta,criterio,ambito,cercato,ordine"
-# Candidature e inviti attivi (WP7): mai messaggi, valutazioni né utenti.
-CANDIDATURA_INDICE_SELECT = "id,partner_call_id,company_profile_id,tipo,stato,scade_at,created_at"
+# Candidature e inviti attivi (WP7): mai messaggi, valutazioni né utenti. WP8:
+# lo stato della riga del consorzio nata dalla candidatura (uscito = libero).
+CANDIDATURA_INDICE_SELECT = (
+    "id,partner_call_id,company_profile_id,tipo,stato,scade_at,created_at,"
+    "partner_call_membri(stato)"
+)
 STATI_CANDIDATURA_ATTIVI = ("inviata", "accettata")
 POSIZIONE_INDICE_SELECT = (
     "id,call_id,titolo,ruolo,tipi_soggetto,competenze,ateco_divisioni,regioni,"
@@ -565,7 +572,10 @@ async def _candidature_attive(cont: _Contatore, primary) -> _Candidature:
     for riga in righe:
         azienda, call = str(riga.get("company_profile_id")), str(riga.get("partner_call_id"))
         stato, tipo = riga.get("stato"), riga.get("tipo")
-        if stato == "accettata":
+        membro = _uno(riga.get("partner_call_membri"))
+        if stato == "accettata" and (membro or {}).get("stato") != "uscito":
+            # WP8: la riga del consorzio, se c'è, prevale sulla candidatura
+            # accettata (stessa regola di fn_partner_esclusivita_violata).
             esito.accettate.append((azienda, call))
         if tipo != "invito":
             continue
@@ -589,13 +599,18 @@ async def _impegni_da_accettate(
     """Le candidature accettate come impegni sul bando della loro call, con
     la stessa regola della RPC (`fn_partner_esclusivita_violata`): in
     qualunque stato della call tranne `chiusa_annullata` (il progetto non
-    c'è più e l'accettata non si ritira). Le call già lette (pubblicate) non
-    si rileggono; le altre a blocchi, solo se ce ne sono."""
+    c'è più e l'accettata non si ritira). WP8: una call non pubblicata e non
+    annullata con un membro accettato impegna anche il suo creatore (il
+    partenariato può essere andato avanti); le pubblicate lo impegnano già.
+    Un consorzio con soli membri esterni qui non si vede (servirebbe una
+    lettura in più): lo ferma la RPC. Le call già lette (pubblicate) non si
+    rileggono; le altre a blocchi, solo se ce ne sono."""
     mancanti = sorted({call for _, call in accettate if call not in note})
     lette = dict(note)
     for riga in await _per_blocchi(
         cont, mancanti,
-        lambda b: primary.table("partner_calls").select("id,bando_id,esclusivita,stato")
+        lambda b: primary.table("partner_calls")
+        .select("id,company_profile_id,bando_id,esclusivita,stato")
         .in_("id", b),
         "id",
     ) if mancanti else []:
@@ -606,9 +621,14 @@ async def _impegni_da_accettate(
                 or riga.get("stato") == "chiusa_annullata"):
             continue
         bando = int(riga["bando_id"])
-        impegni.setdefault(azienda, set()).add(bando)
-        if riga.get("esclusivita") is True:
-            esclusivi.setdefault(azienda, set()).add(bando)
+        impegnate = [azienda]
+        creatore = riga.get("company_profile_id")
+        if creatore and riga.get("stato") not in ("pubblicata", "bozza"):
+            impegnate.append(str(creatore))
+        for impegnata in impegnate:
+            impegni.setdefault(impegnata, set()).add(bando)
+            if riga.get("esclusivita") is True:
+                esclusivi.setdefault(impegnata, set()).add(bando)
 
 
 def _collegate(chiavi: Mapping[str, tuple[ChiaveCollegamento, ...]]) -> dict[str, set[str]]:
@@ -868,6 +888,77 @@ async def profilo_azienda(primary, idx: Indice, company_id: str) -> pm.ProfiloMa
         esposizioni=idx.esposizioni.get(cid, 0),
         impegni_esclusivi=idx.impegni_esclusivi.get(cid, ()),
     )
+
+
+# ------------------------------------------------------ membri (WP8)
+
+# Profilo partner di un membro: le colonne del matching più quelle della
+# proiezione pubblica del WP4 (`partner_profilo_pubblico.profilo_pubblico`).
+PROFILO_MEMBRO_SELECT = (
+    f"{PROFILO_INDICE_SELECT},descrizione_competenze,competenze_libere,paesi_interesse,"
+    "infrastrutture"
+)
+
+
+@dataclass(frozen=True)
+class AziendaMembro:
+    """Un'azienda in piattaforma membro di un consorzio (WP8), letta ORA (non
+    dall'istantanea: bilanci e chiavi aggiornati). Transitoria, per il
+    validatore e le proiezioni del consorzio; nulla resta nell'indice.
+
+    - `profilo`: `ProfiloMatching` con gli esercizi ESATTI (vista «proprio»
+      del validatore; verso gli altri escono solo fasce ed esiti);
+    - `chiavi`: chiavi HMAC dei collegamenti se il marker è valido
+      (`_marker_ok`), altrimenti None (non calcolati: «da verificare»);
+    - `ident`: identificativi dell'azienda (per ripulire i suoi testi);
+    - `registro` / `dossier`: dati del registro SOLO se sono dell'azienda
+      (T5), per la proiezione pubblica del profilo;
+    - `profilo_partner`: la riga del profilo partner (None se manca);
+    - `nome`: ragione sociale, SOLO per la propria azienda."""
+
+    profilo: pm.ProfiloMatching
+    chiavi: tuple[ChiaveCollegamento, ...] | None
+    ident: Any = None
+    registro: Mapping | None = None
+    dossier: Mapping | None = None
+    profilo_partner: Mapping | None = None
+    nome: str | None = None
+
+
+async def carica_membri(primary, company_ids: Iterable[str]) -> dict[str, AziendaMembro]:
+    """Le aziende membro di un consorzio in tre letture a blocchi (profili
+    partner, aziende con gli embed dell'indice, registro), con gli stessi
+    costruttori dell'indice (`_profilo_matching`, `_marker_ok`). Un'azienda
+    sparita manca dal risultato."""
+    ids = sorted({str(c) for c in company_ids if c})
+    if not ids:
+        return {}
+    cont = _Contatore()
+    profili = {
+        str(r["company_profile_id"]): r
+        for r in await _per_blocchi(
+            cont, ids,
+            lambda b: primary.table("company_partner_profiles").select(PROFILO_MEMBRO_SELECT)
+            .in_("company_profile_id", b),
+            "company_profile_id",
+        )
+    }
+    aziende = await _carica_aziende(cont, primary, ids, creatori=set(ids), profili=profili)
+    uscita: dict[str, AziendaMembro] = {}
+    for cid, az in aziende.items():
+        profilo = _profilo_matching(az, collegate=(), impegni=(), esposizioni=0)
+        coerente = _coerente(az.riga, az.dati)
+        nome = az.riga.get("ragione_sociale") or (az.dati or {}).get("denominazione")
+        uscita[cid] = AziendaMembro(
+            profilo=profilo,
+            chiavi=_chiavi(az.riga) if profilo.collegamenti_ok else None,
+            ident=_ident_creatore(az),
+            registro=az.dati if coerente else None,
+            dossier=_dossier(az.dati) if coerente else None,
+            profilo_partner=az.profilo,
+            nome=nome.strip() if isinstance(nome, str) and nome.strip() else None,
+        )
+    return uscita
 
 
 # ------------------------------------------------------- ricontrollo live

@@ -11,6 +11,7 @@ import {
 } from "../components/partenariati/CandidaturaCard";
 import { CandidaturaDialog } from "../components/partenariati/CandidaturaDialog";
 import { descriviCriterio, linkCall, mostraDecimale, percentuale } from "../components/partenariati/callDati";
+import { ConsorzioTab } from "../components/partenariati/ConsorzioTab";
 import { CoperturaBadge } from "../components/partenariati/PassoGap";
 import { NotaAnonima } from "../components/partenariati/PassoBando";
 import { paginaDa } from "../components/partenariati/FiltriBacheca";
@@ -55,17 +56,28 @@ import type {
   PartnerSuggeritoContatto,
 } from "../types";
 
-type Tab = "panoramica" | "suggeriti" | "candidature";
+type Tab = "panoramica" | "suggeriti" | "candidature" | "consorzio";
 
 /** Schede per l'azienda che ha creato la call: i suggeriti solo quando la
  *  call è pubblicata (prima nessuna azienda la vede, dopo non si propone);
- *  candidature e inviti da quando è stata pubblicata (restano consultabili
- *  anche dopo la chiusura). */
+ *  candidature, inviti e consorzio da quando è stata pubblicata (restano
+ *  consultabili anche dopo la chiusura). */
 function schedeCreatore(call: CallVistaCreatore): Array<{ id: Tab; etichetta: string }> {
   const schede: Array<{ id: Tab; etichetta: string }> = [{ id: "panoramica", etichetta: "Panoramica" }];
   if (call.stato === "pubblicata") schede.push({ id: "suggeriti", etichetta: "Aziende suggerite" });
   if (call.pubblicata_at) schede.push({ id: "candidature", etichetta: "Candidature e inviti" });
+  if (call.pubblicata_at) schede.push({ id: "consorzio", etichetta: "Consorzio" });
   return schede;
+}
+
+/** Schede per le altre aziende: solo la controparte accettata (membro del
+ *  consorzio) ha, oltre alla call, la scheda del consorzio. */
+function schedeAltraAzienda(call: CallPubblica): Array<{ id: Tab; etichetta: string }> {
+  if (!perLaTuaAzienda(call).controparte) return [];
+  return [
+    { id: "panoramica", etichetta: "La call" },
+    { id: "consorzio", etichetta: "Consorzio" },
+  ];
 }
 
 /** I campi della vista pubblica per l'azienda attiva (`CallPubblicaDettaglio`:
@@ -278,7 +290,9 @@ function Panoramica({ call }: { call: CallVistaCreatore }) {
               "Non indicato"
             )}
           </Voce>
-          <Voce titolo="La tua quota">
+          {/* Dopo la pubblicazione la quota vive nel consorzio: qui resta
+              quella di partenza. */}
+          <Voce titolo={call.pubblicata_at ? "La tua quota alla pubblicazione" : "La tua quota"}>
             {call.quota_creatore_pct ? `${mostraDecimale(call.quota_creatore_pct)}%` : "Non indicata"}
           </Voce>
           <Voce titolo="Chi la vede">{CALL_COPY.visibilita[call.visibilita]}</Voce>
@@ -816,12 +830,12 @@ function Riservati({ call }: { call: CallDettaglioAltraAzienda }) {
   );
 }
 
-/** Pagina della call (`?tab=panoramica|suggeriti|candidature`; poi
- *  consorzio…). Per l'azienda che l'ha creata: vista completa, aziende
- *  suggerite con «Invita», candidature e inviti; per le altre la proiezione
+/** Pagina della call (`?tab=panoramica|suggeriti|candidature|consorzio`).
+ *  Per l'azienda che l'ha creata: vista completa, aziende suggerite con
+ *  «Invita», candidature e inviti, consorzio; per le altre la proiezione
  *  pubblica con la propria candidatura («Candidati»), il proprio confronto,
  *  «Salva» (titolare) e «Segnala»; dopo l'accettazione anche i dettagli
- *  riservati. */
+ *  riservati e la scheda del consorzio. */
 export default function CallPartenariato() {
   const { id } = useParams();
   const [params, setParams] = useSearchParams();
@@ -840,8 +854,23 @@ export default function CallPartenariato() {
     const timer = window.setTimeout(() => setAnnuncio(annuncioArrivo), 150);
     return () => window.clearTimeout(timer);
   }, [annuncioArrivo, location.key]);
-  const schede = isVistaCreatore(callQ.data) ? schedeCreatore(callQ.data) : [];
+  const schede = isVistaCreatore(callQ.data)
+    ? schedeCreatore(callQ.data)
+    : callQ.data
+      ? schedeAltraAzienda(callQ.data)
+      : [];
   const tab: Tab = schede.some((s) => s.id === params.get("tab")) ? (params.get("tab") as Tab) : "panoramica";
+  const cambiaScheda = (t: Tab) =>
+    setParams(
+      (p) => {
+        const nuovi = new URLSearchParams(p);
+        nuovi.set("tab", t);
+        // La pagina è della scheda: si riparte dalla prima.
+        nuovi.delete("page");
+        return nuovi;
+      },
+      { replace: true },
+    );
 
   let corpo: ReactNode;
   if (callQ.isPending) {
@@ -869,9 +898,9 @@ export default function CallPartenariato() {
   } else if (!isVistaCreatore(callQ.data)) {
     const pubblica = callQ.data;
     const tua = perLaTuaAzienda(pubblica);
-    corpo = (
+    const vistaCall = (
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <h1 className="sr-only">{pubblica.titolo || "Call di partenariato"}</h1>
+        {!tua.controparte && <h1 className="sr-only">{pubblica.titolo || "Call di partenariato"}</h1>}
         <div className="min-w-0 space-y-4">
           <CallPubblicaCard call={pubblica} />
           {tua.controparte && <Riservati call={pubblica as CallDettaglioAltraAzienda} />}
@@ -903,6 +932,18 @@ export default function CallPartenariato() {
         <SegnalaDialog open={segnala} onClose={() => setSegnala(false)} oggettoTipo="call" oggettoId={pubblica.id} />
       </div>
     );
+    // La controparte accettata è nel consorzio: la call e il consorzio in due
+    // schede; il titolo della call resta l'intestazione (nascosta) della pagina.
+    corpo = tua.controparte ? (
+      <div className="space-y-4">
+        <h1 className="sr-only">{pubblica.titolo || "Call di partenariato"}</h1>
+        <Schede etichetta="Sezioni della call" schede={schede} attiva={tab} onCambia={cambiaScheda}>
+          {tab === "consorzio" ? <ConsorzioTab callId={pubblica.id} /> : vistaCall}
+        </Schede>
+      </div>
+    ) : (
+      vistaCall
+    );
   } else {
     const call = callQ.data;
     corpo = (
@@ -928,26 +969,13 @@ export default function CallPartenariato() {
             {call.bando.scadenza ? `, che scade il ${formatDate(call.bando.scadenza)}` : ""}
           </p>
         </div>
-        <Schede
-          etichetta="Sezioni della call"
-          schede={schede}
-          attiva={tab}
-          onCambia={(t) =>
-            setParams(
-              (p) => {
-                const nuovi = new URLSearchParams(p);
-                nuovi.set("tab", t);
-                // La pagina è della scheda: si riparte dalla prima.
-                nuovi.delete("page");
-                return nuovi;
-              },
-              { replace: true },
-            )
-          }
-        >
+        <Schede etichetta="Sezioni della call" schede={schede} attiva={tab} onCambia={cambiaScheda}>
           {tab === "panoramica" && <Panoramica call={call} />}
           {tab === "suggeriti" && <Suggeriti call={call} />}
           {tab === "candidature" && <CandidatureCall call={call} />}
+          {tab === "consorzio" && (
+            <ConsorzioTab callId={call.id} posizioni={call.posizioni} />
+          )}
         </Schede>
       </div>
     );

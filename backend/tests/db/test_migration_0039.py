@@ -1414,7 +1414,9 @@ class TestDecidi:
 
     def test_controparte_con_owner_disattivato(self, db, sc):
         """«Viva» come per il backend (aziende_vive): anche il profilo dell'owner
-        della controparte deve essere attivo, nei due sensi."""
+        della controparte deve essere attivo, nei due sensi. Dalla 0040 un
+        creatore con il titolare disattivato chiude anche la call
+        (fn_partner_call_aperta), che si controlla prima: call_non_attiva."""
         k = candidatura_pendente(db, sc)
         db.execute("update public.profiles set is_active = false where id = %s", (sc.y_owner,))
         with pytest.raises(psycopg.errors.RaiseException) as exc:
@@ -1428,7 +1430,7 @@ class TestDecidi:
                                  (invito["company_profile_id"],)).fetchone()[0])
         with pytest.raises(psycopg.errors.RaiseException) as exc:
             decidi(db, y_owner, invito["company_profile_id"], invito["id"])
-        assert detail_of(exc) == "controparte_non_disponibile"
+        assert detail_of(exc) == "call_non_attiva"
         assert conta(db, "partner_conversazioni") == 0
 
     def test_y_sospeso_non_accetta_l_invito(self, db, sc):

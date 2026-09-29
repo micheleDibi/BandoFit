@@ -46,7 +46,20 @@ spenta) e dopo l'audit scritto dalla RPC all'accettazione
 (`IdentitaRivelataOut`); spenta, anche i dettagli riservati escono senza
 gli identificativi dell'azienda.
 
-Modulo PURO salvo `carica_call_autorizzata` e `candidatura_su_call`.
+WP8 (consorzio): i membri della call (`partner_call_membri`) escono SOLO da
+`proietta_membro`: la propria azienda col suo nome, gli altri membri in
+piattaforma con lo pseudonimo della call e il profilo pubblico anonimo (Q12,
+senza `codice_pubblico`), chi ha creato la call come «Azienda anonima» verso
+gli altri membri, gli esterni con il nome dichiarato dal creatore (ripulito
+dagli identificativi del creatore verso gli altri). Mai `company_profile_id`,
+candidatura, utenti. «Azienda viva» (pubblico, candidato, invitato) = non
+eliminata né archiviata e con il titolare attivo, come nelle RPC (0040).
+Un'azienda USCITA dal consorzio (da sé o tolta dal creatore) non è più
+controparte: la sua candidatura resta accettata (non si ritira), ma la riga
+uscita prevale, come per l'esclusività sul bando.
+
+Modulo PURO salvo `carica_call_autorizzata`, `candidatura_su_call` e
+`uscita_dal_consorzio`.
 """
 
 import base64
@@ -60,6 +73,7 @@ from pydantic import BaseModel, ConfigDict, create_model
 
 from app.core.errors import NotFoundError
 from app.core.privacy import hmac_dominio
+from app.schemas.partenariato_consorzio import MembroOut, PosizioneMembroOut, ProfiloMembroOut
 from app.schemas.partner_call import (
     BandoPubblicoCallOut,
     CallCardOut,
@@ -234,16 +248,29 @@ def pubblicamente_visibile(call: Mapping) -> bool:
 
 
 async def _azienda_viva(primary, company_id: Any) -> bool:
+    """Azienda viva: non eliminata né archiviata E con il titolare attivo —
+    la stessa definizione di `fn_partner_call_aperta` (0040), della
+    controparte nelle RPC del WP7 e di `partenariato_indice.aziende_vive`."""
     resp = (
         await primary.table("company_profiles")
-        .select("id")
+        .select("id,parent_id")
         .eq("id", str(company_id))
         .is_("deleted_at", "null")
         .is_("archived_at", "null")
         .limit(1)
         .execute()
     )
-    return bool(resp.data)
+    owner = resp.data[0].get("parent_id") if resp.data else None
+    if not owner:
+        return False
+    titolare = (
+        await primary.table("profiles")
+        .select("id,is_active")
+        .eq("id", str(owner))
+        .limit(1)
+        .execute()
+    )
+    return bool(titolare.data and titolare.data[0].get("is_active") is True)
 
 
 CANDIDATURA_PROPRIA_SELECT = (
@@ -274,6 +301,22 @@ async def candidatura_su_call(primary, call_id: Any, company_id: Any) -> dict | 
     return min(righe, key=lambda r: _PRIORITA_STATO.get(r.get("stato"), 2))
 
 
+async def uscita_dal_consorzio(primary, call_id: Any, company_id: Any) -> bool:
+    """L'azienda ha una riga USCITA nel consorzio della call (WP8). Una
+    candidatura accettata senza riga (dati precedenti al backfill della
+    0040) non conta come uscita."""
+    resp = (
+        await primary.table("partner_call_membri")
+        .select("stato")
+        .eq("partner_call_id", str(call_id))
+        .eq("company_profile_id", str(company_id))
+        .limit(1)
+        .execute()
+    )
+    riga = resp.data[0] if resp.data else None
+    return isinstance(riga, dict) and riga.get("stato") == "uscito"
+
+
 async def carica_call_autorizzata(
     primary, call_id: Any, active, user: Mapping, *, ammessi: Iterable[str] | None = None
 ) -> tuple[dict, Ruolo]:
@@ -281,7 +324,8 @@ async def carica_call_autorizzata(
     rotta non ammette — 404 come una call inesistente. Il pubblico (e chi ha
     una candidatura o un invito in attesa) vede solo le call di aziende vive;
     la controparte accettata anche dopo (la conversazione resta, in sola
-    lettura), ma non una call sospesa per moderazione."""
+    lettura), ma non una call sospesa per moderazione né dopo essere uscita
+    dal consorzio (WP8: da lì vale come un'azienda qualunque)."""
     identificativo = normalizza_id(call_id)
     resp = (
         await primary.table("partner_calls")
@@ -297,6 +341,13 @@ async def carica_call_autorizzata(
         candidatura = await candidatura_su_call(primary, identificativo, company_id)
         if candidatura is not None:
             ruolo = ruolo_su_call(call, active, user, candidatura=candidatura)
+        if ruolo == "controparte" and await uscita_dal_consorzio(
+            primary, identificativo, company_id
+        ):
+            # WP8: chi è uscito (o è stato tolto) dal consorzio non è più
+            # controparte, anche se la candidatura resta accettata (non si
+            # ritira): niente riservati, budget esatto né consorzio.
+            ruolo = ruolo_su_call(call, active, user)
     if ruolo in ("pubblico", "candidato", "invitato") and not await _azienda_viva(
         primary, call.get("company_profile_id")
     ):
@@ -532,8 +583,9 @@ class CallBachecaOut(CallCardOut):
     """Una call nelle liste (le mie, bacheca, salvate, «Per te»): la card del
     WP5 più il match dell'azienda attiva con la call (vista «proprio»; null
     se non è compatibile, se l'azienda attiva manca o se la call è sua), se
-    l'azienda l'ha salvata, le candidature ricevute (0 fino al WP7) e i
-    posti (somma dei partner cercati dalle posizioni)."""
+    l'azienda l'ha salvata, le candidature spontanee ricevute (in attesa o
+    accettate, `partner_call_service.candidature_ricevute`) e i posti (somma
+    dei partner cercati dalle posizioni)."""
 
     match: MatchOut | None = None
     salvata: bool = False
@@ -874,4 +926,136 @@ def vista_controparte(
         identita_rivelata=identita is not None,
         identita=identita,
         candidatura=candidatura,
+    )
+
+
+# ------------------------------------------------------------ WP8
+
+# Stati della call in cui il consorzio si modifica (come le RPC della 0040):
+# anche scaduta, perché il partenariato può essere andato avanti dopo la
+# scadenza della ricerca di partner (come una call completata).
+STATI_CONSORZIO_MODIFICABILE: frozenset[str] = frozenset(
+    {"pubblicata", "scaduta", "chiusa_completata"}
+)
+NOME_ESTERNO_RIMOSSO = "Membro esterno"
+
+
+def _percentuale(valore: Any) -> Decimal | None:
+    """Quota numeric(5,2) (PostgREST la restituisce come numero) con due
+    decimali; illeggibile → None."""
+    if valore is None or isinstance(valore, bool):
+        return None
+    try:
+        numero = Decimal(str(valore))
+    except (ArithmeticError, ValueError):
+        return None
+    return numero.quantize(Decimal("0.01")) if numero.is_finite() else None
+
+
+def permessi_membro(
+    riga: Mapping, *, call: Mapping, viewer_company_id: Any, sei_creatore: bool, editable: bool
+) -> tuple[bool, bool, bool]:
+    """(può modificare, può confermare, può uscire) il destinatario su UNA
+    riga del consorzio, con le regole delle RPC della 0040: modifica e
+    rimozione solo il creatore (titolare) e solo con la call pubblicata,
+    scaduta o chiusa come completata (un esterno uscito si ripropone
+    modificandolo);
+    conferma la propria riga (il creatore anche quella degli esterni) se è
+    proposta e ha la quota (un partner associato, che non riceve budget,
+    anche senza); si esce dalla propria riga in qualunque stato della call,
+    mai dalla riga del creatore."""
+    if not editable:
+        return False, False, False
+    modificabile = call.get("stato") in STATI_CONSORZIO_MODIFICABILE
+    company = riga.get("company_profile_id")
+    esterno = company is None
+    propria = not esterno and viewer_company_id is not None and (
+        str(company) == str(viewer_company_id)
+    )
+    del_creatore = not esterno and str(company) == str(call.get("company_profile_id"))
+    attivo = riga.get("stato") != "uscito"
+    puo_modificare = sei_creatore and modificabile and (attivo or esterno)
+    puo_confermare = (
+        modificabile
+        and riga.get("stato") == "proposto"
+        and (riga.get("quota_percentuale") is not None
+             or riga.get("ruolo") == "associated_partner")
+        and (propria or (sei_creatore and esterno))
+    )
+    puo_uscire = attivo and not del_creatore and (propria or (sei_creatore and modificabile))
+    return puo_modificare, puo_confermare, puo_uscire
+
+
+def proietta_membro(
+    riga: Mapping,
+    *,
+    call: Mapping,
+    viewer_company_id: Any,
+    sei_creatore: bool,
+    editable: bool,
+    ident_creatore: Identificativi | None,
+    nome_proprio: str | None = None,
+    pseudonimo_membro: str | None = None,
+    profilo: ProfiloMembroOut | None = None,  # type: ignore[valid-type]
+    posizione: Mapping | None = None,
+) -> MembroOut:
+    """Una riga di `partner_call_membri` per il destinatario (T3, Q11,
+    whitelist). `sei_creatore` = il destinatario è l'azienda che ha creato
+    la call (titolare o membro con visibilità). Il nome:
+    - propria azienda: `nome_proprio` (il suo nome);
+    - esterno: il nome dichiarato dal creatore, verso gli altri senza gli
+      identificativi del creatore né contatti;
+    - altre aziende in piattaforma: «Azienda anonima» con lo pseudonimo della
+      call (`pseudonimo_membro`) e il profilo pubblico anonimo (`profilo`);
+      chi ha creato la call senza pseudonimo né profilo (come nella chat del
+      WP7: è «il creatore della call»).
+    Testi del creatore (titolo della posizione) ripuliti verso gli altri."""
+    company = riga.get("company_profile_id")
+    esterno = company is None
+    propria = not esterno and viewer_company_id is not None and (
+        str(company) == str(viewer_company_id)
+    )
+    del_creatore = not esterno and str(company) == str(call.get("company_profile_id"))
+    ident = None if sei_creatore else ident_creatore
+    if esterno:
+        denominazione = riga.get("esterno_denominazione")
+        nome = (
+            (denominazione.strip() if isinstance(denominazione, str) else None)
+            if sei_creatore else testo_pubblico(denominazione, ident)
+        ) or NOME_ESTERNO_RIMOSSO
+    elif propria:
+        nome = (nome_proprio or "").strip() or DENOMINAZIONE_ANONIMA
+    else:
+        nome = DENOMINAZIONE_ANONIMA
+    titolo = None
+    if isinstance(posizione, Mapping) and str(posizione.get("call_id")) == str(call.get("id")):
+        titolo = (
+            posizione.get("titolo") if sei_creatore else testo_pubblico(posizione.get("titolo"),
+                                                                         ident)
+        ) or "Posizione"
+    modifica, conferma, uscita = permessi_membro(
+        riga, call=call, viewer_company_id=viewer_company_id, sei_creatore=sei_creatore,
+        editable=editable,
+    )
+    paese = riga.get("esterno_paese") if esterno else None
+    return MembroOut(
+        id=riga["id"],
+        esterno=esterno,
+        creatore=del_creatore,
+        sei_tu=propria,
+        nome=nome,
+        pseudonimo=pseudonimo_membro if not (esterno or propria or del_creatore) else None,
+        profilo=profilo if not (esterno or propria or del_creatore) else None,
+        paese=paese if isinstance(paese, str) else None,
+        tipi_soggetto=[t for t in _lista(riga.get("esterno_tipi_soggetto"))
+                       if t in voc.TIPI_SOGGETTO] if esterno else [],
+        ruolo=riga.get("ruolo") or "partner",
+        posizione=PosizioneMembroOut(id=posizione["id"], titolo=titolo)
+        if titolo is not None else None,
+        quota_percentuale=_percentuale(riga.get("quota_percentuale")),
+        stato=riga.get("stato") or "proposto",
+        confermato_at=riga.get("confermato_at"),
+        puo_modificare=modifica,
+        puo_confermare=conferma,
+        puo_uscire=uscita,
     )

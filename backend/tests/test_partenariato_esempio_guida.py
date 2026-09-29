@@ -2,7 +2,11 @@
 fondo, parte di SERVIZIO (indice, servizi, fan-out e API del WP6) e il
 seguito del WP7: Y (piano a pagamento) si candida, X accetta, si apre la
 conversazione con l'audit e Y scrive; variante con Y sul Gratuito (criterio
-6): la candidatura spontanea no, l'invito sì.
+6): la candidatura spontanea no, l'invito sì. WP8 (punto 5): dopo
+l'accettazione Y è nel consorzio di X; con le regole confermate (almeno 2
+partner, un organismo di ricerca, una PMI, quota di ogni partner tra 10% e
+70%) le quote 70/30 danno verde, 75/25 rosso «quota massima 70%», la quota
+di Y mancante grigio; l'esito salvato sulla call segue.
 
 Scenario e numeri in `tests/fixtures/partenariati/esempio_guida.py`: X
 pubblica la call con i requisiti A–D (copre B e D, cerca A e C) e i vincoli
@@ -12,10 +16,12 @@ suo motivo; T (senza bilanci) resta, sotto Y, con un'attenzione.
 """
 
 import uuid
+from decimal import Decimal
 
 import pytest
 
 from app.core.errors import AppError
+from app.schemas.partenariato_consorzio import MembroAggiornaIn
 from app.services import partenariato_candidature_service as candidature
 from app.services import partenariato_chat_service as chat
 from app.services import (
@@ -23,6 +29,7 @@ from app.services import (
     partenariato_indice,
     partenariato_notifiche,
 )
+from app.services import partenariato_consorzio_service as consorzio
 from app.services import partenariato_matching as pm
 from app.services import partenariato_vocabolario as voc
 from app.services import partner_call_service as pcs
@@ -36,6 +43,12 @@ from tests.test_partenariato_candidature_service import (  # noqa: F401 — fixt
     candidatura_in,
     fixture_fondo,
     scenario_wp7,
+)
+from tests.test_partenariato_consorzio_service import (
+    imposta_regole,
+    regole,
+    scenario_wp8,
+    termini,
 )
 from tests.test_partenariato_indice import ambiente_wp6, scenario_guida  # noqa: F401
 
@@ -300,3 +313,58 @@ async def test_wp7_variante_y_gratuito_l_invito_passa_la_candidatura_no(fondo):
     assert accettato.stato == "accettata" and accettato.conversazione_id is not None
     assert len(db.tabelle["partner_conversazioni"]) == 1
     assert db.usate(g.OWNER["Y"]) == 0  # l'invito non consuma la quota
+
+
+# ------------------------------------------------ parte di SERVIZIO (WP8)
+#
+# Lo stesso scenario sul primario finto del WP8 (le RPC della 0040): alla
+# pubblicazione X è già nel suo consorzio (capofila, 80%); all'accettazione
+# la RPC di decisione aggiunge Y (proposto, posizione P1, 20%).
+
+
+async def test_wp8_punto_5_quote_70_30_verde_75_25_rosso_quota_mancante_grigio(fondo):
+    db, sec = await scenario_wp8()
+    # Y si candida e X accetta (WP7): Y entra nel consorzio
+    inviata = await candidature.invia_candidatura(db, sec, attiva("Y"), utente("Y"),
+                                                  g.CALL_GUIDA_ID, candidatura_in())
+    await candidature.decidi(db, sec, attiva("X"), utente("X"), inviata.id, "accetta")
+    iniziale = await consorzio.get_consorzio(db, sec, attiva("X"), utente("X"), g.CALL_GUIDA_ID)
+    x, y = iniziale.membri
+    assert (x.creatore, x.ruolo, str(x.quota_percentuale)) == (True, "capofila", "80.00")
+    assert (y.ruolo, str(y.quota_percentuale), y.stato) == ("partner", "20.00", "proposto")
+    assert y.posizione.titolo == "Ricerca e prototipazione"
+    # le regole del bando confermate da X (snapshot della call)
+    imposta_regole(db, regole())
+
+    async def quote(quota_x, quota_y):
+        await consorzio.aggiorna_membro(
+            db, sec, attiva("X"), utente("X"), g.CALL_GUIDA_ID, x.id,
+            MembroAggiornaIn(ruolo="capofila", quota_percentuale=Decimal(quota_x)))
+        return await consorzio.aggiorna_membro(
+            db, sec, attiva("X"), utente("X"), g.CALL_GUIDA_ID, y.id,
+            MembroAggiornaIn(ruolo="partner", posizione_id=g.POS_P1,
+                             quota_percentuale=None if quota_y is None else Decimal(quota_y)))
+
+    def salvato() -> str:
+        return db.una("partner_calls", id=g.CALL_GUIDA_ID)["validazione_esito"]
+
+    verde = await quote("70", "30")
+    assert verde.validazione.esito == "verde" == salvato(), [
+        (v.id, v.esito, v.dettaglio_pubblico) for v in verde.validazione.voci]
+    # Y conferma la sua partecipazione e vede lo stesso esito
+    confermato = await consorzio.conferma(db, sec, attiva("Y"), utente("Y"), g.CALL_GUIDA_ID,
+                                          y.id, termini(db, y.id))
+    assert next(m for m in confermato.membri if m.sei_tu).stato == "confermato"
+    assert confermato.validazione.esito == "verde"
+
+    rosso = await quote("75", "25")
+    assert rosso.validazione.esito == "rosso" == salvato()
+    quota = next(v for v in rosso.validazione.voci if v.id == "quota:Q1")
+    assert quota.esito == "rosso" and "quota massima 70%" in quota.dettaglio_pubblico
+    assert [str(m) for m in quota.membri_coinvolti] == [str(x.id)]
+
+    grigio = await quote("70", None)
+    assert grigio.validazione.esito == "grigio" == salvato()
+    assert next(v for v in grigio.validazione.voci if v.id == "somma_quote").esito == "grigio"
+    assert all(v.esito != "rosso" for v in grigio.validazione.voci)
+

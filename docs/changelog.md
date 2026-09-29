@@ -4,7 +4,8 @@ Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descr
 
 ## 2026-09-29 — Regole di partenariato: prompt v3 (WP3)
 
-L'estrazione delle regole di partenariato cita i documenti ufficiali invece della scheda del catalogo e riconosce meglio le quote (forme negative e distributive, frazioni come nel testo, più casi esclusi); con la nuova versione del prompt le regole già salvate si riestraggono, a pagamento, quando il modulo è acceso.
+L'estrazione delle regole di partenariato cita i documenti ufficiali invece della scheda del catalogo e riconosce meglio le quote (forme negative e distributive, frazioni come nel testo, più casi esclusi); con la nuova versione del prompt le regole già salvate si riestraggono, a pagamento, quando il modulo è acceso. Misura reale sul campione di verifica (18 bandi mai usati per correggere): nessuna quota verificata sbagliata (precisione 1,00, richiamo 0,41), modalità corretta nel 61%.
+- Nessuna migration e nessuna variabile d'ambiente nuova.
 
 ## 2026-09-29 — Regole di partenariato: quote più affidabili (WP3)
 

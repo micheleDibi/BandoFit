@@ -1,14 +1,15 @@
 """Post-elaborazione deterministica delle regole di partenariato (WP3):
-verifica delle citazioni, controlli di coerenza e di range (la voce va
-`da_verificare`, mai un'eccezione), `modalita_effettiva`, mappatura delle
-regioni e dei tipi di soggetto, scrub dei domini esclusi."""
+verifica delle citazioni (solo i documenti ufficiali fanno fede, la scheda del
+catalogo no), controlli di coerenza e di range (la voce va `da_verificare`,
+mai un'eccezione), `modalita_effettiva`, mappatura delle regioni e dei tipi di
+soggetto, scrub dei domini esclusi."""
 
 import copy
 
 import pytest
 
 from app.schemas.partenariato import PartenariatoEstrazione, RegolePartenariatoOut
-from app.services.partenariato_regole import mappa_regioni, post_elabora
+from app.services.partenariato_regole import _da_fonte_ufficiale, mappa_regioni, post_elabora
 
 SEZIONI = {
     "META": "Titolo: Bando reti\nBeneficiari (catalogo): PMI",
@@ -26,6 +27,10 @@ SEZIONI = {
     ),
 }
 FONTI = [{"n": 1, "etichetta": "Avviso pubblico", "url": "https://regione.example.it/avviso.pdf"}]
+# Pagina di un documento ufficiale in cui i test mettono la frase che serve:
+# solo le citazioni dei documenti ufficiali possono dirsi verificate.
+PAGINA = "D2-p1"
+AVVISO_SCHEDA = "Dalla scheda del catalogo: da verificare sul bando ufficiale"
 LOOKUPS = {"regioni": [
     {"id": 1, "nome": "Piemonte"}, {"id": 2, "nome": "Lombardia"},
     {"id": 3, "nome": "Valle d'Aosta/Vallée d'Aoste"}, {"id": 4, "nome": "Emilia-Romagna"},
@@ -130,9 +135,15 @@ class TestCitazioni:
 
     def test_scheda_del_bando(self):
         dati = estrazione_base(modalita_citazione=cit("S1", "in forma singola o associata"))
-        citazione = elabora(dati)["modalita"]["citazione"]
+        modalita = elabora(dati)["modalita"]
+        citazione = modalita["citazione"]
         assert citazione["fonte_etichetta"] == "Scheda del bando"
         assert citazione["url_documento"] is None and citazione["pagina"] is None
+        # ritrovata alla lettera, ma la scheda non è il bando ufficiale
+        assert citazione["verificata"] is True
+        assert modalita["stato"] == "da_verificare"
+        assert modalita["avvisi"] == [AVVISO_SCHEDA]
+        assert modalita["effettiva"] == "non_determinabile"
 
     def test_citazione_non_ritrovata_da_verificare(self):
         dati = estrazione_base()
@@ -141,11 +152,16 @@ class TestCitazioni:
         assert regole["vincoli"][0]["stato"] == "da_verificare"
         assert regole["vincoli"][0]["citazione"]["verificata"] is False
 
-    def test_sezione_sbagliata_non_verifica(self):
+    @pytest.mark.parametrize("sezione", ["S1", PAGINA])
+    def test_sezione_sbagliata_non_verifica(self, sezione):
+        # il testo è in D1-p4, la citazione indica la scheda o un'altra pagina
+        # ufficiale non adiacente: non si cerca nelle altre sezioni
         dati = estrazione_base()
-        # il testo è in D1-p4, la citazione indica la scheda
-        dati["documenti_richiesti"][0]["citazione"] = cit("S1", "costituito prima")
-        assert elabora(dati)["documenti_richiesti"][0]["stato"] == "da_verificare"
+        dati["documenti_richiesti"][0]["citazione"] = cit(sezione, "costituito prima")
+        sezioni = {**SEZIONI, PAGINA: "La domanda si presenta entro il 30 giugno."}
+        voce = elabora(dati, sezioni)["documenti_richiesti"][0]
+        assert voce["stato"] == "da_verificare"
+        assert voce["citazione"]["verificata"] is False
 
     def test_citazione_a_cavallo_di_pagina(self):
         dati = estrazione_base(
@@ -166,6 +182,153 @@ class TestCitazioni:
         modalita = elabora(dati)["modalita"]
         assert modalita["citazione"]["fonte_etichetta"] == "Fonte non riconosciuta"
         assert modalita["effettiva"] == "non_determinabile"
+
+
+FRASE_REGOLE = (
+    "La domanda è presentata esclusivamente in forma associata mediante ATS costituita prima "
+    "della concessione, composta da almeno 3 e al massimo 6 imprese con sede operativa in "
+    "Piemonte. Ciascun partner deve sostenere almeno il 10% delle spese ammissibili e la quota "
+    "non può superare il 60% del fatturato medio."
+)
+
+
+def _estrazione_su(sezione: str) -> dict:
+    """Un'estrazione con TUTTE le voci citate da `sezione` (testo:
+    `FRASE_REGOLE`), valori coerenti: l'unica variabile è la fonte."""
+    dati = estrazione_base(
+        modalita="obbligatorio",
+        modalita_citazione=cit(sezione, "La domanda è presentata esclusivamente in forma associata"),
+        forme_ammesse=[{"forma": "ats", "note": "",
+                        "citazione": cit(sezione, "in forma associata mediante ATS")}],
+        costituzione_citazione=cit(sezione, "costituita prima della concessione"),
+        partner_min_citazione=cit(sezione, "almeno 3"),
+        partner_max_citazione=cit(sezione, "al massimo 6 imprese"),
+    )
+    dati["composizione"][0].update(regioni=["Piemonte"],
+                                   citazione=cit(sezione, "sede operativa in Piemonte"))
+    dati["quote"][0]["citazione"] = cit(
+        sezione, "Ciascun partner deve sostenere almeno il 10% delle spese ammissibili")
+    dati["vincoli"][0]["citazione"] = cit(sezione, "sede operativa in Piemonte")
+    dati["regole_finanziarie"][0]["citazione"] = cit(
+        sezione, "non può superare il 60% del fatturato medio")
+    dati["documenti_richiesti"][0]["citazione"] = cit(
+        sezione, "costituita prima della concessione")
+    return dati
+
+
+def _voci(regole: dict) -> dict:
+    """Tutte le voci con citazione, per nome."""
+    return {
+        "modalita": regole["modalita"],
+        "costituzione": regole["costituzione"],
+        "partner_min": regole["partner_min"],
+        "partner_max": regole["partner_max"],
+        "forma": regole["forme_ammesse"][0],
+        "composizione": regole["composizione"][0],
+        "quota": regole["quote"][0],
+        "vincolo": regole["vincoli"][0],
+        "regola_finanziaria": regole["regole_finanziarie"][0],
+        "documento": regole["documenti_richiesti"][0],
+    }
+
+
+class TestFontiUfficiali:
+    """Fa fede solo il testo dei documenti ufficiali (pagine «D<n>-p<m>»): la
+    scheda del catalogo (META, S1…) è testo generato o classificato dal
+    produttore del catalogo, non estratto dall'atto. Una voce citata solo dalla
+    scheda resta visibile con la sua citazione, ma è da verificare, e la
+    modalità non vale per il filtro."""
+
+    @pytest.mark.parametrize(("sezione", "attesa"), [
+        ("D1-p3", True), ("[D1-P3]", True), ("D1 pag. 3", True), ("d1, pagina 3", True),
+        ("D12-p140", True), ("S2", False), ("[s2]", False), ("META", False), ("meta", False),
+        ("D1", False), ("DOC", False), ("X9", False), ("", False),
+    ])
+    def test_da_fonte_ufficiale(self, sezione, attesa):
+        citazione = PartenariatoEstrazione.model_validate(
+            estrazione_base(modalita_citazione=cit(sezione, "x"))
+        ).modalita_citazione
+        assert _da_fonte_ufficiale(citazione) is attesa
+
+    @pytest.mark.parametrize(("citata", "chiave", "ufficiale"), [
+        ("D2-p1", "D2-p1", True),
+        ("[D2-P1]", "D2-p1", True),
+        ("d2 pag. 1", "D2-p1", True),
+        ("S2", "S2", False),
+        ("[s2]", "S2", False),
+        ("META", "META", False),
+    ])
+    def test_tutte_le_voci(self, citata, chiave, ufficiale):
+        regole = elabora(_estrazione_su(citata), {**SEZIONI, chiave: FRASE_REGOLE})
+        RegolePartenariatoOut.model_validate(regole)
+        for nome, voce in _voci(regole).items():
+            # la citazione resta, ritrovata alla lettera, in ogni caso
+            assert voce["citazione"]["verificata"] is True, nome
+            if ufficiale:
+                assert (voce["stato"], voce["avvisi"]) == ("verificata", []), nome
+                assert voce["citazione"]["fonte_etichetta"] == "Documento 2 — pag. 1", nome
+            else:
+                assert voce["stato"] == "da_verificare", nome
+                assert voce["avvisi"] == [AVVISO_SCHEDA], nome
+                assert voce["citazione"]["fonte_etichetta"] == "Scheda del bando", nome
+        assert regole["modalita"]["valore"] == "obbligatorio"
+        attesa = "obbligatorio" if ufficiale else "non_determinabile"
+        assert regole["modalita"]["effettiva"] == regole["modalita_effettiva"] == attesa
+        # l'avviso resta sulla voce, non tra quelli dell'intero risultato
+        assert regole["avvisi"] == []
+
+    def test_voce_per_voce(self):
+        """Nello stesso bando la modalità citata dal documento vale, la quota
+        citata dalla scheda no."""
+        dati = _estrazione_su(PAGINA)
+        dati["quote"][0]["citazione"] = cit(
+            "S2", "Ciascun partner deve sostenere almeno il 10% delle spese ammissibili")
+        regole = elabora(dati, {**SEZIONI, PAGINA: FRASE_REGOLE, "S2": FRASE_REGOLE})
+        assert regole["modalita_effettiva"] == "obbligatorio"
+        assert regole["partner_min"]["stato"] == "verificata"
+        quota = regole["quote"][0]
+        assert (quota["stato"], quota["avvisi"]) == ("da_verificare", [AVVISO_SCHEDA])
+        assert quota["min_percentuale"] == 10.0  # il valore resta com'è
+
+    @pytest.mark.parametrize("sezione", ["S2", "META"])
+    def test_esclusione_nella_scheda_non_toglie_dal_filtro(self, sezione):
+        frase = "Non sono ammessi raggruppamenti, consorzi o reti di imprese."
+        dati = estrazione_base(
+            modalita="non_ammesso", forme_ammesse=[], modalita_citazione=cit(sezione, frase),
+            partner_min="", partner_min_citazione=NESSUNA,
+            partner_max="", partner_max_citazione=NESSUNA,
+        )
+        regole = elabora(dati, {**SEZIONI, sezione: frase})
+        assert regole["modalita_effettiva"] == "non_determinabile"
+        assert regole["modalita"]["avvisi"] == [AVVISO_SCHEDA]
+        # la stessa frase in un documento ufficiale vale
+        dati["modalita_citazione"] = cit(PAGINA, frase)
+        assert elabora(dati, {**SEZIONI, PAGINA: frase})["modalita_effettiva"] == "non_ammesso"
+
+    def test_bando_senza_documenti_ufficiali(self):
+        """Solo la scheda (il caso della generazione SEO: «in forma singola o
+        associata» nella scheda, l'atto non letto): tutto resta visibile, con
+        le citazioni, ma tutto da verificare e la modalità non determinabile."""
+        sezioni = {
+            "META": "Titolo: Bando reti\nPartecipazione: in forma singola o associata",
+            "S1": FRASE_REGOLE,
+        }
+        dati = _estrazione_su("S1")
+        dati.update(modalita="ammesso",
+                    modalita_citazione=cit("META", "in forma singola o associata"))
+        regole = post_elabora(PartenariatoEstrazione.model_validate(dati), sezioni, [], LOOKUPS)
+        RegolePartenariatoOut.model_validate(regole)
+        assert regole["modalita"]["valore"] == "ammesso"
+        assert regole["modalita_effettiva"] == "non_determinabile"
+        for nome, voce in _voci(regole).items():
+            assert voce["stato"] == "da_verificare", nome
+            assert AVVISO_SCHEDA in voce["avvisi"], nome
+            assert voce["citazione"]["verificata"] is True, nome
+            assert voce["citazione"]["fonte_etichetta"] == "Scheda del bando", nome
+        # i valori restano visibili
+        assert (regole["partner_min"]["valore"], regole["partner_max"]["valore"]) == (3, 6)
+        assert regole["quote"][0]["min_percentuale"] == 10.0
+        assert regole["regole_finanziarie"][0]["soglia"] == "0.6"
 
 
 class TestModalitaEffettiva:
@@ -189,7 +352,7 @@ class TestModalitaEffettiva:
     def test_non_ammesso_con_forme_ammesse_incoerente(self):
         dati = estrazione_base(
             modalita="non_ammesso",
-            modalita_citazione=cit("S1", "in forma singola"),
+            modalita_citazione=cit("D1-p3", "in forma singola"),
         )
         regole = elabora(dati)
         assert regole["modalita"]["effettiva"] == "non_determinabile"
@@ -198,10 +361,10 @@ class TestModalitaEffettiva:
         assert any("contraddice" in a for a in regole["avvisi"])
 
     def test_obbligatorio_verificato(self):
-        sezioni = {**SEZIONI, "S2": "La domanda è presentata esclusivamente in forma associata."}
+        sezioni = {**SEZIONI, PAGINA: "La domanda è presentata esclusivamente in forma associata."}
         dati = estrazione_base(
             modalita="obbligatorio",
-            modalita_citazione=cit("S2", "esclusivamente in forma associata"),
+            modalita_citazione=cit(PAGINA, "esclusivamente in forma associata"),
         )
         assert elabora(dati, sezioni)["modalita"]["effettiva"] == "obbligatorio"
 
@@ -212,19 +375,19 @@ class TestModalitaEffettiva:
     def test_citazione_frammento_non_fonda_la_modalita(self):
         """Ritrovata alla lettera ma di una parola sola: in S2 la frase dice
         il contrario. Il filtro non deve vedere «obbligatorio»."""
-        sezioni = {**SEZIONI, "S2": "Non è ammessa la partecipazione in partenariato."}
+        sezioni = {**SEZIONI, PAGINA: "Non è ammessa la partecipazione in partenariato."}
         for frammento in ("partenariato", "in partenariato", "Il"):
             dati = estrazione_base(modalita="obbligatorio",
-                                   modalita_citazione=cit("S2", frammento))
+                                   modalita_citazione=cit(PAGINA, frammento))
             regole = elabora(dati, sezioni)
             assert regole["modalita_effettiva"] == "non_determinabile", frammento
             assert regole["modalita"]["stato"] == "da_verificare"
             assert any("troppo breve" in a for a in regole["modalita"]["avvisi"])
 
     def test_citazione_breve_ma_probante_accettata(self):
-        sezioni = {**SEZIONI, "S2": "Il partenariato è composto da almeno due imprese."}
+        sezioni = {**SEZIONI, PAGINA: "Il partenariato è composto da almeno due imprese."}
         dati = estrazione_base(modalita="obbligatorio",
-                               modalita_citazione=cit("S2", "almeno due imprese"))
+                               modalita_citazione=cit(PAGINA, "almeno due imprese"))
         assert elabora(dati, sezioni)["modalita_effettiva"] == "obbligatorio"
 
 
@@ -498,7 +661,7 @@ class TestSchemaCompatto:
 
     def test_modalita_usa_i_numeri_letti(self):
         dati = estrazione_base(modalita="non_ammesso", forme_ammesse=[],
-                               modalita_citazione=cit("S1", "in forma singola"))
+                               modalita_citazione=cit("D1-p3", "in forma singola"))
         regole = elabora(dati)  # partner_min "3"
         assert any("numero minimo" in a for a in regole["avvisi"])
 
@@ -506,16 +669,16 @@ class TestSchemaCompatto:
         """Il conteggio che potrebbe contraddire la modalità non si legge:
         la modalità non si conferma (è ciò che usa il filtro)."""
         dati = estrazione_base(modalita="non_ammesso", forme_ammesse=[],
-                               modalita_citazione=cit("S1", "in forma singola"),
+                               modalita_citazione=cit("D1-p3", "in forma singola"),
                                partner_min="almeno 2")
         regole = elabora(dati)
         assert regole["modalita_effettiva"] == "non_determinabile"
         assert regole["modalita"]["stato"] == "da_verificare"
         assert any(a.startswith("«Non ammesso»") and "minimo" in a for a in regole["avvisi"])
 
-        sezioni = {**SEZIONI, "S2": "La domanda è presentata esclusivamente in forma associata."}
+        sezioni = {**SEZIONI, PAGINA: "La domanda è presentata esclusivamente in forma associata."}
         dati = estrazione_base(modalita="obbligatorio",
-                               modalita_citazione=cit("S2", "esclusivamente in forma associata"),
+                               modalita_citazione=cit(PAGINA, "esclusivamente in forma associata"),
                                partner_max="1 soggetto")
         regole = elabora(dati, sezioni)
         assert regole["modalita_effettiva"] == "non_determinabile"
@@ -719,11 +882,11 @@ class TestAssenzaScrittaNeiNumeri:
     def test_obbligatorio_con_massimo_scritto_a_parole_resta_obbligatorio(self):
         """Il caso della prima valutazione reale: «obbligatorio» giusto, ma il
         massimo «non indicato» lo declassava a non determinabile."""
-        sezioni = {**SEZIONI, "S2": "La domanda è presentata esclusivamente in forma associata."}
+        sezioni = {**SEZIONI, PAGINA: "La domanda è presentata esclusivamente in forma associata."}
         for marcatore in ("non indicato", "N/A", "—"):
             dati = estrazione_base(
                 modalita="obbligatorio",
-                modalita_citazione=cit("S2", "esclusivamente in forma associata"),
+                modalita_citazione=cit(PAGINA, "esclusivamente in forma associata"),
                 partner_max=marcatore, partner_max_citazione=NESSUNA,
             )
             regole = elabora(dati, sezioni)
@@ -743,11 +906,11 @@ class TestAssenzaScrittaNeiNumeri:
 
 def _non_ammesso(frase: str, citazione: str | None = None) -> dict:
     """Regole di un'estrazione «non_ammesso» che cita `citazione` (di default
-    la frase intera) dalla sezione S2 = `frase`, senza conteggi né forme."""
-    sezioni = {**SEZIONI, "S2": frase}
+    la frase intera) dalla pagina `PAGINA` = `frase`, senza conteggi né forme."""
+    sezioni = {**SEZIONI, PAGINA: frase}
     dati = estrazione_base(
         modalita="non_ammesso", forme_ammesse=[],
-        modalita_citazione=cit("S2", citazione or frase),
+        modalita_citazione=cit(PAGINA, citazione or frase),
         partner_min="", partner_min_citazione=NESSUNA,
         partner_max="", partner_max_citazione=NESSUNA,
     )
@@ -888,8 +1051,8 @@ class TestNonAmmessoSoloConEsclusioneEsplicita:
             assert AVVISO_ESCLUSIONE in regole["modalita"]["avvisi"]
 
     def test_le_altre_modalita_non_cambiano(self):
-        sezioni = {**SEZIONI, "S2": "Possono presentare domanda le PMI con sede in Piemonte."}
-        dati = estrazione_base(modalita_citazione=cit("S2", "Possono presentare domanda le PMI"))
+        sezioni = {**SEZIONI, PAGINA: "Possono presentare domanda le PMI con sede in Piemonte."}
+        dati = estrazione_base(modalita_citazione=cit(PAGINA, "Possono presentare domanda le PMI"))
         regole = elabora(dati, sezioni)
         assert regole["modalita_effettiva"] == "ammesso"
         assert AVVISO_ESCLUSIONE not in regole["modalita"]["avvisi"]
@@ -936,14 +1099,14 @@ class TestNonAmmessoSoloSullaFraseAllaLettera:
 
     def test_spazi_spuri_del_pdf(self):
         self._nd(_non_ammesso_su(
-            {"S2": "La domanda è presen tata in forma singola o associata in ATS."},
-            "S2", "La domanda è presentata in forma singola"))
+            {PAGINA: "La domanda è presen tata in forma singola o associata in ATS."},
+            PAGINA, "La domanda è presentata in forma singola"))
 
     def test_ellissi(self):
         self._nd(_non_ammesso_su(
-            {"S2": "La domanda è presentata in forma singola o associata in ATS dalle imprese "
+            {PAGINA: "La domanda è presentata in forma singola o associata in ATS dalle imprese "
                    "aventi sede operativa in Puglia."},
-            "S2", "La domanda è presentata in forma singola [...] dalle imprese aventi sede "
+            PAGINA, "La domanda è presentata in forma singola [...] dalle imprese aventi sede "
                   "operativa in Puglia"))
 
     def test_a_cavallo_con_la_pagina_precedente(self):
@@ -960,9 +1123,9 @@ AVVISO_NON_QUOTA = "Il passaggio citato non sembra ripartire il costo del proget
 
 
 def _quota(frase: str, **campi) -> dict:
-    sezioni = {**SEZIONI, "S2": frase}
+    sezioni = {**SEZIONI, PAGINA: frase}
     dati = estrazione_base()
-    dati["quote"][0].update(citazione=cit("S2", frase), **campi)
+    dati["quote"][0].update(citazione=cit(PAGINA, frase), **campi)
     return elabora(dati, sezioni)["quote"][0]
 
 
@@ -1013,11 +1176,11 @@ class TestQuoteNonDiPartenariato:
     def test_la_frase_finisce_col_punto_della_citazione(self):
         """Una citazione che chiude la sua frase non prende il soggetto dalla
         frase successiva."""
-        sezioni = {**SEZIONI, "S2": "Il contributo è pari al 50% delle spese ammissibili. "
+        sezioni = {**SEZIONI, PAGINA: "Il contributo è pari al 50% delle spese ammissibili. "
                                     "Ciascun partner sostiene almeno il 10% del costo."}
         dati = estrazione_base()
         dati["quote"][0].update(citazione=cit(
-            "S2", "Il contributo è pari al 50% delle spese ammissibili."))
+            PAGINA, "Il contributo è pari al 50% delle spese ammissibili."))
         quota = elabora(dati, sezioni)["quote"][0]
         assert any(a.startswith(AVVISO_NON_QUOTA) for a in quota["avvisi"])
 
@@ -1028,7 +1191,7 @@ class TestQuoteNonDiPartenariato:
         assert quota["stato"] == "verificata" and quota["avvisi"] == []
 
     def test_senza_citazione_nessun_giudizio_sul_testo(self):
-        for citazione in (NESSUNA, cit("S2", "  ")):
+        for citazione in (NESSUNA, cit(PAGINA, "  ")):
             dati = estrazione_base()
             dati["quote"][0]["citazione"] = citazione
             quota = elabora(dati)["quote"][0]

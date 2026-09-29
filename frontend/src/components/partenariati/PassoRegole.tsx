@@ -1130,7 +1130,7 @@ export function PassoRegole({ call, onAvanti, onIndietro, onDirty }: PassoProps)
 
         <Blocco
           titolo="Requisiti economici"
-          descrizione="Solo quelli letti nel bando con il passaggio ritrovato: si confermano così come sono o si tolgono."
+          descrizione="Solo quelli letti in un documento ufficiale del bando, con il passaggio ritrovato: si confermano così come sono o si tolgono."
         >
           {lavoro.regole_finanziarie.length === 0 ? (
             <p className="text-sm text-slate-500">Nessun requisito economico letto nel bando.</p>
@@ -1144,7 +1144,7 @@ export function PassoRegole({ call, onAvanti, onIndietro, onDirty }: PassoProps)
                   sezione="regole_finanziarie"
                   titolo={v.valori.descrizione}
                   dettaglio={formulaFinanziaria(v.valori) ?? undefined}
-                  nonIncludibile="Il passaggio del bando non è stato ritrovato alla lettera: una regola economica non si può inserire a mano. Controllala tu sul bando."
+                  nonIncludibile="Questa regola non è confermata da un documento ufficiale del bando (passaggio non ritrovato, valore che non torna o preso solo dalla scheda del catalogo): una regola economica non si può inserire a mano. Controllala tu sul bando."
                   onIncluso={(inc) => includi("regole_finanziarie", v.chiave, inc)}
                 />
               ))}

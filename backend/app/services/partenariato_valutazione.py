@@ -18,7 +18,12 @@ CLI (dal backend: `python -m app.services.partenariato_valutazione ...`):
 - `--reale --tetto-cents N [--conferma]`: pipeline vera con
   `origine='valutazione'` e budget dedicato fail-closed (gruppo
   `valutazione`, tetto N centesimi USD al giorno). Mostra PRIMA la stima;
-  senza `--conferma` non spende nulla. Si ferma al tetto.
+  senza `--conferma` non spende nulla. Si ferma al tetto. USA IL DB PRIMARIO
+  (claim, righe in `bando_partenariato`, registro di spesa; migration 0034);
+- `--reale --locale --tetto-cents N [--conferma] [--out FILE] [--solo ID,ID]`:
+  la stessa pipeline SENZA DB primario, con la spesa fail-closed in memoria
+  (`partenariato_valutazione_locale`). Serve solo `ANTHROPIC_API_KEY`;
+  `--out` fuori dal repository.
 
 Il catalogo si legge con la chiave anon da `SECONDARY_SUPABASE_URL` /
 `SECONDARY_SUPABASE_ANON_KEY` oppure `SUPABASE_URL_BANDI` /
@@ -492,6 +497,10 @@ def _argomenti(argv: list[str] | None) -> argparse.Namespace:
     modo.add_argument("--offline", action="store_true", help="senza modello: recall e stime")
     modo.add_argument("--prepara", metavar="OUT_DIR", help="fogli di lavoro fuori dal repo")
     modo.add_argument("--reale", action="store_true", help="pipeline vera (spende)")
+    parser.add_argument("--locale", action="store_true",
+                        help="con --reale: senza DB primario, spesa in memoria")
+    parser.add_argument("--solo", metavar="ID,ID", default=None,
+                        help="con --reale --locale: solo questi bandi del campione")
     parser.add_argument("--tetto-cents", type=int, default=None, help="tetto di spesa (USD cent)")
     parser.add_argument("--conferma", action="store_true", help="spende davvero (con --reale)")
     parser.add_argument("--campione", default=str(CAMPIONE_PREDEFINITO))
@@ -509,9 +518,22 @@ def _scrivi(risultato: dict, out: str | None) -> None:
 
 async def _esegui(args: argparse.Namespace) -> int:
     campione = carica_campione(args.campione)
+    if args.locale and not args.reale:
+        print("--locale vale solo con --reale", file=sys.stderr)
+        return 2
+    if args.solo is not None and not args.locale:
+        print("--solo vale solo con --reale --locale", file=sys.stderr)
+        return 2
     if args.reale and (args.tetto_cents is None or args.tetto_cents <= 0):
         print("--reale richiede --tetto-cents N (> 0)", file=sys.stderr)
         return 2
+    if args.locale:
+        from app.services import partenariato_valutazione_locale as locale
+
+        return await locale.esegui_cli(
+            campione, tetto_cents=args.tetto_cents, conferma=args.conferma, out=args.out,
+            solo=args.solo,
+        )
     if args.prepara and _dentro_repo(Path(args.prepara)):
         print("La cartella di lavoro deve stare fuori dal repository", file=sys.stderr)
         return 2

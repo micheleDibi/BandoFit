@@ -1804,6 +1804,34 @@ class TestScartaBozza:
         assert db.profilo["bozza_ai_stato"] == "in_corso"
 
 
+class TestLetturaBozza:
+    """La bozza salvata si rilegge col vocabolario di OGGI: lo schema del
+    modello ha le competenze come stringhe, il DTO di lettura no."""
+
+    def test_codici_usciti_dal_vocabolario_tolti(self):
+        riga = {"bozza_ai_stato": "pronta", "bozza_ai": {
+            "descrizione_competenze": "Lavorazioni meccaniche",
+            "competenze": ["codice_rimosso", "sviluppo_software", {"x": 1}],
+            "motivazioni": [{"codice": "codice_rimosso", "motivo": "vecchio"},
+                            {"codice": "sviluppo_software", "motivo": "ok"}],
+        }}
+        proposta = pps._bozza_out(riga).proposta
+        assert proposta.competenze == ["sviluppo_software"]
+        assert [m.codice for m in proposta.motivazioni] == ["sviluppo_software"]
+
+    def test_dto_tipizzato_sul_vocabolario(self):
+        from pydantic import ValidationError
+
+        from app.schemas.partner_profile import BozzaAiOut
+
+        with pytest.raises(ValidationError):
+            BozzaAiOut.model_validate({"stato": "pronta", "proposta": {
+                "descrizione_competenze": "x", "competenze": ["codice_rimosso"],
+                "motivazioni": []}})
+        schema = str(BozzaAiOut.model_json_schema())
+        assert "sviluppo_software" in schema  # l'OpenAPI elenca i codici
+
+
 class TestPulisciBozza:
     def test_tronca_scarta_e_toglie_contatti(self):
         from app.services.partenariato_anonimato import identificativi_azienda

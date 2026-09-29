@@ -18,9 +18,12 @@ I testi scritti dall'utente passano da `testo_utente` (contatti,
 identificativi e nomi delle persone tolti, blocchi neutralizzati): sono DATI,
 non istruzioni (difesa dalla prompt injection, come il WP4).
 
-Gli schemi di output hanno solo tipi ed enum (nessun vincolo numerico): un
-valore fuori range non deve far fallire una chiamata già pagata. I range si
-verificano nella post-elaborazione deterministica (`partner_call_ai`).
+Gli schemi di output hanno solo tipi ed enum PICCOLI (nessun vincolo
+numerico): un valore fuori range non deve far fallire una chiamata già
+pagata, e l'API rifiuta le grammatiche troppo grandi (budget in
+tests/test_schemi_ai_dimensione.py), quindi tipi di soggetto e competenze sono
+stringhe. Codici, range e riferimenti si verificano nella post-elaborazione
+deterministica (`partner_call_ai`), che scarta i codici fuori vocabolario.
 """
 
 import json
@@ -31,7 +34,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, TypeAdapter
 
 from app.schemas.partenariato_criteri import Dimensione
-from app.schemas.partenariato_vocabolario import Competenza, RuoloPartenariato, TipoSoggetto
+from app.schemas.partenariato_vocabolario import RuoloPartenariato
 from app.schemas.partner_call import CreatoreCallOut, RegoleCallSnapshot
 from app.services import partenariato_vocabolario as voc
 from app.services.partenariato_anonimato import Identificativi
@@ -63,14 +66,16 @@ _ETICHETTE_FASCE = {
 
 
 class PosizioneAi(BaseModel):
-    """Una posizione proposta dal modello. Solo tipi ed enum: regioni per
-    NOME (si mappano sulla lookup del catalogo), requisiti per ETICHETTA («A»,
-    «B»…), paesi come codici ISO a due lettere (verificati dopo)."""
+    """Una posizione proposta dal modello. Solo tipi ed enum piccoli: tipi di
+    soggetto e competenze come codici in stringa (quelli fuori vocabolario si
+    scartano dopo), regioni per NOME (si mappano sulla lookup del catalogo),
+    requisiti per ETICHETTA («A», «B»…), paesi come codici ISO a due lettere
+    (verificati dopo)."""
 
     titolo: str
     ruolo: RuoloPartenariato
-    tipi_soggetto: list[TipoSoggetto]
-    competenze: list[Competenza]
+    tipi_soggetto: list[str]  # codici di TipoSoggetto
+    competenze: list[str]  # codici di Competenza
     ateco_divisioni: list[str]
     regioni: list[str]
     territorio_modalita: Literal["qualsiasi", "sede_attuale", "sede_entro_erogazione"]

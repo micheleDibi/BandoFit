@@ -28,7 +28,7 @@ from app.core.errors import (
     AppError,
     NotFoundError,
 )
-from app.schemas.partenariato import PartenariatoEstrazione
+from app.schemas.partenariato import PartenariatoEstrazione, convalida_tollerante
 from app.services import partenariato_service as ps
 from app.services.ai_prezzi import costo_cents
 from app.services.bando_fonti_service import LinkDocumento, StatoBando
@@ -363,23 +363,44 @@ class FakeSecondary:
 
 
 def estrazione_valida() -> PartenariatoEstrazione:
+    # Forma compatta dello schema del modello: "" = assente, numeri in stringa.
+    nessuna = {"sezione": "", "testo": ""}
     return PartenariatoEstrazione.model_validate({
         "modalita": "ammesso",
-        "modalita_citazione": {"sezione": "D1-p1", "testo_esatto": "in forma singola o associata"},
-        "forme_ammesse": [{"forma": "ats", "note": None,
-                           "citazione": {"sezione": "D1-p1", "testo_esatto": "mediante ATS"}}],
-        "costituzione": "non_indicato", "costituzione_citazione": None,
-        "partner_min": 2,
-        "partner_min_citazione": {"sezione": "D1-p2", "testo_esatto": "almeno 2 imprese"},
-        "partner_max": None, "partner_max_citazione": None, "conteggio_note": None,
+        "modalita_citazione": {"sezione": "D1-p1", "testo": "in forma singola o associata"},
+        "forme_ammesse": [{"forma": "ats", "note": "",
+                           "citazione": {"sezione": "D1-p1", "testo": "mediante ATS"}}],
+        "costituzione": "non_indicato", "costituzione_citazione": nessuna,
+        "partner_min": "2",
+        "partner_min_citazione": {"sezione": "D1-p2", "testo": "almeno 2 imprese"},
+        "partner_max": "", "partner_max_citazione": nessuna, "conteggio_note": "",
         "composizione": [], "vincoli": [], "regole_finanziarie": [], "documenti_richiesti": [],
-        "quote": [{"id": "Q1", "ambito": "per_partner", "categoria": None,
-                   "min_percentuale": 20, "max_percentuale": None,
+        "quote": [{"id": "Q1", "ambito": "per_partner", "categoria": "",
+                   "min_percentuale": "20", "max_percentuale": "",
                    "base_calcolo": "spese_ammissibili", "effetto_violazione": "non_indicato",
                    "citazione": {"sezione": "D1-p2",
-                                 "testo_esatto": "almeno il 20% delle spese ammissibili"}}],
-        "fonti_insufficienti": False, "note": None,
+                                 "testo": "almeno il 20% delle spese ammissibili"}}],
+        "fonti_insufficienti": False, "note": "",
     })
+
+
+def errore_del_provider(stato: int) -> AiUpstreamError:
+    """Come `AiCheckClient`: l'AiUpstreamError nasce `from` l'errore HTTP
+    dell'SDK (qui con lo stato dato), senza usage."""
+    import anthropic
+    import httpx
+
+    corpo = {"type": "error", "error": {"type": "invalid_request_error", "message": "x"}}
+    causa = anthropic.APIStatusError(
+        f"Error code: {stato}",
+        response=httpx.Response(
+            stato, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        ),
+        body=corpo,
+    )
+    errore = AiUpstreamError()
+    errore.__cause__ = causa
+    return errore
 
 
 class FakeAi:
@@ -389,10 +410,13 @@ class FakeAi:
         self.errore = errore
         self.chiamate: list[dict] = []
 
-    async def genera(self, system, user_message, output_format, *, model=None, max_tokens=None,
-                     timeout=None):
+    async def estrai_con_strumento(self, system, user_message, output_model, *,
+                                   nome_strumento, descrizione, convalida=None, model=None,
+                                   max_tokens=None, timeout=None):
         self.chiamate.append({"model": model, "max_tokens": max_tokens, "timeout": timeout,
-                              "testo": user_message, "schema": output_format})
+                              "testo": user_message, "schema": output_model,
+                              "system": system, "strumento": nome_strumento,
+                              "descrizione": descrizione, "convalida": convalida})
         if self.errore is not None:
             raise self.errore
         return estrazione_valida(), AiUsage(input_tokens=30_000, output_tokens=6_000)
@@ -548,6 +572,11 @@ class TestFlussoBase:
         assert chiamata["model"] == MODELLO
         assert (chiamata["max_tokens"], chiamata["timeout"]) == (16000, 180.0)
         assert chiamata["schema"] is PartenariatoEstrazione
+        # strumento forzato NON strict, input convalidato in modo tollerante
+        assert chiamata["system"] == ps.SYSTEM_PARTENARIATO
+        assert chiamata["strumento"] == ps.STRUMENTO_ESTRAZIONE
+        assert chiamata["descrizione"] == ps.DESCRIZIONE_STRUMENTO_ESTRAZIONE
+        assert chiamata["convalida"] is convalida_tollerante
         assert "[D1-p1]" in chiamata["testo"] and "[DOCUMENTO D1]" in chiamata["testo"]
 
         riga = db.righe[BANDO_ID]
@@ -867,7 +896,7 @@ class TestHeartbeat:
         db.rinnova_fallisce = {"analisi"}
         await avvia(db, ai, catalogo)
         assert await esegui(spawned) == "claim_perso"
-        assert ai.chiamate == []  # genera NON chiamato
+        assert ai.chiamate == []  # modello NON chiamato
         out = await stato(db, catalogo)
         assert out.stato == "errore"
         [esecuzione] = db.esecuzioni.values()
@@ -912,7 +941,7 @@ class TestCancellazione:
         partita = asyncio.Event()
 
         class AiLenta(FakeAi):
-            async def genera(self, *args, **kwargs):
+            async def estrai_con_strumento(self, *args, **kwargs):
                 self.chiamate.append(kwargs)
                 partita.set()
                 await asyncio.sleep(3600)
@@ -1033,6 +1062,59 @@ class TestCostiErrori:
         assert db.spesa_oggi() == riserva
         [uso] = db.usage
         assert uso["outcome"] == "error" and uso["request_meta"]["costo_ignoto"] is True
+
+    @pytest.mark.parametrize("stato_http", [400, 401, 403, 404, 413])
+    async def test_richiesta_rifiutata_dal_provider_costo_zero(
+        self, catalogo, spawned, stato_http
+    ):
+        """4xx non transitorio (es. 400 invalid_request_error): la richiesta è
+        respinta prima della generazione, nessun token. Codice proprio e costo
+        0 ESPLICITO: la riserva esce dal budget e l'esecuzione non conta nei
+        limiti giornalieri."""
+        db, ai = FakeDb(), FakeAi(errore=errore_del_provider(stato_http))
+        await avvia(db, ai, catalogo)
+        assert await esegui(spawned) == "errore"
+        assert len(ai.chiamate) == 1
+        [esecuzione] = db.esecuzioni.values()
+        assert (esecuzione["stato"], esecuzione["cost_cents"]) == ("errore", 0)
+        assert esecuzione["llm_eseguito"] is False
+        assert db.spesa_oggi() == 0
+        riga = db.righe[BANDO_ID]
+        assert riga["stato"] == "errore" and riga["errore_codice"] == "ai_richiesta_rifiutata"
+        [uso] = db.usage
+        assert (uso["outcome"], uso["cost_cents"]) == ("error", 0)
+        assert uso["request_meta"]["errore"] == "ai_richiesta_rifiutata"
+        assert uso["request_meta"]["costo_ignoto"] is False
+        out = await stato(db, catalogo, ai)
+        assert out.stato == "errore" and out.errore
+
+    @pytest.mark.parametrize("stato_http", [408, 409, 429, 500, 529])
+    async def test_errore_transitorio_del_provider_costo_ignoto(
+        self, catalogo, spawned, stato_http
+    ):
+        """408/409/429 e 5xx restano come prima: costo ignoto, la riserva
+        resta nel budget."""
+        db, ai = FakeDb(), FakeAi(errore=errore_del_provider(stato_http))
+        await avvia(db, ai, catalogo)
+        riserva = ps.stima_riserva_cents(catalogo.bando)
+        assert await esegui(spawned) == "errore"
+        [esecuzione] = db.esecuzioni.values()
+        assert esecuzione["cost_cents"] is None and db.spesa_oggi() == riserva
+        assert db.righe[BANDO_ID]["errore_codice"] == "ai_non_disponibile"
+        [uso] = db.usage
+        assert uso["cost_cents"] == riserva and uso["request_meta"]["costo_ignoto"] is True
+
+    async def test_4xx_con_usage_resta_risposta_non_valida(self, catalogo, spawned):
+        """Con l'usage la risposta è arrivata ed è pagata, qualunque sia la causa."""
+        errore = errore_del_provider(400)
+        errore.usage = AiUsage(input_tokens=1_000, output_tokens=10)
+        db, ai = FakeDb(), FakeAi(errore=errore)
+        await avvia(db, ai, catalogo)
+        riserva = ps.stima_riserva_cents(catalogo.bando)
+        assert await esegui(spawned) == "errore"
+        assert db.righe[BANDO_ID]["errore_codice"] == "ai_risposta_non_valida"
+        [esecuzione] = db.esecuzioni.values()
+        assert esecuzione["cost_cents"] == max(costo_cents(MODELLO, 1_000, 10), riserva)
 
     async def test_errore_prima_del_modello_costo_zero(self, catalogo, spawned):
         catalogo.link_errore = RuntimeError("boom")  # errore inatteso, non di lettura
@@ -1315,10 +1397,10 @@ class TestMemoria:
         vivi_durante_la_chiamata: list[int] = []
 
         class AiCheControlla(FakeAi):
-            async def genera(self, *args, **kwargs):
+            async def estrai_con_strumento(self, *args, **kwargs):
                 gc.collect()
                 vivi_durante_la_chiamata.append(sum(r() is not None for r in riferimenti))
-                return await super().genera(*args, **kwargs)
+                return await super().estrai_con_strumento(*args, **kwargs)
 
         monkeypatch.setattr("app.services.download_sicuro.scarica_pdf", scarica)
         db, ai = FakeDb(), AiCheControlla()

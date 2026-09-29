@@ -98,7 +98,8 @@ class TestBuildBandoInputInvariato:
 class TestPrompt:
     def test_versioni(self):
         assert PARTENARIATO_PROMPT_VERSION == 1
-        assert SCHEMA_VERSION == 1
+        # 2: schema compatto dopo il 400 «compiled grammar is too large».
+        assert SCHEMA_VERSION == 2
 
     def test_regole_chiave_del_prompt(self):
         s = SYSTEM_PARTENARIATO
@@ -116,6 +117,26 @@ class TestPrompt:
             assert f"- {codice}:" in SYSTEM_PARTENARIATO
         for codice in FORME:
             assert f"- {codice}:" in SYSTEM_PARTENARIATO
+
+    def test_codici_dei_campi_stringa_nel_prompt(self):
+        """Lo schema compatto non ha più questi enum: i codici ammessi li
+        elenca il prompt, tutti."""
+        from typing import get_args
+
+        from app.schemas import partenariato as sp
+        from app.schemas.regole_finanziarie import UnitaRegola, VariabileFinanziaria
+
+        for tipo in (sp.Costituzione, sp.BaseCalcolo, sp.EffettoViolazione, sp.TipoVincolo,
+                     sp.Momento, sp.TipoDocumentoRichiesto, VariabileFinanziaria, UnitaRegola):
+            riga = next(r for r in SYSTEM_PARTENARIATO.splitlines()
+                        if r.endswith(", ".join(get_args(tipo))))
+            assert riga.startswith("- ")
+
+    def test_istruzioni_dello_schema_compatto(self):
+        s = SYSTEM_PARTENARIATO
+        assert '{"sezione": "", "testo": ""}' in s
+        assert '"" (stringa vuota)' in s and '"12.5"' in s
+        assert "testo_esatto" not in s and "null" not in s
 
 
 # ------------------------------------------------------------ META
@@ -385,17 +406,36 @@ class TestSchemaLlm:
                 assert nodo.get("additionalProperties") is False
                 assert set(nodo["required"]) == set(nodo["properties"])
 
-    def test_enum_dal_vocabolario(self):
+    def test_codici_del_vocabolario_come_stringhe(self):
+        """Forma compatta: i codici grandi sono stringhe (mappate dalla
+        post-elaborazione), nessun campo nullable."""
         schema = self._schema()
-        tipi = schema["$defs"]["ComposizioneVoce"]["properties"]["tipo_soggetto"]["enum"]
-        assert tipi == list(TIPI_SOGGETTO)
-        forme = schema["$defs"]["FormaAmmessa"]["properties"]["forma"]["enum"]
-        assert forme == list(FORME)
+        voce = schema["$defs"]["ComposizioneVoce"]["properties"]
+        assert voce["tipo_soggetto"] == {"type": "string", "title": "Tipo Soggetto"}
+        assert schema["$defs"]["FormaAmmessa"]["properties"]["forma"]["type"] == "string"
+        assert all("anyOf" not in nodo for nodo in self._nodi(schema))
+        enum = sorted(tuple(n["enum"]) for n in self._nodi(schema) if "enum" in n)
+        assert enum == sorted([
+            ("obbligatorio", "ammesso", "non_ammesso", "non_determinabile"),
+            ("capofila", "partner", "qualsiasi", "affiliato", "partner_associato"),
+            ("per_partner", "per_categoria", "capofila"),
+            ("ciascun_partner", "capofila", "media_pesata_quote", "partenariato_totale"),
+            ("lt", "le", "gt", "ge"),
+        ])
 
-    def test_regola_finanziaria_dal_contratto_unico(self):
+    def test_una_sola_forma_di_citazione(self):
+        schema = self._schema()
+        assert schema["$defs"]["Citazione"]["required"] == ["sezione", "testo"]
+        con_sezione = [nome for nome, d in schema["$defs"].items()
+                       if "sezione" in d.get("properties", {})]
+        assert con_sezione == ["Citazione"]
+        # 4 in cima (modalità, costituzione, partner min/max) + 1 per ogni lista
+        riferimenti = [n["$ref"] for n in self._nodi(schema) if "$ref" in n]
+        assert riferimenti.count("#/$defs/Citazione") == 10
+
+    def test_regola_finanziaria_con_i_campi_del_contratto_unico(self):
         from app.schemas.partenariato import RegolaFinanziariaEstratta
         from app.schemas.regole_finanziarie import RegolaFinanziaria
 
-        assert issubclass(RegolaFinanziariaEstratta, RegolaFinanziaria)
         assert set(RegolaFinanziariaEstratta.model_fields) == {
             *RegolaFinanziaria.model_fields, "citazione"}

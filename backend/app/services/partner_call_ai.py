@@ -168,6 +168,10 @@ def post_posizioni(
     posizioni: list[PosizioneProposta] = []
     avvisi: list[str] = []
     riferimenti_ignoti = regioni_ignote = scartate = quote_fuori = 0
+    # Codici fuori vocabolario (lo schema del modello non li vincola più): si
+    # scartano, ma una lista svuotata vuol dire «nessun vincolo» e la
+    # posizione si allarga, quindi lo scarto si segnala.
+    tipi_ignoti = competenze_ignote = 0
 
     for voce in proposta.posizioni[:MAX_POSIZIONI]:
         titolo, _ = _pulisci(" ".join(voce.titolo.split()), ident, TITOLO_POSIZIONE_MAX)
@@ -213,16 +217,16 @@ def post_posizioni(
                 f"«{titolo}»: il capofila sei tu, la posizione è proposta come partner"
             )
         motivazione, _ = _pulisci(" ".join(voce.motivazione.split()), ident, MAX_MOTIVAZIONE)
+        tipi = [t for t in voce.tipi_soggetto if t in voc.TIPI_SOGGETTO]
+        competenze = [c for c in voce.competenze if c in voc.COMPETENZE]
+        tipi_ignoti += sum(1 for t in voce.tipi_soggetto if t.strip()) - len(tipi)
+        competenze_ignote += sum(1 for c in voce.competenze if c.strip()) - len(competenze)
         posizioni.append(
             PosizioneProposta(
                 titolo=titolo,
                 ruolo=ruolo,
-                tipi_soggetto=_dedup(t for t in voce.tipi_soggetto if t in voc.TIPI_SOGGETTO)[
-                    :MAX_TIPI_POSIZIONE
-                ],
-                competenze=_dedup(c for c in voce.competenze if c in voc.COMPETENZE)[
-                    :MAX_COMPETENZE_POSIZIONE
-                ],
+                tipi_soggetto=_dedup(tipi)[:MAX_TIPI_POSIZIONE],
+                competenze=_dedup(competenze)[:MAX_COMPETENZE_POSIZIONE],
                 ateco_divisioni=_dedup(
                     d.strip() for d in voce.ateco_divisioni
                     if len(d.strip()) == 2 and d.strip().isdigit()
@@ -246,6 +250,10 @@ def post_posizioni(
         )
     if regioni_ignote:
         avvisi.append(f"{regioni_ignote} regioni non riconosciute sono state scartate")
+    if tipi_ignoti:
+        avvisi.append(f"{tipi_ignoti} tipi di soggetto non riconosciuti sono stati scartati")
+    if competenze_ignote:
+        avvisi.append(f"{competenze_ignote} competenze non riconosciute sono state scartate")
     if quote_fuori:
         avvisi.append(f"{quote_fuori} quote fuori dall'intervallo 0-100% sono state tolte")
     avvisi.extend(_avvisi_composizione(posizioni, ruolo_creatore, quota_creatore, regole))

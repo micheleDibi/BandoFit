@@ -12,10 +12,19 @@ risposta non conforme è trattata come guasto del provider.
 da sé il testo della risposta: così, quando la risposta è arrivata ma è
 inutilizzabile (troncata, JSON non valido), l'eccezione porta con sé l'usage
 (``AiUpstreamError.usage``) e una chiamata pagata non si registra mai a costo 0.
+
+``estrai_con_strumento`` (estrazione WP3) è l'eccezione allo strict: uno schema
+troppo grande per la grammatica dell'output strutturato (HTTP 400 «The compiled
+grammar is too large») si invia come schema di uno strumento FORZATO e NON
+strict, che il modello riceve come guida senza che nessuna grammatica venga
+compilata; l'input del blocco ``tool_use`` lo convalida il chiamante (di norma
+in modo tollerante). Stesse regole di spesa e di usage di ``genera``.
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -50,6 +59,22 @@ def _upstream_con_usage(message: str, usage: AiUsage) -> AiUpstreamError:
     errore = AiUpstreamError(message)
     errore.usage = usage
     return errore
+
+
+def definizione_strumento(output_model, nome: str, descrizione: str) -> dict:
+    """Lo strumento come lo invia ``estrai_con_strumento``: nome, descrizione e
+    schema dell'input. Lo schema è quello di ``output_model`` trasformato
+    dall'SDK come per l'output strutturato (``anthropic.transform_schema``: i
+    vincoli non supportati finiscono nella descrizione). Senza ``strict``:
+    nessuna grammatica. Serve anche a stimare i caratteri inviati."""
+    import anthropic
+    from pydantic import TypeAdapter
+
+    return {
+        "name": nome,
+        "description": descrizione,
+        "input_schema": anthropic.transform_schema(TypeAdapter(output_model).json_schema()),
+    }
 
 
 class AiCheckClient:
@@ -218,6 +243,108 @@ class AiCheckClient:
             usage.output_tokens,
         )
         if getattr(message, "stop_reason", None) == "max_tokens":
+            raise _upstream_con_usage(
+                "Il testo da analizzare è troppo lungo per completare l'analisi", usage
+            )
+        raise _upstream_con_usage(
+            "L'analisi non ha prodotto un risultato valido, riprova", usage
+        )
+
+    async def estrai_con_strumento(
+        self,
+        system: str,
+        user_message: str,
+        output_model,
+        *,
+        nome_strumento: str,
+        descrizione: str,
+        convalida: Callable[[Any], BaseModel] | None = None,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        timeout: float | None = None,
+    ) -> tuple[BaseModel, AiUsage]:
+        """Estrazione con uno strumento FORZATO e NON strict: restituisce
+        ``(modello Pydantic, AiUsage)``.
+
+        Invia ``tools=[definizione_strumento(...)]`` (senza ``strict``) e
+        ``tool_choice={"type": "tool", "name": nome_strumento,
+        "disable_parallel_tool_use": True}`` (esattamente UNA chiamata: mai
+        un'estrazione divisa in più blocchi), senza ``output_config``: il
+        modello riceve lo schema come guida, nessuna grammatica viene
+        compilata. Legge il PRIMO blocco ``tool_use`` con quel
+        nome e ne convalida l'input con ``convalida`` (default: la convalida
+        Pydantic stretta di ``output_model``; i chiamanti passano quella
+        tollerante). Risposta arrivata ma inutilizzabile (troncata da
+        ``max_tokens``, rifiutata, senza il blocco ``tool_use``, input che la
+        convalida respinge) → ``AiUpstreamError`` con l'usage della chiamata,
+        addebitata comunque. Timeout → ``AiTimeoutError``; errori di rete e
+        HTTP → ``AiUpstreamError`` senza usage, ``from`` l'errore dell'SDK
+        (il chiamante ne legge lo stato HTTP). Nessun retry."""
+        import anthropic
+        from pydantic import TypeAdapter
+
+        if self._client is None:
+            raise AiNotConfiguredError("Analisi automatica non configurata su questo ambiente")
+        strumento = definizione_strumento(output_model, nome_strumento, descrizione)
+        if convalida is None:
+            convalida = TypeAdapter(output_model).validate_python
+        modello = self.model if model is None else model
+        try:
+            message = await self._client_per(timeout).messages.create(
+                model=modello,
+                max_tokens=MAX_OUTPUT_TOKENS if max_tokens is None else max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user_message}],
+                tools=[strumento],
+                tool_choice={
+                    "type": "tool",
+                    "name": nome_strumento,
+                    "disable_parallel_tool_use": True,
+                },
+            )
+        except anthropic.APITimeoutError as exc:
+            raise AiTimeoutError() from exc
+        except anthropic.APIConnectionError as exc:
+            raise AiUpstreamError() from exc
+        except anthropic.APIStatusError as exc:
+            logger.error("anthropic: errore %s — %s", exc.status_code, exc.message)
+            raise AiUpstreamError() from exc
+        except anthropic.APIError as exc:
+            logger.error("anthropic: risposta non interpretabile (%s)", type(exc).__name__)
+            raise AiUpstreamError() from exc
+
+        usage = _usage(message)
+        stop_reason = getattr(message, "stop_reason", None)
+        blocco = next(
+            (
+                b for b in getattr(message, "content", None) or []
+                if getattr(b, "type", None) == "tool_use"
+                and getattr(b, "name", None) == nome_strumento
+            ),
+            None,
+        )
+        input_respinto = False
+        # Troncato da max_tokens: l'input del blocco può essere parziale, non
+        # si usa. Rifiutato: nessun risultato.
+        if blocco is not None and stop_reason not in ("max_tokens", "refusal"):
+            try:
+                return convalida(getattr(blocco, "input", None)), usage
+            except (ValueError, TypeError):
+                input_respinto = True
+
+        # Mai l'input nei log: può contenere brani dei documenti analizzati.
+        logger.error(
+            "anthropic: strumento %s senza input utilizzabile (model=%s, stop_reason=%s, "
+            "blocco=%s, input_respinto=%s, input_tokens=%s, output_tokens=%s)",
+            nome_strumento,
+            modello,
+            stop_reason,
+            blocco is not None,
+            input_respinto,
+            usage.input_tokens,
+            usage.output_tokens,
+        )
+        if stop_reason == "max_tokens":
             raise _upstream_con_usage(
                 "Il testo da analizzare è troppo lungo per completare l'analisi", usage
             )

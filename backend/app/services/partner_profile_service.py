@@ -57,6 +57,7 @@ from app.core.errors import (
 from app.schemas.partner_profile import (
     BozzaAiOut,
     BozzaProfiloAi,
+    BozzaProfiloAiOut,
     ConsensoIn,
     ConsensoStatoOut,
     EsperienzaPartnerOut,
@@ -501,6 +502,10 @@ def _dati_profilo(riga: dict) -> ProfiloPartnerDati:
     return ProfiloPartnerDati(**valori, esperienze=esperienze)
 
 
+def _competenza_valida(codice) -> bool:
+    return isinstance(codice, str) and codice in voc.COMPETENZE
+
+
 def _bozza_out(riga: dict) -> BozzaAiOut | None:
     stato = riga.get("bozza_ai_stato")
     if stato not in ("in_corso", "pronta", "errore"):
@@ -508,10 +513,18 @@ def _bozza_out(riga: dict) -> BozzaAiOut | None:
     proposta = None
     bozza = riga.get("bozza_ai")
     if stato == "pronta" and isinstance(bozza, dict):
+        dati = {k: bozza.get(k) for k in ("descrizione_competenze", "competenze", "motivazioni")}
+        # Solo i codici del vocabolario di OGGI: una bozza salvata prima di un
+        # cambio di vocabolario non espone (né fa applicare) codici tolti.
+        if isinstance(dati["competenze"], list):
+            dati["competenze"] = [c for c in dati["competenze"] if _competenza_valida(c)]
+        if isinstance(dati["motivazioni"], list):
+            dati["motivazioni"] = [
+                m for m in dati["motivazioni"]
+                if not isinstance(m, dict) or _competenza_valida(m.get("codice"))
+            ]
         try:
-            proposta = BozzaProfiloAi.model_validate(
-                {k: bozza.get(k) for k in ("descrizione_competenze", "competenze", "motivazioni")}
-            )
+            proposta = BozzaProfiloAiOut.model_validate(dati)
         except ValidationError:
             logger.warning("partner: bozza AI non leggibile (azienda %s)",
                            riga.get("company_profile_id"))

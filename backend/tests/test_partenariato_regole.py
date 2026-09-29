@@ -32,7 +32,11 @@ LOOKUPS = {"regioni": [
 
 
 def cit(sezione: str, testo: str) -> dict:
-    return {"sezione": sezione, "testo_esatto": testo}
+    return {"sezione": sezione, "testo": testo}
+
+
+# Citazione assente nello schema compatto del modello.
+NESSUNA = cit("", "")
 
 
 def estrazione_base(**sostituzioni) -> dict:
@@ -40,41 +44,41 @@ def estrazione_base(**sostituzioni) -> dict:
         "modalita": "ammesso",
         "modalita_citazione": cit("D1-p3", "in forma singola o associata mediante ATS"),
         "forme_ammesse": [
-            {"forma": "ats", "note": None, "citazione": cit("D1-p3", "mediante ATS")},
-            {"forma": "rete_contratto", "note": None,
+            {"forma": "ats", "note": "", "citazione": cit("D1-p3", "mediante ATS")},
+            {"forma": "rete_contratto", "note": "",
              "citazione": cit("[D1-P3]", "contratto di rete")},
         ],
         "costituzione": "costituita_richiesta",
         "costituzione_citazione": cit("D1-p4", "deve essere costituito prima della concessione"),
-        "partner_min": 3,
+        "partner_min": "3",
         "partner_min_citazione": cit("D1-p3", "almeno 3"),
-        "partner_max": 6,
+        "partner_max": "6",
         "partner_max_citazione": cit("D1-p3", "al massimo 6 imprese"),
-        "conteggio_note": None,
+        "conteggio_note": "",
         "composizione": [{
-            "id": "C1", "tipo_soggetto": "pmi", "tipo_soggetto_testo": None,
-            "minimo": 3, "massimo": 6, "ruolo": "qualsiasi",
+            "id": "C1", "tipo_soggetto": "pmi", "tipo_soggetto_testo": "",
+            "minimo": "3", "massimo": "6", "ruolo": "qualsiasi",
             "regioni": ["Piemonte", "lombardia", "Atlantide"], "paesi": [],
             "vincolo_territoriale": "sede operativa in Piemonte o Lombardia",
             "citazione": cit("D1-p4", "sede operativa in Piemonte o Lombardia"),
         }],
         "quote": [{
-            "id": "Q1", "ambito": "per_partner", "categoria": None,
-            "min_percentuale": 10, "max_percentuale": None,
+            "id": "Q1", "ambito": "per_partner", "categoria": "",
+            "min_percentuale": "10", "max_percentuale": "",
             "base_calcolo": "spese_ammissibili", "effetto_violazione": "non_indicato",
             # sillabazione a fine riga nel PDF: la verifica la ricuce
             "citazione": cit("D1-p3", "almeno il 10% delle spese ammissibili"),
         }],
         "vincoli": [{
             "id": "V1", "tipo": "sede_operativa_regione", "descrizione": "Sede in Piemonte",
-            "parametro": None, "momento": "domanda",
+            "parametro": "", "momento": "domanda",
             "citazione": cit("D1-p4", "sede operativa in Piemonte"),
         }],
         "regole_finanziarie": [{
             "id": "RF1", "descrizione": "Quota ≤ 60% del fatturato medio 2 anni",
             "ambito": "ciascun_partner", "numeratore": "costo_quota",
             "denominatore": "fatturato_medio_2", "operatore": "le", "soglia": "0.6",
-            "soglia_variabile": None, "soglia_coefficiente": None, "unita": "rapporto",
+            "soglia_variabile": "", "soglia_coefficiente": "", "unita": "rapporto",
             "citazione": cit("D1-p4", "non può superare il 60% del fatturato medio"),
         }],
         "documenti_richiesti": [{
@@ -83,7 +87,7 @@ def estrazione_base(**sostituzioni) -> dict:
             "citazione": cit("D1-p4", "costituito prima della concessione"),
         }],
         "fonti_insufficienti": False,
-        "note": None,
+        "note": "",
     }
     dati.update(sostituzioni)
     return dati
@@ -175,7 +179,7 @@ class TestModalitaEffettiva:
         assert modalita["stato"] == "da_verificare"
 
     def test_non_determinabile_senza_citazione(self):
-        dati = estrazione_base(modalita="obbligatorio", modalita_citazione=None)
+        dati = estrazione_base(modalita="obbligatorio", modalita_citazione=NESSUNA)
         modalita = elabora(dati)["modalita"]
         assert modalita["effettiva"] == "non_determinabile"
         assert modalita["avvisi"]
@@ -200,7 +204,7 @@ class TestModalitaEffettiva:
         assert elabora(dati, sezioni)["modalita"]["effettiva"] == "obbligatorio"
 
     def test_dichiarata_non_determinabile(self):
-        dati = estrazione_base(modalita="non_determinabile", modalita_citazione=None)
+        dati = estrazione_base(modalita="non_determinabile", modalita_citazione=NESSUNA)
         assert elabora(dati)["modalita"]["effettiva"] == "non_determinabile"
 
     def test_citazione_frammento_non_fonda_la_modalita(self):
@@ -224,42 +228,42 @@ class TestModalitaEffettiva:
 
 class TestRange:
     def test_partner_min_maggiore_del_max(self):
-        dati = estrazione_base(partner_min=7)
+        dati = estrazione_base(partner_min="7")
         dati["partner_min_citazione"] = cit("D1-p3", "almeno 3")
         regole = elabora(dati)
         assert regole["partner_min"]["stato"] == "da_verificare"
         assert regole["partner_max"]["stato"] == "da_verificare"
 
     def test_partner_zero_non_plausibile(self):
-        regole = elabora(estrazione_base(partner_min=0))
+        regole = elabora(estrazione_base(partner_min="0"))
         assert regole["partner_min"]["stato"] == "da_verificare"
         assert regole["partner_min"]["valore"] == 0
 
     def test_percentuale_fuori_range(self):
         dati = estrazione_base()
-        dati["quote"][0]["min_percentuale"] = 120
+        dati["quote"][0]["min_percentuale"] = "120"
         quota = elabora(dati)["quote"][0]
         assert quota["stato"] == "da_verificare"
         assert any("0-100" in a for a in quota["avvisi"])
 
     def test_percentuale_min_oltre_max(self):
         dati = estrazione_base()
-        dati["quote"][0].update(min_percentuale=40, max_percentuale=30)
+        dati["quote"][0].update(min_percentuale="40", max_percentuale="30")
         assert elabora(dati)["quote"][0]["stato"] == "da_verificare"
 
     def test_quota_senza_percentuali(self):
         dati = estrazione_base()
-        dati["quote"][0].update(min_percentuale=None, max_percentuale=None)
+        dati["quote"][0].update(min_percentuale="", max_percentuale="")
         assert elabora(dati)["quote"][0]["stato"] == "da_verificare"
 
     def test_composizione_min_oltre_max(self):
         dati = estrazione_base()
-        dati["composizione"][0].update(minimo=5, massimo=2, regioni=[])
+        dati["composizione"][0].update(minimo="5", massimo="2", regioni=[])
         assert elabora(dati)["composizione"][0]["stato"] == "da_verificare"
 
     def test_vincolo_parametro_negativo(self):
         dati = estrazione_base()
-        dati["vincoli"][0]["parametro"] = -3
+        dati["vincoli"][0]["parametro"] = "-3"
         assert elabora(dati)["vincoli"][0]["stato"] == "da_verificare"
 
     def test_regola_finanziaria_incoerente(self):
@@ -275,8 +279,8 @@ class TestRange:
         assert regola["numeratore"] == "costo_quota" and regola["soglia"] == "0.6"
 
     def test_mai_eccezioni_su_valori_estremi(self):
-        dati = estrazione_base(partner_min=-5, partner_max=10**9)
-        dati["quote"][0].update(min_percentuale=1e308, max_percentuale=-1e308)
+        dati = estrazione_base(partner_min="-5", partner_max=str(10**9))
+        dati["quote"][0].update(min_percentuale="1e308", max_percentuale="-1e308")
         regole = elabora(dati)
         assert regole["quote"][0]["stato"] == "da_verificare"
 
@@ -312,7 +316,7 @@ class TestMappature:
 
     def test_tipo_altro_senza_testo(self):
         dati = estrazione_base()
-        dati["composizione"][0].update(tipo_soggetto="altro", tipo_soggetto_testo=None, regioni=[])
+        dati["composizione"][0].update(tipo_soggetto="altro", tipo_soggetto_testo="", regioni=[])
         comp = elabora(dati)["composizione"][0]
         assert comp["stato"] == "da_verificare"
         assert any("non specificato" in a for a in comp["avvisi"])
@@ -353,3 +357,286 @@ class TestScrub:
         regole = post_elabora(PartenariatoEstrazione.model_validate(estrazione_base()), SEZIONI,
                               fonti, LOOKUPS)
         assert "obiettivoeuropa" not in str(regole)
+
+
+class TestSchemaCompatto:
+    """Codici e numeri arrivano come stringhe ("" = assente): la
+    post-elaborazione li riporta ai tipi dei DTO senza mai sollevare."""
+
+    def test_maiuscole_etichette_e_sinonimi(self):
+        dati = estrazione_base(costituzione="Costituita richiesta")
+        dati["forme_ammesse"][0]["forma"] = "ATI"
+        dati["forme_ammesse"][1]["forma"] = "Contratto di rete"
+        dati["composizione"][0].update(tipo_soggetto="Micro impresa", regioni=[])
+        dati["quote"][0].update(categoria="PMI", base_calcolo="Spese ammissibili",
+                                effetto_violazione="NON_INDICATO")
+        dati["vincoli"][0].update(tipo="Sede operativa regione", momento="Domanda")
+        dati["regole_finanziarie"][0].update(numeratore="Costo quota",
+                                             denominatore="fatturato-medio-2", unita="Rapporto")
+        dati["documenti_richiesti"][0].update(tipo="Lettera d'intenti", momento="concessione")
+        regole = elabora(dati)
+        assert regole["costituzione"]["valore"] == "costituita_richiesta"
+        assert [f["forma"] for f in regole["forme_ammesse"]] == ["ati_rti", "rete_contratto"]
+        comp = regole["composizione"][0]
+        assert comp["tipo_soggetto"] == "micro_impresa" and comp["beneficiari"] == [22]
+        assert comp["stato"] == "verificata"
+        quota = regole["quote"][0]
+        assert (quota["categoria"], quota["base_calcolo"], quota["effetto_violazione"]) == (
+            "pmi", "spese_ammissibili", "non_indicato")
+        assert quota["stato"] == "verificata"
+        assert (regole["vincoli"][0]["tipo"], regole["vincoli"][0]["momento"]) == (
+            "sede_operativa_regione", "domanda")
+        regola = regole["regole_finanziarie"][0]
+        assert (regola["numeratore"], regola["denominatore"], regola["unita"]) == (
+            "costo_quota", "fatturato_medio_2", "rapporto")
+        assert regola["stato"] == "verificata"
+        assert regole["documenti_richiesti"][0]["tipo"] == "lettera_intenti"
+
+    def test_sinonimo_di_variabile(self):
+        dati = estrazione_base()
+        dati["regole_finanziarie"][0].update(
+            numeratore="EBITDA", denominatore="", soglia="0", operatore="gt", unita="euro")
+        regola = elabora(dati)["regole_finanziarie"][0]
+        assert regola["numeratore"] == "mol" and regola["denominatore"] is None
+
+    def test_codici_ignoti_diventano_residuali_da_verificare(self):
+        dati = estrazione_base(costituzione="entro 30 giorni")
+        dati["forme_ammesse"][0]["forma"] = "GEIE"
+        dati["composizione"][0].update(tipo_soggetto="Cluster tecnologico", regioni=[])
+        dati["quote"][0].update(categoria="spin-off", base_calcolo="valore aggiunto",
+                                effetto_violazione="revoca")
+        dati["vincoli"][0].update(tipo="rating di legalità", momento="collaudo")
+        dati["documenti_richiesti"][0]["tipo"] = "visura camerale"
+        regole = elabora(dati)
+        RegolePartenariatoOut.model_validate(regole)
+
+        costituzione = regole["costituzione"]
+        assert costituzione["valore"] == "non_indicato"
+        assert costituzione["stato"] == "da_verificare"
+        forma = regole["forme_ammesse"][0]
+        assert (forma["forma"], forma["note"], forma["stato"]) == ("altra", "GEIE", "da_verificare")
+        assert any("GEIE" in a for a in forma["avvisi"])
+        comp = regole["composizione"][0]
+        assert comp["tipo_soggetto"] == "altro"
+        assert comp["tipo_soggetto_testo"] == "Cluster tecnologico"
+        assert comp["stato"] == "da_verificare"
+        quota = regole["quote"][0]
+        assert (quota["categoria"], quota["base_calcolo"], quota["effetto_violazione"]) == (
+            "altro", "non_indicata", "non_indicato")
+        assert len(quota["avvisi"]) == 3 and quota["stato"] == "da_verificare"
+        vincolo = regole["vincoli"][0]
+        assert (vincolo["tipo"], vincolo["momento"], vincolo["stato"]) == (
+            "altro", "non_indicato", "da_verificare")
+        documento = regole["documenti_richiesti"][0]
+        assert (documento["tipo"], documento["stato"]) == ("altro", "da_verificare")
+        assert any("visura camerale" in a for a in documento["avvisi"])
+
+    def test_valori_vuoti_sono_assenti_senza_avvisi(self):
+        dati = estrazione_base(costituzione="", costituzione_citazione=NESSUNA,
+                               partner_max="", partner_max_citazione=NESSUNA)
+        dati["quote"][0].update(base_calcolo="", effetto_violazione="")
+        dati["vincoli"][0]["momento"] = ""
+        regole = elabora(dati)
+        assert regole["costituzione"]["valore"] == "non_indicato"
+        assert regole["costituzione"]["citazione"] is None
+        assert regole["partner_max"]["valore"] is None
+        assert regole["partner_max"]["citazione"] is None
+        assert regole["partner_max"]["avvisi"] == []
+        quota = regole["quote"][0]
+        assert (quota["base_calcolo"], quota["effetto_violazione"]) == (
+            "non_indicata", "non_indicato")
+        assert quota["stato"] == "verificata"
+        assert regole["vincoli"][0]["momento"] == "non_indicato"
+        assert regole["vincoli"][0]["stato"] == "verificata"
+        assert regole["conteggio_note"] is None and regole["note"] is None
+        assert regole["composizione"][0]["tipo_soggetto_testo"] is None
+
+    def test_tipo_vuoto_con_descrizione_e_altro(self):
+        dati = estrazione_base()
+        dati["composizione"][0].update(tipo_soggetto="", tipo_soggetto_testo="Cluster",
+                                       regioni=[])
+        comp = elabora(dati)["composizione"][0]
+        assert (comp["tipo_soggetto"], comp["tipo_soggetto_testo"]) == ("altro", "Cluster")
+        assert comp["stato"] == "verificata"
+
+    def test_costituzione_senza_citazione(self):
+        dati = estrazione_base(costituzione_citazione=NESSUNA)
+        costituzione = elabora(dati)["costituzione"]
+        assert costituzione["valore"] == "costituita_richiesta"
+        assert costituzione["stato"] == "da_verificare"
+
+    def test_numeri_come_stringhe(self):
+        dati = estrazione_base(partner_min="3.0", partner_max=" 6 ")
+        dati["quote"][0].update(min_percentuale="10%", max_percentuale="12,5")
+        dati["vincoli"][0].update(tipo="costituzione_entro", parametro="30")
+        regole = elabora(dati)
+        assert (regole["partner_min"]["valore"], regole["partner_max"]["valore"]) == (3, 6)
+        quota = regole["quote"][0]
+        assert (quota["min_percentuale"], quota["max_percentuale"]) == (10.0, 12.5)
+        assert regole["vincoli"][0]["parametro"] == 30.0
+
+    def test_numeri_non_leggibili_da_verificare(self):
+        dati = estrazione_base(partner_min="tre", partner_max="2.5")
+        dati["composizione"][0].update(minimo="almeno 3", regioni=[])
+        # «1.000»: migliaia o decimali? Meglio da verificare che sbagliato.
+        dati["quote"][0].update(min_percentuale="1.000")
+        dati["vincoli"][0]["parametro"] = "trenta giorni"
+        regole = elabora(dati)
+        for chiave in ("partner_min", "partner_max"):
+            assert regole[chiave]["valore"] is None
+            assert regole[chiave]["stato"] == "da_verificare"
+            assert any("non leggibile" in a for a in regole[chiave]["avvisi"])
+        comp = regole["composizione"][0]
+        assert comp["minimo"] is None and comp["stato"] == "da_verificare"
+        quota = regole["quote"][0]
+        assert quota["min_percentuale"] is None and quota["stato"] == "da_verificare"
+        assert "Quota senza percentuali" not in quota["avvisi"]
+        vincolo = regole["vincoli"][0]
+        assert vincolo["parametro"] is None and vincolo["stato"] == "da_verificare"
+
+    def test_modalita_usa_i_numeri_letti(self):
+        dati = estrazione_base(modalita="non_ammesso", forme_ammesse=[],
+                               modalita_citazione=cit("S1", "in forma singola"))
+        regole = elabora(dati)  # partner_min "3"
+        assert any("numero minimo" in a for a in regole["avvisi"])
+
+    def test_modalita_con_conteggio_illeggibile_non_determinabile(self):
+        """Il conteggio che potrebbe contraddire la modalità non si legge:
+        la modalità non si conferma (è ciò che usa il filtro)."""
+        dati = estrazione_base(modalita="non_ammesso", forme_ammesse=[],
+                               modalita_citazione=cit("S1", "in forma singola"),
+                               partner_min="almeno 2")
+        regole = elabora(dati)
+        assert regole["modalita_effettiva"] == "non_determinabile"
+        assert regole["modalita"]["stato"] == "da_verificare"
+        assert any(a.startswith("«Non ammesso»") and "minimo" in a for a in regole["avvisi"])
+
+        sezioni = {**SEZIONI, "S2": "La domanda è presentata esclusivamente in forma associata."}
+        dati = estrazione_base(modalita="obbligatorio",
+                               modalita_citazione=cit("S2", "esclusivamente in forma associata"),
+                               partner_max="1 soggetto")
+        regole = elabora(dati, sezioni)
+        assert regole["modalita_effettiva"] == "non_determinabile"
+        assert any(a.startswith("«Obbligatorio»") and "massimo" in a for a in regole["avvisi"])
+
+    def test_conteggio_illeggibile_non_pertinente_non_tocca_la_modalita(self):
+        # «ammesso» non si contraddice con nessun conteggio.
+        regole = elabora(estrazione_base(partner_min="almeno 2", partner_max="sei"))
+        assert regole["modalita_effettiva"] == "ammesso"
+        assert regole["avvisi"] == []
+
+    def test_soglia_con_separatore_delle_migliaia_da_verificare(self):
+        """«100.000» letto come decimale varrebbe 100: la regola resta, ma
+        da verificare (esclusa dagli usi deterministici)."""
+        dati = estrazione_base()
+        dati["regole_finanziarie"][0].update(
+            numeratore="patrimonio_netto", denominatore="", operatore="ge",
+            soglia="100.000", unita="euro")
+        regola = elabora(dati)["regole_finanziarie"][0]
+        assert regola["soglia"] == "100.000"
+        assert regola["stato"] == "da_verificare"
+        assert any("ambigua" in a for a in regola["avvisi"])
+
+        dati = estrazione_base()
+        dati["regole_finanziarie"][0].update(
+            numeratore="patrimonio_netto", denominatore="", operatore="ge", soglia="",
+            soglia_variabile="costo_quota", soglia_coefficiente="1.500", unita="euro")
+        regola = elabora(dati)["regole_finanziarie"][0]
+        assert regola["stato"] == "da_verificare"
+        assert any("ambiguo" in a for a in regola["avvisi"])
+
+    def test_soglie_non_ambigue_restano_verificate(self):
+        for soglia in ("100000", "0.600", "1.5", "100000,00"):
+            dati = estrazione_base()
+            dati["regole_finanziarie"][0].update(
+                numeratore="patrimonio_netto", denominatore="", operatore="ge",
+                soglia=soglia, unita="euro")
+            regola = elabora(dati)["regole_finanziarie"][0]
+            assert regola["stato"] == "verificata", soglia
+        dati = estrazione_base()
+        dati["regole_finanziarie"][0].update(
+            numeratore="patrimonio_netto", denominatore="", operatore="ge", soglia="",
+            soglia_variabile="costo_quota", soglia_coefficiente="0.5", unita="euro")
+        assert elabora(dati)["regole_finanziarie"][0]["stato"] == "verificata"
+
+    def test_startup_generica_non_e_startup_innovativa(self):
+        """«Startup innovativa» è una categoria giuridica: una «startup»
+        generica non si mappa in silenzio su di essa."""
+        dati = estrazione_base()
+        dati["composizione"][0].update(tipo_soggetto="startup", regioni=[])
+        comp = elabora(dati)["composizione"][0]
+        assert comp["tipo_soggetto"] == "altro"
+        assert comp["tipo_soggetto_testo"] == "startup"
+        assert comp["stato"] == "da_verificare"
+        for valore in ("startup_innovativa", "Startup innovativa", "start up innovativa"):
+            dati["composizione"][0]["tipo_soggetto"] = valore
+            comp = elabora(dati)["composizione"][0]
+            assert comp["tipo_soggetto"] == "startup_innovativa", valore
+            assert comp["stato"] == "verificata", valore
+
+    def test_vincolo_e_documento_senza_tipo_ne_descrizione(self):
+        dati = estrazione_base()
+        dati["vincoli"][0].update(tipo="", descrizione="")
+        dati["documenti_richiesti"][0].update(tipo="", descrizione="")
+        regole = elabora(dati)
+        vincolo = regole["vincoli"][0]
+        assert (vincolo["tipo"], vincolo["stato"]) == ("altro", "da_verificare")
+        assert any("non descritto" in a for a in vincolo["avvisi"])
+        documento = regole["documenti_richiesti"][0]
+        assert (documento["tipo"], documento["stato"]) == ("altro", "da_verificare")
+        assert any("non descritto" in a for a in documento["avvisi"])
+
+    def test_vincolo_senza_tipo_con_parametro_da_verificare(self):
+        # Il parametro ha senso solo per un tipo (paesi, giorni): senza tipo
+        # non si sa che cosa conti.
+        dati = estrazione_base()
+        dati["vincoli"][0].update(tipo="", parametro="30")
+        vincolo = elabora(dati)["vincoli"][0]
+        assert vincolo["tipo"] == "altro" and vincolo["stato"] == "da_verificare"
+        assert any("Tipo di vincolo non indicato" in a for a in vincolo["avvisi"])
+
+    def test_altro_descritto_resta_verificato(self):
+        dati = estrazione_base()
+        dati["vincoli"][0].update(tipo="altro", descrizione="Rating di legalità")
+        dati["documenti_richiesti"][0].update(tipo="", descrizione="Visura camerale")
+        regole = elabora(dati)
+        assert regole["vincoli"][0]["stato"] == "verificata"
+        assert regole["documenti_richiesti"][0]["stato"] == "verificata"
+
+    def test_regola_con_variabile_ignota_esclusa_con_avviso(self):
+        dati = estrazione_base()
+        dati["regole_finanziarie"].append({
+            **dati["regole_finanziarie"][0], "id": "RF2", "numeratore": "rating bancario",
+            "descrizione": "Rating almeno BB",
+        })
+        dati["regole_finanziarie"].append({
+            **dati["regole_finanziarie"][0], "id": "RF3", "numeratore": "",
+        })
+        regole = elabora(dati)
+        RegolePartenariatoOut.model_validate(regole)
+        assert [r["id"] for r in regole["regole_finanziarie"]] == ["RF1"]
+        assert any("RF2" in a and "rating bancario" in a and "Rating almeno BB" in a
+                   for a in regole["avvisi"])
+        assert any("RF3" in a for a in regole["avvisi"])
+
+    def test_unita_ignota_calcolata_e_da_verificare(self):
+        dati = estrazione_base()
+        dati["regole_finanziarie"][0]["unita"] = "percentuale"
+        regola = elabora(dati)["regole_finanziarie"][0]
+        assert regola["unita"] == "rapporto" and regola["stato"] == "da_verificare"
+        assert any("percentuale" in a for a in regola["avvisi"])
+
+    def test_codici_lunghi_e_ostili_senza_eccezioni(self):
+        import time
+
+        dati = estrazione_base(costituzione="x" * 60_000, partner_min="9" * 60_000)
+        dati["composizione"][0].update(tipo_soggetto="é" * 60_000, regioni=[])
+        dati["regole_finanziarie"][0]["numeratore"] = "-" * 60_000
+        inizio = time.perf_counter()
+        regole = elabora(dati)
+        assert time.perf_counter() - inizio < 1.0
+        RegolePartenariatoOut.model_validate(regole)
+        assert regole["costituzione"]["valore"] == "non_indicato"
+        assert regole["partner_min"]["valore"] is None
+        assert regole["composizione"][0]["tipo_soggetto"] == "altro"
+        assert regole["regole_finanziarie"] == []

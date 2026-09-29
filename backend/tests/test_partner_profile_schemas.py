@@ -335,13 +335,25 @@ class TestBozzaProfiloAi:
                 assert nodo.get("additionalProperties") is False
                 assert set(nodo["required"]) == set(nodo["properties"])
 
-    def test_enum_dal_vocabolario(self):
-        enum = [n["enum"] for n in self._nodi(self._schema()) if "enum" in n]
-        assert enum and all(e == list(voc.COMPETENZE) for e in enum)
+    def test_codici_come_stringhe_senza_enum(self):
+        """Niente enum da 42 valori (grammatica troppo grande, vedi
+        tests/test_schemi_ai_dimensione.py): i codici sono stringhe."""
+        schema = self._schema()
+        assert not [n for n in self._nodi(schema) if "enum" in n]
+        assert schema["properties"]["competenze"]["items"]["type"] == "string"
 
-    def test_codici_ignoti_rifiutati(self):
-        with pytest.raises(ValidationError):
-            BozzaProfiloAi(descrizione_competenze="x", competenze=["inventata"], motivazioni=[])
+    def test_codici_ignoti_accettati_dallo_schema_e_scartati_dopo(self):
+        from app.services.partner_profile_prompts import pulisci_bozza
+
+        bozza = BozzaProfiloAi(
+            descrizione_competenze="x", competenze=["inventata", "sviluppo_software"],
+            motivazioni=[{"codice": "inventata", "motivo": "m"},
+                         {"codice": "sviluppo_software", "motivo": "m"}],
+        )
+        pulita = pulisci_bozza(bozza, None)
+        assert pulita["competenze"] == ["sviluppo_software"]
+        assert [m["codice"] for m in pulita["motivazioni"]] == ["sviluppo_software"]
+        assert all(c in voc.COMPETENZE for c in pulita["competenze"])
 
 
 # ----------------------------------------------------------------- output

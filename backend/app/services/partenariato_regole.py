@@ -15,6 +15,17 @@ Il modello estrae, il codice decide che cosa vale. Per ogni voce:
 - `scrub_menzioni` su tutto il testo (domini esclusi dal catalogo), in tempo
   lineare anche su stringhe ostili del modello.
 
+Lo schema del modello è COMPATTO (vedi `schemas/partenariato.py`): codici e
+numeri arrivano come stringhe, "" = assente. Qui si riportano ai tipi dei DTO:
+- codici: confronto senza maiuscole, accenti e punteggiatura sul codice o
+  sull'etichetta del vocabolario, più pochi sinonimi univoci («ATI» →
+  `ati_rti`, «EBITDA» → `mol`); un valore IGNOTO diventa il codice residuale
+  («altro», «altra», «non_indicato»…) con un avviso, quindi `da_verificare`;
+  una regola finanziaria con una variabile ignota non è rappresentabile nel
+  contratto WP1: resta fuori dalle regole, con un avviso globale;
+- numeri: cifre con punto (o virgola) decimale; una stringa non leggibile
+  vale assente con un avviso (`da_verificare`), mai un'eccezione.
+
 Le voci `da_verificare` restano visibili all'utente (con il badge) ma sono
 escluse dagli usi deterministici del modulo.
 """
@@ -22,29 +33,43 @@ escluse dagli usi deterministici del modulo.
 import math
 import re
 import unicodedata
-from typing import Any
+from collections.abc import Iterable, Mapping
+from typing import Any, get_args
 
-from app.schemas.ai_check import CitazioneBando
 from app.schemas.partenariato import (
+    BaseCalcolo,
+    Citazione,
     CitazioneRegolaOut,
     ComposizioneOut,
     ComposizioneVoce,
     ConteggioOut,
+    Costituzione,
     CostituzioneOut,
     DocumentoRichiestoOut,
+    EffettoViolazione,
     FormaAmmessaOut,
     ModalitaOut,
+    Momento,
     PartenariatoEstrazione,
     QuotaOut,
+    RegolaFinanziariaEstratta,
     RegolaFinanziariaOut,
     RegolePartenariatoOut,
+    TipoDocumentoRichiesto,
+    TipoVincolo,
     VincoloOut,
+    avvisi_convalida,
 )
-from app.schemas.regole_finanziarie import RegolaFinanziaria
+from app.schemas.regole_finanziarie import RegolaFinanziaria, UnitaRegola, VariabileFinanziaria
 from app.services.bilanci_indicatori import valida_regola
 from app.services.citazioni import normalizza_sezione, normalizza_testo, verifica_citazione
 from app.services.partenariato_prompts import scrub_menzioni
-from app.services.partenariato_vocabolario import FORME, TIPI_SOGGETTO, beneficiari_per_tipo
+from app.services.partenariato_vocabolario import (
+    DOCUMENTI,
+    FORME,
+    TIPI_SOGGETTO,
+    beneficiari_per_tipo,
+)
 
 MAX_TESTO = 2000
 MAX_URL = 2048
@@ -94,6 +119,160 @@ def _stato(verificata: bool, avvisi: list[str]) -> str:
     return "verificata" if verificata and not avvisi else "da_verificare"
 
 
+# ------------------------------------------------------------ codici e numeri
+
+# Oltre questa lunghezza un «codice» del modello è comunque ignoto: la chiave
+# si calcola su un prefisso (stringhe ostili lunghe restano in tempo lineare).
+_MAX_CHIAVE = 120
+
+
+def _chiave(valore: str) -> str:
+    """«Micro impresa», «micro-impresa», «MICRO_IMPRESA» → «micro_impresa»."""
+    ascii_ = unicodedata.normalize("NFKD", valore[:_MAX_CHIAVE]).encode("ascii", "ignore")
+    return re.sub(r"[^a-z0-9]+", "_", ascii_.decode().casefold()).strip("_")
+
+
+def _indice(
+    codici: Iterable[str],
+    etichette: Mapping[str, str] | None = None,
+    sinonimi: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Chiave normalizzata → codice: i codici, poi le etichette del
+    vocabolario, poi i sinonimi (a parità vince il primo)."""
+    indice: dict[str, str] = {}
+    coppie = [(c, c) for c in codici]
+    coppie += [(etichetta, c) for c, etichetta in (etichette or {}).items()]
+    coppie += list((sinonimi or {}).items())
+    for testo, codice in coppie:
+        chiave = _chiave(testo)
+        if chiave:
+            indice.setdefault(chiave, codice)
+    return indice
+
+
+def _vuoto(valore: Any) -> bool:
+    return not isinstance(valore, str) or not valore.strip()
+
+
+def _codice(valore: Any, indice: Mapping[str, str]) -> str | None:
+    """Il codice del vocabolario per il testo del modello; None se assente
+    ("") o ignoto (distinguerli con `_vuoto`)."""
+    if _vuoto(valore):
+        return None
+    chiave = _chiave(valore)
+    return indice.get(chiave) if chiave else None
+
+
+def _codice_o_residuo(
+    valore: Any, indice: Mapping[str, str], residuo: str, avviso: str, avvisi: list[str]
+) -> str:
+    """Codice riconosciuto; "" → `residuo` (è il valore «assente»); ignoto →
+    `residuo` e l'avviso «<avviso>: <valore>» (la voce va da verificare)."""
+    codice = _codice(valore, indice)
+    if codice is not None:
+        return codice
+    if not _vuoto(valore):
+        avvisi.append(f"{avviso}: {_testo(valore, 80) or '?'}")
+    return residuo
+
+
+# Solo sinonimi univoci; il resto passa da codice ed etichetta. Niente
+# «startup» → startup_innovativa: la startup innovativa è una categoria
+# giuridica (sezione speciale del Registro delle imprese), una «startup»
+# generica resta «altro» con il testo del modello, da verificare.
+_TIPI = _indice(
+    TIPI_SOGGETTO,
+    {codice: voce.etichetta for codice, voce in TIPI_SOGGETTO.items()},
+    {
+        "piccole e medie imprese": "pmi",
+        "piccola e media impresa": "pmi",
+        "microimpresa": "micro_impresa",
+        "start up innovativa": "startup_innovativa",
+        "ente di ricerca": "organismo_ricerca",
+        "organismo di ricerca e diffusione della conoscenza": "organismo_ricerca",
+        "ateneo": "universita",
+        "pubblica amministrazione": "ente_pubblico",
+        "ente del terzo settore": "ente_terzo_settore",
+        "ets": "ente_terzo_settore",
+    },
+)
+_FORME = _indice(
+    FORME,
+    {codice: voce.etichetta for codice, voce in FORME.items()},
+    {
+        "ati": "ati_rti",
+        "rti": "ati_rti",
+        "associazione temporanea di imprese": "ati_rti",
+        "raggruppamento temporaneo di imprese": "ati_rti",
+        "associazione temporanea di scopo": "ats",
+        "contratto di rete": "rete_contratto",
+        "altro": "altra",
+    },
+)
+_COSTITUZIONE = _indice(
+    get_args(Costituzione),
+    sinonimi={"costituenda": "costituenda_ammessa", "costituita": "costituita_richiesta"},
+)
+_BASI = _indice(get_args(BaseCalcolo), sinonimi={"non_indicato": "non_indicata"})
+_EFFETTI = _indice(get_args(EffettoViolazione), sinonimi={"non_indicata": "non_indicato"})
+_TIPI_VINCOLO = _indice(get_args(TipoVincolo))
+_MOMENTI = _indice(
+    get_args(Momento),
+    sinonimi={"presentazione della domanda": "domanda", "non_indicata": "non_indicato"},
+)
+_DOCUMENTI = _indice(
+    get_args(TipoDocumentoRichiesto),
+    DOCUMENTI,
+    {
+        "lettera di intenti": "lettera_intenti",
+        "accordo di riservatezza": "nda",
+        "memorandum of understanding": "term_sheet_mou",
+        "mou": "term_sheet_mou",
+    },
+)
+_VARIABILI = _indice(
+    get_args(VariabileFinanziaria),
+    sinonimi={
+        "ebitda": "mol",
+        "margine operativo lordo": "mol",
+        "utile": "risultato_esercizio",
+        "utile di esercizio": "risultato_esercizio",
+        "utile netto": "risultato_esercizio",
+        "ricavi": "fatturato",
+        "numero di dipendenti": "dipendenti",
+    },
+)
+_UNITA = _indice(get_args(UnitaRegola), sinonimi={"eur": "euro"})
+# Come `bilanci_indicatori.valida_regola`: le variabili che si contano.
+_CONTEGGI = frozenset({"dipendenti", "bilanci_approvati_n"})
+
+# Numeri del modello: cifre con punto o virgola decimale (anche «30%»). Un
+# numero con un solo separatore seguito da tre cifre («1.000», «12,500») è
+# ambiguo (migliaia o decimali?) e non si legge: meglio da verificare che
+# sbagliato.
+_NUMERO = re.compile(r"[+-]?\d{1,12}(?:[.,]\d{1,6})?")
+_AMBIGUO = re.compile(r"[+-]?[1-9]\d{0,2}[.,]\d{3}")
+
+
+def _numero(valore: Any) -> tuple[float | None, bool]:
+    """(numero, leggibile): "" → (None, True), cioè assente e non un errore."""
+    if _vuoto(valore):
+        return None, True
+    testo = valore.strip().removesuffix("%").strip()
+    if not _NUMERO.fullmatch(testo) or _AMBIGUO.fullmatch(testo):
+        return None, False
+    return float(testo.replace(",", ".")), True
+
+
+def _intero(valore: Any) -> tuple[int | None, bool]:
+    numero, leggibile = _numero(valore)
+    if numero is None:
+        return None, leggibile
+    if not numero.is_integer():
+        return None, False
+    return int(numero), True
+
+
 def _documenti(fonti: Any) -> dict[int, dict]:
     """Fonti (voci di `fonti_usate` o oggetti con n/etichetta/url) per numero."""
     per_numero: dict[int, dict] = {}
@@ -110,14 +289,18 @@ def _documenti(fonti: Any) -> dict[int, dict]:
 
 
 def _citazione(
-    citazione: CitazioneBando | None, sezioni: dict[str, str], documenti: dict[int, dict]
+    citazione: Citazione | None, sezioni: dict[str, str], documenti: dict[int, dict]
 ):
-    """(CitazioneRegolaOut | None, verificata)."""
+    """(CitazioneRegolaOut | None, verificata). Sezione e testo entrambi ""
+    = citazione assente."""
     if citazione is None:
         return None, False
     grezza = citazione.sezione if isinstance(citazione.sezione, str) else ""
+    testo = citazione.testo if isinstance(citazione.testo, str) else ""
+    if not grezza.strip() and not testo.strip():
+        return None, False
     sezione = normalizza_sezione(grezza) or grezza.strip()[:40]
-    verificata = verifica_citazione(grezza, citazione.testo_esatto or "", sezioni)
+    verificata = verifica_citazione(grezza, testo, sezioni)
     url = pagina = None
     corrispondenza = _DOCUMENTO.fullmatch(sezione)
     if corrispondenza:
@@ -134,7 +317,7 @@ def _citazione(
         CitazioneRegolaOut(
             sezione=sezione[:40],
             fonte_etichetta=fonte,
-            testo=_testo(citazione.testo_esatto) or "",
+            testo=_testo(testo) or "",
             verificata=verificata,
             url_documento=url,
             pagina=pagina,
@@ -198,16 +381,22 @@ def mappa_regioni(
 # ------------------------------------------------------------ voci
 
 
-def _citazione_probante(citazione: CitazioneBando | None) -> bool:
+def _citazione_probante(citazione: Citazione | None) -> bool:
     """Abbastanza lunga da fondare la modalità (non un frammento qualsiasi)."""
-    testo = normalizza_testo(citazione.testo_esatto or "") if citazione else ""
+    testo = normalizza_testo(citazione.testo or "") if citazione else ""
     return (
         len(testo) >= MIN_CARATTERI_CITAZIONE_MODALITA
         and len(testo.split()) >= MIN_PAROLE_CITAZIONE_MODALITA
     )
 
 
-def _modalita(estrazione: PartenariatoEstrazione, sezioni, documenti) -> ModalitaOut:
+def _modalita(
+    estrazione: PartenariatoEstrazione,
+    partner_min: int | None,
+    partner_max: int | None,
+    sezioni,
+    documenti,
+) -> ModalitaOut:
     citazione, verificata = _citazione(estrazione.modalita_citazione, sezioni, documenti)
     avvisi: list[str] = []
     dichiarata = estrazione.modalita
@@ -219,10 +408,16 @@ def _modalita(estrazione: PartenariatoEstrazione, sezioni, documenti) -> Modalit
         avvisi.append("Il passaggio citato è troppo breve per confermare la modalità")
     if dichiarata == "non_ammesso" and estrazione.forme_ammesse:
         avvisi.append("«Non ammesso» contraddice le forme di aggregazione indicate")
-    if dichiarata == "non_ammesso" and (estrazione.partner_min or 0) > 1:
+    if dichiarata == "non_ammesso" and (partner_min or 0) > 1:
         avvisi.append("«Non ammesso» contraddice il numero minimo di partner indicato")
-    if dichiarata == "obbligatorio" and estrazione.partner_max == 1:
+    if dichiarata == "obbligatorio" and partner_max == 1:
         avvisi.append("«Obbligatorio» contraddice un massimo di un solo soggetto")
+    # Il conteggio che potrebbe contraddire la modalità c'è ma non si legge
+    # («almeno 2»): la coerenza non si può controllare, la modalità non vale.
+    if dichiarata == "non_ammesso" and not _intero(estrazione.partner_min)[1]:
+        avvisi.append("«Non ammesso» non verificabile: numero minimo di partner non leggibile")
+    if dichiarata == "obbligatorio" and not _intero(estrazione.partner_max)[1]:
+        avvisi.append("«Obbligatorio» non verificabile: numero massimo di partner non leggibile")
     if dichiarata != "non_determinabile" and citazione is None:
         avvisi.append("Manca il passaggio del bando che lo stabilisce")
     effettiva = (
@@ -240,9 +435,14 @@ def _modalita(estrazione: PartenariatoEstrazione, sezioni, documenti) -> Modalit
 
 
 def _conteggi(estrazione: PartenariatoEstrazione, sezioni, documenti):
-    minimo, massimo = estrazione.partner_min, estrazione.partner_max
+    minimo, leggibile_min = _intero(estrazione.partner_min)
+    massimo, leggibile_max = _intero(estrazione.partner_max)
     avvisi_min: list[str] = []
     avvisi_max: list[str] = []
+    if not leggibile_min:
+        avvisi_min.append("Numero minimo di partner non leggibile")
+    if not leggibile_max:
+        avvisi_max.append("Numero massimo di partner non leggibile")
     if minimo is not None and minimo < 1:
         avvisi_min.append("Numero minimo di partner non plausibile")
     if massimo is not None and massimo < 1:
@@ -260,34 +460,51 @@ def _conteggi(estrazione: PartenariatoEstrazione, sezioni, documenti):
     )
 
 
+def _tipo_soggetto(valore: str, testo: str | None, avvisi: list[str]) -> tuple[str, str | None]:
+    """(codice, testo descrittivo). "" = «altro»; un tipo ignoto diventa
+    «altro» con un avviso e, se manca la descrizione, il testo del modello."""
+    codice = _codice(valore, _TIPI)
+    if codice is None and not _vuoto(valore):
+        avvisi.append(f"Tipo di soggetto non riconosciuto: {_testo(valore, 80) or '?'}")
+        testo = testo or _testo(valore, 300)
+    return codice or "altro", testo
+
+
 def _composizione(
     voce: ComposizioneVoce, sezioni, documenti, indice_regioni
 ) -> ComposizioneOut:
     citazione, verificata = _citazione(voce.citazione, sezioni, documenti)
     avvisi: list[str] = []
-    if voce.minimo is not None and voce.minimo < 0:
+    minimo, leggibile_min = _intero(voce.minimo)
+    massimo, leggibile_max = _intero(voce.massimo)
+    if not leggibile_min:
+        avvisi.append("Numero minimo non leggibile")
+    if not leggibile_max:
+        avvisi.append("Numero massimo non leggibile")
+    if minimo is not None and minimo < 0:
         avvisi.append("Numero minimo non plausibile")
-    if voce.massimo is not None and voce.massimo < 0:
+    if massimo is not None and massimo < 0:
         avvisi.append("Numero massimo non plausibile")
-    if voce.minimo is not None and voce.massimo is not None and voce.minimo > voce.massimo:
+    if minimo is not None and massimo is not None and minimo > massimo:
         avvisi.append("Il minimo supera il massimo")
-    testo_tipo = _testo(voce.tipo_soggetto_testo, 300)
-    if voce.tipo_soggetto == "altro" and not testo_tipo:
+    tipo_soggetto, testo_tipo = _tipo_soggetto(
+        voce.tipo_soggetto, _testo(voce.tipo_soggetto_testo, 300), avvisi
+    )
+    if tipo_soggetto == "altro" and not testo_tipo:
         avvisi.append("Tipo di soggetto non specificato")
     regioni, regioni_ids, scartate = mappa_regioni(voce.regioni, indice_regioni)
     if voce.regioni and indice_regioni is None:
         avvisi.append("Regioni non verificabili sul catalogo")
     for nome in scartate:
         avvisi.append(f"Regione non riconosciuta: {nome}")
-    tipo = TIPI_SOGGETTO.get(voce.tipo_soggetto)
     return ComposizioneOut(
         id=_testo(voce.id, 20) or "",
-        tipo_soggetto=voce.tipo_soggetto,
-        tipo_soggetto_etichetta=tipo.etichetta if tipo else voce.tipo_soggetto,
+        tipo_soggetto=tipo_soggetto,
+        tipo_soggetto_etichetta=TIPI_SOGGETTO[tipo_soggetto].etichetta,
         tipo_soggetto_testo=testo_tipo,
-        beneficiari=beneficiari_per_tipo(voce.tipo_soggetto),
-        minimo=voce.minimo,
-        massimo=voce.massimo,
+        beneficiari=beneficiari_per_tipo(tipo_soggetto),
+        minimo=minimo,
+        massimo=massimo,
         ruolo=voce.ruolo,
         regioni=regioni_ids,
         regioni_nomi=regioni,
@@ -302,60 +519,138 @@ def _composizione(
 def _quota(voce, sezioni, documenti) -> QuotaOut:
     citazione, verificata = _citazione(voce.citazione, sezioni, documenti)
     avvisi: list[str] = []
-    minimo, massimo = voce.min_percentuale, voce.max_percentuale
+    minimo, leggibile_min = _numero(voce.min_percentuale)
+    massimo, leggibile_max = _numero(voce.max_percentuale)
+    if not (leggibile_min and leggibile_max):
+        avvisi.append("Percentuale non leggibile")
     for valore in (minimo, massimo):
         if valore is not None and (not _finito(valore) or not 0 <= valore <= 100):
             avvisi.append("Percentuale fuori dall'intervallo 0-100")
             break
     if _finito(minimo) and _finito(massimo) and minimo > massimo:
         avvisi.append("La percentuale minima supera la massima")
-    if minimo is None and massimo is None:
+    if minimo is None and massimo is None and leggibile_min and leggibile_max:
         avvisi.append("Quota senza percentuali")
-    if voce.ambito == "per_categoria" and voce.categoria is None:
+    categoria = None
+    if not _vuoto(voce.categoria):
+        categoria, _ = _tipo_soggetto(voce.categoria, None, avvisi)
+    if voce.ambito == "per_categoria" and categoria is None:
         avvisi.append("Quota per categoria senza categoria")
     return QuotaOut(
         id=_testo(voce.id, 20) or "",
         ambito=voce.ambito,
-        categoria=voce.categoria,
+        categoria=categoria,
         min_percentuale=minimo if _finito(minimo) else None,
         max_percentuale=massimo if _finito(massimo) else None,
-        base_calcolo=voce.base_calcolo,
-        effetto_violazione=voce.effetto_violazione,
+        base_calcolo=_codice_o_residuo(
+            voce.base_calcolo, _BASI, "non_indicata", "Base di calcolo non riconosciuta", avvisi
+        ),
+        effetto_violazione=_codice_o_residuo(
+            voce.effetto_violazione, _EFFETTI, "non_indicato",
+            "Effetto della violazione non riconosciuto", avvisi,
+        ),
         stato=_stato(verificata, avvisi),
         citazione=citazione,
         avvisi=avvisi,
     )
+
+
+def _momento(valore: str, avvisi: list[str]) -> str:
+    return _codice_o_residuo(valore, _MOMENTI, "non_indicato", "Momento non riconosciuto", avvisi)
 
 
 def _vincolo(voce, sezioni, documenti) -> VincoloOut:
     citazione, verificata = _citazione(voce.citazione, sezioni, documenti)
     avvisi: list[str] = []
-    parametro = voce.parametro
+    tipo = _codice_o_residuo(voce.tipo, _TIPI_VINCOLO, "altro", "Tipo di vincolo non riconosciuto",
+                             avvisi)
+    descrizione = _testo(voce.descrizione) or ""
+    if tipo == "altro" and not descrizione:
+        avvisi.append("Vincolo non descritto")
+    parametro, leggibile = _numero(voce.parametro)
+    if not leggibile:
+        avvisi.append("Parametro non leggibile")
+    if _vuoto(voce.tipo) and not _vuoto(voce.parametro):
+        # Il parametro conta paesi o giorni secondo il tipo: senza tipo non
+        # si sa che cosa misuri.
+        avvisi.append("Tipo di vincolo non indicato: il parametro non si può interpretare")
     if parametro is not None:
         if not _finito(parametro) or parametro < 0:
             avvisi.append("Parametro non plausibile")
-        elif voce.tipo == "paesi_distinti" and parametro < 2:
+        elif tipo == "paesi_distinti" and parametro < 2:
             avvisi.append("Numero di paesi non plausibile")
     return VincoloOut(
         id=_testo(voce.id, 20) or "",
-        tipo=voce.tipo,
-        descrizione=_testo(voce.descrizione) or "",
+        tipo=tipo,
+        descrizione=descrizione,
         parametro=parametro if _finito(parametro) else None,
-        momento=voce.momento,
+        momento=_momento(voce.momento, avvisi),
         stato=_stato(verificata, avvisi),
         citazione=citazione,
         avvisi=avvisi,
     )
 
 
-def _regola_finanziaria(voce, sezioni, documenti) -> RegolaFinanziariaOut:
+def _regola_finanziaria(
+    voce: RegolaFinanziariaEstratta, sezioni, documenti
+) -> tuple[RegolaFinanziariaOut | None, str | None]:
+    """(regola, None) oppure (None, avviso globale) se una variabile è ignota:
+    il contratto WP1 non può rappresentarla, e una regola con un termine
+    sbagliato sarebbe peggio di nessuna regola."""
+    id_ = _testo(voce.id, 20) or ""
+    descrizione = _testo(voce.descrizione) or ""
+    variabili: dict[str, str | None] = {}
+    ignote: list[str] = []
+    for campo in ("numeratore", "denominatore", "soglia_variabile"):
+        valore = getattr(voce, campo)
+        variabili[campo] = _codice(valore, _VARIABILI)
+        if variabili[campo] is None and (campo == "numeratore" or not _vuoto(valore)):
+            ignote.append(_testo(valore, 80) or "(vuota)")
+    if ignote:
+        nome = f"Regola finanziaria {id_}" if id_ else "Regola finanziaria"
+        avviso = f"{nome} non riconosciuta (variabile {', '.join(ignote)})"
+        return None, f"{avviso}: {descrizione}" if descrizione else avviso
+    avvisi: list[str] = []
+    unita = _codice(voce.unita, _UNITA)
+    if unita is None:
+        avvisi.append(f"Unità non riconosciuta: {_testo(voce.unita, 40) or '(vuota)'}")
+        # La più plausibile, come la calcola `bilanci_indicatori.valida_regola`.
+        if variabili["denominatore"] is not None:
+            unita = "rapporto"
+        else:
+            unita = "numero" if variabili["numeratore"] in _CONTEGGI else "euro"
+    # «100.000» per `_leggi_decimale` (WP1) vale 100: come per gli altri
+    # numeri, un solo separatore seguito da tre cifre è ambiguo e la regola
+    # resta da verificare (il valore si mostra com'è).
+    for campo, nome in (
+        ("soglia", "Soglia ambigua"), ("soglia_coefficiente", "Coefficiente ambiguo")
+    ):
+        valore = getattr(voce, campo)
+        if not _vuoto(valore) and _AMBIGUO.fullmatch(valore.strip()):
+            avvisi.append(f"{nome} (separatore delle migliaia?): {_testo(valore, 40) or '?'}")
+    campi = {
+        "id": id_,
+        "descrizione": descrizione,
+        "ambito": voce.ambito,
+        "numeratore": variabili["numeratore"],
+        "denominatore": variabili["denominatore"],
+        "operatore": voce.operatore,
+        "soglia": None if _vuoto(voce.soglia) else voce.soglia,
+        "soglia_variabile": variabili["soglia_variabile"],
+        "soglia_coefficiente": (
+            None if _vuoto(voce.soglia_coefficiente) else voce.soglia_coefficiente
+        ),
+        "unita": unita,
+    }
     citazione, verificata = _citazione(voce.citazione, sezioni, documenti)
-    campi = {nome: getattr(voce, nome) for nome in RegolaFinanziaria.model_fields}
-    campi["id"] = _testo(campi["id"], 20) or ""
-    campi["descrizione"] = _testo(campi["descrizione"]) or ""
-    avvisi = [f"Regola non coerente: {errore}" for errore in valida_regola(RegolaFinanziaria(**campi))]
-    return RegolaFinanziariaOut(
-        **campi, stato=_stato(verificata, avvisi), citazione=citazione, avvisi=avvisi
+    avvisi += [
+        f"Regola non coerente: {errore}" for errore in valida_regola(RegolaFinanziaria(**campi))
+    ]
+    return (
+        RegolaFinanziariaOut(
+            **campi, stato=_stato(verificata, avvisi), citazione=citazione, avvisi=avvisi
+        ),
+        None,
     )
 
 
@@ -377,15 +672,21 @@ def post_elabora(
     documenti = _documenti(fonti)
     indice_regioni = _indice_regioni(lookups)
 
-    modalita = _modalita(estrazione, sezioni, documenti)
     partner_min, partner_max = _conteggi(estrazione, sezioni, documenti)
+    modalita = _modalita(
+        estrazione, partner_min.valore, partner_max.valore, sezioni, documenti
+    )
 
     cit_cost, ver_cost = _citazione(estrazione.costituzione_citazione, sezioni, documenti)
     avvisi_cost: list[str] = []
-    if estrazione.costituzione != "non_indicato" and cit_cost is None:
+    valore_cost = _codice_o_residuo(
+        estrazione.costituzione, _COSTITUZIONE, "non_indicato",
+        "Costituzione non riconosciuta", avvisi_cost,
+    )
+    if valore_cost != "non_indicato" and cit_cost is None:
         avvisi_cost.append("Manca il passaggio del bando che lo stabilisce")
     costituzione = CostituzioneOut(
-        valore=estrazione.costituzione,
+        valore=valore_cost,
         stato=_stato(ver_cost, avvisi_cost),
         citazione=cit_cost,
         avvisi=avvisi_cost,
@@ -395,12 +696,20 @@ def post_elabora(
     for voce in estrazione.forme_ammesse:
         citazione, verificata = _citazione(voce.citazione, sezioni, documenti)
         note = _testo(voce.note, 500)
-        avvisi = ["Forma non descritta"] if voce.forma == "altra" and not note else []
-        forma = FORME.get(voce.forma)
+        avvisi: list[str] = []
+        codice = _codice(voce.forma, _FORME)
+        if codice is None:
+            # Forma ignota (o vuota): «altra», descritta dal testo del modello.
+            if not _vuoto(voce.forma):
+                avvisi.append(f"Forma non riconosciuta: {_testo(voce.forma, 80) or '?'}")
+                note = note or _testo(voce.forma, 500)
+            codice = "altra"
+        if codice == "altra" and not note:
+            avvisi.append("Forma non descritta")
         forme.append(
             FormaAmmessaOut(
-                forma=voce.forma,
-                etichetta=forma.etichetta if forma else voce.forma,
+                forma=codice,
+                etichetta=FORME[codice].etichetta,
                 note=note,
                 stato=_stato(verificata, avvisi),
                 citazione=citazione,
@@ -411,16 +720,34 @@ def post_elabora(
     documenti_richiesti: list[DocumentoRichiestoOut] = []
     for voce in estrazione.documenti_richiesti:
         citazione, verificata = _citazione(voce.citazione, sezioni, documenti)
+        avvisi = []
+        tipo = _codice_o_residuo(
+            voce.tipo, _DOCUMENTI, "altro", "Tipo di documento non riconosciuto", avvisi
+        )
+        descrizione = _testo(voce.descrizione) or ""
+        if tipo == "altro" and not descrizione:
+            avvisi.append("Documento non descritto")
+        momento = _momento(voce.momento, avvisi)
         documenti_richiesti.append(
             DocumentoRichiestoOut(
                 id=_testo(voce.id, 20) or "",
-                tipo=voce.tipo,
-                descrizione=_testo(voce.descrizione) or "",
-                momento=voce.momento,
-                stato=_stato(verificata, []),
+                tipo=tipo,
+                descrizione=descrizione,
+                momento=momento,
+                stato=_stato(verificata, avvisi),
                 citazione=citazione,
+                avvisi=avvisi,
             )
         )
+
+    regole_finanziarie: list[RegolaFinanziariaOut] = []
+    avvisi_regole: list[str] = []
+    for voce in estrazione.regole_finanziarie:
+        regola, avviso = _regola_finanziaria(voce, sezioni, documenti)
+        if regola is not None:
+            regole_finanziarie.append(regola)
+        if avviso:
+            avvisi_regole.append(_testo(avviso, 500) or "")
 
     regole = RegolePartenariatoOut(
         modalita=modalita,
@@ -436,15 +763,16 @@ def post_elabora(
         ],
         quote=[_quota(voce, sezioni, documenti) for voce in estrazione.quote],
         vincoli=[_vincolo(voce, sezioni, documenti) for voce in estrazione.vincoli],
-        regole_finanziarie=[
-            _regola_finanziaria(voce, sezioni, documenti)
-            for voce in estrazione.regole_finanziarie
-        ],
+        regole_finanziarie=regole_finanziarie,
         documenti_richiesti=documenti_richiesti,
         fonti_insufficienti=bool(estrazione.fonti_insufficienti),
         note=_testo(estrazione.note),
-        # Le incoerenze della modalità valgono per tutto il risultato.
-        avvisi=[a for a in modalita.avvisi if a.startswith("«")],
+        # Le incoerenze della modalità valgono per tutto il risultato; le
+        # regole finanziarie non rappresentabili e le voci che la convalida
+        # tollerante ha scartato o declassato restano visibili solo qui.
+        avvisi=[a for a in modalita.avvisi if a.startswith("«")] + avvisi_regole + [
+            _testo(a, 500) or "" for a in avvisi_convalida(estrazione)
+        ],
     )
     # Ultima rete: nessun rimando ai domini esclusi, in nessun campo.
     return scrub_menzioni(regole.model_dump(mode="json"))

@@ -29,15 +29,27 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
+from typing import get_args
 
+from app.schemas.partenariato import (
+    BaseCalcolo,
+    Costituzione,
+    EffettoViolazione,
+    Momento,
+    TipoDocumentoRichiesto,
+    TipoVincolo,
+)
+from app.schemas.regole_finanziarie import UnitaRegola, VariabileFinanziaria
 from app.services.ai_check_prompts import _fmt, _junction_names, serializza_sezioni
 from app.services.link_policy import BLOCKED_LINK_HOSTS
 from app.services.partenariato_vocabolario import FORME, TIPI_SOGGETTO, VOCABOLARIO_VERSIONE
 
 PARTENARIATO_PROMPT_VERSION = 1
 # Versione dello schema di output (schemas/partenariato.PartenariatoEstrazione)
-# e della forma delle regole post-elaborate.
-SCHEMA_VERSION = 1
+# e della forma delle regole post-elaborate. 2: schema compatto (codici e
+# numeri come stringhe, niente nullable) dopo il 400 «compiled grammar is too
+# large» della v1, mai rilasciata.
+SCHEMA_VERSION = 2
 
 # Pagine sempre incluse per documento (quando il testo supera il tetto).
 PAGINE_INIZIALI = 2
@@ -100,6 +112,11 @@ def _elenco_forme() -> str:
     return "\n".join(f"- {codice}: {voce.etichetta}" for codice, voce in FORME.items())
 
 
+def _codici(tipo) -> str:
+    """I codici di un `Literal`, compatti: «a, b, c»."""
+    return ", ".join(get_args(tipo))
+
+
 SYSTEM_PARTENARIATO = f"""Sei un analista esperto di bandi e agevolazioni pubbliche italiane \
 ed europee. Dal testo fornito estrai SOLO le regole di PARTENARIATO: se e come più soggetti \
 possono o devono presentare insieme la domanda (aggregazioni, raggruppamenti, reti, consorzi, \
@@ -119,9 +136,14 @@ Alcune pagine possono mancare: se l'informazione che serve non è nel testo, non
 
 REGOLE VINCOLANTI
 - Usa SOLO il testo fornito: niente conoscenze esterne, prassi di settore o supposizioni.
-- Ogni voce ha una citazione: `sezione` è l'identificatore esatto del blocco SENZA parentesi \
-quadre ("META", "S2", "D1-p3") e `testo_esatto` è una frase o un breve passaggio COPIATO ALLA \
-LETTERA da quel blocco, senza riformulare e senza unire testo di blocchi diversi.
+- Ogni voce ha una citazione {{"sezione", "testo"}}: `sezione` è l'identificatore esatto del \
+blocco SENZA parentesi quadre ("META", "S2", "D1-p3") e `testo` è una frase o un breve \
+passaggio COPIATO ALLA LETTERA da quel blocco, senza riformulare e senza unire testo di blocchi \
+diversi. Citazione assente: {{"sezione": "", "testo": ""}}.
+- Compila SEMPRE tutti i campi. Un'informazione che manca è "" (stringa vuota) o una lista \
+vuota, mai testo di riempimento. I campi con un codice vogliono ESATTAMENTE uno dei codici \
+elencati in fondo. I numeri sono cifre dentro una stringa, con il punto per i decimali e \
+senza separatore delle migliaia ("3", "30", "12.5").
 - `modalita`:
   - "obbligatorio": la domanda può essere presentata SOLO da un partenariato o da \
 un'aggregazione (es. «almeno due imprese», «esclusivamente in forma associata», «consorzio \
@@ -133,7 +155,7 @@ escluse espressamente;
   - "non_determinabile": il testo non lo dice in modo chiaro, o mancano le pagine che lo \
 direbbero.
   `modalita_citazione` è il passaggio che la fonda, copiato come FRASE INTERA e non come \
-singola parola (null solo con "non_determinabile").
+singola parola (vuota solo con "non_determinabile").
 - `forme_ammesse`: le forme di aggregazione ammesse, con i codici del vocabolario qui sotto; \
 una forma non in elenco è "altra", descritta in `note`. Lista vuota se il testo non ne nomina.
 - `costituzione`: "costituenda_ammessa" se il raggruppamento può costituirsi dopo la domanda \
@@ -147,23 +169,26 @@ e chi non conta (es. affiliati, partner associati).
 - `composizione`: le categorie di soggetti richieste o ammesse nel partenariato, con \
 `minimo` e `massimo` quando indicati, il ruolo e i vincoli territoriali (`regioni` con il \
 nome della regione italiana, `paesi` con il nome del paese).
-- `quote`: percentuali come numeri da 0 a 100 (30 per «30%»), mai frazioni; indica su cosa \
-si calcolano (`base_calcolo`) e l'effetto se non sono rispettate.
+- `quote`: percentuali da 0 a 100 ("30" per «30%»), mai frazioni; indica su cosa si \
+calcolano (`base_calcolo`) e l'effetto se non sono rispettate (`effetto_violazione`).
 - `vincoli`: indipendenza o assenza di collegamenti tra i partner, partecipazione a un solo \
 partenariato, paesi distinti (`parametro` = numero di paesi), sede operativa in una regione, \
-termine per costituire il raggruppamento (`parametro` = giorni), requisiti del capofila, altro.
+termine per costituire il raggruppamento (`parametro` = giorni), requisiti del capofila, altro; \
+`momento` = quando va rispettato.
 - `regole_finanziarie`: SOLO soglie economico-finanziarie ESPLICITE sui partner o sul \
 partenariato (es. «costo della quota non superiore al 60% del fatturato medio degli ultimi \
-due esercizi»), nella forma numeratore [/ denominatore] operatore soglia: operatore lt, le, \
-gt o ge; `soglia` è un numero decimale con il punto, in una stringa ("0.6", "100000"), \
-OPPURE `soglia_variabile` con `soglia_coefficiente` (es. patrimonio netto maggiore della \
-metà del costo del progetto: soglia_variabile "costo_progetto_totale", coefficiente "0.5"); \
+due esercizi»), nella forma numeratore [/ denominatore] operatore soglia: `numeratore`, \
+`denominatore` e `soglia_variabile` sono codici delle variabili finanziarie; operatore lt, le, \
+gt o ge; `soglia` è un numero decimale con il punto ("0.6", "100000"), OPPURE \
+`soglia_variabile` con `soglia_coefficiente` (es. patrimonio netto maggiore della metà del \
+costo del progetto: soglia_variabile "costo_progetto_totale", coefficiente "0.5"); \
 la percentuale di un rapporto va come frazione ("0.6" per 60%); `unita` è "rapporto" se c'è \
 un denominatore, "numero" per dipendenti e bilanci approvati, altrimenti "euro". Non fare \
 calcoli e non inventare soglie.
 - `documenti_richiesti`: i documenti del partenariato che il bando richiede (mandato, atto \
-costitutivo, lettere d'intenti, accordi, ...) e quando.
-- `tipo_soggetto` e `categoria`: usa i codici del vocabolario qui sotto; se nessuno è adatto \
+costitutivo, lettere d'intenti, accordi, ...) e quando (`momento`); `tipo` "altro" se nessun \
+codice è adatto.
+- `tipo_soggetto` e `categoria`: usa i codici dei tipi di soggetto; se nessuno è adatto \
 usa "altro" e descrivi il soggetto in `tipo_soggetto_testo`.
 - FALSI AMICI da NON trattare come partenariato: «ATS» nel senso di Agenzia di Tutela della \
 Salute; consorzi di tutela o di bonifica elencati tra i beneficiari; il partenariato \
@@ -176,13 +201,32 @@ reti di vendita o reti informatiche.
 - Non valutare mai l'ammissibilità di un'azienda: estrai soltanto.
 - Gli id sono progressivi: C1, C2, ... (composizione), Q1, ... (quote), V1, ... (vincoli), \
 RF1, ... (regole finanziarie), DR1, ... (documenti richiesti).
-- Scrivi in italiano, in modo conciso. Se un'informazione manca usa null o una lista vuota.
+- Scrivi in italiano, in modo conciso.
 
-VOCABOLARIO (versione {VOCABOLARIO_VERSIONE}) — tipi di soggetto:
+CODICI AMMESSI (vocabolario versione {VOCABOLARIO_VERSIONE})
+Tipi di soggetto (`tipo_soggetto`, `categoria`):
 {_elenco_tipi()}
 
-VOCABOLARIO — forme di aggregazione:
-{_elenco_forme()}"""
+Forme di aggregazione (`forma`):
+{_elenco_forme()}
+
+- `costituzione`: {_codici(Costituzione)}
+- `base_calcolo`: {_codici(BaseCalcolo)}
+- `effetto_violazione`: {_codici(EffettoViolazione)}
+- tipo di vincolo (`vincoli.tipo`): {_codici(TipoVincolo)}
+- `momento`: {_codici(Momento)}
+- tipo di documento (`documenti_richiesti.tipo`): {_codici(TipoDocumentoRichiesto)}
+- variabili finanziarie: {_codici(VariabileFinanziaria)}
+- `unita`: {_codici(UnitaRegola)}"""
+
+# Lo strumento con cui il modello restituisce l'estrazione (forzato, NON
+# strict: lo schema v2 come grammatica è rifiutato dall'API, vedi
+# `schemas/partenariato.py`). Nome e descrizione entrano nella stima dei costi.
+STRUMENTO_ESTRAZIONE = "registra_regole_partenariato"
+DESCRIZIONE_STRUMENTO_ESTRAZIONE = (
+    "Registra le regole di partenariato estratte dal testo fornito, secondo le istruzioni. "
+    "Compila tutti i campi: un'informazione che manca è \"\" (stringa vuota) o una lista vuota."
+)
 
 
 # ------------------------------------------------------------- documenti

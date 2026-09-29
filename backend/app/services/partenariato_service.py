@@ -14,14 +14,18 @@ Flusso di un'estrazione (una sola per bando alla volta):
    transitorie = `errore` con backoff, costo 0) → input e `content_hash`
    (uguale al precedente = `riusata`, costo 0) → heartbeat SUBITO PRIMA
    della chiamata: claim perso → ci si ferma senza chiamare il modello (e si
-   chiude a costo 0 se il claim è ancora nostro) → `ai.genera` → post-elaborazione
-   deterministica → `fn_partenariato_concludi` (un solo vincitore);
+   chiude a costo 0 se il claim è ancora nostro) → `ai.estrai_con_strumento`
+   (strumento forzato NON strict, input convalidato in modo tollerante) →
+   post-elaborazione deterministica → `fn_partenariato_concludi` (un solo
+   vincitore);
 3. `get_stato` (GET, poll-on-read) con il failsafe `fn_partenariato_chiudi_stale`.
 
 Spesa: costo della PIATTAFORMA (mai una riga in `ai_checks`, che vale come
 quota dell'utente), registrata in `partenariati_ai_esecuzioni` (budget) e in
 `api_usage_events` (`record_usage`, su ogni esito). Errori dopo l'invio: costo
-= max(reale se noto, riserva), oppure ignoto (la riserva resta nel budget).
+= max(reale se noto, riserva), oppure ignoto (la riserva resta nel budget);
+una richiesta rifiutata dal provider con un 4xx non transitorio (es. 400
+`invalid_request_error`) costa 0: è respinta prima della generazione.
 Log: solo id del bando e dominio dei documenti.
 """
 
@@ -32,10 +36,12 @@ from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
+from typing import NamedTuple
 
 from postgrest.exceptions import APIError
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 
+from app.clients.anthropic_ai import definizione_strumento
 from app.core.config import get_settings
 from app.core.errors import (
     AiNotConfiguredError,
@@ -50,6 +56,7 @@ from app.schemas.partenariato import (
     PartenariatoBandoOut,
     PartenariatoEstrazione,
     RegolePartenariatoOut,
+    convalida_tollerante,
 )
 from app.services import (
     bandi_service,
@@ -64,8 +71,10 @@ from app.services.openapi_service import record_usage
 from app.services.partenariato_errori import raise_from_rpc
 from app.services.partenariato_preclassificatore import preclassifica
 from app.services.partenariato_prompts import (
+    DESCRIZIONE_STRUMENTO_ESTRAZIONE,
     PARTENARIATO_PROMPT_VERSION,
     SCHEMA_VERSION,
+    STRUMENTO_ESTRAZIONE,
     SYSTEM_PARTENARIATO,
     DocumentoLetto,
     DocumentoSelezionato,
@@ -159,15 +168,21 @@ def _https(url) -> str | None:
 
 @lru_cache(maxsize=1)
 def _schema_json() -> str:
-    """Lo schema dell'output come lo vede il modello (entra nella stima)."""
-    return json.dumps(TypeAdapter(PartenariatoEstrazione).json_schema(), ensure_ascii=False)
+    """Lo strumento dell'estrazione come lo riceve il modello (nome,
+    descrizione e schema dell'input): entra nella stima."""
+    return json.dumps(
+        definizione_strumento(
+            PartenariatoEstrazione, STRUMENTO_ESTRAZIONE, DESCRIZIONE_STRUMENTO_ESTRAZIONE
+        ),
+        ensure_ascii=False,
+    )
 
 
 def stima_riserva_cents(bando: dict) -> int:
     """Riserva al caso peggiore di un'estrazione: prompt di sistema + scheda
-    del catalogo + TUTTO il tetto dei documenti + margine + schema, e tutto
-    l'output consentito (`ai_prezzi.stima_cents`; modello ignoto = il più
-    caro)."""
+    del catalogo + TUTTO il tetto dei documenti + margine + strumento (schema
+    e descrizione), e tutto l'output consentito (`ai_prezzi.stima_cents`;
+    modello ignoto = il più caro)."""
     settings = get_settings()
     catalogo = len(meta_partenariato(bando)) + sum(
         len(testo) + 8 for _, testo in serializza_sezioni(bando.get("contenuto"))
@@ -939,6 +954,159 @@ def _riusabile(precedente: dict | None, content_hash: str, forza: bool) -> bool:
     )
 
 
+# ------------------------------------------- passi della pipeline senza DB
+# Nessun claim, cache o scrittura: li compone `_pipeline` e, identici, la
+# valutazione locale (`partenariato_valutazione_locale`), che deve restare
+# fedele alla produzione.
+
+
+class InputModello(NamedTuple):
+    """Ciò che si invia al modello e ciò che serve a verificarne l'output."""
+
+    testo: str
+    sezioni: dict[str, str]  # indice → testo ESATTAMENTE come inviato
+    selezionati: list[DocumentoSelezionato]
+    fonti: list[dict]  # voci di `fonti_usate` con le pagine incluse
+
+
+def candidati_documenti(bando: dict, links, *, settings) -> list:
+    """Documenti da acquisire: da `bando_link`; dagli allegati del catalogo
+    SOLO se la lettura dei link è fallita (None)."""
+    return bando_fonti_service.seleziona_candidati(
+        links, bando.get("allegati") if links is None else None,
+        settings.partenariato_max_documenti,
+    )
+
+
+async def scarica_documenti(candidati: list, *, settings) -> list:
+    """Download sicuro dei candidati, in parallelo (fase documenti)."""
+    return await asyncio.gather(
+        *(
+            download_sicuro.scarica_pdf(
+                c.url,
+                max_bytes=settings.partenariato_pdf_max_bytes,
+                timeout_s=settings.partenariato_download_timeout_seconds,
+            )
+            for c in candidati
+        )
+    )
+
+
+async def leggi_documenti(scaricati: list, *, settings) -> list:
+    """Testo dei PDF scaricati, ciascuno in un processo separato con tempo
+    massimo (fase lettura); None per i documenti non scaricati."""
+    return await asyncio.gather(
+        *(
+            pdf_testo.estrai_testo(
+                s.contenuto,
+                max_pagine=settings.partenariato_pdf_max_pagine,
+                timeout_s=settings.partenariato_pdf_timeout_seconds,
+            )
+            if s.stato == "ok" and s.contenuto
+            else _nessun_testo()
+            for s in scaricati
+        )
+    )
+
+
+def documenti_non_raggiungibili(links, documenti, scaricati, testi) -> bool:
+    """Niente letto e una causa che può sparire da sola: link ufficiali non
+    leggibili dal catalogo (None = errore di lettura) o documenti non
+    scaricati/letti per rete, portale lento, tempo scaduto."""
+    return not any(doc.pagine for doc in documenti) and (
+        links is None or any(_fallimento_transitorio(s, t) for s, t in zip(scaricati, testi))
+    )
+
+
+def sezioni_preclassificatore(bando: dict, documenti: list[DocumentoLetto]) -> dict[str, str]:
+    """Scheda del catalogo e pagine lette, come le vede il pre-classificatore."""
+    sezioni = {"META": meta_partenariato(bando), **dict(serializza_sezioni(bando.get("contenuto")))}
+    for doc in documenti:
+        for numero, testo in doc.pagine:
+            sezioni[f"D{doc.n}-p{numero}"] = testo
+    return sezioni
+
+
+def esito_senza_modello(livello: str, documenti_mancati: bool, *, forza: bool) -> str | None:
+    """Esito deciso SENZA chiamare il modello, None se il modello serve. Zero
+    segnali (e nessun «Analizza comunque») = `nessun_segnale`; ma se nessun
+    documento è stato letto per cause transitorie = `errore`
+    (`documenti_non_raggiungibili`): «nessun segnale» varrebbe 14 giorni
+    senza aver letto nulla."""
+    if livello != "nessuno" or forza:
+        return None
+    return "errore" if documenti_mancati else "nessun_segnale"
+
+
+def prepara_input(
+    bando: dict, documenti: list[DocumentoLetto], fonti: list[dict], per_sezione, *, settings
+) -> InputModello:
+    """Pagine selezionate entro il tetto dei caratteri, fonti con le pagine
+    incluse e input del modello."""
+    selezionati = seleziona_pagine(
+        documenti,
+        max_caratteri=settings.partenariato_max_caratteri_documenti,
+        per_sezione=per_sezione,
+    )
+    fonti = _segna_incluse(fonti, selezionati)
+    testo, sezioni, _ = build_partenariato_input(bando, bando.get("contenuto"), selezionati)
+    return InputModello(testo, sezioni, selezionati, fonti)
+
+
+def stima_input_cents(testo: str, *, settings) -> int:
+    """Costo massimo della chiamata sull'input davvero inviato: prompt di
+    sistema + messaggio + strumento (schema e descrizione), e tutti i
+    `max_tokens`."""
+    return stima_cents(
+        settings.partenariato_ai_model,
+        len(SYSTEM_PARTENARIATO) + len(testo) + len(_schema_json()),
+        settings.partenariato_ai_max_tokens,
+    )
+
+
+async def genera_estrazione(ai, testo: str, *, settings):
+    """La chiamata al modello: (PartenariatoEstrazione, AiUsage). Strumento
+    forzato NON strict (lo schema come grammatica dell'output strutturato è
+    rifiutato: «The compiled grammar is too large»), input convalidato in
+    modo tollerante (`convalida_tollerante`)."""
+    return await ai.estrai_con_strumento(
+        SYSTEM_PARTENARIATO,
+        testo,
+        PartenariatoEstrazione,
+        nome_strumento=STRUMENTO_ESTRAZIONE,
+        descrizione=DESCRIZIONE_STRUMENTO_ESTRAZIONE,
+        convalida=convalida_tollerante,
+        model=settings.partenariato_ai_model,
+        max_tokens=settings.partenariato_ai_max_tokens,
+        timeout=settings.partenariato_ai_timeout_seconds,
+    )
+
+
+# Stati 4xx del provider che si risolvono ripetendo (timeout della richiesta,
+# conflitto, rate limit): ogni altro 4xx è un rifiuto della richiesta stessa,
+# prima della generazione (nessun token).
+STATI_4XX_TRANSITORI = frozenset({408, 409, 429})
+
+
+def stato_http(exc: BaseException) -> int | None:
+    """Stato HTTP della risposta d'errore del provider dietro un
+    `AiUpstreamError` (il client lo solleva `from` l'eccezione dell'SDK);
+    None se una risposta HTTP non c'è stata (rete, timeout)."""
+    stato = getattr(exc.__cause__, "status_code", None)
+    return stato if isinstance(stato, int) and not isinstance(stato, bool) else None
+
+
+def non_transitorio(stato: int | None) -> bool:
+    """Un 4xx che ripetere non risolve (tutti tranne 408, 409 e 429)."""
+    return stato is not None and 400 <= stato < 500 and stato not in STATI_4XX_TRANSITORI
+
+
+async def regole_da_estrazione(secondary, estrazione, sezioni: dict, fonti: list) -> dict:
+    """Post-elaborazione deterministica (verifica delle citazioni sul testo
+    inviato, coerenza, regioni dalle lookup del catalogo)."""
+    return post_elabora(estrazione, sezioni, fonti, await _lookups(secondary))
+
+
 @dataclass
 class _Contesto:
     """Ciò che serve ai rami della pipeline per chiudere e registrare."""
@@ -1007,10 +1175,7 @@ async def _pipeline(
     try:
         # ---- fase documenti (impostata dalla prenotazione)
         links = await bando_fonti_service.leggi_link_documenti(secondary, bando_id)
-        candidati = bando_fonti_service.seleziona_candidati(
-            links, bando.get("allegati") if links is None else None,
-            settings.partenariato_max_documenti,
-        )
+        candidati = candidati_documenti(bando, links, settings=settings)
         catalogo_hash = calcola_catalogo_hash(bando, contenuto, [c.url for c in candidati])
         stato_pubblico = await _stato_pubblico(secondary, bando_id)
         meta_dati = {
@@ -1024,57 +1189,28 @@ async def _pipeline(
         if _catalogo_invariato(precedente, catalogo_hash, forza):
             return await _chiudi_senza_modello(primary, ctx, "riusata", meta_dati)
 
-        scaricati = await asyncio.gather(
-            *(
-                download_sicuro.scarica_pdf(
-                    c.url,
-                    max_bytes=settings.partenariato_pdf_max_bytes,
-                    timeout_s=settings.partenariato_download_timeout_seconds,
-                )
-                for c in candidati
-            )
-        )
+        scaricati = await scarica_documenti(candidati, settings=settings)
         if not await _rinnova(primary, bando_id, claim_token, "lettura"):
             return await _claim_perso(primary, ctx)
 
         # ---- fase lettura
-        testi = await asyncio.gather(
-            *(
-                pdf_testo.estrai_testo(
-                    s.contenuto,
-                    max_pagine=settings.partenariato_pdf_max_pagine,
-                    timeout_s=settings.partenariato_pdf_timeout_seconds,
-                )
-                if s.stato == "ok" and s.contenuto
-                else _nessun_testo()
-                for s in scaricati
-            )
-        )
+        testi = await leggi_documenti(scaricati, settings=settings)
         documenti, fonti = documenti_letti(candidati, scaricati, testi)
-        # Niente letto e una causa che può sparire da sola: link ufficiali
-        # non leggibili dal catalogo (None = errore di lettura) o documenti
-        # non scaricati/letti per rete, portale lento, tempo scaduto.
-        documenti_mancati = not any(doc.pagine for doc in documenti) and (
-            links is None or any(_fallimento_transitorio(s, t) for s, t in zip(scaricati, testi))
-        )
+        documenti_mancati = documenti_non_raggiungibili(links, documenti, scaricati, testi)
         # I byte dei PDF non servono più (fonti ha sha256 e dimensione): non
         # restano in memoria durante l'attesa e la chiamata al modello.
         del scaricati
-        sezioni_pre = {"META": meta_partenariato(bando), **dict(serializza_sezioni(contenuto))}
-        for doc in documenti:
-            for numero, testo in doc.pagine:
-                sezioni_pre[f"D{doc.n}-p{numero}"] = testo
         # Regex su centinaia di migliaia di caratteri: fuori dall'event loop.
-        pre = await asyncio.to_thread(preclassifica, sezioni_pre)
-        if pre.livello == "nessuno" and not forza:
-            if documenti_mancati:
-                # Nessun documento letto per cause transitorie: «nessun
-                # segnale» varrebbe 14 giorni senza aver letto nulla. Errore
-                # con backoff, costo 0 (il modello non è stato chiamato).
-                return await _chiudi_senza_modello(
-                    primary, ctx, "errore",
-                    {"errore_codice": "documenti_non_raggiungibili", "model": None},
-                )
+        pre = await asyncio.to_thread(preclassifica, sezioni_preclassificatore(bando, documenti))
+        senza_modello = esito_senza_modello(pre.livello, documenti_mancati, forza=forza)
+        if senza_modello == "errore":
+            # Nessun documento letto per cause transitorie: errore con
+            # backoff, costo 0 (il modello non è stato chiamato).
+            return await _chiudi_senza_modello(
+                primary, ctx, "errore",
+                {"errore_codice": "documenti_non_raggiungibili", "model": None},
+            )
+        if senza_modello == "nessun_segnale":
             return await _chiudi_senza_modello(
                 primary,
                 ctx,
@@ -1083,13 +1219,9 @@ async def _pipeline(
                  "content_hash": None, "model": None},
             )
 
-        selezionati = seleziona_pagine(
-            documenti,
-            max_caratteri=settings.partenariato_max_caratteri_documenti,
-            per_sezione=pre.per_sezione,
+        testo, sezioni, selezionati, fonti = prepara_input(
+            bando, documenti, fonti, pre.per_sezione, settings=settings
         )
-        fonti = _segna_incluse(fonti, selezionati)
-        testo, sezioni, _ = build_partenariato_input(bando, contenuto, selezionati)
         content_hash = calcola_content_hash(
             testo,
             selezionati,
@@ -1111,26 +1243,16 @@ async def _pipeline(
         # ---- fase analisi: heartbeat SUBITO prima della chiamata pagata
         if not await _rinnova(primary, bando_id, claim_token, "analisi"):
             return await _claim_perso(primary, ctx)
-        stima = stima_cents(
-            modello, len(SYSTEM_PARTENARIATO) + len(testo) + len(_schema_json()),
-            settings.partenariato_ai_max_tokens,
-        )
+        stima = stima_input_cents(testo, settings=settings)
         if stima > riserva_cents:
             logger.warning(
                 "partenariati: stima %s oltre la riserva %s (bando %s)", stima, riserva_cents,
                 bando_id,
             )
         inviata = True
-        estrazione, usage = await ai.genera(
-            SYSTEM_PARTENARIATO,
-            testo,
-            PartenariatoEstrazione,
-            model=modello,
-            max_tokens=settings.partenariato_ai_max_tokens,
-            timeout=settings.partenariato_ai_timeout_seconds,
-        )
+        estrazione, usage = await genera_estrazione(ai, testo, settings=settings)
         costo = costo_cents(modello, usage.input_tokens, usage.output_tokens)
-        regole = post_elabora(estrazione, sezioni, fonti, await _lookups(secondary))
+        regole = await regole_da_estrazione(secondary, estrazione, sezioni, fonti)
         vinto = await _concludi(
             primary,
             bando_id,
@@ -1188,6 +1310,12 @@ async def _pipeline(
             # La risposta è arrivata (troncata o non valida): pagata.
             costo = max(costo_cents(modello, uso.input_tokens, uso.output_tokens), riserva_cents)
             codice = "ai_risposta_non_valida"
+        elif non_transitorio(stato_http(exc)):
+            # Richiesta rifiutata dal provider (4xx non transitorio, es. 400
+            # invalid_request_error): respinta prima della generazione,
+            # nessun token. Costo 0 ESPLICITO: la riserva esce dal budget.
+            costo = 0
+            codice = "ai_richiesta_rifiutata"
         else:
             costo = None  # errore di rete o del provider: costo ignoto
             codice = "ai_non_disponibile"

@@ -684,7 +684,7 @@ LOOKUPS_REGOLE = {"regioni": [{"id": 1, "nome": "Piemonte"}, {"id": 2, "nome": "
 
 
 def _cit(sezione, testo):
-    return {"sezione": sezione, "testo_esatto": testo}
+    return {"sezione": sezione, "testo": testo}
 
 
 def regole_estratte() -> dict:
@@ -692,40 +692,42 @@ def regole_estratte() -> dict:
     from app.schemas.partenariato import PartenariatoEstrazione
     from app.services.partenariato_regole import post_elabora
 
+    # Forma compatta dello schema del modello: "" = assente, numeri in stringa.
+    nessuna = _cit("", "")
     estrazione = {
         "modalita": "obbligatorio",
         "modalita_citazione": _cit("D1-p3", "partecipare in forma associata mediante ATS"),
         "forme_ammesse": [
-            {"forma": "ats", "note": None, "citazione": _cit("D1-p3", "mediante ATS")},
+            {"forma": "ats", "note": "", "citazione": _cit("D1-p3", "mediante ATS")},
         ],
-        "costituzione": "non_indicato", "costituzione_citazione": None,
-        "partner_min": 3, "partner_min_citazione": _cit("D1-p3", "almeno 3 imprese"),
-        "partner_max": None, "partner_max_citazione": None, "conteggio_note": None,
+        "costituzione": "non_indicato", "costituzione_citazione": nessuna,
+        "partner_min": "3", "partner_min_citazione": _cit("D1-p3", "almeno 3 imprese"),
+        "partner_max": "", "partner_max_citazione": nessuna, "conteggio_note": "",
         "composizione": [
-            {"id": "K1", "tipo_soggetto": "organismo_ricerca", "tipo_soggetto_testo": None,
-             "minimo": 1, "massimo": None, "ruolo": "partner", "regioni": [], "paesi": [],
-             "vincolo_territoriale": None,
+            {"id": "K1", "tipo_soggetto": "organismo_ricerca", "tipo_soggetto_testo": "",
+             "minimo": "1", "massimo": "", "ruolo": "partner", "regioni": [], "paesi": [],
+             "vincolo_territoriale": "",
              "citazione": _cit("D1-p3", "almeno un organismo di ricerca")},
             # regione sconosciuta → da_verificare
-            {"id": "K2", "tipo_soggetto": "pmi", "tipo_soggetto_testo": None, "minimo": 3,
-             "massimo": None, "ruolo": "qualsiasi", "regioni": ["Piemonte", "Atlantide"],
+            {"id": "K2", "tipo_soggetto": "pmi", "tipo_soggetto_testo": "", "minimo": "3",
+             "massimo": "", "ruolo": "qualsiasi", "regioni": ["Piemonte", "Atlantide"],
              "paesi": [], "vincolo_territoriale": "sede operativa in Piemonte",
              "citazione": _cit("D1-p4", "sede operativa in Piemonte o in Atlantide")},
         ],
         "quote": [],
         "vincoli": [
             {"id": "V1", "tipo": "sede_operativa_regione", "descrizione": "Sede in Piemonte",
-             "parametro": None, "momento": "domanda",
+             "parametro": "", "momento": "domanda",
              "citazione": _cit("D1-p4", "devono avere sede operativa in Piemonte")},
         ],
         "regole_finanziarie": [
             {"id": "RF1", "descrizione": "Quota al massimo il 60% del fatturato medio",
              "ambito": "ciascun_partner", "numeratore": "costo_quota",
              "denominatore": "fatturato_medio_2", "operatore": "le", "soglia": "0.6",
-             "soglia_variabile": None, "soglia_coefficiente": None, "unita": "rapporto",
+             "soglia_variabile": "", "soglia_coefficiente": "", "unita": "rapporto",
              "citazione": _cit("D1-p4", "non può superare il 60% del fatturato medio")},
         ],
-        "documenti_richiesti": [], "fonti_insufficienti": False, "note": None,
+        "documenti_richiesti": [], "fonti_insufficienti": False, "note": "",
     }
     return post_elabora(
         PartenariatoEstrazione.model_validate(estrazione), SEZ_REGOLE, FONTI_REGOLE,

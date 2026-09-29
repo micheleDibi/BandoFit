@@ -8,9 +8,12 @@ Tre famiglie:
     l'utente: un'eccezione che non è `ValueError` attraversa Pydantic e FastAPI
     la consegna all'handler di `AppError`. Tipi sbagliati e campi sconosciuti
     restano la 422 `validation_error` generica.
-  * output del modello: `BozzaProfiloAi`, SOLO tipi ed enum (niente vincoli
-    numerici, come lo schema di estrazione WP3): troncamenti, codici ignoti e
-    rimozione dei contatti si fanno nel post-processing del servizio.
+  * output del modello: `BozzaProfiloAi`, solo tipi semplici e i codici delle
+    competenze come STRINGHE (niente enum da 42 valori né vincoli numerici,
+    come lo schema di estrazione WP3: l'API rifiuta le grammatiche troppo
+    grandi, budget in tests/test_schemi_ai_dimensione.py): troncamenti, codici
+    ignoti e rimozione dei contatti si fanno nel post-processing del servizio
+    (`partner_profile_prompts.pulisci_bozza`).
   * DTO: `PartnerProfileOut` (vista del titolare e dei membri),
     `PartnerPubblicoOut` (proiezione a whitelist verso terzi, costruita solo da
     `partner_profilo_pubblico.profilo_pubblico`), `InformativaPartnerOut`.
@@ -398,17 +401,35 @@ class ReferenteRispostaIn(BaseModel):
 
 
 class MotivazioneCompetenza(BaseModel):
-    codice: Competenza
+    codice: str  # codice di Competenza
     motivo: str
 
 
 class BozzaProfiloAi(BaseModel):
-    """Schema di OUTPUT imposto al modello: tutti i campi obbligatori, solo
-    tipi ed enum. Diventa visibile solo dopo «Applica» e salvataggio."""
+    """Schema di OUTPUT imposto al modello: tutti i campi obbligatori, codici
+    delle competenze come stringhe (quelli fuori vocabolario li scarta
+    `pulisci_bozza`, prima del salvataggio in `bozza_ai`). Diventa visibile
+    solo dopo «Applica» e salvataggio."""
+
+    descrizione_competenze: str
+    competenze: list[str]  # codici di Competenza
+    motivazioni: list[MotivazioneCompetenza]
+
+
+class MotivazioneCompetenzaOut(BaseModel):
+    codice: Competenza
+    motivo: str
+
+
+class BozzaProfiloAiOut(BaseModel):
+    """La bozza salvata come la rilegge l'API (`BozzaAiOut.proposta`):
+    tipizzata sul vocabolario, a differenza dello schema del modello. I codici
+    usciti dal vocabolario dopo il salvataggio li toglie
+    `partner_profile_service._bozza_out`."""
 
     descrizione_competenze: str
     competenze: list[Competenza]
-    motivazioni: list[MotivazioneCompetenza]
+    motivazioni: list[MotivazioneCompetenzaOut]
 
 
 # ----------------------------------------------------- vista del titolare
@@ -486,7 +507,7 @@ class BozzaAiOut(BaseModel):
     avviata_at: datetime | None = None
     pronta_at: datetime | None = None
     errore: str | None = None
-    proposta: BozzaProfiloAi | None = None
+    proposta: BozzaProfiloAiOut | None = None
 
 
 class PartnerProfileOut(BaseModel):

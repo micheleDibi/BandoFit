@@ -117,7 +117,7 @@ Il dump locale è del 3 luglio e precede la v1.1: non va usato per queste stime.
   - Registro `partenariati_ai_esecuzioni` + prenotazione atomica (advisory lock, costo riservato al caso peggiore, budget giornaliero per gruppo) per **tutti** i servizi LLM del modulo: estrazione WP3, bozza profilo WP4, posizioni e testi WP5, bozze WP10.
   - `rate_limit_service` (fail-open) resta solo come anti-abuso, mai come tetto di spesa.
   - Il client Anthropic allega l'`usage` anche alle eccezioni (output troncato, JSON non valido): una chiamata pagata non viene mai registrata a costo 0.
-  - Gli schemi passati al modello contengono solo tipi ed enum, senza vincoli numerici, perché un valore fuori range non deve far fallire una chiamata già pagata. I range si validano nel post-processing, che declassa la voce a `da_verificare`.
+  - Gli schemi passati al modello contengono solo tipi ed enum, senza vincoli numerici, perché un valore fuori range non deve far fallire una chiamata già pagata. I range si validano nel post-processing, che declassa la voce a `da_verificare`. Gli schemi con output strutturato strict devono restare piccoli (budget di dimensione fissato dai test): l'estrazione WP3, troppo grande per la grammatica strict, usa uno strumento forzato **non strict** con convalida tollerante nel codice (§16).
   - Tabella prezzi unica `services/ai_prezzi.py` (sonnet-5 a $2/$10, da riconfermare). I nuovi moduli **non scrivono mai in `ai_checks`**, che vale come quota.
 - **T7. Niente chiamate a pagamento in richieste HTTP lunghe.** Le generazioni AI nuove (WP4, WP5, WP10) sono job asincroni: 202 + poll-on-read + failsafe. Il proxy (nginx a 60 s documentato, Cloudflare a 100 s) taglierebbe le richieste mentre il server continua a pagare. Per l'anteprima import vedi Q23.
 - **T8. Minimizzazione.**
@@ -207,7 +207,7 @@ Il dump locale è del 3 luglio e precede la v1.1: non va usato per queste stime.
   - Cooldown per bando di 24 h, riverifica ogni 14 giorni, backoff sugli errori.
   - «Analizza comunque» (dopo `nessun_segnale`) salta il cooldown una sola volta.
 - **R6. Pre-classificatore deterministico.** Regex del §1.4 della spec, con l'inglese UE e i falsi positivi noti (ATS salute, consorzi di tutela, PPP, Accordo di partenariato UE, Comuni capofila). Serve per ordinare, dare priorità e **fare da guardia di costo** (zero segnali → niente LLM, con «Analizza comunque»). Non decide mai la modalità.
-- **R7. Schema strict**: `modalita`, `forme_ammesse`, `costituzione`, `partner_min/max`, `composizione`, `quote`, `vincoli`, `regole_finanziarie` (contratto B7), `documenti_richiesti`, `fonti_insufficienti`. Ogni voce ha una citazione, verificata dal nuovo `services/citazioni.py`:
+- **R7. Schema dell'estrazione** (strumento forzato non strict dal 2026-09-29, vedi §16): `modalita`, `forme_ammesse`, `costituzione`, `partner_min/max`, `composizione`, `quote`, `vincoli`, `regole_finanziarie` (contratto B7), `documenti_richiesti`, `fonti_insufficienti`. Ogni voce ha una citazione, verificata dal nuovo `services/citazioni.py`:
   - NFKC, apostrofi, sillabazione, soft hyphen;
   - pagine adiacenti ed ellissi;
   - `_citation_verified` dell'AI-check resta invariata.
@@ -576,7 +576,7 @@ Il **caso peggiore** è limitato dai tetti fail-closed: WP3 $5 al giorno + altri
 |---|---|
 | 1 Import + IT-advanced, fasce ai terzi, niente doppia spesa | test WP1 + G1 in sandbox |
 | 2 Bilancio ufficiale → addon → XBRL prevalente | test WP2 + G1 |
-| 3 Regole citate, `modalita` ≥ 90% | test WP3 + **G3** (non misurabile finché non c'è credito) |
+| 3 Regole citate, `modalita` ≥ 90% | test WP3 + **G3**: prima misura reale il 2026-09-29 al 67% (sotto l'obiettivo; cause e correzioni in §16) |
 | 4 Esempio guida end-to-end | test d'integrazione unico |
 | 5 Collegate e senza opt-in mai; revoca immediata | matching + test d'integrazione |
 | 6 Gratuito / limiti in RPC | test DB 0036-0039 |
@@ -600,7 +600,7 @@ Branch `feat/partenariati` da `main`: la spec qui prevale sul `claude/<…>` del
 Gate (non bloccano lo sviluppo, ma il rilascio sì):
 - **G1** sandbox openapi: le tue azioni in §14, poi lanci lo script. Serve a sostituire le fixture sintetiche e a confermare i codici CEE; senza G1 il fix del mapping resta «verificato solo su OAS».
 - **G2** migration nello SQL Editor prima di ogni deploy.
-- **G3** credito Anthropic, poi `partenariato_valutazione --reale --tetto-cents 800`.
+- **G3** credito Anthropic, poi `partenariato_valutazione --reale --locale --tetto-cents 800 --conferma --out <file fuori dal repo>` (modalità locale: nessuna scrittura su DB reali; tetto sulla somma delle esecuzioni).
 - **G4** testi legali (informativa, Termini/DSA, disclaimer) prima di accendere il flag in produzione.
 
 Durante l'esecuzione mi fermo solo per ambiguità che cambiano comportamento o costo e che non sono coperte da §13.
@@ -810,6 +810,13 @@ Durante l'esecuzione mi fermo solo per ambiguità che cambiano comportamento o c
   - `regole`: snapshot delle regole assente → grigio, con i soli controlli di coerenza.
 
   Esito complessivo: rosso se c'è un rosso, altrimenti grigio se c'è un grigio, altrimenti verde; quello salvato sulla call è nella vista del creatore. Matrice di copertura con la stessa `valuta_criterio` dei suggerimenti (vista «proprio» nella colonna di chi guarda, «terzi» nelle altre).
+- **Estrazione WP3 rivista dopo la prima valutazione reale (G3, 2026-09-29)**:
+  - lo schema di output strutturato strict dell'estrazione è rifiutato dall'API («compiled grammar is too large», nessun limite numerico documentato); anche ridotto (v2: nessun campo nullable, codici come stringhe mappate sul vocabolario nella post-elaborazione, 5 enum piccoli) resta rifiutato, mentre gli schemi WP4 e WP5 ridotti sono accettati;
+  - l'estrazione usa quindi **uno strumento forzato non strict** (`anthropic_ai.estrai_con_strumento`, `tool_choice` sullo strumento, niente `output_config`): lo schema guida il modello ma nessuna grammatica si compila; il JSON restituito si convalida in modo **tollerante** (`convalida_tollerante`: campi mancanti → assenti, conversioni semplici, valori presenti ma non leggibili segnalati e mai trasformati in «assente», voci con codici chiusi ignoti scartate con avviso, risposta vuota o senza campi dell'estrazione = risposta non valida pagata); la post-elaborazione deterministica (citazioni, range, vocabolario, `modalita_effettiva`) è invariata;
+  - WP4 (bozza profilo) e WP5 (posizioni, testi) restano con output strutturato strict, con schemi ridotti; un test fissa il budget di dimensione di ogni schema;
+  - un errore 4xx del provider non transitorio senza usage (richiesta rifiutata prima della generazione) chiude a **costo 0** (`ai_richiesta_rifiutata`) invece della riserva;
+  - nuova valutazione **locale** (`--reale --locale`, nessun DB primario, spesa fail-closed in memoria, stop al primo errore non transitorio o dopo 3 errori consecutivi) e **sonda degli schemi** (`backend/scripts/sonda_schemi_ai.py`: una chiamata minima per schema per sapere se l'API lo accetta);
+  - **prima misura reale** (25 bandi, 23 con il modello, 2,87 $, 11 cent e 29 s in media per bando): `modalita` corretta nel **67%** (obiettivo 90%), `partner_min`/`partner_max` esatti al 92%, citazioni verificate all'83%, quote con molti falsi positivi. La modalità grezza del modello coincide con l'etichetta in 20 casi su 24: la differenza nasce da un controllo di coerenza che scatta quando il modello scrive a parole l'assenza di un conteggio, da 3 citazioni non ritrovate nel testo e da 4 «non ammesso» dedotti da elenchi di beneficiari senza un'esclusione esplicita. Correzioni in corso; il campione serve sia a correggere sia a misurare, quindi la misura successiva sarà ottimistica: servirà un secondo campione di verifica.
 - **WP9–WP10** — da fare.
 
 ---

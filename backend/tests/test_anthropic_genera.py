@@ -1,4 +1,5 @@
-"""Client Anthropic: `genera` dei servizi partenariati e invarianza dell'AI-check.
+"""Client Anthropic: `genera` e `estrai_con_strumento` dei servizi partenariati e
+invarianza dell'AI-check.
 
 Nessuna chiamata reale: il client dell'SDK è sostituito da un finto
 (`FakeAsyncAnthropic`) oppure è il vero `AsyncAnthropic` con un trasporto httpx
@@ -17,10 +18,15 @@ from typing import Literal
 import anthropic
 import httpx
 import pytest
-from anthropic.types import Message, TextBlock, ThinkingBlock, Usage
+from anthropic.types import Message, TextBlock, ThinkingBlock, ToolUseBlock, Usage
 from pydantic import BaseModel, TypeAdapter
 
-from app.clients.anthropic_ai import MAX_OUTPUT_TOKENS, AiCheckClient, AiUsage
+from app.clients.anthropic_ai import (
+    MAX_OUTPUT_TOKENS,
+    AiCheckClient,
+    AiUsage,
+    definizione_strumento,
+)
 from app.core.errors import AiNotConfiguredError, AiTimeoutError, AiUpstreamError
 from app.schemas.ai_check import ExtractionResult, MatchingResult
 
@@ -387,3 +393,234 @@ class TestExtractMatchInvariati:
         ))
         assert client._client.max_retries == 0
         assert client._client.with_options(timeout=45.0).max_retries == 0
+
+
+# --- estrai_con_strumento: strumento forzato NON strict (estrazione WP3) --------------
+# Col vero SDK su un trasporto finto: si verifica il corpo HTTP che partirebbe
+# davvero (tools senza strict, tool_choice forzato, nessun output_config).
+
+STRUMENTO = "registra_esito"
+DESCRIZIONE = "Registra l'esito della verifica"
+
+
+def _sdk_con_handler(handler, richieste: list[dict]) -> anthropic.AsyncAnthropic:
+    def registra(request: httpx.Request) -> httpx.Response:
+        richieste.append(json.loads(request.content))
+        return handler(request)
+
+    return anthropic.AsyncAnthropic(
+        api_key="sk-test",
+        max_retries=0,
+        timeout=5.0,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(registra)),
+    )
+
+
+def _corpo_strumento(*blocchi: dict, stop_reason="tool_use") -> dict:
+    return {
+        "id": "msg_t",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-5",
+        "content": list(blocchi),
+        "stop_reason": stop_reason,
+        "stop_sequence": None,
+        "usage": {"input_tokens": 100, "output_tokens": 20},
+    }
+
+
+def _tool_use(input_, nome=STRUMENTO, id_="toolu_1") -> dict:
+    return {"type": "tool_use", "id": id_, "name": nome, "input": input_}
+
+
+async def _estrai(sdk, modello=Uscita, **kwargs):
+    return await _client(sdk).estrai_con_strumento(
+        "SYS", "TESTO", modello, nome_strumento=STRUMENTO, descrizione=DESCRIZIONE, **kwargs
+    )
+
+
+class TestEstraiConStrumentoSulVeroSdk:
+    async def test_corpo_http_strumento_forzato_non_strict(self):
+        richieste: list[dict] = []
+        risposta = _corpo_strumento(_tool_use({"esito": "si", "note": None}))
+        sdk = _sdk_con_handler(lambda r: httpx.Response(200, json=risposta), richieste)
+        risultato, usage = await _estrai(sdk)
+        assert risultato == Uscita(esito="si", note=None)
+        assert usage == AiUsage(input_tokens=100, output_tokens=20)
+        [corpo] = richieste
+        assert set(corpo) == {"model", "max_tokens", "system", "messages", "tools",
+                              "tool_choice"}
+        assert "output_config" not in corpo
+        assert corpo["tools"] == [definizione_strumento(Uscita, STRUMENTO, DESCRIZIONE)]
+        assert "strict" not in corpo["tools"][0]
+        # esattamente UNA chiamata: mai un'estrazione divisa in più blocchi, di
+        # cui il primo, parziale, passerebbe la convalida tollerante
+        assert corpo["tool_choice"] == {"type": "tool", "name": STRUMENTO,
+                                        "disable_parallel_tool_use": True}
+        assert (corpo["model"], corpo["max_tokens"]) == ("claude-sonnet-5", MAX_OUTPUT_TOKENS)
+        assert corpo["system"] == "SYS"
+        assert corpo["messages"] == [{"role": "user", "content": "TESTO"}]
+
+    def test_schema_dello_strumento_come_quello_dell_output_strutturato(self):
+        """Stessa trasformazione dell'SDK (niente vincoli non supportati): lo
+        schema inviato non cambia passando dall'output strict allo strumento."""
+        strumento = definizione_strumento(Uscita, STRUMENTO, DESCRIZIONE)
+        assert strumento == {
+            "name": STRUMENTO, "description": DESCRIZIONE,
+            "input_schema": _formato_atteso(Uscita)["format"]["schema"],
+        }
+
+    async def test_legge_il_primo_blocco_con_quel_nome(self):
+        richieste: list[dict] = []
+        risposta = _corpo_strumento(
+            {"type": "text", "text": "Ecco l'esito."},
+            _tool_use({"esito": "no", "note": None}, nome="altro", id_="toolu_0"),
+            _tool_use({"esito": "si", "note": "primo"}, id_="toolu_1"),
+            _tool_use({"esito": "no", "note": "secondo"}, id_="toolu_2"),
+        )
+        sdk = _sdk_con_handler(lambda r: httpx.Response(200, json=risposta), richieste)
+        risultato, _ = await _estrai(sdk)
+        assert risultato == Uscita(esito="si", note="primo")
+
+    async def test_convalida_del_chiamante(self):
+        """L'estrazione WP3 passa la convalida tollerante: tipi semplici
+        sbagliati e campi mancanti non buttano una risposta pagata."""
+        from app.schemas.partenariato import PartenariatoEstrazione, convalida_tollerante
+
+        richieste: list[dict] = []
+        risposta = _corpo_strumento(_tool_use({"modalita": "Ammesso", "partner_min": 3,
+                                               "campo_ignoto": True}))
+        sdk = _sdk_con_handler(lambda r: httpx.Response(200, json=risposta), richieste)
+        risultato, usage = await _estrai(sdk, PartenariatoEstrazione,
+                                         convalida=convalida_tollerante)
+        assert isinstance(risultato, PartenariatoEstrazione)
+        assert (risultato.modalita, risultato.partner_min, risultato.quote) == (
+            "ammesso", "3", [])
+        assert usage == AiUsage(input_tokens=100, output_tokens=20)
+        schema = richieste[0]["tools"][0]["input_schema"]
+        assert schema == anthropic.transform_schema(
+            TypeAdapter(PartenariatoEstrazione).json_schema())
+
+    @pytest.mark.parametrize(
+        ("corpo", "convalida", "messaggio"),
+        [
+            # troncato da max_tokens: l'input può essere parziale, non si usa
+            (_corpo_strumento(_tool_use({"esito": "si", "note": None}),
+                              stop_reason="max_tokens"), None, "troppo lungo"),
+            (_corpo_strumento(stop_reason="refusal"), None, "non ha prodotto"),
+            # nessun blocco tool_use (solo testo)
+            (_corpo_strumento({"type": "text", "text": '{"esito": "si"}'},
+                              stop_reason="end_turn"), None, "non ha prodotto"),
+            # blocco di un altro strumento
+            (_corpo_strumento(_tool_use({"esito": "si", "note": None}, nome="altro")),
+             None, "non ha prodotto"),
+            # input che la convalida stretta di default respinge
+            (_corpo_strumento(_tool_use({"esito": "forse", "note": None})), None,
+             "non ha prodotto"),
+            # input non oggetto con la convalida tollerante
+            (_corpo_strumento(_tool_use(["non", "un", "oggetto"])), "tollerante",
+             "non ha prodotto"),
+            # oggetto senza nessun campo dell'estrazione: non un'estrazione vuota
+            # (che si salverebbe e si riuserebbe), una risposta illeggibile
+            (_corpo_strumento(_tool_use({"risultato": {"esito": "ammesso"}})), "tollerante",
+             "non ha prodotto"),
+        ],
+        ids=["max_tokens", "rifiuto", "senza_tool_use", "altro_nome", "input_non_valido",
+             "input_non_oggetto", "input_senza_campi_noti"],
+    )
+    async def test_risposta_inutilizzabile_porta_l_usage(self, corpo, convalida, messaggio):
+        from app.schemas.partenariato import PartenariatoEstrazione, convalida_tollerante
+
+        richieste: list[dict] = []
+        sdk = _sdk_con_handler(lambda r: httpx.Response(200, json=corpo), richieste)
+        kwargs = ({"convalida": convalida_tollerante} if convalida else {})
+        modello = PartenariatoEstrazione if convalida else Uscita
+        with pytest.raises(AiUpstreamError) as exc:
+            await _estrai(sdk, modello, timeout=30.0, **kwargs)
+        assert exc.value.usage == AiUsage(input_tokens=100, output_tokens=20)
+        assert messaggio in exc.value.message
+        assert len(richieste) == 1  # max_retries=0
+
+    async def test_convalida_che_solleva_type_error(self):
+        def rotta(dati):
+            raise TypeError("input illeggibile")
+
+        richieste: list[dict] = []
+        corpo = _corpo_strumento(_tool_use({"esito": "si", "note": None}))
+        sdk = _sdk_con_handler(lambda r: httpx.Response(200, json=corpo), richieste)
+        with pytest.raises(AiUpstreamError) as exc:
+            await _estrai(sdk, convalida=rotta)
+        assert exc.value.usage == AiUsage(input_tokens=100, output_tokens=20)
+
+    @pytest.mark.parametrize("stato", [400, 401, 404, 429, 500, 529])
+    async def test_errore_http_senza_usage_con_lo_stato(self, stato):
+        richieste: list[dict] = []
+        corpo = {"type": "error", "error": {"type": "invalid_request_error",
+                                            "message": "tool_choice non valido"}}
+        sdk = _sdk_con_handler(lambda r: httpx.Response(stato, json=corpo), richieste)
+        with pytest.raises(AiUpstreamError) as exc:
+            await _estrai(sdk)
+        assert exc.value.usage is None
+        # il chiamante legge lo stato dall'eccezione dell'SDK (4xx non transitori)
+        assert exc.value.__cause__.status_code == stato
+        assert len(richieste) == 1  # nessun retry, nemmeno su 429/5xx
+
+    async def test_timeout(self):
+        def lento(request):
+            raise httpx.ReadTimeout("lento", request=request)
+
+        richieste: list[dict] = []
+        with pytest.raises(AiTimeoutError):
+            await _estrai(_sdk_con_handler(lento, richieste))
+        assert len(richieste) == 1
+
+    async def test_errore_di_connessione(self):
+        def giu(request):
+            raise httpx.ConnectError("giù", request=request)
+
+        richieste: list[dict] = []
+        with pytest.raises(AiUpstreamError) as exc:
+            await _estrai(_sdk_con_handler(giu, richieste))
+        assert exc.value.usage is None and len(richieste) == 1
+
+    async def test_non_configurato(self):
+        with pytest.raises(AiNotConfiguredError):
+            await _estrai(None)
+
+    async def test_override_di_modello_token_e_timeout(self):
+        messages = FakeMessages(_messaggio(
+            ToolUseBlock(type="tool_use", id="toolu_1", name=STRUMENTO,
+                         input={"esito": "no", "note": None}),
+            stop_reason="tool_use",
+        ))
+        fake = FakeAsyncAnthropic(messages)
+        risultato, usage = await _client(fake).estrai_con_strumento(
+            "SYS", "TESTO", Uscita, nome_strumento=STRUMENTO, descrizione=DESCRIZIONE,
+            model="claude-opus-5", max_tokens=4000, timeout=45.0,
+        )
+        assert risultato.esito == "no" and usage == AiUsage(1200, 345)
+        [(metodo, kwargs)] = messages.chiamate
+        assert metodo == "create"
+        assert (kwargs["model"], kwargs["max_tokens"]) == ("claude-opus-5", 4000)
+        assert fake.opzioni == [{"timeout": 45.0}]
+
+    async def test_l_input_non_finisce_nei_log(self, caplog):
+        segreto = "BRANO RISERVATO DEL DOCUMENTO"
+        richieste: list[dict] = []
+        corpo = _corpo_strumento(_tool_use({"esito": segreto, "note": segreto}))
+        sdk = _sdk_con_handler(lambda r: httpx.Response(200, json=corpo), richieste)
+        with caplog.at_level(logging.DEBUG, logger="bandofit.ai"):
+            with pytest.raises(AiUpstreamError):
+                await _estrai(sdk)
+        assert segreto not in caplog.text
+        assert "input_respinto=True" in caplog.text and "output_tokens=20" in caplog.text
+
+
+class TestGeneraInvariato:
+    async def test_genera_resta_output_strutturato_strict(self):
+        """WP4/WP5 restano su `output_config.format`: niente tools."""
+        messages = FakeMessages(_messaggio(_testo('{"esito": "si", "note": null}')))
+        await _client(FakeAsyncAnthropic(messages)).genera("SYS", "TESTO", Uscita)
+        [(_, kwargs)] = messages.chiamate
+        assert "tools" not in kwargs and "tool_choice" not in kwargs
+        assert kwargs["output_config"] == _formato_atteso(Uscita)

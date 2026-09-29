@@ -319,7 +319,8 @@ class MembroOut(_Uscita):
 
 class RegolaOrigineOut(_Uscita):
     """Da dove viene la regola di una voce: `citazione` solo per le voci del
-    bando confermate con il passaggio ritrovato."""
+    bando confermate con il passaggio ritrovato su una pagina di un documento
+    ufficiale."""
 
     fonte: FonteRegola
     citazione: CitazioneIn | None = None

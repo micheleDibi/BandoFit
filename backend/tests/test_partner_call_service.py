@@ -2118,9 +2118,13 @@ class TestSalvaRequisiti:
         assert (salvato.requisiti[1].copertura_creatore,
                 salvato.requisiti[1].copertura_fonte) == (
             vero.copertura_creatore, vero.copertura_fonte)
+        # Nel validatore nessun pre-check è «Regola del bando»: i dati della
+        # scheda del catalogo non sono una fonte ufficiale (rifiniture finali).
+        # L'origine salvata distingue comunque il pre-check vero da quelli
+        # riscritti o inventati (vedi l'assert sulle origini qui sopra).
         fonti = {r["testo"]: pv.requisito_da_riga(r).regola.fonte
                  for r in db.righe("partner_call_requisiti", call_id=call["id"])}
-        assert fonti == {vero.testo: "bando", riscritto["testo"]: "creatore",
+        assert fonti == {vero.testo: "creatore", riscritto["testo"]: "creatore",
                          inventato["testo"]: "creatore"}
 
     async def test_precheck_senza_catalogo_leggibile_e_del_creatore(self):

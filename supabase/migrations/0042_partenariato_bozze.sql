@@ -18,7 +18,8 @@
 --      timeout_unknown, come la 0037);
 --   4) RPC: fn_partner_bozza_prenota (partecipazione, limite di piano sotto il
 --      lock dell'owner, una pending, poi fn_partenariati_ai_prenota nel gruppo
---      altri), fn_partner_bozza_concludi (chiusura ATOMICA di bozza ed
+--      altri con il tetto giornaliero per owner p_limite_owner),
+--      fn_partner_bozza_concludi (chiusura ATOMICA di bozza ed
 --      esecuzione), fn_partner_bozza_chiudi_stale (failsafe in lettura e
 --      nello scheduler);
 --   5) ridefinizioni con la STESSA firma (una sola funzione per nome):
@@ -341,8 +342,14 @@ comment on function public.fn_partner_bozza_esecuzione_interrotta(uuid) is
 --        il lock del budget, prima della nuova prenotazione);
 --      - bozze del mese ≥ limite → bozze_esaurite (NULL = illimitato);
 --      - lock del budget; fn_partenariati_ai_prenota('partner_bozza',
---        'utente', 'altri', …, nessun limite giornaliero per richiedente o
---        owner: vale il limite mensile) → ai_budget_esaurito;
+--        'utente', 'altri', …) con il tetto giornaliero per owner
+--        p_limite_owner (esecuzioni partner_bozza dell'owner nel giorno
+--        Europe/Rome, su tutte le sue aziende, con l'esclusione della 0034;
+--        NULL = nessun tetto) → ai_limite_owner, poi il budget →
+--        ai_budget_esaurito. Il tetto giornaliero impedisce che un piano
+--        illimitato consumi in un giorno il budget «altri», condiviso con la
+--        bozza del profilo (WP4) e le proposte della call (WP5); nessun
+--        limite per richiedente (richiedente = owner);
 --      - insert della bozza pending con l'esecuzione.
 --    Ritorna {bozza_id, esecuzione_id}.
 -- ----------------------------------------------------------------------------
@@ -355,7 +362,8 @@ create or replace function public.fn_partner_bozza_prenota(
   p_input                 jsonb,
   p_budget_cents          integer,
   p_costo_riservato_cents integer,
-  p_prompt_version        integer default null
+  p_prompt_version        integer default null,
+  p_limite_owner          integer default null
 )
 returns jsonb
 language plpgsql
@@ -445,7 +453,7 @@ begin
     p_richiedente           => p_richiedente,
     p_limite_richiedente    => null,
     p_owner                 => p_owner,
-    p_limite_owner          => null,
+    p_limite_owner          => p_limite_owner,
     p_company               => p_company,
     p_bando_id              => v_call.bando_id);
 
@@ -467,8 +475,8 @@ begin
 end;
 $$;
 
-comment on function public.fn_partner_bozza_prenota(uuid, uuid, uuid, uuid, text, jsonb, integer, integer, integer) is
-  'Prenota una bozza AI di un documento del partenariato (lock owner → azienda viva → call FOR SHARE → membro FOR SHARE → bozza pending → budget): richiedente = titolare; azienda creatrice della call o membro non uscito di una call non sospesa, altrimenti call_non_trovata; piano con 0 bozze → funzione_non_inclusa; pending della stessa azienda × call × tipo < 10 minuti → bozza_in_corso (più vecchia: chiusa come interrotta a costo ignoto); bozze del mese (fn_partner_bozze_usate, pool dell''owner, Europe/Rome) ≥ limite → bozze_esaurite (NULL = illimitato); poi fn_partenariati_ai_prenota(partner_bozza, utente, altri). Ritorna {bozza_id, esecuzione_id}. Detail: parametri_non_validi | attore_non_titolare | owner_not_found | company_not_found | call_non_trovata | funzione_non_inclusa | bozza_in_corso | bozze_esaurite | ai_budget_esaurito.';
+comment on function public.fn_partner_bozza_prenota(uuid, uuid, uuid, uuid, text, jsonb, integer, integer, integer, integer) is
+  'Prenota una bozza AI di un documento del partenariato (lock owner → azienda viva → call FOR SHARE → membro FOR SHARE → bozza pending → budget): richiedente = titolare; azienda creatrice della call o membro non uscito di una call non sospesa, altrimenti call_non_trovata; piano con 0 bozze → funzione_non_inclusa; pending della stessa azienda × call × tipo < 10 minuti → bozza_in_corso (più vecchia: chiusa come interrotta a costo ignoto); bozze del mese (fn_partner_bozze_usate, pool dell''owner, Europe/Rome) ≥ limite → bozze_esaurite (NULL = illimitato); poi fn_partenariati_ai_prenota(partner_bozza, utente, altri) con il tetto giornaliero per owner p_limite_owner (esecuzioni partner_bozza dell''owner nel giorno, NULL = nessun tetto). Ritorna {bozza_id, esecuzione_id}. Detail: parametri_non_validi | attore_non_titolare | owner_not_found | company_not_found | call_non_trovata | funzione_non_inclusa | bozza_in_corso | bozze_esaurite | ai_limite_owner | ai_budget_esaurito.';
 
 -- ----------------------------------------------------------------------------
 -- 6) fn_partner_bozza_concludi — chiusura ATOMICA del job della bozza (modello
@@ -725,7 +733,7 @@ revoke execute on function public.fn_partner_bozze_limite(uuid)
   from public, anon, authenticated;
 revoke execute on function public.fn_partner_bozza_esecuzione_interrotta(uuid)
   from public, anon, authenticated;
-revoke execute on function public.fn_partner_bozza_prenota(uuid, uuid, uuid, uuid, text, jsonb, integer, integer, integer)
+revoke execute on function public.fn_partner_bozza_prenota(uuid, uuid, uuid, uuid, text, jsonb, integer, integer, integer, integer)
   from public, anon, authenticated;
 revoke execute on function public.fn_partner_bozza_concludi(uuid, uuid, text, jsonb, text, text, integer, integer, integer, text, text)
   from public, anon, authenticated;
@@ -751,7 +759,7 @@ revoke execute on function public.fn_partenariati_snapshot(uuid)
 --    drop function public.fn_partner_bozza_concludi(uuid, uuid, text, jsonb, text, text,
 --      integer, integer, integer, text, text);
 --    drop function public.fn_partner_bozza_prenota(uuid, uuid, uuid, uuid, text, jsonb,
---      integer, integer, integer);
+--      integer, integer, integer, integer);
 --    drop function public.fn_partner_bozza_esecuzione_interrotta(uuid);
 --    drop function public.fn_partner_bozze_limite(uuid);
 --    drop function public.fn_partner_bozze_usate(uuid);

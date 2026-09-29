@@ -291,8 +291,9 @@ class TestDaPrecheck:
         """Completamento WP9: la citazione costruita dai metadati della scheda
         del catalogo (testo generato o classificato) non fa fede: esce non
         verificata. Il requisito resta (anche visibile ai terzi se cercato),
-        la copertura del creatore non cambia e il validatore lo attribuisce ai
-        dati del catalogo, senza citazione."""
+        la copertura del creatore non cambia e il validatore lo attribuisce al
+        creatore, come un requisito manuale (anche con la citazione della
+        scheda salvata come verificata prima della regola)."""
         prechecks = facet_prechecks(BANDO, COMPANY, DERIVED)
         bozze = gap.requisiti_da_precheck(prechecks, bando=BANDO)
         assert {b.rif_origine for b in bozze} == {"regione", "ateco", "beneficiari"}
@@ -309,9 +310,9 @@ class TestDaPrecheck:
             (r.copertura_creatore, r.copertura_fonte, r.cercato, r.criterio, r.ambito)
             for r in prima]
         assert [r.citazione.verificata for r in dopo] == [False] * len(bozze)
-        for bozza in bozze:
+        for bozza in (*bozze, *come_prima):
             regola = pv.requisito_da_riga(_riga_requisito(bozza)).regola
-            assert (regola.fonte, regola.citazione) == ("bando", None)
+            assert (regola.fonte, regola.citazione) == ("creatore", None)
 
     def test_settore_senza_ateco(self):
         bando = {**BANDO, "bando_codici_ateco": []}

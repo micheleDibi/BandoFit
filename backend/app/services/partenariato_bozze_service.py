@@ -15,8 +15,9 @@ Flusso (T7, job asincrono come WP4/WP5):
    azienda solo con `includi_nome_azienda`), riserva al caso peggiore,
    prenotazione ATOMICA `fn_partner_bozza_prenota` (partecipazione, limite
    mensile del piano `partner_bozze_mese` sul pool del titolare, una sola
-   bozza in preparazione per azienda × call × tipo, budget giornaliero del
-   gruppo `altri`, fail-closed), poi il job in background;
+   bozza in preparazione per azienda × call × tipo, tetto giornaliero del
+   titolare `partner_bozze_documento_limite_owner_giorno`, budget giornaliero
+   del gruppo `altri`, fail-closed), poi il job in background;
 2. `esegui_job`: modello → post-processing deterministico (segnaposto non
    previsti sostituiti, contatti e identificativi tolti con `anonimizza`,
    lunghezze) → chiusura ATOMICA di bozza ed esecuzione
@@ -127,6 +128,11 @@ _ERRORI_BOZZE: dict[str, tuple[int, str, str]] = {
         409,
         "bozza_in_corso",
         "La bozza di questo documento è già in preparazione: attendi qualche istante",
+    ),
+    "ai_limite_owner": (
+        429,
+        "ai_limite_giornaliero",
+        "Hai raggiunto le bozze di documenti di oggi: riprova domani",
     ),
     "ai_budget_esaurito": (
         429,
@@ -795,7 +801,8 @@ async def avvia(primary, secondary, ai, active, user: dict, call_id: Any, tipo: 
     """202: prenota (fail-closed) e avvia in background la bozza. Errori:
     403 `forbidden` (non titolare), 404 (call fuori partecipazione), 400
     (tipo), 503 `ai_not_configured`, 409 `funzione_non_inclusa` /
-    `bozze_esaurite` / `bozza_in_corso`, 429 `ai_sospesa_oggi`."""
+    `bozze_esaurite` / `bozza_in_corso`, 429 `ai_limite_giornaliero` (tetto
+    giornaliero del titolare) / `ai_sospesa_oggi`."""
     if not active.editable:
         raise ForbiddenError(MSG_SOLO_TITOLARE)
     if tipo not in TIPI_BOZZA:
@@ -825,6 +832,7 @@ async def avvia(primary, secondary, ai, active, user: dict, call_id: Any, tipo: 
         "p_budget_cents": budget_cents_gruppo("altri"),
         "p_costo_riservato_cents": riserva,
         "p_prompt_version": BOZZE_PROMPT_VERSION,
+        "p_limite_owner": get_settings().partner_bozze_documento_limite_owner_giorno,
     })
     bozza_id = esito.get("bozza_id") if isinstance(esito, dict) else None
     esecuzione_id = esito.get("esecuzione_id") if isinstance(esito, dict) else None

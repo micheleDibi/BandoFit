@@ -12,8 +12,10 @@ collegamenti li decidono le funzioni esistenti, qui non si duplicano:
 
 `valida_consorzio` produce una checklist di voci verde / rossa / grigia, ogni
 voce con la regola di origine (voce dello snapshot confermata con la sua
-citazione → «bando»; modificata, aggiunta o scelta del creatore →
-«creatore»; nessuna regola per i controlli di coerenza). Una voce esiste se
+citazione verificata da una pagina di un documento ufficiale → «bando»;
+modificata, aggiunta, citata dalla scheda del catalogo o scelta del creatore
+→ «creatore», e così i requisiti manuali e i pre-check del catalogo; nessuna
+regola per i controlli di coerenza). Una voce esiste se
 la regola c'è nello snapshot o se è un controllo sempre valido (somma delle
 quote, indipendenza, requisiti «di ogni membro»); se la regola c'è ma il
 bando non ne indica il valore decisivo (quanti soggetti, quanti paesi, se i
@@ -152,6 +154,7 @@ from app.services.partenariato_criteri import (
     testo_pubblico,
     valuta_criterio,
 )
+from app.services.partner_call_gap import da_pagina_ufficiale
 
 logger = logging.getLogger("bandofit.partenariati")
 
@@ -171,6 +174,9 @@ _CAMPI_REGOLA = ("id", "descrizione", "ambito", "numeratore", "denominatore", "o
                  "soglia", "soglia_variabile", "soglia_coefficiente", "unita")
 
 TESTO_NON_INDICA = "Il bando non lo indica"
+# Origini dei requisiti la cui citazione può far fede (le stesse di
+# `partner_call_gap.citazioni_dal_server`): manuali e pre-check mai.
+_ORIGINI_CON_PROVA = frozenset({"bando_partenariato", "regola_finanziaria", "ai_check"})
 
 _ALIAS_PAESI = {"EL": "GR", "UK": "GB"}
 _MILLESIMI = Decimal("0.001")
@@ -324,11 +330,21 @@ def membro_da_riga(
 
 
 def _origine_requisito(riga: Mapping) -> RegolaOrigine:
+    """«bando» solo per un requisito generato da una fonte che può far fede
+    (`_ORIGINI_CON_PROVA`) con la citazione verificata da una pagina di un
+    documento ufficiale (la decide il server al salvataggio,
+    `partner_call_gap.citazioni_dal_server`). Manuali e pre-check (dati della
+    scheda del catalogo, testo generato o classificato) sono del creatore,
+    come una riga salvata prima della regola dei documenti ufficiali con una
+    citazione verificata della scheda."""
     citazione = _citazione(riga.get("citazione"))
-    if citazione is not None and citazione.verificata:
+    if (
+        riga.get("origine") in _ORIGINI_CON_PROVA
+        and citazione is not None
+        and citazione.verificata
+        and da_pagina_ufficiale(citazione)
+    ):
         return RegolaOrigine("bando", citazione)
-    if riga.get("origine") == "precheck":
-        return RegolaOrigine("bando")  # dati del catalogo del bando, senza citazione
     return REGOLA_CREATORE
 
 
@@ -609,11 +625,17 @@ def _pct(valore: Any) -> str:
 
 
 def _origine_voce(voce: Any) -> RegolaOrigine:
+    """«bando» solo per una voce `confermata` con la citazione verificata da
+    una pagina di un documento ufficiale (`D<n>-p<m>`, come
+    `partner_call_gap._dump_citazione`): anche uno snapshot confermato prima
+    della regola dei documenti ufficiali, con una voce citata dalla scheda del
+    catalogo, è del creatore."""
     citazione = getattr(voce, "citazione", None)
     if (
         getattr(voce, "origine_voce", None) == "confermata"
         and citazione is not None
         and citazione.verificata
+        and da_pagina_ufficiale(citazione)
     ):
         return RegolaOrigine("bando", citazione)
     return REGOLA_CREATORE

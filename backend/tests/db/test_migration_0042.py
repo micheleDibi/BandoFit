@@ -42,7 +42,8 @@ FIRME = {
     "fn_partner_bozze_limite": "fn_partner_bozze_limite(uuid)",
     "fn_partner_bozza_esecuzione_interrotta": "fn_partner_bozza_esecuzione_interrotta(uuid)",
     "fn_partner_bozza_prenota":
-        "fn_partner_bozza_prenota(uuid,uuid,uuid,uuid,text,jsonb,integer,integer,integer)",
+        "fn_partner_bozza_prenota(uuid,uuid,uuid,uuid,text,jsonb,integer,integer,integer,"
+        "integer)",
     "fn_partner_bozza_concludi":
         "fn_partner_bozza_concludi(uuid,uuid,text,jsonb,text,text,integer,integer,integer,"
         "text,text)",
@@ -169,8 +170,9 @@ def membro(db, call_id: str, company: str, stato: str = "proposto") -> str:
 
 def prenota(db, owner, company, call_id, tipo: str | None = "nda", *, richiedente=_TITOLARE,
             input_=_DEFAULT, budget: int | None = 1000, riserva: int | None = 5,
-            prompt_version=_ASSENTE) -> dict:
-    """Chiamata per nome come PostgREST; senza p_prompt_version usa il default."""
+            prompt_version=_ASSENTE, limite_owner=_ASSENTE) -> dict:
+    """Chiamata per nome come PostgREST; senza p_prompt_version o p_limite_owner
+    usa il default (NULL)."""
     argomenti = [
         ("p_owner", owner, "uuid"), ("p_company", company, "uuid"),
         ("p_call", call_id, "uuid"),
@@ -182,6 +184,8 @@ def prenota(db, owner, company, call_id, tipo: str | None = "nda", *, richiedent
     ]
     if prompt_version is not _ASSENTE:
         argomenti.append(("p_prompt_version", prompt_version, "integer"))
+    if limite_owner is not _ASSENTE:
+        argomenti.append(("p_limite_owner", limite_owner, "integer"))
     sql = ", ".join(f"{nome} => %s::{tipo_}" for nome, _, tipo_ in argomenti)
     return db.execute(f"select public.fn_partner_bozza_prenota({sql})",
                       [v for _, v, _ in argomenti]).fetchone()[0]
@@ -968,6 +972,100 @@ class TestBudget:
         assert detail_of(exc) == "ai_budget_esaurito"
 
 
+# ------------------------------------------------- tetto giornaliero per owner
+
+
+def esecuzione_diretta(db, owner, *, servizio: str = "partner_bozza", giorno_offset: int = 0,
+                       stato: str = "conclusa", cost: int | None = 2,
+                       llm: bool = True) -> None:
+    """Esecuzione chiusa scritta direttamente nel registro della spesa (0034)."""
+    db.execute(
+        "insert into public.partenariati_ai_esecuzioni (servizio, origine, gruppo, owner_id, "
+        "richiedente_user_id, giorno, costo_riservato_cents, stato, llm_eseguito, cost_cents, "
+        "conclusa_at) values (%s, 'utente', 'altri', %s, %s, "
+        "(now() at time zone 'Europe/Rome')::date + %s, 1, %s, %s, %s, now())",
+        (servizio, owner, owner, giorno_offset, stato, llm, cost))
+
+
+class TestTettoGiornalieroOwner:
+    """p_limite_owner passato a fn_partenariati_ai_prenota: un piano illimitato
+    non consuma in un giorno il budget «altri» condiviso con la bozza del
+    profilo (WP4) e le proposte della call (WP5)."""
+
+    def test_tetto_raggiunto(self, db, sc):
+        limite_piano(db, "smart", None)
+        for tipo in ("nda", "term_sheet"):
+            prenota(db, sc.y_owner, sc.y, sc.call, tipo, limite_owner=2)
+        with pytest.raises(psycopg.errors.RaiseException) as exc:
+            prenota(db, sc.y_owner, sc.y, sc.call, "lettera_intenti", limite_owner=2)
+        assert detail_of(exc) == "ai_limite_owner"
+        assert conta(db, "partner_bozze_documento") == 2
+        assert conta(db, "partenariati_ai_esecuzioni") == 2
+        # Il tetto è dell'owner Y: X prenota sulla stessa call.
+        prenota(db, sc.x_owner, sc.x, sc.call, limite_owner=2)
+
+    def test_tetto_zero_nega(self, db, sc):
+        with pytest.raises(psycopg.errors.RaiseException) as exc:
+            prenota(db, sc.y_owner, sc.y, sc.call, limite_owner=0)
+        assert detail_of(exc) == "ai_limite_owner"
+        assert conta(db, "partner_bozze_documento") == 0
+
+    @pytest.mark.parametrize("limite", [None, _ASSENTE])
+    def test_null_nessun_tetto(self, db, sc, limite):
+        limite_piano(db, "smart", None)
+        esecuzione_diretta(db, sc.y_owner)
+        for _ in range(2):
+            for tipo in TIPI:
+                out = prenota(db, sc.y_owner, sc.y, sc.call, tipo, limite_owner=limite)
+                concludi(db, out["bozza_id"], out["esecuzione_id"])
+        assert usate(db, sc.y_owner) == 6
+
+    def test_pool_dell_owner_advisor(self, db, sc):
+        """Il tetto vale su tutte le aziende del titolare."""
+        limite_piano(db, "advisor", None)
+        owner = new_user(db, "advisor")
+        a = make_company(db, owner)
+        b = make_company(db, owner)
+        prenota(db, owner, a, inserisci_call(db, a), limite_owner=2)
+        prenota(db, owner, b, inserisci_call(db, b), limite_owner=2)
+        with pytest.raises(psycopg.errors.RaiseException) as exc:
+            prenota(db, owner, a, inserisci_call(db, a), limite_owner=2)
+        assert detail_of(exc) == "ai_limite_owner"
+
+    def test_conta_solo_le_esecuzioni_delle_bozze_di_oggi(self, db, sc):
+        """Non contano gli altri servizi dello stesso owner (profilo, call,
+        estrazioni), le bozze di ieri, né (esclusione della 0034) le esecuzioni
+        senza LLM a costo 0; contano quelle a costo ignoto."""
+        limite_piano(db, "smart", None)
+        for servizio in ("partner_profilo_ai", "partner_call_posizioni", "partner_call_testi",
+                         "partenariato_estrazione"):
+            esecuzione_diretta(db, sc.y_owner, servizio=servizio)
+        esecuzione_diretta(db, sc.y_owner, giorno_offset=-1)
+        esecuzione_diretta(db, sc.y_owner, stato="errore", cost=0, llm=False)
+        esecuzione_diretta(db, sc.x_owner)  # un altro owner
+        out = prenota(db, sc.y_owner, sc.y, sc.call, limite_owner=2)
+        concludi(db, out["bozza_id"], out["esecuzione_id"], bozza_stato="error",
+                 stato="errore", cost=None, input_tokens=0, output_tokens=0)  # conta
+        # Passa solo se il conteggio è esattamente 1: una sola riga esclusa
+        # contata per errore lo porterebbe a 2.
+        prenota(db, sc.y_owner, sc.y, sc.call, "term_sheet", limite_owner=2)
+        with pytest.raises(psycopg.errors.RaiseException) as exc:
+            prenota(db, sc.y_owner, sc.y, sc.call, "lettera_intenti", limite_owner=2)
+        assert detail_of(exc) == "ai_limite_owner"
+
+    def test_prima_del_budget_e_senza_effetti(self, db, sc):
+        """Il tetto si controlla prima del budget; con una pending orfana la RPC
+        fallisce prima di chiuderla (la transazione non lascia effetti)."""
+        vecchia = prenota(db, sc.y_owner, sc.y, sc.call)
+        invecchia(db, vecchia["bozza_id"], 11)
+        with pytest.raises(psycopg.errors.RaiseException) as exc:
+            prenota(db, sc.y_owner, sc.y, sc.call, budget=0, limite_owner=1)
+        assert detail_of(exc) == "ai_limite_owner"
+        assert bozza(db, vecchia["bozza_id"])["stato"] == "pending"
+        assert esecuzione(db, vecchia["esecuzione_id"])["stato"] == "in_corso"
+        assert consumi(db) == []
+
+
 # ----------------------------------------------------------------- chiusura
 
 
@@ -1731,8 +1829,9 @@ class TestSicurezza0042:
         mancanti = DETAIL_NEL_FILE - set(errori.RPC_ERRORS) - DETAIL_NON_MAPPATI
         assert not mancanti, sorted(mancanti)
         assert not DETAIL_NON_MAPPATI & set(errori.RPC_ERRORS)
-        # Detail delle funzioni chiamate (lock dell'azienda, budget).
-        for detail in ("owner_not_found", "company_not_found", "ai_budget_esaurito"):
+        # Detail delle funzioni chiamate (lock dell'azienda, tetto per owner, budget).
+        for detail in ("owner_not_found", "company_not_found", "ai_limite_owner",
+                       "ai_budget_esaurito"):
             assert detail in errori.RPC_ERRORS, detail
         status, code, messaggio = errori.RPC_ERRORS["bozze_esaurite"]
         assert (status, code) == (409, "bozze_esaurite") and "bozze" in messaggio

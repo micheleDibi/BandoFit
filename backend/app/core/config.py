@@ -249,9 +249,12 @@ class Settings(BaseSettings):
     # Bozze AI dei documenti del partenariato (WP10, docs/partenariati.md W4):
     # job asincrono sul budget «altri», stesso modello delle estrazioni. Il
     # limite è quello mensile del piano (`partner_bozze_mese`, nella RPC di
-    # prenotazione), qui solo tetto dei token di output (ragionamento
+    # prenotazione); qui il tetto di bozze al giorno PER TITOLARE su tutte le
+    # sue aziende (fail-closed nella RPC: un piano illimitato non consuma da
+    # solo il budget del gruppo), tetto dei token di output (ragionamento
     # compreso), timeout della chiamata e minuti dopo i quali una bozza ancora
     # in preparazione è orfana (failsafe in lettura e nello scheduler).
+    partner_bozze_documento_limite_owner_giorno: int = 10
     partner_bozze_documento_max_tokens: int = 8000
     partner_bozze_documento_timeout_seconds: float = 150.0
     partner_bozze_documento_stale_minuti: int = 10

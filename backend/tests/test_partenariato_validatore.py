@@ -36,7 +36,7 @@ from app.schemas.partenariato_consorzio import (
     MembroAggiornaIn,
     MembroOut,
 )
-from app.schemas.partner_call import RegoleCallSnapshot
+from app.schemas.partner_call import CitazioneIn, RegoleCallSnapshot
 from app.services import partenariato_validatore as pv
 from app.services.partenariato_collegamenti import ChiaveCollegamento
 from app.services.partenariato_criteri import profilo_candidato_da
@@ -334,6 +334,41 @@ def test_regola_di_origine_bando_o_creatore():
     out = vista(v, "numero_partner:min", A, True)
     assert out.regola.fonte == "bando" and out.regola.citazione.sezione == "D1-p2"
     assert vista(v, "somma_quote").regola is None  # controllo di coerenza
+
+
+@pytest.mark.parametrize("citazione", [
+    {**CIT, "sezione": "S2"},             # scheda del catalogo (testo generato)
+    {**CIT, "sezione": "META"},
+    {**CIT, "sezione": "Fonte ignota"},
+])
+def test_voce_confermata_del_bando_solo_da_una_pagina_ufficiale(citazione):
+    """Uno snapshot confermato prima della regola dei documenti ufficiali può
+    avere voci `confermata` citate dalla scheda del catalogo: sono del
+    creatore, in ogni tipo di voce (conteggi, composizione, quote, vincoli,
+    regole finanziarie)."""
+    def c(**voce):
+        return {"origine_voce": "confermata", "citazione": citazione, **voce}
+
+    regole = snapshot(
+        partner_min=c(valore=2),
+        composizione=[c(id="C1", tipo_soggetto="pmi", minimo=1, ruolo="qualsiasi")],
+        quote=[{**quota_voce(massimo=70), "citazione": citazione}],
+        vincoli=[c(id="V1", tipo="paesi_distinti", parametro=1, descrizione="Paesi",
+                   momento="domanda"),
+                 c(id="V5", tipo="altro", descrizione="Un partner estero", momento="domanda")],
+        regole_finanziarie=[{**regola_f(), "citazione": citazione}],
+    )
+    v = valida(regole, coppia())
+    for id_ in ("numero_partner:min", "composizione:C1", "quota:Q1", "paesi:V1",
+                "vincolo:V5", "finanziaria:F1"):
+        x = voce(v, id_)
+        assert x.regola == pv.REGOLA_CREATORE, id_
+        assert vista(v, id_, A, True).regola.citazione is None
+    # La stessa voce citata da una pagina ufficiale («[D1-P2]» = D1-p2) è del bando.
+    ufficiale = {**CIT, "sezione": "[D1-P2]"}
+    v = valida(snapshot(partner_min={"origine_voce": "confermata", "citazione": ufficiale,
+                                     "valore": 2}), coppia())
+    assert voce(v, "numero_partner:min").regola.fonte == "bando"
 
 
 # ------------------------------------------------------------ composizione
@@ -927,13 +962,34 @@ def test_vincolo_sede_in_regione_senza_requisito_da_verificare():
 
 
 def test_origine_dei_requisiti():
-    assert requisito(mid(60), CALABRIA_OGNI, citazione=CIT).regola.fonte == "bando"
-    assert requisito(mid(61), CALABRIA_OGNI, origine="precheck").regola == pv.RegolaOrigine(
-        "bando"
-    )
+    bando = requisito(mid(60), CALABRIA_OGNI, origine="bando_partenariato", citazione=CIT)
+    assert bando.regola == pv.RegolaOrigine("bando", CitazioneIn.model_validate(CIT))
+    # Un pre-check (dati della scheda del catalogo, testo generato) è del
+    # creatore come un requisito manuale, con o senza citazione.
+    assert requisito(mid(61), CALABRIA_OGNI, origine="precheck").regola == pv.REGOLA_CREATORE
+    meta = {"sezione": "META", "testo": "Regione: Calabria", "verificata": False,
+            "fonte_etichetta": "Scheda del bando"}
+    assert requisito(mid(64), CALABRIA_OGNI, origine="precheck",
+                     citazione=meta).regola == pv.REGOLA_CREATORE
+    assert requisito(mid(65), CALABRIA_OGNI).regola == pv.REGOLA_CREATORE
     non_verificata = {**CIT, "verificata": False}
     assert requisito(mid(62), CALABRIA_OGNI, origine="ai_check",
                      citazione=non_verificata).regola.fonte == "creatore"
+    # Fa fede solo una pagina di un documento ufficiale: una citazione della
+    # scheda salvata come verificata (riga di prima della regola) non basta; e
+    # un requisito manuale o un pre-check non è mai «Regola del bando», anche
+    # con una citazione verificata (il server non la salva così).
+    for n, (origine, sezione) in enumerate((("bando_partenariato", "S2"),
+                                            ("regola_finanziaria", "META"),
+                                            ("ai_check", "S1"),
+                                            ("precheck", "D1-p2"),
+                                            ("manuale", "D1-p2"))):
+        riga = requisito(mid(70 + n), CALABRIA_OGNI, origine=origine,
+                         citazione={**CIT, "sezione": sezione})
+        assert riga.regola == pv.REGOLA_CREATORE, (origine, sezione)
+    # Una pagina ufficiale scritta in un'altra forma vale.
+    assert requisito(mid(69), CALABRIA_OGNI, origine="ai_check",
+                     citazione={**CIT, "sezione": "[D2-P7]"}).regola.fonte == "bando"
     # Criterio illeggibile → manuale (mai contato in automatico).
     assert requisito(mid(63), {"tipo": "sconosciuto"}).criterio.tipo == "manuale"
 

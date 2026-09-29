@@ -73,7 +73,9 @@ NUMERI_Y = ("2400000", "2.400.000", "2600000", "2.600.000", "2500000", "2.500.00
 NUMERI_X = ("3300000", "3.300.000", "3200000", "3.200.000", "1500000", "1.500.000")
 NUMERI_T: tuple[str, ...] = ()
 
-CIT = {"sezione": "S2", "testo": "Il partenariato è composto da almeno due soggetti",
+# Voce confermata: citazione ritrovata su una pagina di un documento ufficiale
+# (una voce della scheda del catalogo non si può confermare).
+CIT = {"sezione": "D1-p2", "testo": "Il partenariato è composto da almeno due soggetti",
        "verificata": True}
 
 

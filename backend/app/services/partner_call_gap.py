@@ -814,8 +814,9 @@ def citazioni_dal_server(
     - in entrambi i casi il requisito deve essere ancora quello generato
       (`_stesso_requisito`); altrimenti, e per `manuale` e `precheck`, la
       citazione del client resta come riferimento ma NON verificata (il
-      validatore attribuisce il requisito al creatore; un pre-check vale come
-      «dati del catalogo» solo se lo conferma `origini_dal_server`)."""
+      validatore attribuisce il requisito al creatore, come ogni manuale e
+      pre-check; un pre-check resta tale solo se lo conferma
+      `origini_dal_server`)."""
     fonti: dict[tuple[str, str], RequisitoBozza] = {}
     for bozza in (*da_regole, *da_ai_check):
         if bozza.rif_origine:

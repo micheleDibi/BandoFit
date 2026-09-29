@@ -160,6 +160,17 @@ class FakePrimaryWP10(FakePrimaryWP8):
         return sum(e["costo_riservato_cents"] if e["cost_cents"] is None else e["cost_cents"]
                    for e in self.esecuzioni.values())
 
+    def esecuzioni_owner(self, owner) -> int:
+        """Il conteggio per owner di fn_partenariati_ai_prenota (0034) sul
+        servizio delle bozze: non contano, senza LLM, gli errori a costo 0 (il
+        registro finto ha solo esecuzioni di oggi)."""
+        return sum(
+            1 for e in self.esecuzioni.values()
+            if e["owner"] == owner and e["servizio"] == "partner_bozza"
+            and not (not e["llm_eseguito"] and e["stato"] in ("errore", "interrotta")
+                     and e["cost_cents"] == 0)
+        )
+
     def bozze_usate(self, owner) -> int:
         """fn_partner_bozze_usate: mese solare Europe/Rome, pool dell'owner."""
         roma = ZoneInfo("Europe/Rome")
@@ -236,6 +247,11 @@ class FakePrimaryWP10(FakePrimaryWP8):
         if pending is not None:
             pending.update(stato="error", errore="interrotta", ready_at=_iso())
             self._esecuzione_interrotta(pending["esecuzione_id"])
+        limite_owner = p.get("p_limite_owner")
+        if limite_owner is not None and self.esecuzioni_owner(p["p_owner"]) >= max(
+            limite_owner, 0
+        ):
+            raise errore("ai_limite_owner")
         budget = p["p_budget_cents"]
         if budget is None or budget <= 0 or (
             self.spesa_altri() + p["p_costo_riservato_cents"] > budget
@@ -412,6 +428,7 @@ def ambiente_wp10(monkeypatch):
         "PARTNER_BOZZE_DOCUMENTO_MAX_TOKENS": "8000",
         "PARTNER_BOZZE_DOCUMENTO_TIMEOUT_SECONDS": "150",
         "PARTNER_BOZZE_DOCUMENTO_STALE_MINUTI": "10",
+        "PARTNER_BOZZE_DOCUMENTO_LIMITE_OWNER_GIORNO": "10",
     }.items():
         monkeypatch.setenv(chiave, valore)
     from app.core.config import get_settings
@@ -455,6 +472,7 @@ class TestInput:
         messaggio = build_messaggio(p["p_input"])
         assert riga["input_snapshot"] == p["p_input"]
         assert p["p_prompt_version"] == BOZZE_PROMPT_VERSION
+        assert p["p_limite_owner"] == 10  # tetto giornaliero del titolare
         testo = messaggio + json.dumps(p["p_input"], ensure_ascii=False)
         assenti(testo, [*vietati("X", "Y", "T", "Z", "W"), *VIETATI_SEMPRE])
         # e contiene la whitelist
@@ -1016,6 +1034,28 @@ class TestPrenotazione:
         [p] = db.chiamate("fn_partner_bozza_prenota")[-1:]
         assert p["p_budget_cents"] == 200
 
+    async def test_tetto_giornaliero_del_titolare(self, fondo, lavori, monkeypatch):
+        """Anche con un piano illimitato il titolare ha un tetto di bozze al
+        giorno (Settings, passato alla RPC): il budget «altri» è condiviso con
+        la bozza del profilo e le proposte della call."""
+        from app.core.config import get_settings
+
+        monkeypatch.setenv("PARTNER_BOZZE_DOCUMENTO_LIMITE_OWNER_GIORNO", "2")
+        get_settings.cache_clear()
+        db, sec = await scenario_xy(fondo)
+        db.limiti_bozze[g.OWNER["X"]] = None
+        for tipo in ("nda", "term_sheet"):
+            _, job = await avvia(db, sec, FakeAi(), lavori, tipo=tipo)
+            assert await job == "pronta"
+        e = await codice(avvia(db, sec, FakeAi(), lavori, tipo="lettera_intenti"))
+        assert (e.status_code, e.code) == (429, "ai_limite_giornaliero")
+        assert e.message == "Hai raggiunto le bozze di documenti di oggi: riprova domani"
+        assert [p["p_limite_owner"] for p in db.chiamate("fn_partner_bozza_prenota")] == [2] * 3
+        assert len(db.bozze()) == 2 and len(db.esecuzioni) == 2 and lavori == []
+        # Il tetto è del titolare: Y (un altro) prepara la sua.
+        _, job = await avvia(db, sec, FakeAi(), lavori, nome="Y")
+        job.close()
+
     async def test_riserva_al_caso_peggiore(self, fondo, lavori):
         db, sec = await scenario_xy(fondo)
         _, job = await avvia(db, sec, FakeAi(), lavori)
@@ -1107,11 +1147,13 @@ class TestImpostazioni:
 
         for chiave in ("PARTNER_BOZZE_DOCUMENTO_MAX_TOKENS",
                        "PARTNER_BOZZE_DOCUMENTO_TIMEOUT_SECONDS",
-                       "PARTNER_BOZZE_DOCUMENTO_STALE_MINUTI"):
+                       "PARTNER_BOZZE_DOCUMENTO_STALE_MINUTI",
+                       "PARTNER_BOZZE_DOCUMENTO_LIMITE_OWNER_GIORNO"):
             monkeypatch.delenv(chiave, raising=False)
         s = Settings(_env_file=None, primary_supabase_url="https://dummy.supabase.co",
                      primary_supabase_service_role_key="k",
                      secondary_supabase_url="https://d2.supabase.co",
                      secondary_supabase_anon_key="k")
         assert (s.partner_bozze_documento_max_tokens, s.partner_bozze_documento_timeout_seconds,
-                s.partner_bozze_documento_stale_minuti) == (8000, 150.0, 10)
+                s.partner_bozze_documento_stale_minuti,
+                s.partner_bozze_documento_limite_owner_giorno) == (8000, 150.0, 10, 10)

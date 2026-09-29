@@ -12,7 +12,7 @@ la v2 (6456 byte, 62 proprietà, nessun anyOf, 5 enum con 20 valori) e
 accettato gli schemi WP4/WP5.
 
 Per questo il budget STRICT qui sotto vale per gli schemi che restano in
-output strutturato strict (WP4, WP5 e il riferimento AI-check), mentre
+output strutturato strict (WP4, WP5, WP10 e il riferimento AI-check), mentre
 l'estrazione WP3 non usa più `output_config.format`: va come schema di uno
 strumento forzato NON strict (`AiCheckClient.estrai_con_strumento`, nessuna
 grammatica). Per lei resta solo un tetto più largo, come guardia contro la
@@ -47,6 +47,7 @@ from app.schemas.ai_check import ExtractionResult, MatchingResult
 from app.schemas.partenariato import PartenariatoEstrazione, convalida_tollerante
 from app.services import partenariato_service as ps
 from app.schemas.partner_profile import BozzaProfiloAi
+from app.services.partenariato_bozze_prompts import BozzaDocumentoAi
 from app.services.partner_call_prompts import BozzaTestiCall, PropostaPosizioni
 
 
@@ -111,8 +112,9 @@ BUDGET_COMUNE = {"anyOf": 4, "enum": 6, "valori_enum": 24, "profondita": 3}
 # combinazione). Strict (WP4/WP5): come l'AI-check (2,4 KB, 20 proprietà).
 TETTO_AI_CHECK = {"byte": 2500, "proprieta": 24}
 
-# Gli schemi che restano in output strutturato strict (`genera`).
-SCHEMI_STRICT = [BozzaProfiloAi, PropostaPosizioni, BozzaTestiCall]
+# Gli schemi che restano in output strutturato strict (`genera`): WP4, WP5 e
+# la bozza dei documenti del WP10.
+SCHEMI_STRICT = [BozzaProfiloAi, PropostaPosizioni, BozzaTestiCall, BozzaDocumentoAi]
 
 # WP3, strumento NON strict: nessuna grammatica, quindi nessun budget comune;
 # solo una guardia contro la crescita incontrollata, circa un terzo sopra il

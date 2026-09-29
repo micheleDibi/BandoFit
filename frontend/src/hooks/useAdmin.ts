@@ -94,6 +94,7 @@ export interface PlanPayload {
   /** Partenariati: null = illimitate, 0 = non incluse nel piano. */
   partner_calls_attive_max?: number | null;
   partner_candidature_mese?: number | null;
+  partner_bozze_mese?: number | null;
   ordering?: number;
   is_active?: boolean;
 }

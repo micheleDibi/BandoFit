@@ -2260,7 +2260,8 @@ class TestSnapshot:
         assert s["candidature_mese"]["periodo_inizio"] == inizio.isoformat()
         assert s["candidature_mese"]["periodo_fine"] == fine.isoformat()
         assert s["call_attive"] == {"limite": 1, "usate": 0, "residuo": 1}
-        assert set(s) == {"call_attive", "candidature_mese"}
+        # bozze_mese: ridefinizione della 0042 (test_migration_0042).
+        assert set(s) - {"bozze_mese"} == {"call_attive", "candidature_mese"}
 
     def test_residuo_mai_negativo_e_illimitato(self, db, sc):
         for _ in range(2):

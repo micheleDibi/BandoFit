@@ -2,6 +2,7 @@ import { CalendarClock, Check, Eye, Flag, Handshake, Lock, Pencil, Scale, Send, 
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { BannerOptIn } from "../components/partenariati/BannerOptIn";
+import { BozzeTab } from "../components/partenariati/BozzeTab";
 import { CallPubblicaCard } from "../components/partenariati/CallPubblicaCard";
 import { CallStatoBadge } from "../components/partenariati/CallStatoBadge";
 import {
@@ -44,7 +45,7 @@ import { useCompany } from "../hooks/useCompany";
 import { useSuggeriti } from "../hooks/usePartenariati";
 import { usePartenariatiVocabolario } from "../hooks/usePartenariatiVocabolario";
 import { apiErrorCode, apiErrorMessage } from "../lib/api";
-import { CALL_COPY, CANDIDATURE_COPY, PARTENARIATO_COPY } from "../lib/copy";
+import { BOZZE_COPY, CALL_COPY, CANDIDATURE_COPY, PARTENARIATO_COPY } from "../lib/copy";
 import { formatDate, formatDateTime, formatEur } from "../lib/format";
 import type {
   CandidaturaPropria,
@@ -58,27 +59,31 @@ import type {
   PartnerSuggeritoContatto,
 } from "../types";
 
-type Tab = "panoramica" | "suggeriti" | "candidature" | "consorzio";
+type Tab = "panoramica" | "suggeriti" | "candidature" | "consorzio" | "bozze";
 
 /** Schede per l'azienda che ha creato la call: i suggeriti solo quando la
  *  call è pubblicata (prima nessuna azienda la vede, dopo non si propone);
- *  candidature, inviti e consorzio da quando è stata pubblicata (restano
- *  consultabili anche dopo la chiusura). */
+ *  candidature, inviti, consorzio e bozze dei documenti (WP10: ruoli e quote
+ *  vengono dal consorzio, che nasce alla pubblicazione) da quando è stata
+ *  pubblicata (restano consultabili anche dopo la chiusura). */
 function schedeCreatore(call: CallVistaCreatore): Array<{ id: Tab; etichetta: string }> {
   const schede: Array<{ id: Tab; etichetta: string }> = [{ id: "panoramica", etichetta: "Panoramica" }];
   if (call.stato === "pubblicata") schede.push({ id: "suggeriti", etichetta: "Aziende suggerite" });
   if (call.pubblicata_at) schede.push({ id: "candidature", etichetta: "Candidature e inviti" });
   if (call.pubblicata_at) schede.push({ id: "consorzio", etichetta: "Consorzio" });
+  if (call.pubblicata_at) schede.push({ id: "bozze", etichetta: BOZZE_COPY.titolo });
   return schede;
 }
 
 /** Schede per le altre aziende: solo la controparte accettata (membro del
- *  consorzio) ha, oltre alla call, la scheda del consorzio. */
+ *  consorzio) ha, oltre alla call, le schede del consorzio e delle bozze dei
+ *  documenti. */
 function schedeAltraAzienda(call: CallPubblica): Array<{ id: Tab; etichetta: string }> {
   if (!perLaTuaAzienda(call).controparte) return [];
   return [
     { id: "panoramica", etichetta: "La call" },
     { id: "consorzio", etichetta: "Consorzio" },
+    { id: "bozze", etichetta: BOZZE_COPY.titolo },
   ];
 }
 
@@ -835,12 +840,12 @@ function Riservati({ call }: { call: CallDettaglioAltraAzienda }) {
   );
 }
 
-/** Pagina della call (`?tab=panoramica|suggeriti|candidature|consorzio`).
+/** Pagina della call (`?tab=panoramica|suggeriti|candidature|consorzio|bozze`).
  *  Per l'azienda che l'ha creata: vista completa, aziende suggerite con
- *  «Invita», candidature e inviti, consorzio; per le altre la proiezione
- *  pubblica con la propria candidatura («Candidati»), il proprio confronto,
- *  «Salva» (titolare) e «Segnala»; dopo l'accettazione anche i dettagli
- *  riservati e la scheda del consorzio. */
+ *  «Invita», candidature e inviti, consorzio, bozze dei documenti; per le
+ *  altre la proiezione pubblica con la propria candidatura («Candidati»), il
+ *  proprio confronto, «Salva» (titolare) e «Segnala»; dopo l'accettazione
+ *  anche i dettagli riservati e le schede del consorzio e delle bozze. */
 export default function CallPartenariato() {
   const { id } = useParams();
   const [params, setParams] = useSearchParams();
@@ -935,13 +940,20 @@ export default function CallPartenariato() {
         <SegnalaDialog open={segnala} onClose={() => setSegnala(false)} oggettoTipo="call" oggettoId={pubblica.id} />
       </div>
     );
-    // La controparte accettata è nel consorzio: la call e il consorzio in due
-    // schede; il titolo della call resta l'intestazione (nascosta) della pagina.
+    // La controparte accettata è nel consorzio: la call, il consorzio e le
+    // bozze dei documenti in schede; il titolo della call resta
+    // l'intestazione (nascosta) della pagina.
     corpo = tua.controparte ? (
       <div className="space-y-4">
         <h1 className="sr-only">{pubblica.titolo || "Call di partenariato"}</h1>
         <Schede etichetta="Sezioni della call" schede={schede} attiva={tab} onCambia={cambiaScheda}>
-          {tab === "consorzio" ? <ConsorzioTab callId={pubblica.id} /> : vistaCall}
+          {tab === "consorzio" ? (
+            <ConsorzioTab callId={pubblica.id} />
+          ) : tab === "bozze" ? (
+            <BozzeTab callId={pubblica.id} editable={azienda?.editable ?? false} />
+          ) : (
+            vistaCall
+          )}
         </Schede>
       </div>
     ) : (
@@ -979,6 +991,7 @@ export default function CallPartenariato() {
           {tab === "consorzio" && (
             <ConsorzioTab callId={call.id} posizioni={call.posizioni} />
           )}
+          {tab === "bozze" && <BozzeTab callId={call.id} editable={call.editable} />}
         </Schede>
       </div>
     );

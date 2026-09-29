@@ -1,6 +1,7 @@
 """Schemi dei piani: modalità di visualizzazione prezzo (migration 0010),
-alert, bullet custom e limiti del modulo partenariati (0036); coerenza tra
-PlanOut e le select del piano (PLAN_SELECT e gli embed di user_service)."""
+alert, bullet custom e limiti del modulo partenariati (0036, bozze AI 0042);
+coerenza tra PlanOut e le select del piano (PLAN_SELECT e gli embed di
+user_service)."""
 
 import ast
 import inspect
@@ -128,10 +129,10 @@ class TestFeaturesOverride:
 
 
 class TestLimitiPartenariato:
-    """0036: None = illimitato, 0 = esclusa (semantica OPPOSTA ad
-    alert_ritardo_giorni), default 0 come la colonna."""
+    """0036 (e 0042 per le bozze AI): None = illimitato, 0 = esclusa
+    (semantica OPPOSTA ad alert_ritardo_giorni), default 0 come la colonna."""
 
-    CAMPI = ("partner_calls_attive_max", "partner_candidature_mese")
+    CAMPI = ("partner_calls_attive_max", "partner_candidature_mese", "partner_bozze_mese")
 
     @pytest.mark.parametrize("campo", CAMPI)
     def test_create_default_zero(self, campo):
@@ -178,18 +179,26 @@ class TestLimitiPartenariato:
             id=1, nome="X", slug="x", prezzo_annuale=Decimal("0"), ai_check=0,
             alert_attivo=False, num_account_aziendali=1, ordering=0, is_active=True,
         )
-        assert plan.partner_calls_attive_max == 0
-        assert plan.partner_candidature_mese == 0
+        for campo in self.CAMPI:
+            assert getattr(plan, campo) == 0
 
     def test_out_conserva_null(self):
         plan = PlanOut(
             id=1, nome="X", slug="x", prezzo_annuale=Decimal("0"), ai_check=0,
             alert_attivo=False, num_account_aziendali=1, ordering=0, is_active=True,
-            partner_calls_attive_max=None, partner_candidature_mese=None,
+            **{campo: None for campo in self.CAMPI},
         )
         dump = plan.model_dump(mode="json")
-        assert dump["partner_calls_attive_max"] is None
-        assert dump["partner_candidature_mese"] is None
+        for campo in self.CAMPI:
+            assert dump[campo] is None
+
+    def test_bozze_indipendenti_dagli_altri_limiti(self):
+        # Il limite delle bozze (0042) non eredita i valori degli altri due:
+        # un piano può includere le candidature ma non le bozze, e viceversa.
+        plan = make_create(partner_candidature_mese=None, partner_bozze_mese=0)
+        assert (plan.partner_candidature_mese, plan.partner_bozze_mese) == (None, 0)
+        changes = PlanUpdate(partner_bozze_mese=30).model_dump(mode="json", exclude_unset=True)
+        assert changes == {"partner_bozze_mese": 30}
 
 
 def _embed_del_piano(sorgente: str) -> list[set[str]]:

@@ -388,6 +388,17 @@ RPC_ERRORS: dict[str, tuple[int, str, str]] = {
         "motivo_obbligatorio",
         "Indica il motivo della revoca (al massimo 500 caratteri)",
     ),
+    # WP10 — bozze AI dei documenti del partenariato (migration 0042). La RPC
+    # di prenotazione riusa anche detail già mappati con testi di altri WP
+    # (`funzione_non_inclusa` delle candidature, `bozza_in_corso` del profilo,
+    # `attore_non_titolare` del profilo): il servizio delle bozze li sostituisce
+    # con i suoi, come `_ERRORI_CALL` nel WP5. `parametri_non_validi` resta NON
+    # mappato (il servizio valida prima).
+    "bozze_esaurite": (
+        409,
+        "bozze_esaurite",
+        "Hai usato tutte le bozze di documenti di questo mese",
+    ),
 }
 
 

@@ -246,6 +246,15 @@ class Settings(BaseSettings):
     partner_candidature_limite_giorno: int = 10
     partner_inviti_limite_giorno: int = 50
     partner_messaggi_limite_ora: int = 120
+    # Bozze AI dei documenti del partenariato (WP10, docs/partenariati.md W4):
+    # job asincrono sul budget «altri», stesso modello delle estrazioni. Il
+    # limite è quello mensile del piano (`partner_bozze_mese`, nella RPC di
+    # prenotazione), qui solo tetto dei token di output (ragionamento
+    # compreso), timeout della chiamata e minuti dopo i quali una bozza ancora
+    # in preparazione è orfana (failsafe in lettura e nello scheduler).
+    partner_bozze_documento_max_tokens: int = 8000
+    partner_bozze_documento_timeout_seconds: float = 150.0
+    partner_bozze_documento_stale_minuti: int = 10
 
     @model_validator(mode="after")
     def _segreti_obbligatori_in_produzione(self) -> "Settings":

@@ -53,6 +53,9 @@ class PlanOut(BaseModel):
     # un embed senza le colonne vale «esclusa», mai «illimitato».
     partner_calls_attive_max: int | None = 0
     partner_candidature_mese: int | None = 0
+    # Bozze AI dei documenti del partenariato al mese (0042, WP10): stessa
+    # semantica e stesso default fail-closed dei due limiti sopra.
+    partner_bozze_mese: int | None = 0
     ordering: int
     is_active: bool
     updated_at: datetime | None = None
@@ -76,6 +79,7 @@ class PlanCreate(BaseModel):
     # Partenariati: 0 = esclusa (default, come la colonna), None = illimitato.
     partner_calls_attive_max: int | None = Field(default=0, ge=0)
     partner_candidature_mese: int | None = Field(default=0, ge=0)
+    partner_bozze_mese: int | None = Field(default=0, ge=0)
     ordering: int = 0
     is_active: bool = True
 
@@ -107,6 +111,7 @@ class PlanUpdate(BaseModel):
     # Partenariati: None esplicito = illimitato, 0 = esclusa; assenti = invariati.
     partner_calls_attive_max: int | None = Field(default=None, ge=0)
     partner_candidature_mese: int | None = Field(default=None, ge=0)
+    partner_bozze_mese: int | None = Field(default=None, ge=0)
     ordering: int | None = None
     is_active: bool | None = None
 

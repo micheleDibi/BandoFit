@@ -81,7 +81,11 @@ def limiti_piano(db, slug: str) -> tuple:
 
 
 def limiti(db, owner: str | None) -> dict:
-    return db.execute("select public.fn_partenariati_limiti(%s::uuid)", (owner,)).fetchone()[0]
+    """I campi della 0036: bozze_mese (ridefinizione della 0042) lo copre
+    test_migration_0042."""
+    esito = db.execute("select public.fn_partenariati_limiti(%s::uuid)", (owner,)).fetchone()[0]
+    esito.pop("bozze_mese", None)
+    return esito
 
 
 def blocco_do() -> str:
@@ -238,7 +242,7 @@ class TestLimiti:
         # null JSON, non assente: il chiamante distingue illimitato da mancante.
         testo = db.execute("select public.fn_partenariati_limiti(%s::uuid)::text",
                            (owner,)).fetchone()[0]
-        assert json.loads(testo) == esito and '"calls_attive_max": null' in testo
+        assert json.loads(testo).items() >= esito.items() and '"calls_attive_max": null' in testo
 
     def test_legge_il_piano_dal_vivo(self, db):
         owner = new_user(db, "smart")

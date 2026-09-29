@@ -158,6 +158,9 @@ export interface Plan {
   partner_calls_attive_max: number | null;
   /** Partenariati (0036): candidature al mese solare. null = illimitate, 0 = non incluse. */
   partner_candidature_mese: number | null;
+  /** Partenariati (0042): bozze AI dei documenti (lettera d'intenti, NDA,
+   *  term sheet) al mese solare. null = illimitate, 0 = non incluse. */
+  partner_bozze_mese: number | null;
   ordering: number;
   is_active: boolean;
   updated_at: string | null;
@@ -1168,6 +1171,10 @@ export interface PartenariatiEntitlement {
   /** Call pubblicate o sospese (le bozze non contano). */
   call_attive: PartenariatiLimite;
   candidature_mese: PartenariatiLimiteMese;
+  /** Bozze AI dei documenti del mese (0042; gli errori pagati contano).
+   *  null = dato non disponibile (NON «illimitate»: quello è `limite`
+   *  null): la UI non mostra il contatore, il limite lo applica il server. */
+  bozze_mese: PartenariatiLimiteMese | null;
 }
 
 /** Le quote dell'account in un'unica risposta: il frontend legge, non
@@ -3529,4 +3536,55 @@ export interface CallVistaProgettista {
   chiusa_at: string | null;
   /** null per una bozza (il consorzio nasce alla pubblicazione). */
   consorzio: Consorzio | null;
+}
+
+// ---- WP10: bozze AI dei documenti del partenariato -----------------------------------
+
+export type TipoBozzaDocumento = "lettera_intenti" | "nda" | "term_sheet";
+
+/** `pending` → `ready | error`: una sola bozza in preparazione per azienda ×
+ *  call × tipo. */
+export type StatoBozzaDocumento = "pending" | "ready" | "error";
+
+export interface SezioneBozzaDocumento {
+  titolo: string;
+  testo: string;
+}
+
+/** Una bozza di documento dell'azienda attiva su una call (whitelist del
+ *  server). Titolo, sezioni e note solo quando è pronta, `errore` (il
+ *  messaggio per l'utente) solo quando non è riuscita. Le aziende compaiono
+ *  con segnaposto («[Capofila]», «[Partner 1]», …) che l'utente sostituisce
+ *  nel documento finale; il nome della propria azienda solo se l'ha chiesto.
+ *  `avvisi` = ciò che il controllo automatico ha tolto o sostituito. */
+export interface BozzaDocumento {
+  id: string;
+  tipo: TipoBozzaDocumento;
+  stato: StatoBozzaDocumento;
+  avviata_at: string;
+  conclusa_at: string | null;
+  errore: string | null;
+  includi_nome_azienda: boolean;
+  titolo: string | null;
+  sezioni: SezioneBozzaDocumento[];
+  note_per_l_utente: string[];
+  avvisi: string[];
+  /** Il testo fisso della piattaforma, mai generato dal modello. */
+  disclaimer: string;
+}
+
+/** `GET /partenariati/call/{id}/bozze`: le bozze dell'azienda attiva sulla
+ *  call, dalla più recente. `editable` = può avviarne di nuove (titolare);
+ *  il contatore del mese sta in `/me/entitlements.partenariati.bozze_mese`. */
+export interface BozzeCall {
+  bozze: BozzaDocumento[];
+  editable: boolean;
+  disclaimer: string;
+}
+
+/** `POST /partenariati/call/{id}/bozze` (solo il titolare, 202). */
+export interface AvviaBozzaInput {
+  tipo: TipoBozzaDocumento;
+  /** Il nome della PROPRIA azienda nella bozza: solo se scelto (default no). */
+  includi_nome_azienda: boolean;
 }

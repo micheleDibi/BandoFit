@@ -64,6 +64,14 @@ Passo del WP9:
   `fn_partner_call_validazioni_da_ricalcolare`), si ricalcola con la vista
   del creatore e si salva (`fn_partner_call_validazione_salva`), ogni call
   isolata. Il resto alla notte dopo.
+
+Passo del WP10:
+- `failsafe_bozze`: le bozze AI dei documenti rimaste `pending` oltre
+  `partner_bozze_documento_stale_minuti` diventano `error` (`interrotta`,
+  costo ignoto: contano nel limite mensile) e la loro esecuzione si chiude con
+  una riga `timeout_unknown` nel registro consumi; lo stesso per le
+  esecuzioni rimaste in corso senza una bozza in preparazione
+  (`fn_partner_bozza_chiudi_stale`).
 """
 
 import asyncio
@@ -151,6 +159,18 @@ async def failsafe_ai_call(primary) -> int:
     resp = await primary.rpc(
         "fn_partner_call_ai_chiudi_stale",
         {"p_minuti": get_settings().partner_call_ai_stale_minuti},
+    ).execute()
+    return int(resp.data or 0)
+
+
+async def failsafe_bozze(primary) -> int:
+    """Bozze AI dei documenti orfane (job perso in un riavvio) → errore
+    `interrotta`; la riserva della loro esecuzione resta nel budget del giorno
+    in cui sono partite e va nel registro consumi come `timeout_unknown`.
+    Ritorna quante bozze ed esecuzioni ha chiuso."""
+    resp = await primary.rpc(
+        "fn_partner_bozza_chiudi_stale",
+        {"p_minuti": get_settings().partner_bozze_documento_stale_minuti},
     ).execute()
     return int(resp.data or 0)
 
@@ -463,6 +483,7 @@ async def esegui_run(primary, secondary, ai, oggi: date, adesso: datetime | None
         ("failsafe_estrazioni", lambda: failsafe_estrazioni(primary)),
         ("failsafe_bozze_profilo", lambda: failsafe_bozze_profilo(primary)),
         ("failsafe_ai_call", lambda: failsafe_ai_call(primary)),
+        ("failsafe_bozze", lambda: failsafe_bozze(primary)),
         ("chiusura_call", lambda: chiusura_call(primary, secondary, oggi)),
         ("scadenza_inviti", lambda: scadenza_inviti(primary)),
         ("batch_estrazioni", lambda: batch_estrazioni(primary, secondary, ai, oggi)),

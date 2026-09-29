@@ -45,10 +45,16 @@ class PartenariatiLimiteMese(PartenariatiLimite):
 
 class PartenariatiEntitlement(BaseModel):
     """Snapshot di `fn_partenariati_snapshot` (pool del titolare su tutte le
-    sue aziende): call attive (pubblicate o sospese) e candidature del mese."""
+    sue aziende): call attive (pubblicate o sospese), candidature del mese e
+    bozze AI dei documenti del mese (0042, WP10)."""
 
     call_attive: PartenariatiLimite
     candidature_mese: PartenariatiLimiteMese
+    # Facoltativo: uno snapshot anteriore alla 0042 non ha la chiave e non
+    # deve invalidare gli altri due limiti. None = dato non disponibile (non
+    # «illimitato»): la UI non mostra il contatore, il limite lo applica
+    # comunque la RPC di prenotazione della bozza.
+    bozze_mese: PartenariatiLimiteMese | None = None
 
 
 class EntitlementsOut(BaseModel):

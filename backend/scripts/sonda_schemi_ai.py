@@ -12,10 +12,11 @@ Uso (da `backend/`, con la chiave SOLO nell'ambiente della shell):
     # opzioni: --model M, --solo estrazione,testi, --max-tokens 64, --timeout 60
 
 Per ciascuno schema del modulo (estrazione WP3, bozza del profilo WP4, posizioni e
-testi della call WP5), importato dal codice così la sonda prova sempre la versione
-corrente, con `--conferma` invia UNA richiesta minima con lo stesso percorso della
-produzione, nessun retry: per WP4/WP5 `AiCheckClient.genera` (output strutturato
-strict: `output_config.format` con lo schema trasformato dall'SDK), per l'estrazione
+testi della call WP5, bozza di un documento del partenariato WP10), importato dal
+codice così la sonda prova sempre la versione corrente, con `--conferma` invia UNA
+richiesta minima con lo stesso percorso della produzione, nessun retry: per
+WP4/WP5/WP10 `AiCheckClient.genera` (output strutturato strict:
+`output_config.format` con lo schema trasformato dall'SDK), per l'estrazione
 WP3 `AiCheckClient.estrai_con_strumento` (strumento forzato NON strict con lo stesso
 schema, nome, descrizione e convalida della produzione: nessuna grammatica). System
 «Rispondi con un JSON conforme allo schema con valori vuoti», user «prova»,
@@ -105,6 +106,7 @@ def schemi_del_modulo() -> list[SchemaAi]:
     codice (sempre la versione corrente)."""
     from app.schemas.partenariato import PartenariatoEstrazione, convalida_tollerante
     from app.schemas.partner_profile import BozzaProfiloAi
+    from app.services.partenariato_bozze_prompts import BozzaDocumentoAi
     from app.services.partenariato_prompts import (
         DESCRIZIONE_STRUMENTO_ESTRAZIONE,
         STRUMENTO_ESTRAZIONE,
@@ -120,6 +122,8 @@ def schemi_del_modulo() -> list[SchemaAi]:
         SchemaAi("bozza_profilo", "WP4 bozza AI del profilo partner", BozzaProfiloAi),
         SchemaAi("posizioni", "WP5 proposta delle posizioni della call", PropostaPosizioni),
         SchemaAi("testi", "WP5 bozza dei testi della call", BozzaTestiCall),
+        SchemaAi("bozza_documento", "WP10 bozza di un documento del partenariato",
+                 BozzaDocumentoAi),
     ]
 
 

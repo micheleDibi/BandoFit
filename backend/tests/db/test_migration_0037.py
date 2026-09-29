@@ -2624,6 +2624,7 @@ class TestSnapshot:
             "select date_trunc('month', now() at time zone 'Europe/Rome')::date, "
             "(date_trunc('month', now() at time zone 'Europe/Rome') + interval '1 month' "
             "- interval '1 day')::date").fetchone()
+        s.pop("bozze_mese", None)  # ridefinizione della 0042: test_migration_0042
         assert s == {
             "call_attive": {"limite": 1, "usate": 0, "residuo": 1},
             "candidature_mese": {"limite": 5, "usate": 0, "residuo": 5,

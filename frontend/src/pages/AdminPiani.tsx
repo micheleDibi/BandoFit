@@ -53,6 +53,7 @@ interface PlanFormState {
   features_override: string;
   partner_calls_attive_max: LimitePartenariatoForm;
   partner_candidature_mese: LimitePartenariatoForm;
+  partner_bozze_mese: LimitePartenariatoForm;
   ordering: string;
   is_active: boolean;
 }
@@ -75,6 +76,7 @@ function toFormState(plan: Plan): PlanFormState {
     features_override: (plan.features_override ?? []).join("\n"),
     partner_calls_attive_max: limiteDaPiano(plan.partner_calls_attive_max),
     partner_candidature_mese: limiteDaPiano(plan.partner_candidature_mese),
+    partner_bozze_mese: limiteDaPiano(plan.partner_bozze_mese),
     ordering: String(plan.ordering),
     is_active: plan.is_active,
   };
@@ -96,6 +98,7 @@ const EMPTY_FORM: PlanFormState = {
   // Come il default della colonna: un piano nuovo nasce senza partenariati.
   partner_calls_attive_max: { illimitato: false, limite: "0" },
   partner_candidature_mese: { illimitato: false, limite: "0" },
+  partner_bozze_mese: { illimitato: false, limite: "0" },
   ordering: "10",
   is_active: true,
 };
@@ -121,6 +124,8 @@ function validate(form: PlanFormState): string | null {
     return "Il limite di call di partenariato attive non è valido (intero ≥ 0, oppure «Illimitate»).";
   if (!limiteValido(form.partner_candidature_mese))
     return "Il limite di candidature al mese non è valido (intero ≥ 0, oppure «Illimitate»).";
+  if (!limiteValido(form.partner_bozze_mese))
+    return "Il limite di bozze di documenti al mese non è valido (intero ≥ 0, oppure «Illimitate»).";
   return null;
 }
 
@@ -148,6 +153,7 @@ function toPayload(form: PlanFormState): PlanPayload {
     })(),
     partner_calls_attive_max: limiteToApi(form.partner_calls_attive_max),
     partner_candidature_mese: limiteToApi(form.partner_candidature_mese),
+    partner_bozze_mese: limiteToApi(form.partner_bozze_mese),
     ordering: Number(form.ordering) || 0,
     is_active: form.is_active,
   };
@@ -347,6 +353,13 @@ function PlanFormFields({
         inputLabel="Numero massimo di candidature al mese"
         value={form.partner_candidature_mese}
         onChange={(v) => setForm((f) => ({ ...f, partner_candidature_mese: v }))}
+      />
+      <LimitePartenariatoField
+        legend="Bozze di documenti al mese"
+        helper="Bozze generate con l'AI (lettera d'intenti, NDA, term sheet) in un mese, contando tutte le aziende del cliente. Contano anche quelle fallite dopo la chiamata all'AI, tranne quando il servizio AI la rifiuta subito (ad esempio perché sovraccarico). 0 = non incluse nel piano."
+        inputLabel="Numero massimo di bozze di documenti al mese"
+        value={form.partner_bozze_mese}
+        onChange={(v) => setForm((f) => ({ ...f, partner_bozze_mese: v }))}
       />
       <div className="sm:col-span-2">
         <TextareaField

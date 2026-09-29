@@ -246,7 +246,8 @@ class TestClaim:
         dopo = datetime(2026, 9, 28, 6, 0, tzinfo=ZoneInfo("Europe/Rome"))
         esiti = await sched.esegui_se_dovuto(db, SecondarioVietato(), FakeAi(), dopo)
         assert esiti == {"failsafe_estrazioni": 2, "failsafe_bozze_profilo": 2,
-                         "failsafe_ai_call": 2, "chiusura_call": NESSUNA_CALL,
+                         "failsafe_ai_call": 2, "failsafe_bozze": 2,
+                         "chiusura_call": NESSUNA_CALL,
                          "scadenza_inviti": 2,
                          "batch_estrazioni": {"eseguite": 0, "motivo": "spento"},
                          **ESITI_WP6, **ESITI_WP9}
@@ -272,7 +273,8 @@ class TestPassi:
         db = FakePrimary()
         esiti = await sched.esegui_run(db, object(), FakeAi(), OGGI)
         assert esiti == {"failsafe_estrazioni": "errore", "failsafe_bozze_profilo": 2,
-                         "failsafe_ai_call": 2, "chiusura_call": NESSUNA_CALL,
+                         "failsafe_ai_call": 2, "failsafe_bozze": 2,
+                         "chiusura_call": NESSUNA_CALL,
                          "scadenza_inviti": 2, "batch_estrazioni": {"eseguite": 0},
                          **ESITI_WP6, **ESITI_WP9}
         assert chiamato == [OGGI]

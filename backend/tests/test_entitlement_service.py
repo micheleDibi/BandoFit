@@ -1,7 +1,7 @@
 """Snapshot entitlement lato backend: risoluzione dell'owner (collegato
 attivo → titolare, pool condiviso), mapping difensivo dello snapshot RPC,
 campi del membro (budget/consumi, WP6) e limiti del modulo partenariati
-(0036/0037: solo a flag acceso, None se la RPC fallisce)."""
+(0036/0037, bozze AI 0042: solo a flag acceso, None se la RPC fallisce)."""
 
 import logging
 from types import SimpleNamespace
@@ -24,12 +24,18 @@ SNAPSHOT = {
                   "periodo_inizio": "2026-01-01", "periodo_fine": "2027-01-01"},
 }
 
-# Forma di fn_partenariati_snapshot (0037): piano Pro con una call pubblicata.
+# Forma di fn_partenariati_snapshot (0042): piano Pro con una call pubblicata
+# e due bozze AI generate nel mese.
 PARTENARIATI = {
     "call_attive": {"limite": 3, "usate": 1, "residuo": 2},
     "candidature_mese": {"limite": 20, "usate": 0, "residuo": 20,
                          "periodo_inizio": "2026-09-01", "periodo_fine": "2026-09-30"},
+    "bozze_mese": {"limite": 10, "usate": 2, "residuo": 8,
+                   "periodo_inizio": "2026-09-01", "periodo_fine": "2026-09-30"},
 }
+
+# La stessa risposta prima della 0042 (fn_partenariati_snapshot della 0039).
+PARTENARIATI_PRIMA_0042 = {k: v for k, v in PARTENARIATI.items() if k != "bozze_mese"}
 
 _OBBLIGATORIE = {
     "PRIMARY_SUPABASE_URL": "https://dummy.supabase.co",
@@ -248,3 +254,86 @@ class TestPartenariati:
         out = EntitlementsOut(editable=True, seats=SNAPSHOT["seats"],
                               companies=SNAPSHOT["companies"], ai_checks=SNAPSHOT["ai_checks"])
         assert out.partenariati is None
+
+
+class TestBozzeMese:
+    """Limite mensile delle bozze AI (0042): `bozze_mese` nello snapshot
+    ridefinito, stessa forma di `candidature_mese`."""
+
+    async def test_bozze_nello_snapshot(self, membership, flag):
+        flag(True)
+        out = await entitlement_service.get_entitlements(FakePrimary(), USER)
+        bozze = out.partenariati.bozze_mese
+        assert (bozze.limite, bozze.usate, bozze.residuo) == (10, 2, 8)
+        assert (bozze.periodo_inizio, bozze.periodo_fine) == ("2026-09-01", "2026-09-30")
+        dump = out.model_dump(mode="json")["partenariati"]["bozze_mese"]
+        assert dump == PARTENARIATI["bozze_mese"]
+
+    async def test_collegato_legge_le_bozze_del_titolare(self, membership, flag):
+        flag(True)
+        membership["value"] = {"id": "m-1", "status": "active", "parent_id": PARENT_ID,
+                               "ai_check_budget": None}
+        primary = FakePrimary()
+        out = await entitlement_service.get_entitlements(primary, USER)
+        assert primary.rpcs[-1] == ("fn_partenariati_snapshot", {"p_owner": PARENT_ID})
+        assert out.partenariati.bozze_mese.usate == 2
+
+    @pytest.mark.parametrize(("bozze", "atteso"), [
+        # None = illimitate: residuo None, mai 0.
+        ({"limite": None, "usate": 7, "residuo": None}, (None, 7, None)),
+        # 0 = non incluse nel piano (Gratuito, default della colonna).
+        ({"limite": 0, "usate": 0, "residuo": 0}, (0, 0, 0)),
+        # Esaurite (gli errori pagati contano: li somma già la RPC).
+        ({"limite": 3, "usate": 3, "residuo": 0}, (3, 3, 0)),
+    ])
+    async def test_illimitate_non_incluse_esaurite(self, membership, flag, bozze, atteso):
+        flag(True)
+        dati = {**PARTENARIATI, "bozze_mese": {**bozze, "periodo_inizio": "2026-09-01",
+                                               "periodo_fine": "2026-09-30"}}
+        out = await entitlement_service.get_entitlements(FakePrimary(partenariati=dati), USER)
+        b = out.partenariati.bozze_mese
+        assert (b.limite, b.usate, b.residuo) == atteso
+
+    async def test_snapshot_prima_della_0042(self, membership, flag):
+        # Backend nuovo su un DB senza la 0042: gli altri due limiti restano
+        # validi, le bozze valgono «dato non disponibile» (null, non illimitate).
+        flag(True)
+        out = await entitlement_service.get_entitlements(
+            FakePrimary(partenariati=PARTENARIATI_PRIMA_0042), USER)
+        assert out.partenariati is not None
+        assert out.partenariati.call_attive.limite == 3
+        assert out.partenariati.candidature_mese.limite == 20
+        assert out.partenariati.bozze_mese is None
+        # La chiave c'è comunque nel JSON, a null.
+        assert out.model_dump(mode="json")["partenariati"]["bozze_mese"] is None
+
+    async def test_bozze_null_esplicito(self, membership, flag):
+        flag(True)
+        dati = {**PARTENARIATI, "bozze_mese": None}
+        out = await entitlement_service.get_entitlements(FakePrimary(partenariati=dati), USER)
+        assert out.partenariati.bozze_mese is None
+        assert out.partenariati.call_attive.usate == 1
+
+    async def test_bozze_senza_periodo(self, membership, flag):
+        flag(True)
+        dati = {**PARTENARIATI, "bozze_mese": {"limite": 10, "usate": 0, "residuo": 10}}
+        out = await entitlement_service.get_entitlements(FakePrimary(partenariati=dati), USER)
+        assert out.partenariati.bozze_mese.periodo_inizio is None
+        assert out.partenariati.bozze_mese.residuo == 10
+
+    @pytest.mark.parametrize("bozze", [
+        {"limite": "tante", "usate": 0, "residuo": 1},
+        {"limite": 3, "residuo": 3},
+        "dieci",
+    ])
+    async def test_bozze_di_forma_inattesa_come_gli_altri_limiti(self, membership, flag,
+                                                                  bozze, caplog):
+        # Forma inattesa = snapshot non affidabile: None come per gli altri
+        # limiti (la risposta di /me/entitlements non si rompe).
+        flag(True)
+        dati = {**PARTENARIATI, "bozze_mese": bozze}
+        with caplog.at_level(logging.WARNING, logger="bandofit.entitlements"):
+            out = await entitlement_service.get_entitlements(FakePrimary(partenariati=dati), USER)
+        assert out.partenariati is None
+        assert out.seats.effettivo == 5
+        assert "limiti di partenariato" in caplog.text

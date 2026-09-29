@@ -8,9 +8,10 @@ famiglia). Nessun servizio deve più derivare un limite leggendo le colonne del
 piano: chi ha bisogno del numero passa da qui o dai wrapper SQL
 (`fn_family_limit` / `fn_effective_max_aziende`).
 
-I limiti del modulo partenariati (0036/0037) hanno una semantica diversa
-(None = illimitato, 0 = esclusa) e una RPC propria (`fn_partenariati_snapshot`):
-si aggiungono allo snapshot solo con il flag acceso e non lo rompono mai.
+I limiti del modulo partenariati (0036/0037, bozze AI dalla 0042) hanno una
+semantica diversa (None = illimitato, 0 = esclusa) e una RPC propria
+(`fn_partenariati_snapshot`): si aggiungono allo snapshot solo con il flag
+acceso e non lo rompono mai.
 """
 
 import logging

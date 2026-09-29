@@ -53,6 +53,8 @@ def risposta_strumento(input_, nome: str = "registra_regole_partenariato",
 
 
 TESTI_OK = json.dumps({"titolo": "", "descrizione_pubblica": "", "profilo_partner_ideale": ""})
+BOZZA_OK = json.dumps({"titolo": "", "sezioni": [], "note_per_l_utente": []})
+NOMI = ("estrazione", "bozza_profilo", "posizioni", "testi", "bozza_documento")
 TRONCATA = risposta('{"posizioni": [', stop_reason="max_tokens", tok_in=1_500, tok_out=64)
 
 
@@ -116,7 +118,7 @@ def sdk(monkeypatch):
     return finto
 
 
-def esiti(nomi=("estrazione", "bozza_profilo", "posizioni", "testi"), max_tokens=64):
+def esiti(nomi=NOMI, max_tokens=64):
     voci = [v for v in sonda.schemi_del_modulo() if v.nome in nomi]
     return sonda.prepara(voci, MODELLO_DEFAULT, max_tokens)
 
@@ -136,13 +138,13 @@ def test_senza_conferma_nessuna_chiamata(capsys, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY")  # senza --conferma non serve
     assert sonda.main([]) == 0
     out = capsys.readouterr().out
-    for nome in ("estrazione", "bozza_profilo", "posizioni", "testi"):
+    for nome in NOMI:
         assert f"[{nome}]" in out
     assert "schema inviato:" in out and "byte" in out
     assert "Nessuna chiamata" in out and "RIFIUTATO" not in out
     # il modo di ciascuno schema: l'estrazione WP3 come strumento non strict
     assert out.count("modo: strumento forzato non strict") == 1
-    assert out.count("modo: output strutturato strict") == 3
+    assert out.count("modo: output strutturato strict") == 4
     blocco_estrazione = out.split("[estrazione]", 1)[1].split("[bozza_profilo]", 1)[0]
     assert "modo: strumento forzato non strict" in blocco_estrazione
 
@@ -150,10 +152,13 @@ def test_senza_conferma_nessuna_chiamata(capsys, monkeypatch):
 def test_schemi_importati_dal_codice():
     from app.schemas.partenariato import PartenariatoEstrazione
     from app.schemas.partner_profile import BozzaProfiloAi
+    from app.services.partenariato_bozze_prompts import BozzaDocumentoAi
     from app.services.partner_call_prompts import BozzaTestiCall, PropostaPosizioni
 
     assert [v.modello for v in sonda.schemi_del_modulo()] == [
-        PartenariatoEstrazione, BozzaProfiloAi, PropostaPosizioni, BozzaTestiCall]
+        PartenariatoEstrazione, BozzaProfiloAi, PropostaPosizioni, BozzaTestiCall,
+        BozzaDocumentoAi]
+    assert [v.nome for v in sonda.schemi_del_modulo()] == list(NOMI)
     # l'estrazione con lo stesso strumento e la stessa convalida della produzione
     from app.schemas.partenariato import convalida_tollerante
     from app.services.partenariato_prompts import (
@@ -201,11 +206,13 @@ async def test_classificazione(sdk):
         errore_http(400, "invalid_request_error", "max_tokens: field required"),
         TRONCATA,
         risposta(TESTI_OK),
+        risposta(BOZZA_OK),
     ]
     lista = esiti()
     assert await sonda_con(sdk, lista) is None
-    estrazione, profilo, posizioni, testi = lista
-    assert [e.esito for e in lista] == ["RIFIUTATO", "ERRORE", "ACCETTATO", "ACCETTATO"]
+    estrazione, profilo, posizioni, testi, bozza = lista
+    assert [e.esito for e in lista] == ["RIFIUTATO", "ERRORE", "ACCETTATO", "ACCETTATO",
+                                        "ACCETTATO"]
     assert estrazione.stato_http == 400 and "grammar is too large" in estrazione.dettaglio
     assert "invalid_request_error" in estrazione.dettaglio
     # 400 senza usage: contata la riserva, probabile 0
@@ -218,6 +225,9 @@ async def test_classificazione(sdk):
     assert posizioni.costo_probabile_cents is None
     assert testi.dettaglio == "risposta conforme allo schema"
     assert testi.costo_cents == costo_cents(MODELLO_DEFAULT, 900, 20)
+    # WP10: la bozza di un documento, output strutturato strict
+    assert bozza.voce.modo == "output strutturato strict"
+    assert bozza.dettaglio == "risposta conforme allo schema"
 
 
 async def test_richiesta_minima_con_lo_stesso_formato(sdk):
@@ -227,10 +237,10 @@ async def test_richiesta_minima_con_lo_stesso_formato(sdk):
         STRUMENTO_ESTRAZIONE,
     )
 
-    sdk.copione = [risposta_strumento({"modalita": None})] + [risposta(TESTI_OK)] * 3
+    sdk.copione = [risposta_strumento({"modalita": None})] + [risposta(TESTI_OK)] * 4
     lista = esiti()
     await sonda_con(sdk, lista)
-    assert len(sdk.richieste) == 4 and sdk.timeout == [60.0] * 4
+    assert len(sdk.richieste) == 5 and sdk.timeout == [60.0] * 5
     for e, richiesta in zip(lista, sdk.richieste, strict=True):
         assert richiesta["model"] == MODELLO_DEFAULT and richiesta["max_tokens"] == 64
         assert richiesta["system"] == "Rispondi con un JSON conforme allo schema con valori vuoti"
@@ -251,7 +261,7 @@ async def test_richiesta_minima_con_lo_stesso_formato(sdk):
     assert sonda.byte_schema(strumento["input_schema"]) == e.byte
     # {} con la convalida tollerante è un'estrazione vuota valida
     assert e.esito == "ACCETTATO" and e.dettaglio == "risposta conforme allo schema"
-    # WP4/WP5: output strutturato strict, come prima
+    # WP4/WP5/WP10: output strutturato strict, come prima
     for e, richiesta in strict:
         formato = richiesta["output_config"]["format"]
         assert formato["type"] == "json_schema"
@@ -289,7 +299,7 @@ async def test_chiave_sbagliata_ferma_le_altre(sdk):
     lista = esiti()
     fermato = await sonda_con(sdk, lista)
     assert "HTTP 401" in fermato and len(sdk.richieste) == 1
-    assert [e.esito for e in lista] == ["ERRORE"] + ["NON_PROVATO"] * 3
+    assert [e.esito for e in lista] == ["ERRORE"] + ["NON_PROVATO"] * 4
     assert all(e.chiamata is False for e in lista[1:])
     # 4xx non transitorio senza usage: riserva contata, probabile 0 (come in
     # produzione e nella valutazione locale, non solo per il 400)
@@ -349,7 +359,7 @@ def test_tetto_interno_di_20_centesimi():
 
 def test_cli_con_conferma(sdk, capsys):
     sdk.copione = [errore_http(400, "invalid_request_error", GRAMMATICA),
-                   risposta("{}"), TRONCATA, risposta(TESTI_OK)]
+                   risposta("{}"), TRONCATA, risposta(TESTI_OK), risposta(BOZZA_OK)]
     assert sonda.main(["--conferma"]) == 1  # uno schema rifiutato
     catturato = capsys.readouterr()
     out = catturato.out
@@ -357,8 +367,8 @@ def test_cli_con_conferma(sdk, capsys):
     assert "esito: RIFIUTATO — HTTP 400 invalid_request_error: The compiled grammar" in out
     assert "probabile 0: richiesta rifiutata prima della generazione" in out
     assert "Riepilogo: estrazione RIFIUTATO; bozza_profilo ACCETTATO; posizioni ACCETTATO; " \
-           "testi ACCETTATO" in out
-    assert "tetto di 20" in out and "chiamate 4" in out
+           "testi ACCETTATO; bozza_documento ACCETTATO" in out
+    assert "tetto di 20" in out and "chiamate 5" in out
     assert CHIAVE not in out + catturato.err
     assert sdk.chiuso is True
 

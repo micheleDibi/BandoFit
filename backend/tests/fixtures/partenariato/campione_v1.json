@@ -188,8 +188,8 @@
         "forme": [
           "accordo_partenariato"
         ],
-        "verificato_da": "claude (da validare da Michele)",
-        "verificato_at": "2026-09-28",
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria)",
+        "verificato_at": "2026-09-29",
         "fonte_verificata": "pdf"
       }
     },
@@ -255,8 +255,8 @@
         "partner_max": null,
         "quote": [],
         "forme": [],
-        "verificato_da": "claude (da validare da Michele)",
-        "verificato_at": "2026-09-28",
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria)",
+        "verificato_at": "2026-09-29",
         "fonte_verificata": "pdf"
       }
     },
@@ -271,10 +271,10 @@
         "partner_max": null,
         "quote": [],
         "forme": [
-          "consorzio"
+          "altra"
         ],
-        "verificato_da": "claude (da validare da Michele)",
-        "verificato_at": "2026-09-28",
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria)",
+        "verificato_at": "2026-09-29",
         "fonte_verificata": "pdf"
       }
     },
@@ -289,8 +289,8 @@
         "partner_max": null,
         "quote": [],
         "forme": [],
-        "verificato_da": "claude (da validare da Michele)",
-        "verificato_at": "2026-09-28",
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria)",
+        "verificato_at": "2026-09-29",
         "fonte_verificata": "pdf"
       }
     },
@@ -313,11 +313,13 @@
         ],
         "forme": [
           "ats",
+          "ati_rti",
           "rete_contratto",
+          "rete_soggetto",
           "consorzio"
         ],
-        "verificato_da": "claude (da validare da Michele)",
-        "verificato_at": "2026-09-28",
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria)",
+        "verificato_at": "2026-09-29",
         "fonte_verificata": "pdf"
       }
     },
@@ -331,9 +333,11 @@
         "partner_min": 3,
         "partner_max": 20,
         "quote": [],
-        "forme": [],
-        "verificato_da": "claude (da validare da Michele)",
-        "verificato_at": "2026-09-28",
+        "forme": [
+          "altra"
+        ],
+        "verificato_da": "Michele (delegato a bandofit-60: analisi esperta + verifica avversaria)",
+        "verificato_at": "2026-09-29",
         "fonte_verificata": "pdf"
       }
     },

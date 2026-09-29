@@ -4,6 +4,7 @@ Nel DB secondario una parte dei bandi ha `link_bando`/`link_candidatura`
 (e qualche segmento «link» dentro `contenuto`) che puntano a
 obiettivoeuropa.com, un aggregatore concorrente: quei rimandi non devono
 mai uscire dall'API — né in pagina né nel testo passato all'AI-check.
+Lo stesso vale per la fonte ufficiale (`fonte_ufficiale_url`/`_host`).
 Il filtro si applica alla riga grezza del bando alla frontiera del
 catalogo (`fetch_bando_by_slug` e `fetch_bando_for_ai` in
 `bandi_service`), unico punto di passaggio di tutte le superfici.
@@ -39,6 +40,20 @@ def is_blocked_link(url: Any) -> bool:
         host == blocked or host.endswith("." + blocked)
         for blocked in BLOCKED_LINK_HOSTS
     )
+
+
+_FONTE_SCHEMI = frozenset({"http", "https"})
+
+
+def _ha_schema_http(url: Any) -> bool:
+    """True se `url` è una stringa con schema http o https (maiuscole
+    incluse). Senza schema, `javascript:`, `data:` e simili → False."""
+    if not isinstance(url, str):
+        return False
+    try:
+        return urlsplit(url.strip()).scheme.lower() in _FONTE_SCHEMI
+    except ValueError:
+        return False
 
 
 def _mentions_blocked_host(text: Any) -> bool:
@@ -128,6 +143,17 @@ def scrub_bando_row(row: dict) -> dict:
     for key in ("link_bando", "link_candidatura"):
         if is_blocked_link(row.get(key)):
             row[key] = None
+    # Fonte ufficiale: url e host vanno insieme (l'host è l'etichetta del
+    # pulsante): cadono entrambi se uno dei due è escluso o se l'url non è
+    # un indirizzo http/https.
+    fonte_url = row.get("fonte_ufficiale_url")
+    if (
+        (fonte_url is not None and not _ha_schema_http(fonte_url))
+        or is_blocked_link(fonte_url)
+        or is_blocked_link(row.get("fonte_ufficiale_host"))
+    ):
+        row["fonte_ufficiale_url"] = None
+        row["fonte_ufficiale_host"] = None
     allegati = row.get("allegati")
     if isinstance(allegati, list):
         row["allegati"] = [

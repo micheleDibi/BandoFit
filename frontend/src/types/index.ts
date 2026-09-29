@@ -99,6 +99,17 @@ export interface BandoDetail extends BandoListItem {
   link_candidatura: string | null;
   contenuto: { sections?: ContenutoSection[] } | null;
   allegati: Array<{ nome?: string; titolo?: string; url?: string; link?: string }>;
+  /** Fonte ufficiale del bando (sito dell'ente o portale pubblico). L'URL va
+   *  usato solo con `fonte_ufficiale_stato === "trovata"`. Stringhe libere: un
+   *  valore nuovo del catalogo non deve rompere nulla. */
+  fonte_ufficiale_url: string | null;
+  fonte_ufficiale_host: string | null;
+  /** `ente` | `portale_pubblico` */
+  fonte_ufficiale_tipo: string | null;
+  /** `trovata` | `in_verifica` | `non_trovata` */
+  fonte_ufficiale_stato: string | null;
+  /** Data ISO dell'ultima verifica della fonte. */
+  fonte_ufficiale_verificata_at: string | null;
   programma: LookupItem | null;
   settori: LookupItem[];
   beneficiari: LookupItem[];
@@ -966,6 +977,9 @@ export interface SavedBandoItem {
   disponibile: boolean;
   in_calendario: boolean;
   salvato_il: string;
+  /** Solo per i non disponibili: slug della scheda che ha preso il posto del
+   *  bando (bando unito a un altro). */
+  slug_aggiornato?: string | null;
 }
 
 export interface CalendarEvent {

@@ -5,11 +5,11 @@ from datetime import date, time
 
 import pytest
 
-from app.core.errors import BadRequestError, NotFoundError
+from app.core.errors import BadRequestError, BandoRitiratoError, NotFoundError
 from app.schemas.calendar import CalendarEventIn, CalendarEventUpdate
 from app.api.deps import ActiveCompany
 from app.services import calendar_service
-from tests.test_saved_bandi_service import BANDO_VIVO, FakeDb
+from tests.test_saved_bandi_service import BANDO_VIVO, STORICO_301, FakeDb, catalogo_per_id
 
 USER_ID = "a0000000-0000-0000-0000-000000000001"
 EVENT_ID = "e0000000-0000-0000-0000-0000000000e1"
@@ -149,6 +149,40 @@ class TestCreateBandoEvent:
         secondary = FakeDb({"bando": []})
         with pytest.raises(NotFoundError):
             await calendar_service.create_bando_event(FakeDb(), secondary, USER_ID, _active(), "x")
+
+    async def test_slug_spostato_evento_sul_master(self):
+        primary = FakeDb({"calendar_events": []})
+        secondary = FakeDb({"bando": catalogo_per_id(BANDO_VIVO), "bando_slug_storico": STORICO_301})
+        out = await calendar_service.create_bando_event(
+            primary, secondary, USER_ID, _active(), "vecchio-slug"
+        )
+        [(inserted, _)] = primary.ops_for("calendar_events", "insert")
+        assert inserted["bando_id"] == 42
+        assert inserted["bando_slug"] == "bando-x"  # canonico, non quello richiesto
+        assert inserted["titolo"] == "Scadenza: Bando X"
+        assert inserted["data"] == "2026-09-15"
+        assert out.bando_slug == "bando-x"
+
+    async def test_slug_ritirato_410_primario_mai_interrogato(self):
+        primary = FakeDb()
+        secondary = FakeDb({
+            "bando": [],
+            "bando_slug_storico": [{"slug": "ritirato", "bando_id": None, "esito": "410"}],
+        })
+        with pytest.raises(BandoRitiratoError):
+            await calendar_service.create_bando_event(primary, secondary, USER_ID, _active(), "ritirato")
+        assert primary.ops == []
+
+    async def test_master_senza_scadenza_resta_400(self):
+        # Il controllo sulla scadenza viene dopo la risoluzione: vale sul master.
+        secondary = FakeDb({
+            "bando": catalogo_per_id({**BANDO_VIVO, "data_scadenza": None}),
+            "bando_slug_storico": STORICO_301,
+        })
+        with pytest.raises(BadRequestError):
+            await calendar_service.create_bando_event(
+                FakeDb(), secondary, USER_ID, _active(), "vecchio-slug"
+            )
 
     async def test_idempotente_se_gia_in_calendario(self):
         esistente = event_row(tipo="bando", bando_id=42, bando_slug="bando-x",

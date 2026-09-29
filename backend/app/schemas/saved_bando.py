@@ -17,6 +17,8 @@ class SavedBandoItem(BaseModel):
     disponibile: bool
     in_calendario: bool
     salvato_il: datetime
+    # Solo se non disponibile: slug del bando in cui è confluito quello salvato.
+    slug_aggiornato: str | None = None
 
 
 class SavedIdsOut(BaseModel):

@@ -5,18 +5,19 @@ si salva bando_id + uno snapshot minimo (slug/titolo/scadenza/stato) che fa
 da fallback di visualizzazione se il bando sparisce dal catalogo. La lista
 pagina sul PRIMARIO (ordine di salvataggio) e idrata i dati vivi dal
 secondario con una sola query per pagina (≤ 50 id: dentro il timeout di 3s
-del ruolo anon).
+del ruolo anon), più una su `bando_fusione` solo se qualche id manca.
 """
 
 import logging
 
 from postgrest.exceptions import APIError
 
-from app.core.errors import BadRequestError, NotFoundError
+from app.core.errors import BadRequestError
 from app.schemas.bando import BandoListItem
 from app.schemas.common import Page
 from app.schemas.saved_bando import SavedBandoItem, SavedIdsOut
 from app.services import company_scope
+from app.services.bandi_risoluzione import carica_per_slug, risolvi_fusioni
 from app.services.bandi_service import LIST_SELECT, map_list_item
 
 logger = logging.getLogger("bandofit.saved_bandi")
@@ -53,17 +54,9 @@ def fallback_item(row: dict) -> BandoListItem:
 
 
 async def _fetch_live_bando(secondary, slug: str) -> dict:
-    resp = (
-        await secondary.table("bando")
-        .select(LIST_SELECT)
-        .eq("slug", slug)
-        .eq("stato_processing", "completed")
-        .limit(1)
-        .execute()
-    )
-    if not resp.data:
-        raise NotFoundError("Bando non trovato")
-    return resp.data[0]
+    """Riga viva per slug. Slug spostato (storico 301 o fusione) → la riga del
+    master (id e slug canonici); ritirato → 410; altrimenti 404."""
+    return await carica_per_slug(secondary, slug, LIST_SELECT)
 
 
 async def _existing_row(primary, user_id: str, active, bando_id: int) -> dict | None:
@@ -100,13 +93,17 @@ async def _in_calendar_ids(primary, user_id: str, active, bando_ids: list[int]) 
 
 
 def _to_item(
-    saved_row: dict, live: dict | None, in_calendar: set[int]
+    saved_row: dict,
+    live: dict | None,
+    in_calendar: set[int],
+    slug_aggiornato: str | None = None,
 ) -> SavedBandoItem:
     return SavedBandoItem(
         bando=map_list_item(live) if live else fallback_item(saved_row),
         disponibile=live is not None,
         in_calendario=saved_row["bando_id"] in in_calendar,
         salvato_il=saved_row["created_at"],
+        slug_aggiornato=slug_aggiornato,
     )
 
 
@@ -204,9 +201,24 @@ async def list_saved(
         .execute()
     )
     live_by_id = {row["id"]: row for row in (live_resp.data or [])}
+    # Solo per gli id spariti: se confluiti in un altro bando, la card (sempre
+    # dallo snapshot, non disponibile) rimanda alla scheda del master. Nessuna
+    # scrittura sul primario: la riga salvata resta sul bando_id originale.
+    mancanti = [bando_id for bando_id in ids if bando_id not in live_by_id]
+    fusioni = await risolvi_fusioni(secondary, mancanti) if mancanti else {}
     in_calendar = await _in_calendar_ids(primary, user_id, active, ids)
 
-    items = [_to_item(row, live_by_id.get(row["bando_id"]), in_calendar) for row in rows]
+    items = []
+    for row in rows:
+        fusione = fusioni.get(row["bando_id"])
+        items.append(
+            _to_item(
+                row,
+                live_by_id.get(row["bando_id"]),
+                in_calendar,
+                slug_aggiornato=fusione.master_slug if fusione else None,
+            )
+        )
     return Page.build(items, total, page, page_size)
 
 

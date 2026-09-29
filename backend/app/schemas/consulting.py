@@ -131,6 +131,9 @@ class ConsulenzaOut(BaseModel):
     appuntamento: BookingOut | None = None
     # WP9 (W1): consulto chiesto dalla call di partenariato (null = da AI-check).
     partner_call_id: UUID | None = None
+    # L'azienda della richiesta (una delle proprie): serve al link alla call
+    # (`?azienda=`), che si apre solo con l'azienda creatrice attiva.
+    company_profile_id: UUID | None = None
 
 
 class RichiestaPoolOut(BaseModel):

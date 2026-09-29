@@ -1,7 +1,7 @@
 import { ArrowLeft, CalendarClock } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ConsulenzaStatoBadge } from "./Consulenze";
+import { ConsulenzaStatoBadge, ConsultoCallBadge, linkCallDelConsulto } from "./Consulenze";
 import { SlotPicker } from "../components/consulenze/SlotPicker";
 import { VideocallButton } from "../components/consulenze/VideocallButton";
 import { Badge } from "../components/ui/Badge";
@@ -17,8 +17,9 @@ import {
   usePrenotaSlot,
   useRifiutaProposta,
 } from "../hooks/useConsulenze";
+import { useFunzioni } from "../hooks/useFunzioni";
 import { apiErrorMessage } from "../lib/api";
-import { PROPOSTA_STATO_LABELS } from "../lib/copy";
+import { CONSULTO_CALL_COPY, PROPOSTA_STATO_LABELS } from "../lib/copy";
 import { formatDateTime, formatSlotGiorno, formatSlotOra } from "../lib/format";
 import type { Proposta, PropostaStato } from "../types";
 
@@ -37,6 +38,7 @@ function PropostaStatoBadge({ stato }: { stato: PropostaStato }) {
 export default function ConsulenzaDetail() {
   const { id } = useParams<{ id: string }>();
   const { data: consulenza, isPending, isError, error, refetch } = useConsulenza(id);
+  const { partenariatiAttivo } = useFunzioni();
 
   const accetta = useAccettaProposta(id ?? "");
   const rifiuta = useRifiutaProposta(id ?? "");
@@ -67,6 +69,7 @@ export default function ConsulenzaDetail() {
   }
 
   const { editable } = consulenza;
+  const linkCall = linkCallDelConsulto(consulenza, partenariatiAttivo);
 
   const handleAccept = async (slotId: string | null) => {
     if (!accepting || accetta.isPending) return;
@@ -116,14 +119,27 @@ export default function ConsulenzaDetail() {
           <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
             {consulenza.bando_titolo}
           </h1>
-          <Link
-            to={`/app/bandi/${consulenza.bando_slug}`}
-            className="mt-1 inline-block text-sm font-medium text-brand-600 underline-offset-2 hover:underline"
-          >
-            Vai al bando →
-          </Link>
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+            <Link
+              to={`/app/bandi/${consulenza.bando_slug}`}
+              className="inline-block text-sm font-medium text-brand-600 underline-offset-2 hover:underline"
+            >
+              Vai al bando →
+            </Link>
+            {linkCall && (
+              <Link
+                to={linkCall}
+                className="inline-block text-sm font-medium text-brand-600 underline-offset-2 hover:underline"
+              >
+                {CONSULTO_CALL_COPY.vaiAllaCall} →
+              </Link>
+            )}
+          </div>
         </div>
-        <ConsulenzaStatoBadge stato={consulenza.stato} />
+        <div className="flex flex-wrap items-center gap-1.5">
+          {linkCall && <ConsultoCallBadge />}
+          <ConsulenzaStatoBadge stato={consulenza.stato} />
+        </div>
       </div>
 
       {/* Progettista assegnato + appuntamento */}

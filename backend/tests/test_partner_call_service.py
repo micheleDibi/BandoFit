@@ -2050,6 +2050,133 @@ class TestSalvaRequisiti:
         assert [(r.copertura_creatore, r.copertura_fonte) for r in salvato.requisiti] == [
             (r.copertura_creatore, r.copertura_fonte) for r in proposta.requisiti]
 
+    async def test_verificata_del_client_non_creduta(self):
+        """Completamento WP9: un creatore che manda `verificata: true` su un
+        requisito scritto a mano (o su un pre-check, o su una voce che non
+        corrisponde a nessuna fonte) lo salva NON verificato, e il validatore
+        del consorzio lo attribuisce al creatore, non al bando."""
+        from app.services import partenariato_validatore as pv
+
+        db = FakeDb()
+        call = db.con_call(regole_partenariato=snapshot_confermato(),
+                           regole_confermate_at=_iso())
+        falsa = citazione(testo="Passaggio mai scritto nel bando")
+        dati = RequisitiIn.model_validate({"requisiti": [
+            requisito_in(citazione=falsa),
+            requisito_in(testo="Sede in Lombardia", origine="precheck", rif_origine="regione",
+                         citazione=falsa),
+            requisito_in(testo="Almeno un laboratorio accreditato",
+                         origine="bando_partenariato", rif_origine="K7~0123456789",
+                         citazione=falsa),
+            requisito_in(testo="Esperienza inventata", origine="ai_check",
+                         rif_origine=rif_con_impronta("R9", "Esperienza inventata"),
+                         citazione=falsa),
+        ]})
+        await pcs.salva_requisiti(db, FakeSecondary(), titolare(), USER_OWNER, call["id"], dati)
+        [p] = db.chiamate("fn_partner_call_sostituisci_requisiti")
+        assert [e["citazione"]["verificata"] for e in p["p_requisiti"]] == [False] * 4
+        # il testo della citazione resta come riferimento del creatore
+        assert p["p_requisiti"][0]["citazione"]["testo"] == "Passaggio mai scritto nel bando"
+        salvati = db.righe("partner_call_requisiti", call_id=call["id"])
+        manuale = next(r for r in salvati if r["origine"] == "manuale")
+        assert pv.requisito_da_riga(manuale).regola.fonte == "creatore"
+        forgiata = next(r for r in salvati if r["origine"] == "bando_partenariato")
+        assert pv.requisito_da_riga(forgiata).regola.fonte == "creatore"
+        # il «pre-check» che il catalogo non genera è del creatore anche lui
+        assert [e["origine"] for e in p["p_requisiti"]][1] == "manuale"
+        assert all(pv.requisito_da_riga(r).regola.fonte == "creatore" for r in salvati)
+
+    async def test_precheck_solo_se_generato_dal_catalogo(self):
+        """Correzione WP9: nemmeno `origine` fa fede. Un pre-check vale come
+        dato del catalogo solo se coincide con uno che il server genera ora
+        dai facet del bando (stesso riferimento, testo, criterio e ambito);
+        inventato o riscritto è del creatore: si salva `manuale`, senza
+        riferimento, con la stessa copertura, e il validatore del consorzio
+        lo attribuisce a lui."""
+        from app.services import partenariato_validatore as pv
+
+        db = FakeDb()
+        call = db.con_call()
+        proposta = await pcs.genera_requisiti(db, FakeSecondary(), titolare(), USER_OWNER,
+                                              call["id"])
+        [vero] = [r for r in proposta.requisiti if r.rif_origine == "regione"]
+        assert vero.origine == "precheck"
+        corpo = {k: v for k, v in vero.model_dump(mode="json").items()
+                 if k in ("testo", "criterio", "ambito", "cercato", "origine", "rif_origine",
+                          "citazione")}
+        riscritto = {**corpo, "testo": "Sede in Lombardia da almeno tre anni"}
+        inventato = requisito_in(testo="Ogni partner deve avere la certificazione ISO 27001",
+                                 origine="precheck", rif_origine="regione",
+                                 ambito="ogni_membro")
+        dati = RequisitiIn.model_validate({"requisiti": [corpo, riscritto, inventato]})
+        salvato = await pcs.salva_requisiti(db, FakeSecondary(), titolare(), USER_OWNER,
+                                            call["id"], dati)
+        [p] = db.chiamate("fn_partner_call_sostituisci_requisiti")
+        assert [(e["origine"], e["rif_origine"]) for e in p["p_requisiti"]] == [
+            ("precheck", "regione"), ("manuale", None), ("manuale", None)]
+        # la copertura dipende dal criterio, non dall'origine
+        assert (salvato.requisiti[1].copertura_creatore,
+                salvato.requisiti[1].copertura_fonte) == (
+            vero.copertura_creatore, vero.copertura_fonte)
+        fonti = {r["testo"]: pv.requisito_da_riga(r).regola.fonte
+                 for r in db.righe("partner_call_requisiti", call_id=call["id"])}
+        assert fonti == {vero.testo: "bando", riscritto["testo"]: "creatore",
+                         inventato["testo"]: "creatore"}
+
+    async def test_precheck_senza_catalogo_leggibile_e_del_creatore(self):
+        """Fail-closed: se i facet del bando non si leggono, nessun pre-check
+        si può confrontare e si salva come requisito del creatore."""
+        db = FakeDb()
+        call = db.con_call()
+        proposta = await pcs.genera_requisiti(db, FakeSecondary(), titolare(), USER_OWNER,
+                                              call["id"])
+        [vero] = [r for r in proposta.requisiti if r.rif_origine == "regione"]
+        corpo = {k: v for k, v in vero.model_dump(mode="json").items()
+                 if k in ("testo", "criterio", "ambito", "cercato", "origine", "rif_origine",
+                          "citazione")}
+        await pcs.salva_requisiti(db, FakeSecondary(bandi=[]), titolare(), USER_OWNER,
+                                  call["id"], RequisitiIn.model_validate({"requisiti": [corpo]}))
+        [p] = db.chiamate("fn_partner_call_sostituisci_requisiti")
+        assert (p["p_requisiti"][0]["origine"], p["p_requisiti"][0]["rif_origine"]) == (
+            "manuale", None)
+
+    async def test_la_proposta_salvata_conserva_le_prove_del_server(self):
+        """Il giro proposta → salvataggio conserva le citazioni che il server
+        ha generato (voci confermate dello snapshot, AI-check); se il client
+        le altera o riscrive il requisito, contano solo le fonti."""
+        db = FakeDb().con_estrazione()
+        db.con_ai_check(report_ai_check())
+        call = db.con_call(regole_partenariato=snapshot_confermato(),
+                           regole_confermate_at=_iso())
+        proposta = await pcs.genera_requisiti(db, FakeSecondary(), titolare(), USER_OWNER,
+                                              call["id"])
+        attese = [r.citazione.model_dump(mode="json") if r.citazione else None
+                  for r in proposta.requisiti]
+        corpo = [
+            {k: v for k, v in r.model_dump(mode="json").items()
+             if k in ("id", "etichetta", "testo", "criterio", "ambito", "cercato", "origine",
+                      "rif_origine", "citazione")}
+            for r in proposta.requisiti
+        ]
+        for voce in corpo:  # il client prova a «verificare» tutto
+            if voce["citazione"]:
+                voce["citazione"] = {**voce["citazione"], "verificata": True,
+                                     "testo": "Testo sostituito dal client"}
+        salvato = await pcs.salva_requisiti(db, FakeSecondary(), titolare(), USER_OWNER,
+                                            call["id"],
+                                            RequisitiIn.model_validate({"requisiti": corpo}))
+        uscite = [r.citazione.model_dump(mode="json") if r.citazione else None
+                  for r in salvato.requisiti]
+        per_origine = {r.origine: u for r, u in zip(salvato.requisiti, uscite, strict=True)}
+        # voci della fonte: la citazione del server, testo compreso
+        for r, attesa, uscita in zip(salvato.requisiti, attese, uscite, strict=True):
+            if r.origine in ("bando_partenariato", "regola_finanziaria", "ai_check"):
+                assert uscita == attesa, r.rif_origine
+        # la voce confermata dello snapshot fa fede solo da una pagina ufficiale
+        assert per_origine["bando_partenariato"]["verificata"] is True
+        # il pre-check (scheda del catalogo) mai
+        assert per_origine["precheck"]["verificata"] is False
+
     async def test_q11_regola_finanziaria_solo_dallo_snapshot(self):
         db = FakeDb()
         call = db.con_call(regole_partenariato=snapshot_confermato(),

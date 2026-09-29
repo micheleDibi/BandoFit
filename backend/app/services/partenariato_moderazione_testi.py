@@ -318,8 +318,8 @@ _TITOLI_IDENTITA = {
 }
 _CORPI_IDENTITA = {
     "verificata": (
-        "Ora puoi mostrare il nome dell'azienda nel profilo partner, e dopo un'accettazione "
-        "le identità si rivelano tra aziende verificate."
+        "Ora puoi mostrare il nome dell'azienda nel profilo partner e nelle call di "
+        "partenariato, e dopo un'accettazione le identità si rivelano tra aziende verificate."
     ),
     "rifiutata": (
         "Puoi chiedere di nuovo la verifica dalla pagina Azienda. Intanto puoi continuare a "

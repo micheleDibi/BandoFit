@@ -1259,6 +1259,24 @@ class TestConsenso:
                                   consenso_versione="2025-01-vecchia")
         assert (await leggi(db)).riconsenso_suggerito is True
 
+    async def test_riconsenso_dopo_l_informativa_v2(self):
+        """WP9: chi aveva acconsentito alla v1 dell'informativa vede il banner
+        di riconferma (il consenso resta valido: il profilo resta visibile);
+        la nuova concessione con la v2 lo spegne. La v1 non si accetta più."""
+        db = FakeDb().con_profilo(visibile_come_partner=True, consenso_at=_iso(60),
+                                  consenso_versione="2026-10-bozza-1")
+        letto = await leggi(db)
+        assert (letto.visibile, letto.riconsenso_suggerito) == (True, True)
+        assert letto.informativa_versione_corrente == "2026-10-bozza-2"
+        with pytest.raises(AppError) as exc:
+            await pps.consenso(db, object(), titolare(), USER_OWNER,
+                               consenso_in(versione="2026-10-bozza-1"))
+        assert exc.value.code == "informativa_superata"
+        out = await pps.consenso(db, object(), titolare(), USER_OWNER,
+                                 consenso_in(versione="2026-10-bozza-2"))
+        assert (out.visibile, out.riconsenso_suggerito) == (True, False)
+        assert out.consenso.versione == "2026-10-bozza-2"
+
     async def test_concedi_anonimo_ricontrolla_i_testi_salvati(self):
         db = FakeDb().con_profilo(anonimo=False,
                                   descrizione_competenze="Rossi Meccanica, dal 1980")

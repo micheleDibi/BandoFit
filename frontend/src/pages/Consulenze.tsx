@@ -1,22 +1,46 @@
-import { CalendarClock, MessagesSquare } from "lucide-react";
+import { CalendarClock, Handshake, MessagesSquare } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Badge } from "../components/ui/Badge";
 import { Card } from "../components/ui/Card";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
 import { useConsulenze } from "../hooks/useConsulenze";
+import { useFunzioni } from "../hooks/useFunzioni";
 import { apiErrorMessage } from "../lib/api";
-import { CONSULENZA_STATO_LABELS } from "../lib/copy";
+import { CONSULENZA_STATO_LABELS, CONSULTO_CALL_COPY } from "../lib/copy";
 import { formatDate, formatSlotGiorno, formatSlotOra } from "../lib/format";
-import type { ConsulenzaStato } from "../types";
+import type { Consulenza, ConsulenzaStato } from "../types";
 
 export function ConsulenzaStatoBadge({ stato }: { stato: ConsulenzaStato }) {
   const tone = stato === "assegnata" ? "emerald" : stato === "nuova" ? "amber" : "slate";
   return <Badge tone={tone}>{CONSULENZA_STATO_LABELS[stato]}</Badge>;
 }
 
+/** Badge dei consulti chiesti dalla call di partenariato (WP9). */
+export function ConsultoCallBadge() {
+  return (
+    <Badge tone="brand">
+      <Handshake className="size-3" aria-hidden />
+      {CONSULTO_CALL_COPY.badge}
+    </Badge>
+  );
+}
+
+/** Link alla call di un consulto chiesto dalla call (WP9); null se il
+ *  consulto viene dall'AI-check o se il modulo partenariati è spento (la call
+ *  non si apre, e non se ne parla). `?azienda=` attiva l'azienda che ha
+ *  creato la call, l'unica con cui la call si apre. */
+export function linkCallDelConsulto(consulenza: Consulenza, partenariatiAttivo: boolean) {
+  if (!partenariatiAttivo || !consulenza.partner_call_id) return null;
+  const azienda = consulenza.company_profile_id
+    ? `&azienda=${encodeURIComponent(consulenza.company_profile_id)}`
+    : "";
+  return `/app/partenariati/call/${consulenza.partner_call_id}?tab=panoramica${azienda}`;
+}
+
 /** Le richieste di consulto dell'Azienda: pagina lista, dettaglio a parte. */
 export default function Consulenze() {
   const { data: consulenze, isPending, isError, error, refetch } = useConsulenze();
+  const { partenariatiAttivo } = useFunzioni();
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -58,7 +82,12 @@ export default function Consulenze() {
                         Richiesta del {formatDate(consulenza.created_at)}
                       </p>
                     </div>
-                    <ConsulenzaStatoBadge stato={consulenza.stato} />
+                    {/* Il link alla call sta nel dettaglio: qui la card
+                        intera è già un link. */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {linkCallDelConsulto(consulenza, partenariatiAttivo) && <ConsultoCallBadge />}
+                      <ConsulenzaStatoBadge stato={consulenza.stato} />
+                    </div>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm text-slate-600">
                     {consulenza.stato === "nuova" && (

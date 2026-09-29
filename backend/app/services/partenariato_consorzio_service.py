@@ -547,6 +547,11 @@ async def _consorzio(primary, secondary, active, call: Mapping, ruolo: str, *,
         mostrate = [propria] if propria is not None else []
     else:
         mostrate = [r for r in righe if r.get("stato") != "uscito" or r is propria]
+    # WP9: verso gli altri membri il creatore di una call nominativa compare con
+    # il nome del registro, come nella vista pubblica (solo se verificato oggi).
+    nome_del_creatore = (
+        None if sei_creatore or fuori else await pcs.nome_creatore(primary, call)
+    )
     membri_out = []
     for riga in mostrate:
         company = str(riga["company_profile_id"]) if riga.get("company_profile_id") else None
@@ -559,6 +564,7 @@ async def _consorzio(primary, secondary, active, call: Mapping, ruolo: str, *,
             editable=editable,
             ident_creatore=ident,
             nome_proprio=az.nome if az is not None else None,
+            nome_creatore=nome_del_creatore,
             pseudonimo_membro=_pseudonimo(cid, az),
             profilo=_profilo_membro(az, lookups)
             if company not in (None, creatore_id) and riga is not propria else None,

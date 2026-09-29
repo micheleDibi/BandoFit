@@ -30,6 +30,14 @@ delle regole (fonti che rinumerano le voci) l'id della voce porta
 l'impronta del contenuto (`rif_con_impronta`); per il catalogo è la chiave
 del facet; per le regole finanziarie l'id della regola dello snapshot (Q11).
 
+Prova dei requisiti (WP9, completamento): `citazione.verificata` la decide
+SOLO il server. Fa fede il testo dei documenti ufficiali del bando (pagine
+`D<n>-p<m>`, come la post-elaborazione del WP3): le citazioni costruite dai
+metadati della scheda del catalogo (`_citazione_meta`) escono non verificate,
+e una voce dello snapshot solo se `confermata` e citata da una pagina
+ufficiale (`_dump_citazione`). Al salvataggio `citazioni_dal_server`
+ricalcola la citazione di ogni requisito inviato dal client (mai creduta).
+
 Sicurezza dei testi: `copertura_nota` viene SOLO dai template di
 `NOTE_COPERTURA` (esito + fonte + motivo macchina). Motivazioni e dati
 aziendali dell'AI-check (che con il WP1 ricevono i bilanci esatti) non
@@ -37,6 +45,7 @@ entrano MAI in nessun campo prodotto qui.
 """
 
 import hashlib
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from decimal import Decimal
@@ -69,7 +78,9 @@ from app.schemas.partner_call import (
 )
 from app.schemas.regole_finanziarie import RegolaFinanziaria
 from app.services import partenariato_vocabolario as voc
+from app.services.citazioni import normalizza_sezione
 from app.services.openapi_mapping import ateco_division
+from app.services.partenariato_anonimato import senza_invisibili
 from app.services.partenariato_criteri import criterio_da_json, valuta_criterio_dettaglio
 
 # ------------------------------------------------------------------ costanti
@@ -255,12 +266,37 @@ def tipi_da_beneficiari(ids: Iterable[int]) -> list[str]:
 
 
 def _citazione_meta(testo: str) -> dict:
+    """Citazione di un pre-check, costruita dai metadati della scheda del
+    catalogo (regioni, ATECO, settori, beneficiari): testo generato o
+    classificato dal produttore del catalogo, non estratto dall'atto. Resta
+    come riferimento visibile al creatore, ma NON verificata (fa fede solo il
+    testo dei documenti ufficiali, `da_pagina_ufficiale`). Il requisito e la
+    sua copertura non cambiano: la copertura dipende dal criterio."""
     return {
         "sezione": "META",
         "testo": testo[:2000],
-        "verificata": True,
+        "verificata": False,
         "fonte_etichetta": "Scheda del bando",
     }
+
+
+# Pagina di un documento ufficiale del bando, nella forma canonica di
+# `citazioni.normalizza_sezione` («D1-p3»).
+_PAGINA_UFFICIALE = re.compile(r"D\d+-p\d+")
+
+
+def da_pagina_ufficiale(citazione: Any) -> bool:
+    """True se la citazione punta a una pagina di un documento ufficiale del
+    bando («D1-p3», anche scritta «[D1-P3]» o «D1 pag. 3»). La scheda del
+    catalogo (META, S1…) e ogni altra sezione non fanno fede (WP3, commit
+    «regole verificate solo dai documenti ufficiali»)."""
+    if isinstance(citazione, Mapping):
+        sezione = citazione.get("sezione")
+    else:
+        sezione = getattr(citazione, "sezione", None)
+    if not isinstance(sezione, str):
+        return False
+    return _PAGINA_UFFICIALE.fullmatch(normalizza_sezione(sezione)) is not None
 
 
 # -------------------------------------------------------- criterio da fonte
@@ -331,17 +367,23 @@ def criterio_da_requisito(
 
 
 def _citazione_report(riferimento: Any) -> dict | None:
+    """Citazione di una voce dell'AI-check. Il suo `verificata` dice solo che
+    il passaggio è stato ritrovato nel testo letto; l'AI-check legge la scheda
+    del catalogo (META, S1…), testo generato o classificato: fa fede solo da
+    una pagina di un documento ufficiale (`da_pagina_ufficiale`), come per i
+    pre-check (`_citazione_meta`) e le regole. Il requisito e la sua
+    copertura non cambiano."""
     if not isinstance(riferimento, Mapping):
         return None
     testo = riferimento.get("testo")
     sezione = riferimento.get("sezione")
     if not isinstance(testo, str) or not isinstance(sezione, str):
         return None
-    return {
-        "sezione": sezione.strip()[:40],
-        "testo": testo[:2000],
-        "verificata": riferimento.get("verificata") is True,
-    }
+    citazione = {"sezione": sezione.strip()[:40], "testo": testo[:2000]}
+    citazione["verificata"] = (
+        riferimento.get("verificata") is True and da_pagina_ufficiale(citazione)
+    )
+    return citazione
 
 
 def requisiti_da_ai_check(report: Mapping | None) -> list[RequisitoBozza]:
@@ -507,15 +549,18 @@ def requisiti_da_precheck(
 
 def _dump_citazione(voce: Any) -> dict | None:
     """La citazione di una voce dello snapshot per il suo requisito. Fa fede
-    (`verificata`) solo per una voce `confermata`: una voce `modificata` (tra
+    (`verificata`) solo per una voce `confermata` citata da una pagina di un
+    documento ufficiale (`da_pagina_ufficiale`): una voce `modificata` (tra
     cui ogni voce della scheda del catalogo, che entra solo così) la porta come
     riferimento, e il validatore attribuisce il requisito al creatore, come
-    `partenariato_validatore._origine_voce` sullo snapshot."""
+    `partenariato_validatore._origine_voce` sullo snapshot. Anche uno snapshot
+    confermato prima della regola dei documenti ufficiali, con una voce
+    `confermata` citata dalla scheda, non dà requisiti verificati."""
     citazione: CitazioneIn | None = voce.citazione
     if citazione is None:
         return None
     dati = citazione.model_dump(mode="json", exclude_none=True)
-    if voce.origine_voce != "confermata":
+    if voce.origine_voce != "confermata" or not da_pagina_ufficiale(dati):
         dati["verificata"] = False
     return dati
 
@@ -717,6 +762,104 @@ def evidenze_assorbite(
         bersaglio = _bersaglio(candidati, voce)
         if bersaglio is not None:
             bersaglio.esiti_ai_check = (*bersaglio.esiti_ai_check, *voce.esiti_ai_check)
+
+
+# Origini la cui citazione può far fede, se il requisito è ancora quello che il
+# server genera dalla stessa fonte.
+_ORIGINI_CON_PROVA = frozenset({"bando_partenariato", "regola_finanziaria", "ai_check"})
+
+
+def _compatto(testo: Any) -> str:
+    # Come lo schema del client (`RequisitoIn`): senza caratteri invisibili.
+    return " ".join(senza_invisibili(testo).split()) if isinstance(testo, str) else ""
+
+
+def _stesso_requisito(richiesto: Any, bozza: RequisitoBozza) -> bool:
+    """Il requisito inviato è ancora quello generato dalla fonte: stesso
+    testo (a meno degli spazi), stesso criterio e stesso ambito. Un requisito
+    riscritto dal creatore è suo, anche se conserva origine e riferimento."""
+    criterio = getattr(richiesto, "criterio", None) or CriterioManuale()
+    return (
+        _compatto(getattr(richiesto, "testo", None)) == _compatto(bozza.testo)
+        and getattr(richiesto, "ambito", None) == bozza.ambito
+        and _json_criterio(criterio) == _json_criterio(bozza.criterio or CriterioManuale())
+    )
+
+
+def _non_verificata(citazione: Any) -> dict | None:
+    if isinstance(citazione, BaseModel):
+        citazione = citazione.model_dump(mode="json")
+    if not isinstance(citazione, Mapping):
+        return None
+    return {**citazione, "verificata": False}
+
+
+def citazioni_dal_server(
+    requisiti: Sequence[Any],
+    *,
+    da_regole: Iterable[RequisitoBozza] = (),
+    da_ai_check: Iterable[RequisitoBozza] = (),
+) -> list[dict | None]:
+    """La citazione da SALVARE per ogni requisito inviato dal client
+    (`RequisitoIn`), con `verificata` decisa dal server: quella del client
+    non conta mai.
+
+    - `bando_partenariato` e `regola_finanziaria`: la citazione della voce
+      dello snapshot confermato con lo stesso riferimento (`da_regole` =
+      `requisiti_da_regole` sullo snapshot della call), verificata solo se la
+      voce è `confermata` e citata da una pagina ufficiale
+      (`_dump_citazione`);
+    - `ai_check`: la citazione della voce dell'ultimo AI-check `ready` con lo
+      stesso riferimento (id~impronta, `da_ai_check`), come nella proposta;
+    - in entrambi i casi il requisito deve essere ancora quello generato
+      (`_stesso_requisito`); altrimenti, e per `manuale` e `precheck`, la
+      citazione del client resta come riferimento ma NON verificata (il
+      validatore attribuisce il requisito al creatore; un pre-check vale come
+      «dati del catalogo» solo se lo conferma `origini_dal_server`)."""
+    fonti: dict[tuple[str, str], RequisitoBozza] = {}
+    for bozza in (*da_regole, *da_ai_check):
+        if bozza.rif_origine:
+            fonti.setdefault((bozza.origine, bozza.rif_origine), bozza)
+    uscita: list[dict | None] = []
+    for richiesto in requisiti:
+        origine = getattr(richiesto, "origine", None)
+        rif = getattr(richiesto, "rif_origine", None)
+        bozza = fonti.get((origine, rif)) if origine in _ORIGINI_CON_PROVA and rif else None
+        if bozza is not None and _stesso_requisito(richiesto, bozza):
+            uscita.append(dict(bozza.citazione) if isinstance(bozza.citazione, Mapping)
+                          else None)
+            continue
+        uscita.append(_non_verificata(getattr(richiesto, "citazione", None)))
+    return uscita
+
+
+def origini_dal_server(
+    requisiti: Sequence[Any], *, da_precheck: Iterable[RequisitoBozza] = ()
+) -> list[tuple[str, str | None]]:
+    """(origine, rif_origine) da SALVARE per ogni requisito inviato dal
+    client (`RequisitoIn`): anche l'origine dichiarata non fa fede. Un
+    pre-check resta tale solo se è ancora uno di quelli che il server genera
+    ora dai facet del bando (`da_precheck` = `requisiti_da_precheck`), con lo
+    stesso riferimento e lo stesso contenuto (`_stesso_requisito`); inventato,
+    riscritto o senza catalogo leggibile (fail-closed) è del creatore:
+    `manuale`, senza riferimento (criterio e copertura non cambiano). Le
+    altre origini restano quelle inviate: la loro prova la decide
+    `citazioni_dal_server`."""
+    generati: dict[str, RequisitoBozza] = {}
+    for bozza in da_precheck:
+        if bozza.rif_origine:
+            generati.setdefault(bozza.rif_origine, bozza)
+    uscita: list[tuple[str, str | None]] = []
+    for richiesto in requisiti:
+        origine = getattr(richiesto, "origine", None) or "manuale"
+        rif = getattr(richiesto, "rif_origine", None)
+        if origine == "precheck":
+            bozza = generati.get(rif) if rif else None
+            if bozza is None or not _stesso_requisito(richiesto, bozza):
+                uscita.append(("manuale", None))
+                continue
+        uscita.append((origine, rif))
+    return uscita
 
 
 # ---------------------------------------------------------------- copertura

@@ -58,24 +58,31 @@ export function useRitiraProposta() {
 }
 
 /** Vista FULL (solo dopo l'assegnazione): ogni lettura è registrata lato
- *  server in audit_log — si carica su richiesta esplicita, non in eager. */
+ *  server in audit_log — si carica su richiesta esplicita, non in eager. Come
+ *  per la call (`useCallRichiesta`), la chiave sta FUORI dalla radice
+ *  `["progettista-richieste"]` e il focus della finestra non la rilegge: una
+ *  lettura (e un accesso registrato) solo per un'azione di chi la apre. */
 export function useDossierRichiesta(requestId: string, enabled: boolean) {
   return useQuery({
-    queryKey: ["progettista-richieste", requestId, "dossier"],
+    queryKey: ["progettista-dossier-richiesta", requestId],
     queryFn: async () =>
       (await api.get<FullCompany>(`/progettista/richieste/${requestId}/dossier`)).data,
     enabled,
     staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 
 /** La call di partenariato di un consulto chiesto dalla call (WP9), solo per
  *  il progettista assegnato. Ogni lettura è registrata lato server PRIMA di
  *  rispondere (se la registrazione fallisce: 502 e nessun dato): si carica su
- *  richiesta esplicita, come il dossier. */
+ *  richiesta esplicita, come il dossier. La chiave sta FUORI dalla radice
+ *  `["progettista-richieste"]`: le azioni che la invalidano (ritiro di una
+ *  proposta, annullamento di un appuntamento) altrimenti rileggerebbero la
+ *  call e scriverebbero un nuovo accesso nell'audit a ogni azione. */
 export function useCallRichiesta(requestId: string, enabled: boolean) {
   return useQuery({
-    queryKey: ["progettista-richieste", requestId, "call"],
+    queryKey: ["progettista-call-richiesta", requestId],
     queryFn: async () =>
       (await api.get<CallVistaProgettista>(`/progettista/richieste/${requestId}/call`)).data,
     enabled,

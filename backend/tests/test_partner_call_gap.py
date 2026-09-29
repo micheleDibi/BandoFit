@@ -16,6 +16,7 @@ Proprietà difese:
 
 import copy
 import json
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -191,9 +192,55 @@ class TestDaAiCheck:
         assert per_rif["R2"].esiti_ai_check == ("dato_mancante",)
         assert per_rif["C1"].premiale and per_rif["C1"].esiti_ai_check == ("non_coperto",)
         assert per_rif["C1"].testo == "Criterio di valutazione: Presenza di un organismo di ricerca"
+        # la scheda del catalogo non fa fede: ritrovata dallo scoring, ma non verificata
         assert per_rif["R1"].citazione == {
-            "sezione": "S1", "testo": SEZIONI["S1"], "verificata": True,
+            "sezione": "S1", "testo": SEZIONI["S1"], "verificata": False,
         }
+
+    def test_citazioni_della_scheda_mai_verificate(self):
+        """Correzione WP9: l'AI-check legge solo la scheda del catalogo (META,
+        S1…), testo generato o classificato. Il suo «verificata» (passaggio
+        ritrovato nella scheda) non basta: fa fede solo una pagina di un
+        documento ufficiale, come per i pre-check e le regole. Il requisito
+        resta, con la stessa copertura, e il validatore lo attribuisce al
+        creatore."""
+        report = {"requisiti": [
+            {"id": "R1", "testo": "Sede in Puglia", "categoria": "soggettivo",
+             "verdetto": "soddisfatto",
+             "riferimento_bando": {"sezione": "S3", "testo": "sede in Puglia",
+                                   "verificata": True}},
+            {"id": "V2", "testo": "Vincolo di catalogo: PMI", "categoria": "dimensionale",
+             "verdetto": "non_soddisfatto",
+             "riferimento_bando": {"sezione": "META", "testo": "PMI", "verificata": True}},
+            {"id": "R3", "testo": "Bilancio depositato", "categoria": "formale",
+             "verdetto": "soddisfatto",
+             "riferimento_bando": {"sezione": "D1-p4", "testo": "bilancio depositato",
+                                   "verificata": True}},
+        ], "criteri": [
+            {"id": "C1", "nome": "Presenza di un organismo di ricerca",
+             "categoria": "soggettivo", "verdetto": "non_soddisfatto",
+             "riferimento_bando": {"sezione": "S2", "testo": "organismo", "verificata": True}},
+        ]}
+        bozze = gap.requisiti_da_ai_check(report)
+        per_rif = {gap.id_voce(b.rif_origine): b for b in bozze}
+        assert {k: b.citazione["verificata"] for k, b in per_rif.items()} == {
+            "R1": False, "V2": False, "R3": True, "C1": False}
+        assert per_rif["V2"].sintetico  # la voce sintetica resta riconosciuta
+        assert [b.esiti_ai_check for b in bozze] == [
+            ("coperto",), ("non_coperto",), ("coperto",), ("non_coperto",)]
+        # al salvataggio, anche invariata, la citazione della scheda non fa fede
+        richiesti = [
+            RequisitoIn.model_validate({
+                "testo": b.testo, "criterio": gap._json_criterio(b.criterio),
+                "ambito": b.ambito, "origine": b.origine, "rif_origine": b.rif_origine,
+                "citazione": {**b.citazione, "verificata": True}})
+            for b in bozze
+        ]
+        uscita = gap.citazioni_dal_server(richiesti, da_ai_check=bozze)
+        assert [c["verificata"] for c in uscita] == [False, False, True, False]
+        fonti = [pv.requisito_da_riga({**_riga_requisito(b), "citazione": c}).regola.fonte
+                 for b, c in zip(bozze, uscita, strict=True)]
+        assert fonti == ["creatore", "creatore", "bando", "creatore"]
 
     def test_voce_sintetica_del_catalogo(self):
         # azienda fuori regione e nessun requisito territoriale estratto: lo
@@ -239,6 +286,32 @@ class TestDaPrecheck:
         assert per_rif["beneficiari"].criterio == CriterioTipoSoggetto(valori=["impresa"])
         assert "Lombardia" in per_rif["regione"].testo
         assert per_rif["regione"].citazione["sezione"] == "META"
+
+    def test_citazione_della_scheda_non_verificata(self):
+        """Completamento WP9: la citazione costruita dai metadati della scheda
+        del catalogo (testo generato o classificato) non fa fede: esce non
+        verificata. Il requisito resta (anche visibile ai terzi se cercato),
+        la copertura del creatore non cambia e il validatore lo attribuisce ai
+        dati del catalogo, senza citazione."""
+        prechecks = facet_prechecks(BANDO, COMPANY, DERIVED)
+        bozze = gap.requisiti_da_precheck(prechecks, bando=BANDO)
+        assert {b.rif_origine for b in bozze} == {"regione", "ateco", "beneficiari"}
+        for bozza in bozze:
+            assert bozza.citazione["sezione"] == "META"
+            assert bozza.citazione["verificata"] is False
+            assert bozza.citazione["fonte_etichetta"] == "Scheda del bando"
+        come_prima = [replace(b, citazione={**b.citazione, "verificata": True}) for b in bozze]
+        profilo = creatore()
+        dopo = gap.copertura_creatore(bozze, profilo)
+        prima = gap.copertura_creatore(come_prima, profilo)
+        assert [(r.copertura_creatore, r.copertura_fonte, r.cercato, r.criterio, r.ambito)
+                for r in dopo] == [
+            (r.copertura_creatore, r.copertura_fonte, r.cercato, r.criterio, r.ambito)
+            for r in prima]
+        assert [r.citazione.verificata for r in dopo] == [False] * len(bozze)
+        for bozza in bozze:
+            regola = pv.requisito_da_riga(_riga_requisito(bozza)).regola
+            assert (regola.fonte, regola.citazione) == ("bando", None)
 
     def test_settore_senza_ateco(self):
         bando = {**BANDO, "bando_codici_ateco": []}
@@ -336,10 +409,121 @@ class TestDaRegole:
             assert bozza.citazione["verificata"] is (origine == "confermata")
             assert pv.requisito_da_riga(_riga_requisito(bozza)).regola.fonte == fonte
 
+    @pytest.mark.parametrize("sezione", ["META", "S2", "[d1 pag. 3]"])
+    def test_confermata_fa_fede_solo_da_una_pagina_ufficiale(self, sezione):
+        """Completamento WP9: uno snapshot confermato prima della regola dei
+        documenti ufficiali può avere una voce `confermata` citata dalla
+        scheda del catalogo: il suo requisito non è verificato. Una pagina
+        ufficiale scritta in un'altra forma («[d1 pag. 3]») vale."""
+        citazione = {**citazione_verificata(), "sezione": sezione}
+        snap = snapshot(composizione=[composizione(citazione=citazione)])
+        (bozza,) = gap.requisiti_da_regole(snap)
+        ufficiale = sezione.startswith("[d1")
+        assert bozza.citazione["verificata"] is ufficiale
+        assert pv.requisito_da_riga(_riga_requisito(bozza)).regola.fonte == (
+            "bando" if ufficiale else "creatore")
+
     def test_snapshot_come_dict_o_assente(self):
         assert gap.requisiti_da_regole(None) == []
+
+
+# ------------------------------------------------------- prova dal server
+
+
+def _in(**campi) -> RequisitoIn:
+    return RequisitoIn.model_validate({"testo": "Requisito di prova", **campi})
+
+
+class TestCitazioniDalServer:
+    """Completamento WP9: la citazione salvata la decide il server, mai il
+    client (`citazioni_dal_server`)."""
+
+    def _fonti(self):
+        snap = snapshot(composizione=[composizione()], regole_finanziarie=[regola()])
+        da_regole = gap.requisiti_da_regole(snap)
+        da_ai_check = gap.requisiti_da_ai_check(report_reale())
+        return da_regole, da_ai_check
+
+    def _come_generato(self, bozza: gap.RequisitoBozza, **modifiche) -> RequisitoIn:
+        dati = {"testo": bozza.testo, "criterio": gap._json_criterio(bozza.criterio),
+                "ambito": bozza.ambito, "origine": bozza.origine,
+                "rif_origine": bozza.rif_origine, "citazione": bozza.citazione}
+        dati.update(modifiche)
+        return RequisitoIn.model_validate(dati)
+
+    def test_manuale_e_precheck_mai_verificati(self):
+        falsa = {"sezione": "D1-p3", "testo": "Passaggio inventato", "verificata": True}
+        richiesti = [_in(citazione=falsa),
+                     _in(origine="precheck", rif_origine="regione", citazione=falsa)]
+        uscita = gap.citazioni_dal_server(richiesti, da_regole=self._fonti()[0],
+                                          da_ai_check=self._fonti()[1])
+        assert [c["verificata"] for c in uscita] == [False, False]
+        assert uscita[0]["testo"] == "Passaggio inventato"  # resta come riferimento
+        riga = {**_riga_requisito(gap.RequisitoBozza(origine="manuale", testo="x",
+                                                     criterio=None)),
+                "citazione": uscita[0]}
+        assert pv.requisito_da_riga(riga).regola.fonte == "creatore"
+
+    def test_voce_dello_snapshot_confermata_e_ai_check(self):
+        da_regole, da_ai_check = self._fonti()
+        k1 = next(b for b in da_regole if b.origine == "bando_partenariato")
+        f1 = next(b for b in da_regole if b.origine == "regola_finanziaria")
+        r1 = next(b for b in da_ai_check if gap.id_voce(b.rif_origine) == "R1")
+        # il client prova a cambiare il testo della citazione o a spegnerla
+        falsa = {"sezione": "D9-p9", "testo": "Altro", "verificata": False}
+        richiesti = [self._come_generato(k1, citazione=falsa), self._come_generato(f1),
+                     self._come_generato(r1, citazione=falsa)]
+        uscita = gap.citazioni_dal_server(richiesti, da_regole=da_regole,
+                                          da_ai_check=da_ai_check)
+        assert uscita == [k1.citazione, f1.citazione, r1.citazione]
+        assert uscita[0]["verificata"] is True and uscita[0]["sezione"] == "D1-p3"
+
+    @pytest.mark.parametrize("modifica", [
+        {"testo": "Almeno un soggetto di tipo università come partner"},
+        {"criterio": {"tipo": "tipo_soggetto", "valori": ["universita"]}},
+        {"ambito": "ogni_membro"},
+        {"rif_origine": "K9~0000000000"},
+        {"origine": "ai_check"},
+    ], ids=["testo", "criterio", "ambito", "riferimento", "origine"])
+    def test_requisito_riscritto_non_verificato(self, modifica):
+        da_regole, da_ai_check = self._fonti()
+        k1 = next(b for b in da_regole if b.origine == "bando_partenariato")
+        richiesto = self._come_generato(k1, **modifica)
+        [citazione] = gap.citazioni_dal_server([richiesto], da_regole=da_regole,
+                                               da_ai_check=da_ai_check)
+        assert citazione["verificata"] is False
+
+    def test_senza_citazione(self):
+        assert gap.citazioni_dal_server([_in()]) == [None]
         dati = snapshot(composizione=[composizione()]).model_dump(mode="json")
         assert len(gap.requisiti_da_regole(dati)) == 1
+
+    def test_origine_del_precheck_decisa_dal_server(self):
+        """Correzione WP9: un `precheck` resta tale solo se coincide con uno
+        generato ora dal catalogo; inventato, riscritto o senza catalogo è
+        `manuale`, senza riferimento. Le altre origini restano (la loro prova
+        la decide `citazioni_dal_server`). I caratteri invisibili che lo
+        schema toglie al testo non bastano a declassare un pre-check vero."""
+        # nel nome del catalogo un trattino morbido, che `RequisitoIn` toglie
+        bando = {**BANDO, "bando_regioni": [{"regioni": {"id": LOMBARDIA,
+                                                          "nome": "Lom­bardia"}}]}
+        generati = gap.requisiti_da_precheck(None, bando=bando)
+        regione = next(b for b in generati if b.rif_origine == "regione")
+        vero = RequisitoIn.model_validate({
+            "testo": regione.testo, "criterio": gap._json_criterio(regione.criterio),
+            "ambito": regione.ambito, "origine": "precheck", "rif_origine": "regione"})
+        assert "­" in regione.testo and "­" not in vero.testo
+        richiesti = [
+            vero,
+            vero.model_copy(update={"testo": "Sede in Lombardia da almeno tre anni"}),
+            vero.model_copy(update={"rif_origine": "ateco"}),
+            _in(testo="Certificazione ISO 27001", origine="precheck", rif_origine="regione"),
+            _in(origine="ai_check", rif_origine="R1~0123456789"),
+        ]
+        assert gap.origini_dal_server(richiesti, da_precheck=generati) == [
+            ("precheck", "regione"), ("manuale", None), ("manuale", None),
+            ("manuale", None), ("ai_check", "R1~0123456789")]
+        assert gap.origini_dal_server([vero]) == [("manuale", None)]  # catalogo assente
 
 
 # ---------------------------------------------------------------- unisci

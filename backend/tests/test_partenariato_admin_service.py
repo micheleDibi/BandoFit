@@ -221,6 +221,63 @@ class TestListaCall:
         pagina = await adm.lista_call(db, page=2, page_size=2)
         assert (pagina.total, pagina.page, len(pagina.items)) == (3, 2, 1)
 
+    async def test_ricerca_per_denominazione_del_registro(self, fondo):
+        """Completamento WP9: `q` cerca anche nella denominazione del Registro
+        Imprese dell'azienda creatrice (senza maiuscole), oltre a titolo e
+        bando; le due ricerche si uniscono, con totale e pagine giusti."""
+        db, sec = await scenario_wp9()
+        # O ha creato la call «altra» e quella riservata; nessun titolo né
+        # bando contiene «sintetica o».
+        per_nome = await adm.lista_call(db, q="impresa SINTETICA o")
+        assert sorted(str(c.id) for c in per_nome.items) == sorted(
+            [g.CALL_ALTRA_ID, g.CALL_RISERVATA_ID])
+        assert per_nome.total == 2
+        assert {c.creatore.ragione_sociale for c in per_nome.items} == {RAGIONE["O"]}
+        # un'azienda che non ha creato call non porta nulla
+        assert (await adm.lista_call(db, q="sintetica y")).total == 0
+        # filtro di stato applicato anche alla ricerca per nome
+        db.una("partner_calls", id=g.CALL_RISERVATA_ID)["stato"] = "chiusa_annullata"
+        pubblicate = await adm.lista_call(db, q="sintetica o", stato="pubblicata")
+        assert [str(c.id) for c in pubblicate.items] == [g.CALL_ALTRA_ID]
+        # unione: X per denominazione, la call di O per titolo
+        db.una("company_data", company_profile_id=g.COMPANY["X"])["denominazione"] = (
+            "INNOVAZIONE DIGITALE SRL")
+        unione = await adm.lista_call(db, q="innovazione digitale", page_size=1)
+        assert unione.total == 2 and len(unione.items) == 1
+        seconda = await adm.lista_call(db, q="innovazione digitale", page=2, page_size=1)
+        assert {str(unione.items[0].id), str(seconda.items[0].id)} == {
+            g.CALL_GUIDA_ID, g.CALL_ALTRA_ID}
+        # denominazioni lette a blocchi (in_ con al più 100 aziende)
+        letture = [o for o in db.ops if o["tabella"] == "company_data" and o["op"] == "select"]
+        assert letture and all(
+            len(v) <= 100 for o in letture for op, c, v in o["filtri"] if op == "in")
+
+    async def test_ricerca_per_denominazione_a_blocchi_e_keyset(self, fondo, monkeypatch):
+        """Correzione WP9: nessuna lettura della ricerca per denominazione
+        supera il max-rows. Con blocchi e pagine di una riga il risultato non
+        cambia, le denominazioni si leggono un'azienda alla volta e i
+        creatori a keyset (una lettura per call, più quella vuota finale)."""
+        db, sec = await scenario_wp9()
+        atteso = await adm.lista_call(db, q="sintetica o")
+        monkeypatch.setattr(adm, "_BLOCCO", 1)
+        monkeypatch.setattr(adm, "_PAGINA", 1)
+        db.ops.clear()
+        ridotta = await adm.lista_call(db, q="sintetica o")
+        assert ridotta.total == atteso.total == 2
+        assert sorted(str(c.id) for c in ridotta.items) == sorted(
+            str(c.id) for c in atteso.items)
+        call = db.tabelle["partner_calls"]
+        creatori = {str(r["company_profile_id"]) for r in call if r.get("company_profile_id")}
+        assert len(creatori) >= 2
+        per_nome = [o for o in db.ops if o["tabella"] == "company_data" and o["op"] == "select"
+                    and any(op == "or" and "denominazione.ilike" in str(v)
+                            for op, _c, v in o["filtri"])]
+        assert len(per_nome) == len(creatori)
+        assert all(len(v) == 1 for o in per_nome for op, _c, v in o["filtri"] if op == "in")
+        chiavi = [o for o in db.ops if o["tabella"] == "partner_calls" and o["op"] == "select"
+                  and o["select"] == "id,company_profile_id"]
+        assert len(chiavi) == len(call) + 1
+
     @pytest.mark.parametrize(("q", "atteso"), [
         (None, None), ("", None), ("  ", None), ("a,b(c)*d", "a b c d"),
         ("x" * 300, "x" * 100), ('nome"\\:%', "nome"),
@@ -392,9 +449,9 @@ class TestDecisioneIdentita:
         assert IdentitaDecisioneIn(esito="rifiutata", nota="   ").nota is None
 
 
-def test_la_notifica_di_verifica_non_promette_le_call_con_il_nome():
-    """WP9: le call con il nome non hanno ancora una proiezione verso terzi
-    (compaiono comunque anonime): l'esito della verifica non le promette."""
+def test_la_notifica_di_verifica_dice_cosa_sblocca():
+    """Completamento WP9: le call con il nome hanno la loro proiezione verso
+    terzi, quindi l'esito della verifica le nomina insieme al profilo."""
     corpo = testi.corpo_identita("verificata")
     assert "profilo partner" in corpo and "tra aziende verificate" in corpo
-    assert "call" not in corpo
+    assert "nelle call di partenariato" in corpo

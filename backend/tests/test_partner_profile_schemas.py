@@ -479,8 +479,57 @@ def test_api_valido_200(client):
 
 class TestInformative:
     def test_versioni(self):
-        assert inf.INFORMATIVA_PARTNER_VERSIONE == "2026-10-bozza-1"
-        assert 1 <= len(inf.INFORMATIVA_REFERENTE_VERSIONE) <= 50
+        # v2 (WP9): verifica dell'identità, rivelazione solo tra verificate,
+        # moderazione dei messaggi segnalati, conservazione.
+        assert inf.INFORMATIVA_PARTNER_VERSIONE == "2026-10-bozza-2"
+        assert inf.INFORMATIVA_REFERENTE_VERSIONE == "2026-10-bozza-2"
+        for versione, testo in (
+            (inf.INFORMATIVA_PARTNER_VERSIONE, inf.INFORMATIVA_PARTNER_TESTO),
+            (inf.INFORMATIVA_REFERENTE_VERSIONE, inf.INFORMATIVA_REFERENTE_TESTO),
+        ):
+            assert f"Versione {versione}." in testo
+
+    @pytest.mark.parametrize(
+        "tema",
+        [
+            # la verifica la fa la piattaforma, su richiesta
+            "## Verifica dell'identità",
+            "la verifica la chiede il titolare",
+            "recapiti ufficiali del registro imprese",
+            # il nome solo se scelto E verificato; la revoca lo spegne
+            "solo se scegli di mostrarlo e solo se la piattaforma ha verificato l'identità",
+            "il nome non si mostra più",
+            # rivelazione simmetrica, altrimenti anonime e presentazione in chat
+            "solo se entrambe le aziende hanno l'identità verificata",
+            "restate anonime l'una per l'altra",
+            "in chat potete presentarvi voi",
+            # moderazione: finestra di contesto, intera solo con motivazione
+            "## Segnalazioni e moderazione",
+            "una finestra di messaggi vicini",
+            "la conversazione intera solo se serve a decidere, indicando una motivazione",
+            # conservazione
+            "per 24 mesi",
+            "registro delle verifiche dell'identità",
+        ],
+    )
+    def test_temi_della_versione_2(self, tema):
+        assert tema.lower() in inf.INFORMATIVA_PARTNER_TESTO.lower()
+
+    def test_referente_versione_2(self):
+        testo = inf.INFORMATIVA_REFERENTE_TESTO.lower()
+        assert "solo se entrambe le aziende hanno l'identità verificata" in testo
+        assert "staff di moderazione" in testo
+
+    def test_promette_solo_cio_che_il_sistema_fa(self):
+        """Correzione WP9: si registrano gli accessi al contesto dei messaggi
+        segnalati e le decisioni, non ogni lettura della coda; il nome che
+        un'azienda verificata sceglie di mostrare resta visibile anche a
+        un'azienda non verificata, che invece non vede sito, PEC e referente."""
+        testo = " ".join(inf.INFORMATIVA_PARTNER_TESTO.lower().split())
+        assert "ogni accesso" not in testo
+        assert "gli accessi ai messaggi vicini e alla conversazione intera" in testo
+        assert "sito, pec e referente non si rivelano" in testo
+        assert "salvo il nome che un'azienda verificata ha scelto di mostrare" in testo
 
     @pytest.mark.parametrize(
         "testo", [inf.INFORMATIVA_PARTNER_TESTO, inf.INFORMATIVA_REFERENTE_TESTO]

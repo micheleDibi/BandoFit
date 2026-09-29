@@ -966,6 +966,7 @@ async def list_my_requests(primary, user: dict) -> list[ConsulenzaOut]:
                 proposte_aperte=aperte_per_request.get(row["id"], 0),
                 appuntamento=_map_booking(bookings.get(row["id"])),
                 partner_call_id=row.get("partner_call_id"),
+                company_profile_id=row.get("company_profile_id"),
             )
         )
     return items
@@ -1015,6 +1016,7 @@ async def get_my_request(primary, user: dict, request_id: str) -> ConsulenzaOut:
         ],
         appuntamento=_map_booking(bookings.get(request["id"])),
         partner_call_id=request.get("partner_call_id"),
+        company_profile_id=request.get("company_profile_id"),
     )
 
 

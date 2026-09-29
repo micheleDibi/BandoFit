@@ -278,6 +278,26 @@ class TestCanary:
         out = proiezione(call_canary(forma_aggregazione_prevista="altra"))
         assert out.forma_aggregazione_prevista is None
 
+    def test_denominazione_solo_nominativa_e_verificata(self):
+        """Completamento WP9: il nome del registro solo per una call con
+        `anonima` false di un'azienda verificata oggi, ripulito dai caratteri
+        invisibili; il resto della card del creatore non cambia."""
+        dati = company_data(denominazione="ROSSI​ MECCANICA   SRL")
+        nominativa = {"anonima": False}
+        assert acc.denominazione_nominativa(nominativa, dati, verificata_oggi=True) == (
+            "ROSSI MECCANICA SRL")
+        assert acc.denominazione_nominativa(nominativa, dati, verificata_oggi=False) is None
+        assert acc.denominazione_nominativa({"anonima": True}, dati, verificata_oggi=True) is None
+        assert acc.denominazione_nominativa({}, dati, verificata_oggi=True) is None
+        assert acc.denominazione_nominativa(nominativa, None, verificata_oggi=True) is None
+        con_nome = acc.creatore_pubblico(dati, {}, REGIONI, denominazione="ROSSI MECCANICA SRL")
+        senza = acc.creatore_pubblico(dati, {}, REGIONI)
+        assert (con_nome.anonima, con_nome.denominazione) == (False, "ROSSI MECCANICA SRL")
+        assert (senza.anonima, senza.denominazione) == (True, "Azienda anonima")
+        assert con_nome.model_dump(exclude={"anonima", "denominazione"}) == senza.model_dump(
+            exclude={"anonima", "denominazione"})
+        assert acc.creatore_pubblico(dati, {}, REGIONI, denominazione="  ").anonima is True
+
     def test_testo_ridotto_al_solo_rimosso(self):
         assert acc.testo_pubblico("info@rossi.it", None) is None
         assert acc.testo_pubblico("   ", None) is None

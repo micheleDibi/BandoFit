@@ -140,6 +140,13 @@ export const CONSULENZA_STATO_LABELS: Record<
   annullata: "Annullata",
 };
 
+/** Consulto chiesto dalla call di partenariato (WP9) nell'area Consulenze
+ *  del cliente: badge in elenco e nel dettaglio, link alla call. */
+export const CONSULTO_CALL_COPY = {
+  badge: "Dalla call di partenariato",
+  vaiAllaCall: "Vai alla call",
+} as const;
+
 /** Etichette degli stati di un acquisto: badge dello storico utente
  *  (/app/acquisti) e della vista admin pagamenti. */
 export const PURCHASE_STATO_LABELS: Record<import("../types").PurchaseStatus, string> = {
@@ -528,7 +535,7 @@ export const PARTNER_COPY = {
   /** Referente per i partenariati. */
   referenteTitolo: "Referente per i partenariati",
   referenteDescrizione:
-    "La persona che le altre aziende vedono (nome e ruolo) quando accetti un contatto. L'email personale non viene mai mostrata.",
+    "La persona che le altre aziende vedono (nome e ruolo) quando accetti un contatto, se entrambe le aziende hanno l'identità verificata dalla piattaforma. L'email personale non viene mai mostrata.",
   referenteTu: "Tu (titolare)",
   referenteAttuale: (nome: string) => `Referente attuale: ${nome}`,
   referenteInAttesa: (nome: string) =>
@@ -575,22 +582,22 @@ export const CALL_COPY = {
    *  dalla piattaforma, e si rivela solo tra aziende verificate). */
   notaAnonima:
     "La call è anonima: le altre aziende non vedono il nome della tua. Dopo che accetti un'azienda, i nomi si rivelano solo se tutte e due hanno l'identità verificata dalla piattaforma.",
-  /** Call con il nome (solo aziende verificate, WP9). Il backend del WP9 non
-   *  ha ancora la proiezione con il nome verso le altre aziende: la nota lo
-   *  dice (da aggiornare quando arriva). */
+  /** Call con il nome (solo aziende verificate, WP9): il nome del Registro
+   *  Imprese, finché l'identità resta verificata (lo decide il server). */
   notaNominativa:
-    "Hai scelto la call con il nome dell'azienda. Per ora le altre aziende la vedono ancora in forma anonima: il nome comparirà quando la piattaforma mostrerà le call con il nome.",
+    "La call mostra il nome dell'azienda registrato al Registro Imprese, finché l'identità resta verificata dalla piattaforma: se la verifica viene revocata, le altre aziende la vedono di nuovo anonima. Partita IVA, sito e contatti restano riservati; dopo che accetti un'azienda si rivelano solo se tutte e due avete l'identità verificata.",
   sceltaNomeTitolo: "Come vuoi pubblicare la call?",
   sceltaAnonima: "Anonima",
   sceltaAnonimaNota: "Le altre aziende vedono regione, settore e dimensione, non il nome.",
   sceltaNome: "Con il nome dell'azienda",
   sceltaNomeNota:
-    "Il nome registrato al Registro Imprese. Per ora la call compare comunque in forma anonima.",
+    "Le altre aziende vedono anche il nome registrato al Registro Imprese. Solo il nome: partita IVA, sito e contatti restano riservati.",
   nomeNonDisponibile:
     "Per pubblicare la call con il nome dell'azienda serve la verifica dell'identità da parte della piattaforma. Intanto la call è anonima.",
-  /** Call rimasta «con il nome» mentre la scelta è spenta (WP9). */
-  nomeNonAncoraVisibile:
-    "La call è impostata con il nome dell'azienda, ma per ora le call compaiono solo in forma anonima: puoi renderla anonima.",
+  /** Call rimasta «con il nome» senza la verifica di oggi (per esempio dopo
+   *  una revoca): le altre aziende la vedono anonima e non si pubblica così. */
+  nomeSenzaVerifica:
+    "La call è impostata con il nome dell'azienda, ma l'identità non risulta verificata: le altre aziende non vedono il nome e per pubblicarla devi renderla anonima.",
   aziendaAnonima: "Azienda anonima",
   soloTitolare: "La call la gestisce il titolare dell'azienda: tu puoi solo consultarla.",
 
@@ -974,6 +981,7 @@ export const IDENTITA_COPY = {
     "Un amministratore della piattaforma controlla che tu rappresenti davvero l'azienda, per esempio con una telefonata alla sede o una PEC. Non costa nulla.",
   sblocca: [
     "mostrare il nome dell'azienda nel profilo partner;",
+    "pubblicare call di partenariato con il nome dell'azienda;",
     "rivelare i nomi dopo un'accettazione, quando anche l'altra azienda è verificata.",
   ],
   sbloccaTitolo: "Cosa sblocca",

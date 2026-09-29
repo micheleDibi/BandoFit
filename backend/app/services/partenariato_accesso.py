@@ -19,12 +19,16 @@ Unico punto in cui si decide CHI vede una call e COSA vede:
 - proiezioni a WHITELIST, costruite campo per campo (`extra='forbid'` sui DTO
   pubblici): verso i terzi MAI `company_profile_id`, `family_parent_id`,
   `creato_da`, `budget_progetto_eur`, `dettagli_riservati`, coperture del
-  creatore, fasce del creatore né identificativi dell'azienda. Le call sono
-  per ora solo anonime: il creatore è «Azienda anonima» con regione della
-  sede, sezione ATECO e classe dimensionale, SOLO dal Registro Imprese e solo
-  se i dati del registro sono dell'azienda (T5). I testi liberi escono
-  comunque passati da `anonimizza` (difesa in profondità: sono già stati
-  controllati al salvataggio);
+  creatore, fasce del creatore né identificativi dell'azienda. Il creatore è
+  «Azienda anonima» con regione della sede, sezione ATECO e classe
+  dimensionale, SOLO dal Registro Imprese e solo se i dati del registro sono
+  dell'azienda (T5). Call NOMINATIVA (WP9, decisione di Michele): in più la
+  sola denominazione del Registro Imprese, e solo se OGGI l'azienda ha
+  l'identità verificata dalla piattaforma (`denominazione_nominativa`: una
+  verifica revocata la rende di nuovo anonima); mai P.IVA, sito, PEC né
+  persone. I testi liberi escono comunque passati da `anonimizza` (difesa in
+  profondità: sono già stati controllati al salvataggio, e anche una call
+  nominativa non li usa per identificarsi);
 - controllo anti-contatti dei testi della call (`rilievi_testo`, usato dal
   servizio al salvataggio, alla pubblicazione e nell'anteprima) sulla forma
   canonica del testo, così un contatto non passa grazie a caratteri
@@ -55,7 +59,9 @@ WP8 (consorzio): i membri della call (`partner_call_membri`) escono SOLO da
 `proietta_membro`: la propria azienda col suo nome, gli altri membri in
 piattaforma con lo pseudonimo della call e il profilo pubblico anonimo (Q12,
 senza `codice_pubblico`), chi ha creato la call come «Azienda anonima» verso
-gli altri membri, gli esterni con il nome dichiarato dal creatore (ripulito
+gli altri membri (per una call nominativa di un'azienda verificata oggi, con
+la sola denominazione del registro, come nella vista pubblica), gli esterni
+con il nome dichiarato dal creatore (ripulito
 dagli identificativi del creatore verso gli altri). Mai `company_profile_id`,
 candidatura, utenti. «Azienda viva» (pubblico, candidato, invitato) = non
 eliminata né archiviata e con il titolare attivo, come nelle RPC (0040).
@@ -426,22 +432,49 @@ def _sezione(derived: Mapping, dossier: Mapping | None) -> AtecoSezioneOut | Non
     return None
 
 
+DENOMINAZIONE_MAX = 200
+
+
+def denominazione_nominativa(
+    call: Mapping, dati_registro: Mapping | None, *, verificata_oggi: bool
+) -> str | None:
+    """La denominazione del Registro Imprese con cui il creatore di una call
+    NOMINATIVA (`anonima` false) si mostra ai terzi (WP9, decisione di
+    Michele), SOLO se oggi l'azienda ha l'identità verificata dalla
+    piattaforma (`verificata_oggi`, `fn_partenariato_identita_forte`) e i dati
+    del registro sono suoi (`dati_registro` già coerente, T5). Altrimenti
+    None: il creatore resta «Azienda anonima» (una verifica revocata spegne il
+    nome nelle viste successive). Mai P.IVA, sito, PEC né persone."""
+    if call.get("anonima") is not False or not verificata_oggi:
+        return None
+    nome = _campo(dati_registro, "denominazione")
+    if not isinstance(nome, str):
+        return None
+    nome = " ".join(senza_invisibili(nome).split())[:DENOMINAZIONE_MAX]
+    return nome or None
+
+
 def creatore_pubblico(
-    dati_registro: Mapping | None, dossier: Mapping | None, regioni: Mapping[int, str]
+    dati_registro: Mapping | None, dossier: Mapping | None, regioni: Mapping[int, str],
+    *, denominazione: str | None = None,
 ) -> CreatoreCallOut:
-    """Il creatore di una call anonima visto da terzi (C3): regione della
-    sede, sezione ATECO e classe dimensionale dal Registro Imprese.
+    """Il creatore di una call visto da terzi (C3): regione della sede,
+    sezione ATECO e classe dimensionale dal Registro Imprese.
     `dati_registro` è la riga di `company_data` SOLO se è dell'azienda
     (`piva_fetched` = partita IVA attuale, T5); altrimenti None e non si
-    mostra nulla. Mai denominazione, fasce, coperture o identificativi."""
+    mostra nulla. Anonima (default): «Azienda anonima». Con `denominazione`
+    (da `denominazione_nominativa`: call nominativa di un'azienda verificata
+    oggi) il nome del registro al posto di «Azienda anonima». Mai fasce,
+    coperture o identificativi."""
     derived = _campo(dati_registro, "derived") or {}
     if not isinstance(derived, Mapping):
         derived = {}
     classe = derived.get("classe_dimensionale")
     classe = classe.strip().lower() if isinstance(classe, str) else None
+    nome = denominazione.strip() if isinstance(denominazione, str) else ""
     return CreatoreCallOut(
-        anonima=True,
-        denominazione=DENOMINAZIONE_ANONIMA,
+        anonima=not nome,
+        denominazione=nome or DENOMINAZIONE_ANONIMA,
         regione=_regione_sede(derived, regioni) if dati_registro else None,
         ateco_sezione=_sezione(derived, dossier) if dati_registro else None,
         classe_dimensionale=classe if dati_registro and classe in CLASSI_DIMENSIONALI else None,
@@ -1027,6 +1060,7 @@ def proietta_membro(
     editable: bool,
     ident_creatore: Identificativi | None,
     nome_proprio: str | None = None,
+    nome_creatore: str | None = None,
     pseudonimo_membro: str | None = None,
     profilo: ProfiloMembroOut | None = None,  # type: ignore[valid-type]
     posizione: Mapping | None = None,
@@ -1040,7 +1074,9 @@ def proietta_membro(
     - altre aziende in piattaforma: «Azienda anonima» con lo pseudonimo della
       call (`pseudonimo_membro`) e il profilo pubblico anonimo (`profilo`);
       chi ha creato la call senza pseudonimo né profilo (come nella chat del
-      WP7: è «il creatore della call»).
+      WP7: è «il creatore della call»), con `nome_creatore` se la call è
+      nominativa e l'azienda verificata oggi (`denominazione_nominativa`,
+      lo stesso nome della vista pubblica).
     Testi del creatore (titolo della posizione) ripuliti verso gli altri."""
     company = riga.get("company_profile_id")
     esterno = company is None
@@ -1057,6 +1093,8 @@ def proietta_membro(
         ) or NOME_ESTERNO_RIMOSSO
     elif propria:
         nome = (nome_proprio or "").strip() or DENOMINAZIONE_ANONIMA
+    elif del_creatore:
+        nome = (nome_creatore or "").strip() or DENOMINAZIONE_ANONIMA
     else:
         nome = DENOMINAZIONE_ANONIMA
     titolo = None

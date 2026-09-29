@@ -135,7 +135,11 @@ def _vale(riga: dict, termine: str) -> bool:
 
 
 class FakeQueryWP9(FakeQueryWP7):
-    """La query del WP7 con `ilike` nei filtri `or` (ricerca dell'admin)."""
+    """La query del WP7 con `ilike`, anche nei filtri `or` (ricerca
+    dell'admin)."""
+
+    def ilike(self, c, v):
+        return self._f("or", "", f"{c}.ilike.{v}")
 
     def _passa(self, riga: dict) -> bool:
         for op, c, v in self.filtri:

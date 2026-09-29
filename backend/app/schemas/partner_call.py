@@ -19,8 +19,9 @@ Call nominative (WP9, decisione di Michele): `anonima: false` solo per le
 aziende con l'identità verificata dalla piattaforma (altrimenti 409
 `identita_non_verificata_admin` dal servizio; 409 `nominativo_non_disponibile`
 con l'interruttore globale `NOMINATIVO_DISPONIBILE` spento). Verso terzi il
-creatore resta comunque «Azienda anonima» finché non esiste una proiezione
-nominativa delle call.
+creatore di una call nominativa compare con la sola denominazione del
+Registro Imprese (`CreatoreCallOut.anonima` false) finché l'identità resta
+verificata: con la verifica revocata torna «Azienda anonima».
 """
 
 import math
@@ -1126,7 +1127,10 @@ class _Pubblico(BaseModel):
 class CreatoreCallOut(_Pubblico):
     """Il creatore visto da terzi. Call anonima (C3): «Azienda anonima» con
     regione della sede, sezione ATECO e classe dimensionale, tutto dal
-    registro; niente fasce, niente coperture, niente identificativi."""
+    registro; niente fasce, niente coperture, niente identificativi. Call
+    nominativa di un'azienda con l'identità verificata OGGI (WP9): `anonima`
+    false e `denominazione` = denominazione del Registro Imprese, nient'altro
+    (mai P.IVA, sito, PEC né persone)."""
 
     anonima: bool = True
     denominazione: str = "Azienda anonima"

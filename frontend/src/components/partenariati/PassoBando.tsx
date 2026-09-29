@@ -37,7 +37,8 @@ const NOTE_RUOLO: Record<RuoloCreatoreCall, string> = {
 };
 
 /** Nota su come la call compare alle altre aziende: anonima (default) o, dal
- *  WP9, con il nome per le aziende con l'identità verificata. */
+ *  WP9, con il nome del Registro Imprese finché l'identità dell'azienda resta
+ *  verificata (lo decide il server a ogni lettura). */
 export function NotaAnonima({ anonima = true }: { anonima?: boolean }) {
   const Icona = anonima ? EyeOff : Eye;
   return (
@@ -53,17 +54,11 @@ export function NotaAnonima({ anonima = true }: { anonima?: boolean }) {
 
 type SceltaNome = "anonima" | "nome";
 
-/** Scelta «Con il nome dell'azienda» nel wizard: SPENTA. Il backend la salva
- *  (solo per aziende verificate) ma non esiste ancora una proiezione della
- *  call con il nome verso le altre aziende, che la vedrebbero comunque
- *  anonima: finché non c'è, la scelta non si offre (perimetro da confermare
- *  con Michele; per riaccenderla basta questa costante). */
-const SCELTA_NOME_CALL = false;
-
-/** Anonima o con il nome (WP9): con `SCELTA_NOME_CALL` la scelta c'è solo se
- *  l'azienda ha l'identità verificata dalla piattaforma; altrimenti la call è
- *  anonima. Una call rimasta «con il nome» (per esempio dopo una revoca della
- *  verifica) si può solo rendere anonima. */
+/** Anonima o con il nome (WP9, decisione di Michele): la scelta c'è solo se
+ *  l'azienda ha l'identità verificata dalla piattaforma (il server rifiuta le
+ *  altre, 409 `identita_non_verificata_admin`); altrimenti la call è anonima,
+ *  con il link per chiedere la verifica. Una call rimasta «con il nome» senza
+ *  verifica (per esempio dopo una revoca) si può solo rendere anonima. */
 function SceltaNomeCall({
   anonima,
   onChange,
@@ -76,11 +71,11 @@ function SceltaNomeCall({
   const nome = useId();
   const { data: identita } = useIdentitaAzienda();
   const verificata = identitaVerificata(identita);
-  if (!SCELTA_NOME_CALL || !verificata) {
+  if (!verificata) {
     return (
       <div className="space-y-2">
         <NotaAnonima />
-        {SCELTA_NOME_CALL && identita && (
+        {identita && (
           <p className="px-1 text-xs text-slate-500">
             {CALL_COPY.nomeNonDisponibile}{" "}
             <Link
@@ -93,11 +88,7 @@ function SceltaNomeCall({
         )}
         {!anonima && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            <p className="min-w-0 flex-1">
-              {verificata
-                ? CALL_COPY.nomeNonAncoraVisibile
-                : "La call è impostata con il nome dell'azienda, ma l'identità non risulta verificata: per pubblicarla rendila anonima."}
-            </p>
+            <p className="min-w-0 flex-1">{CALL_COPY.nomeSenzaVerifica}</p>
             <Button variant="secondary" size="sm" onClick={() => onChange(true)} disabled={disabled}>
               Rendi anonima
             </Button>

@@ -16,8 +16,9 @@ function conteggio(n: number, uno: string, molti: string) {
   return `${n} ${n === 1 ? uno : molti}`;
 }
 
-/** Una call nella bacheca, in «Per te» e tra le salvate: chi la propone (in
- *  forma anonima: classe, regione, sezione ATECO), bando, ruolo, budget,
+/** Una call nella bacheca, in «Per te» e tra le salvate: chi la propone
+ *  (classe, regione, sezione ATECO; il nome solo per una call con il nome di
+ *  un'azienda verificata, altrimenti «Azienda anonima»), bando, ruolo, budget,
  *  scadenza, posti; il confronto con la tua azienda se c'è; «Salva» per il
  *  titolare. La card è un `<li>`: va dentro un `<ul>`. */
 export function CallCard({ call, editable }: { call: CallBacheca; editable: boolean }) {

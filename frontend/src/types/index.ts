@@ -330,6 +330,9 @@ export interface Consulenza {
   /** Consulto chiesto dalla call di partenariato (WP9): l'AI-check è
    *  facoltativo, esito e punteggio ci sono solo se ce n'era uno pronto. */
   partner_call_id: string | null;
+  /** L'azienda della richiesta: il link alla call porta `?azienda=` (la call
+   *  si apre solo con l'azienda creatrice attiva). Assente sui server vecchi. */
+  company_profile_id?: string | null;
 }
 
 /** Vista PARZIALE del progettista sul pool (requisito: ragione sociale,
@@ -2423,8 +2426,10 @@ export interface CallVistaCreatore {
 
 // ---- Proiezioni verso le altre aziende (whitelist del server) --------------------
 
-/** Il creatore visto dagli altri: per ora sempre «Azienda anonima» con
- *  regione, sezione ATECO e classe dimensionale (dal Registro Imprese). */
+/** Il creatore visto dagli altri: «Azienda anonima» con regione, sezione
+ *  ATECO e classe dimensionale (dal Registro Imprese). Call con il nome di
+ *  un'azienda verificata oggi (WP9): `anonima` false e `denominazione` = il
+ *  nome del Registro Imprese, nient'altro. */
 export interface CreatoreCall {
   anonima: boolean;
   denominazione: string;

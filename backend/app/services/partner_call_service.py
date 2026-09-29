@@ -11,7 +11,8 @@ Flusso del wizard (7 passi, stato nella bozza lato server):
    in apertura), estrazione WP3 `non_ammesso` → serve un motivo
    (`partenariato_non_ammesso` altrimenti); call nominativa solo con
    l'identità dell'azienda verificata dalla piattaforma (WP9, `_nominativo`;
-   verso terzi il creatore resta comunque «Azienda anonima»);
+   verso terzi il creatore compare con la denominazione del registro solo
+   finché l'identità resta verificata, `nome_creatore` / `nomi_creatori`);
 2. `conferma_regole`: snapshot delle regole confermate; una voce `confermata`
    deve coincidere con una voce VERIFICATA dell'estrazione corrente, e la
    `fonte` la scrive il servizio dalla riga `bando_partenariato`;
@@ -167,6 +168,7 @@ from app.services.partenariato_accesso import (
     candidatura_su_call,
     carica_call_autorizzata,
     creatore_pubblico,
+    denominazione_nominativa,
     nomi_regioni,
     normalizza_id,
     proietta_versione,
@@ -186,12 +188,14 @@ from app.services.partenariato_criteri import intervallo_costo_quota, profilo_ca
 from app.services.partenariato_errori import RPC_ERRORS, raise_from_rpc
 from app.services.partner_call_gap import (
     RequisitoBozza,
+    citazioni_dal_server,
     copertura_creatore,
     errori_regole_finanziarie,
     errori_voci_confermate,
     etichetta_breve,
     evidenze_assorbite,
     intervallo_budget,
+    origini_dal_server,
     payload_requisito,
     requisiti_da_ai_check,
     requisiti_da_precheck,
@@ -304,7 +308,7 @@ PROFILO_PARTNER_SELECT = "company_profile_id,tipi_soggetto,competenze,certificaz
 PARTENARIATO_SELECT = "bando_id,stato,esito,modalita_effettiva,regole,estratta_at,prompt_version"
 LISTA_SELECT = (
     "id,bando_slug,bando_titolo,bando_scadenza,ruolo_creatore,titolo,budget_fascia,"
-    "scadenza_call,stato,pubblicata_at,wizard_passo,created_at,updated_at"
+    "scadenza_call,stato,pubblicata_at,wizard_passo,anonima,created_at,updated_at"
 )
 BANDO_CATALOGO_SELECT = "id,slug,titolo,titolo_breve,programmi(id),tipologie_bando(id)"
 BANDO_FACET_SELECT = (
@@ -486,6 +490,84 @@ async def carica_azienda(primary, company_id: str, owner_id: str | None, *,
         persone=[p for p in (persone.data or []) if isinstance(p, dict)],
         profilo_partner=profilo,
     )
+
+
+# ------------------------------------------------ call nominative (WP9)
+
+
+async def nome_creatore(primary, call: Mapping, az: Azienda | None = None) -> str | None:
+    """Il nome con cui il creatore di una call si mostra ai terzi: la
+    denominazione del Registro Imprese per una call NOMINATIVA di un'azienda
+    che OGGI ha l'identità verificata dalla piattaforma (interruttore globale
+    acceso e `fn_partenariato_identita_forte`, letta a ogni vista: una revoca
+    rende la call di nuovo anonima), altrimenti None («Azienda anonima»).
+    Per le viste: una lettura non riuscita lascia la call anonima
+    (`identita_forte_o_no`). `az` = l'azienda creatrice, se già letta."""
+    if call.get("anonima") is not False or not pps.NOMINATIVO_DISPONIBILE:
+        return None
+    company_id = call.get("company_profile_id")
+    if not company_id or not await pps.identita_forte_o_no(primary, company_id):
+        return None
+    if az is None or str(az.company_id) != str(company_id):
+        try:
+            az = await carica_azienda(primary, company_id, call.get("family_parent_id"),
+                                      viva=False)
+        except NotFoundError:
+            return None
+    return denominazione_nominativa(call, az.dati_registro, verificata_oggi=True)
+
+
+async def nomi_creatori(primary, call_ids: Iterable[Any]) -> dict[str, str]:
+    """`nome_creatore` per le card di UNA pagina di call di altri (bacheca,
+    «Per te»): call id → denominazione del registro, solo per le call
+    nominative di aziende verificate oggi (le altre restano anonime). Letture
+    live a blocchi di 100 (sotto il max-rows): anonima e creatore della call,
+    identità verificata di ogni creatore nominativo, P.IVA e denominazione del
+    registro (T5). Best-effort e fail-closed: su un errore tutte anonime."""
+    ids = sorted({str(c) for c in call_ids if c})
+    if not ids or not pps.NOMINATIVO_DISPONIBILE:
+        return {}
+    try:
+        nominative: dict[str, str] = {}
+        for inizio in range(0, len(ids), 100):
+            resp = await (
+                primary.table("partner_calls").select("id,company_profile_id,anonima")
+                .in_("id", ids[inizio : inizio + 100]).eq("anonima", False).execute()
+            )
+            for riga in resp.data or []:
+                if isinstance(riga, dict) and riga.get("anonima") is False:
+                    nominative[str(riga["id"])] = str(riga.get("company_profile_id"))
+        if not nominative:
+            return {}
+        forti = sorted(await pps.aziende_con_identita_forte(primary, set(nominative.values())))
+        denominazioni: dict[str, str] = {}
+        for inizio in range(0, len(forti), 100):
+            blocco = forti[inizio : inizio + 100]
+            aziende, dati = await asyncio.gather(
+                primary.table("company_profiles").select("id,partita_iva").in_("id", blocco)
+                .execute(),
+                primary.table("company_data")
+                .select("company_profile_id,denominazione,piva_fetched")
+                .in_("company_profile_id", blocco).execute(),
+            )
+            piva = {str(r.get("id")): r.get("partita_iva") for r in aziende.data or []
+                    if isinstance(r, dict)}
+            for riga in dati.data or []:
+                if not isinstance(riga, dict):
+                    continue
+                cid = str(riga.get("company_profile_id"))
+                coerente = bool(piva.get(cid) and riga.get("piva_fetched") == piva[cid])
+                nome = denominazione_nominativa(
+                    {"anonima": False}, riga if coerente else None, verificata_oggi=True
+                )
+                if nome:
+                    denominazioni[cid] = nome
+    except Exception as exc:  # noqa: BLE001 — fail-closed: le call restano anonime
+        logger.warning("call: nomi dei creatori non letti (%s)",
+                       getattr(exc, "code", None) or type(exc).__name__)
+        return {}
+    return {call_id: denominazioni[cid] for call_id, cid in nominative.items()
+            if cid in denominazioni}
 
 
 async def _requisiti(primary, call_id: str) -> list[dict]:
@@ -1168,12 +1250,22 @@ async def lista_mie(
         chiave = str(riga["call_id"])
         conta_posizioni[chiave] = conta_posizioni.get(chiave, 0) + 1
         conta_posti[chiave] = conta_posti.get(chiave, 0) + _posti(riga)
-    creatore = creatore_pubblico(az.dati_registro, az.dossier, nomi_regioni(lookups))
+    regioni = nomi_regioni(lookups)
+    anonimo = creatore_pubblico(az.dati_registro, az.dossier, regioni)
+    # Come le vedono gli altri: le call nominative con il nome del registro
+    # solo se oggi l'identità è verificata (una sola lettura per l'azienda).
+    nome = None
+    if any(c.get("anonima") is False for c in calls):
+        nome = await nome_creatore(primary, {"anonima": False, "company_profile_id": az.company_id,
+                                             "family_parent_id": active.owner_id}, az)
+    nominativo = (creatore_pubblico(az.dati_registro, az.dossier, regioni, denominazione=nome)
+                  if nome else anonimo)
     ricevute = await candidature_ricevute(primary, ids)
     items = [
         call_bacheca(
             call_card(
-                c, creatore, posizioni_n=conta_posizioni.get(str(c["id"]), 0),
+                c, nominativo if c.get("anonima") is False else anonimo,
+                posizioni_n=conta_posizioni.get(str(c["id"]), 0),
                 requisiti_cercati_n=conta_cercati.get(str(c["id"]), 0), mia=True,
                 ident=az.ident,
             ),
@@ -1275,7 +1367,9 @@ async def _proiezione_pubblica(
     primary, secondary, call: Mapping, az: Azienda | None = None, *,
     requisiti: list[dict] | None = None, posizioni: list[dict] | None = None,
 ) -> CallPubblicaOut:
-    """La call come la vedono i terzi (anteprima e segnalazioni)."""
+    """La call come la vedono i terzi (anteprima e segnalazioni): per una call
+    nominativa di un'azienda verificata oggi, il creatore con la
+    denominazione del registro (`nome_creatore`)."""
     if az is None:
         az = await carica_azienda(primary, call["company_profile_id"], call["family_parent_id"],
                                   viva=False)
@@ -1284,7 +1378,8 @@ async def _proiezione_pubblica(
             _requisiti(primary, call["id"]), _posizioni(primary, call["id"])
         )
     regioni = nomi_regioni(await _lookups(secondary))
-    creatore = creatore_pubblico(az.dati_registro, az.dossier, regioni)
+    creatore = creatore_pubblico(az.dati_registro, az.dossier, regioni,
+                                 denominazione=await nome_creatore(primary, call, az))
     return call_pubblica(call, requisiti, posizioni, creatore, ident=az.ident, regioni=regioni)
 
 
@@ -1652,14 +1747,19 @@ async def salva_requisiti(primary, secondary, active, user: dict, call_id: Any,
     un requisito tipizzato riceve i verdetti delle voci che assorbe, come
     nella proposta. L'etichetta si rispetta solo per i requisiti conservati
     (con id): ai nuovi la assegna la RPC, senza spostare su di loro i
-    collegamenti delle posizioni a un requisito rimosso."""
+    collegamenti delle posizioni a un requisito rimosso. La prova di ogni
+    requisito (`citazione.verificata`) la ricalcola il server dalle stesse
+    fonti della proposta (`citazioni_dal_server`): quella del client non
+    conta mai; e un pre-check resta tale solo se coincide con uno che il
+    server genera ora dal catalogo (`origini_dal_server`)."""
     call = await _carica_scrittura(primary, active, user, call_id)
     az = await carica_azienda(primary, active.company_id, active.owner_id)
     _controlla(
         [v for v in _testi_pubblici({}, dati.requisiti, ()) if v.campo.startswith("requisiti.")],
         az.ident,
     )
-    errori = errori_regole_finanziarie(dati.requisiti, snapshot_regole(call))
+    snapshot = snapshot_regole(call)
+    errori = errori_regole_finanziarie(dati.requisiti, snapshot)
     if errori:
         raise BadRequestError(errori[0])
     evidenze: dict[str, tuple[str, ...]] = {}
@@ -1671,20 +1771,38 @@ async def salva_requisiti(primary, secondary, active, user: dict, call_id: Any,
         )
         da_ai_check = requisiti_da_ai_check((ai_row or {}).get("report"))
         evidenze = {b.rif_origine: b.esiti_ai_check for b in da_ai_check if b.rif_origine}
+    # Facet del catalogo: i pre-check si confrontano con quelli generati ora
+    # (`origini_dal_server`, fail-closed); le regioni del bando servono al
+    # criterio del vincolo territoriale.
+    bando = (
+        await _bando_facet(secondary, call["bando_slug"])
+        if any(r.origine in ("precheck", "bando_partenariato") for r in dati.requisiti)
+        else None
+    )
+    origini = origini_dal_server(
+        dati.requisiti, da_precheck=requisiti_da_precheck(None, bando=bando) if bando else []
+    )
+    da_regole: list[RequisitoBozza] = []
+    if snapshot is not None and any(
+        r.origine in ("bando_partenariato", "regola_finanziaria") for r in dati.requisiti
+    ):
+        da_regole = requisiti_da_regole(snapshot, regioni_bando=_regioni_bando(bando))
+    citazioni = citazioni_dal_server(dati.requisiti, da_regole=da_regole,
+                                     da_ai_check=da_ai_check)
     bozze = [
         RequisitoBozza(
-            origine=r.origine,
+            origine=origine,
             testo=r.testo,
             criterio=r.criterio,
             ambito=r.ambito,
-            rif_origine=r.rif_origine,
-            citazione=r.citazione.model_dump(mode="json") if r.citazione else None,
+            rif_origine=rif,
+            citazione=citazione,
             esiti_ai_check=evidenze.get(r.rif_origine or "", ()) if r.origine == "ai_check"
             else (),
             cercato=r.cercato,
             id=r.id,
         )
-        for r in dati.requisiti
+        for r, citazione, (origine, rif) in zip(dati.requisiti, citazioni, origini, strict=True)
     ]
     propri = {r.rif_origine for r in dati.requisiti if r.origine == "ai_check" and r.rif_origine}
     evidenze_assorbite(bozze, [b for b in da_ai_check if b.rif_origine not in propri])
@@ -2073,9 +2191,13 @@ def _in_bacheca(ci, snapshot, active, oggi: date) -> bool:
     return snapshot.creatore.viva
 
 
-def _card(ci, idx, regioni: Mapping[int, str]) -> CallCardOut:
+def _card(ci, idx, regioni: Mapping[int, str], nomi: Mapping[str, str] | None = None
+          ) -> CallCardOut:
+    """La card di una call dell'indice; `nomi` = `nomi_creatori` della pagina
+    (call nominative di aziende verificate oggi, letto live)."""
     vetrina = idx.vetrine.get(ci.company_id) or partenariato_indice.Vetrina()
-    creatore = creatore_pubblico(vetrina.registro, vetrina.dossier, regioni)
+    creatore = creatore_pubblico(vetrina.registro, vetrina.dossier, regioni,
+                                 denominazione=(nomi or {}).get(ci.id))
     return call_card(ci.riga, creatore, posizioni_n=ci.posizioni_n,
                      requisiti_cercati_n=ci.requisiti_cercati_n, mia=False, ident=None)
 
@@ -2175,9 +2297,10 @@ async def bacheca(
     )
     regioni = nomi_regioni(await _lookups(secondary))
     ricevute = await candidature_ricevute(primary, [ci.id for ci, _snapshot in pagina])
+    nomi = await nomi_creatori(primary, [ci.id for ci, _snapshot in pagina])
     items = [
         call_bacheca(
-            _card(ci, idx, regioni),
+            _card(ci, idx, regioni, nomi),
             match=pm.proietta_match(match[ci.id], vista="proprio") if match.get(ci.id) else None,
             salvata=ci.id in salvate,
             posti=ci.posti,
@@ -2230,9 +2353,10 @@ async def per_te(primary, secondary, active, user: dict, *, page: int = 1,
     salvate = await _salvate(primary, company_id)
     regioni = nomi_regioni(await _lookups(secondary))
     ricevute = await candidature_ricevute(primary, [m.call_id for m in pagina])
+    nomi = await nomi_creatori(primary, [m.call_id for m in pagina])
     items = [
         call_bacheca(
-            _card(idx.bacheca[m.call_id], idx, regioni),
+            _card(idx.bacheca[m.call_id], idx, regioni, nomi),
             match=pm.proietta_match(m, vista="proprio"),
             salvata=m.call_id in salvate,
             posti=idx.bacheca[m.call_id].posti,

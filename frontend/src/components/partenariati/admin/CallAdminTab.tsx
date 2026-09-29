@@ -94,7 +94,7 @@ export function CallAdminTab() {
               type="search"
               value={testo}
               onChange={(e) => setTesto(e.target.value)}
-              placeholder="Titolo della call o del bando, oppure l'id della call"
+              placeholder="Titolo della call o del bando, nome dell'azienda, oppure l'id della call"
               className="h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-2 focus:outline-offset-0 focus:outline-brand-500/30"
             />
           </div>

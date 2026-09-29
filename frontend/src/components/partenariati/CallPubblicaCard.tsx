@@ -65,8 +65,9 @@ function Posizione({ p }: { p: PosizionePubblicaCall }) {
 }
 
 /** La call come la vedono le altre aziende (proiezione a whitelist del server:
- *  niente nome, niente budget esatto, niente dettagli riservati né coperture
- *  del creatore). I testi sono testo semplice, mai HTML né link. */
+ *  il nome solo per una call con il nome di un'azienda verificata, niente
+ *  budget esatto, niente dettagli riservati né coperture del creatore). I
+ *  testi sono testo semplice, mai HTML né link. */
 export function CallPubblicaCard({ call, className }: { call: CallPubblica; className?: string }) {
   const { data: vocabolario } = usePartenariatiVocabolario();
   const nomi = useNomiCall();

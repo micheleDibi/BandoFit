@@ -281,6 +281,28 @@ class TestCreaDaCall:
         assert "per questa call" in errore_doppio.message
         assert len(db.tabelle["consultation_requests"]) == 2
 
+    async def test_area_consulenze_del_cliente(self):
+        """Completamento WP9: nell'area Consulenze del cliente (elenco e
+        dettaglio) il consulto chiesto dalla call porta la call e l'azienda
+        (per il link `?azienda=` alla call); quello da AI-check no."""
+        db, sec = await scenario()
+        da_ai_check = str(uuid.uuid4())
+        db.tabelle["consultation_requests"].append({
+            **{c: None for c in REQUEST_COLONNE}, "id": da_ai_check,
+            "cliente_id": g.OWNER["X"], "family_parent_id": g.OWNER["X"],
+            "company_profile_id": g.COMPANY["X"], "bando_id": g.BANDO_GUIDA,
+            "bando_slug": SLUG, "bando_titolo": "Bando", "stato": "nuova",
+            "created_at": _ora()})
+        creata = await chiedi(db, sec)
+        elenco = {str(c.id): c for c in await consulting_service.list_my_requests(
+            db, utente("X"))}
+        dettaglio = await consulting_service.get_my_request(db, utente("X"), str(creata.id))
+        for vista in (elenco[str(creata.id)], dettaglio):
+            assert str(vista.partner_call_id) == g.CALL_GUIDA_ID
+            assert str(vista.company_profile_id) == g.COMPANY["X"]
+        assert elenco[da_ai_check].partner_call_id is None
+        assert str(elenco[da_ai_check].company_profile_id) == g.COMPANY["X"]
+
     async def test_solo_il_titolare_dell_azienda_creatrice(self):
         db, sec = await scenario()
         await attendi(chiedi(db, sec, editable=False), "forbidden", 403)

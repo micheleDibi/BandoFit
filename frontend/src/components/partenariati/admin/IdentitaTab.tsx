@@ -143,7 +143,7 @@ function DecidiIdentitaDialog({
             {
               valore: "verificata",
               etichetta: "Identità verificata",
-              nota: "Sblocca il nome dell'azienda nel profilo partner e la rivelazione tra aziende verificate.",
+              nota: "Sblocca il nome dell'azienda nel profilo partner e nelle call, e la rivelazione tra aziende verificate.",
             },
             {
               valore: "rifiutata",

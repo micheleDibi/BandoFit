@@ -2,7 +2,8 @@
 dell'identità da parte dell'admin, decisione di Michele del 2026-09-29).
 
 - `lista_call`: le call di tutte le aziende con filtri per stato e testo
-  (titolo della call o del bando, oppure l'id esatto), con creatore,
+  (titolo della call o del bando, denominazione del Registro Imprese
+  dell'azienda creatrice, oppure l'id esatto), con creatore,
   conteggi di candidature e inviti, esito dell'ultima validazione e
   segnalazioni aperte. Letture a blocchi e a keyset (sotto il max-rows 1000).
 - `metriche` e `costi`: le RPC `fn_admin_metriche_partenariati` e
@@ -200,23 +201,96 @@ async def _ragioni_sociali(primary, company_ids: Iterable[Any]) -> dict[str, str
     return uscita
 
 
+async def _creatori_per_denominazione(primary, testo: str, stato: str | None) -> list[str]:
+    """Le aziende che hanno creato call (nello `stato`, se indicato) e la cui
+    denominazione del Registro Imprese (`company_data.denominazione`) contiene
+    `testo`, senza distinguere le maiuscole. I creatori si leggono a keyset
+    sulle call, le denominazioni a blocchi di 100 aziende (una riga per
+    azienda): ogni lettura resta sotto il max-rows 1000."""
+    def call_creatori():
+        query = primary.table("partner_calls").select("id,company_profile_id")
+        return query.eq("stato", stato) if stato else query
+
+    creatori = sorted({str(r["company_profile_id"]) for r in await _tutte(call_creatori)
+                       if r.get("company_profile_id")})
+    trovati: set[str] = set()
+    for blocco in _blocchi(creatori):
+        resp = await (primary.table("company_data").select("company_profile_id")
+                      .in_("company_profile_id", blocco)
+                      .ilike("denominazione", f"*{testo}*").execute())
+        trovati |= {str(r["company_profile_id"]) for r in resp.data or []
+                    if isinstance(r, dict) and r.get("company_profile_id")}
+    return sorted(trovati)
+
+
+def _istante(valore: Any) -> datetime:
+    try:
+        istante = datetime.fromisoformat(str(valore).replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=ZoneInfo("UTC"))
+    return istante if istante.tzinfo else istante.replace(tzinfo=ZoneInfo("UTC"))
+
+
+async def _pagina_per_testo_o_creatori(
+    primary, testo: str, creatori: list[str], stato: str | None, offset: int, page_size: int,
+) -> tuple[list[dict], int]:
+    """Una pagina delle call che corrispondono a `testo` nel titolo o nel
+    bando OPPURE che sono di uno dei `creatori`, dalla più recente. L'unione
+    si calcola qui (id e date a keyset, i creatori a blocchi di 100: un filtro
+    `or` con una lista lunga di aziende non sta in una richiesta); poi si
+    leggono le sole righe della pagina. → (righe, totale)."""
+    def base():
+        query = primary.table("partner_calls").select("id,created_at")
+        return query.eq("stato", stato) if stato else query
+
+    trovate = {
+        str(r["id"]): r for r in await _tutte(
+            lambda: base().or_(f"titolo.ilike.*{testo}*,bando_titolo.ilike.*{testo}*"))
+    }
+    for blocco in _blocchi(creatori):
+        for riga in await _tutte(lambda b=blocco: base().in_("company_profile_id", b)):
+            trovate[str(riga["id"])] = riga
+    ordinate = sorted(trovate.values(),
+                      key=lambda r: (_istante(r.get("created_at")), str(r["id"])), reverse=True)
+    pagina = [str(r["id"]) for r in ordinate[offset : offset + page_size]]
+    if not pagina:
+        return [], len(ordinate)
+    resp = await (primary.table("partner_calls").select(CALL_ADMIN_SELECT)
+                  .in_("id", pagina).execute())
+    per_id = {str(r["id"]): r for r in resp.data or [] if isinstance(r, dict)}
+    return [per_id[i] for i in pagina if i in per_id], len(ordinate)
+
+
 async def lista_call(primary, *, stato: str | None = None, q: str | None = None,
                      page: int = 1, page_size: int = 50) -> Page[CallAdminOut]:
     """Le call di tutte le aziende, dalla più recente. `q`: id esatto della
-    call se è un uuid, altrimenti testo nel titolo della call o del bando."""
-    query = primary.table("partner_calls").select(CALL_ADMIN_SELECT, count="exact")
-    if stato:
-        query = query.eq("stato", stato)
+    call se è un uuid, altrimenti testo nel titolo della call, nel titolo del
+    bando o nella denominazione del Registro Imprese dell'azienda creatrice
+    (`_creatori_per_denominazione`)."""
+    offset = (page - 1) * page_size
     testo = pulisci_ricerca(q)
+    creatori: list[str] = []
+    per_id: str | None = None
     if testo:
         try:
-            query = query.eq("id", str(uuid.UUID(testo)))
+            per_id = str(uuid.UUID(testo))
         except ValueError:
+            creatori = await _creatori_per_denominazione(primary, testo, stato)
+    if creatori:
+        righe, totale = await _pagina_per_testo_o_creatori(
+            primary, testo or "", creatori, stato, offset, page_size)
+    else:
+        query = primary.table("partner_calls").select(CALL_ADMIN_SELECT, count="exact")
+        if stato:
+            query = query.eq("stato", stato)
+        if per_id is not None:
+            query = query.eq("id", per_id)
+        elif testo:
             query = query.or_(f"titolo.ilike.*{testo}*,bando_titolo.ilike.*{testo}*")
-    offset = (page - 1) * page_size
-    resp = await (query.order("created_at", desc=True)
-                  .range(offset, offset + page_size - 1).execute())
-    righe = [r for r in resp.data or [] if isinstance(r, dict)]
+        resp = await (query.order("created_at", desc=True)
+                      .range(offset, offset + page_size - 1).execute())
+        righe = [r for r in resp.data or [] if isinstance(r, dict)]
+        totale = resp.count or 0
     ids = [str(r["id"]) for r in righe]
     conteggi = await _conteggi_candidature(primary, ids)
     membri = await _membri_attivi(primary, ids)
@@ -242,7 +316,7 @@ async def lista_call(primary, *, stato: str | None = None, q: str | None = None,
         )
         for r in righe
     ]
-    return Page.build(items, resp.count or 0, page, page_size)
+    return Page.build(items, totale, page, page_size)
 
 
 # ------------------------------------------------------- metriche e costi

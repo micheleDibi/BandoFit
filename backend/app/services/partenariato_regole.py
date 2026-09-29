@@ -1287,15 +1287,27 @@ def _valore_frazione(corrispondenza: re.Match) -> float | None:
     return _FRAZIONI.get("metà" if chiave == "meta'" else chiave)
 
 
+# Un articolo iniziale nel valore del modello («i due terzi», «l'80%»): il
+# prompt chiede la frazione senza articolo, ma non è detto che lo rispetti.
+_ARTICOLO_INIZIALE = re.compile(r"(?:il|lo|la|i)\s+|l'\s*")
+
+
 def _percentuale(valore: Any, *, minimo: bool = False) -> tuple[float | None, bool]:
     """Come `_numero`, ma accetta anche le frazioni di `_FRAZIONI` («due
-    terzi», «2/3» → 66.67): solo per le percentuali delle quote."""
+    terzi», «2/3» → 66.67) e un articolo iniziale («i due terzi», «il
+    30%»): solo per le percentuali delle quote."""
     if isinstance(valore, str) and len(valore) <= _MAX_MARCATORE:
-        corrispondenza = _FRAZIONE.fullmatch(normalizza_testo(valore))
+        testo = normalizza_testo(valore)
+        articolo = _ARTICOLO_INIZIALE.match(testo)
+        if articolo:
+            testo = testo[articolo.end() :]
+        corrispondenza = _FRAZIONE.fullmatch(testo)
         if corrispondenza:
             percentuale = _valore_frazione(corrispondenza)
             if percentuale is not None:
                 return percentuale, True
+        if articolo and testo:
+            return _numero(testo, minimo=minimo)
     return _numero(valore, minimo=minimo)
 
 

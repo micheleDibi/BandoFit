@@ -1441,6 +1441,30 @@ class TestFrazioni:
         assert quota["stato"] == "da_verificare"
         assert "Percentuale non leggibile" in quota["avvisi"]
 
+    @pytest.mark.parametrize(("valore", "testo", "atteso"), [
+        # il prompt chiede la frazione senza articolo, il modello può metterlo
+        ("i due terzi", "i due terzi", 66.67),
+        ("I due terzi", "i due terzi", 66.67),
+        ("i 2/3", "i 2/3", 66.67),
+        ("la metà", "la metà", 50.0),
+        ("il 30%", "il 30%", 30.0),
+        ("l'80%", "l'80%", 80.0),
+        ("l’ 80", "l'80%", 80.0),
+        ("lo 0,5", "lo 0,5%", 0.5),
+    ])
+    def test_articolo_iniziale(self, valore, testo, atteso):
+        quota = _quota(f"Il capofila sostiene al massimo {testo} del costo del progetto.",
+                       min_percentuale="", max_percentuale=valore)
+        assert quota["max_percentuale"] == atteso
+        assert (quota["stato"], quota["avvisi"]) == ("verificata", [])
+
+    @pytest.mark.parametrize("valore", ["gli due terzi", "il", "l'", "il circa 30", "le 30"])
+    def test_articolo_senza_valore_leggibile(self, valore):
+        quota = _quota("Il capofila sostiene almeno il 10% del costo del progetto.",
+                       max_percentuale=valore)
+        assert quota["max_percentuale"] is None
+        assert "Percentuale non leggibile" in quota["avvisi"]
+
     def test_solo_per_le_quote(self):
         dati = estrazione_base(partner_min="metà")
         dati["vincoli"][0].update(tipo="costituzione_entro", parametro="2/3")

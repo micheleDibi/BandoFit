@@ -439,8 +439,8 @@ export function Regole({
     <div className="space-y-6">
       <p className="text-xs text-slate-500">
         Apri una voce per leggere il passaggio del bando da cui viene. Le voci «da verificare» hanno
-        un passaggio che non abbiamo ritrovato alla lettera, o un valore che non torna: controllale
-        sul documento.
+        un passaggio che non abbiamo ritrovato alla lettera, preso solo dalla scheda del catalogo
+        (non dal bando ufficiale), o un valore che non torna: controllale sul documento.
       </p>
 
       <Blocco titolo="Modalità di partecipazione">

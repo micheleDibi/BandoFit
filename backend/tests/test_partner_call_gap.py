@@ -33,6 +33,7 @@ from app.schemas.partenariato_criteri import (
     CriterioTipoSoggetto,
 )
 from app.schemas.partner_call import RegoleCallSnapshot, RequisitoIn
+from app.services import partenariato_validatore as pv
 from app.services import partner_call_gap as gap
 from app.services.ai_check_scoring import facet_prechecks, score_report
 from app.services.bilanci_indicatori import EsercizioBilancio
@@ -163,6 +164,13 @@ def composizione(id_="K1", tipo="organismo_ricerca", **extra) -> dict:
 def vincolo(id_="V1", tipo="sede_operativa_regione", momento="domanda") -> dict:
     return {"id": id_, "tipo": tipo, "descrizione": "Sede operativa nella regione",
             "momento": momento, "origine_voce": "modificata"}
+
+
+def _riga_requisito(bozza: gap.RequisitoBozza) -> dict:
+    """La riga `partner_call_requisiti` che il validatore rilegge da una bozza."""
+    return {"id": bozza.rif_origine or "R", "etichetta": "R1", "testo": bozza.testo,
+            "criterio": None, "ambito": bozza.ambito, "origine": bozza.origine,
+            "citazione": bozza.citazione}
 
 
 # --------------------------------------------------------------- AI-check
@@ -309,6 +317,24 @@ class TestDaRegole:
         (bozza,) = gap.requisiti_da_regole(snapshot(vincoli=[vincolo()]))
         assert isinstance(bozza.criterio, CriterioManuale)
         assert bozza.ambito == "ogni_membro"
+
+    @pytest.mark.parametrize("origine, fonte", [("confermata", "bando"), ("modificata", "creatore")])
+    def test_citazione_fa_fede_solo_se_confermata(self, origine, fonte):
+        # Una voce inserita come «modificata» (per esempio una voce della
+        # scheda del catalogo, che entra solo così) porta la citazione come
+        # riferimento, ma nel validatore non è «Regola del bando»: come
+        # `_origine_voce` sullo snapshot.
+        snap = snapshot(
+            composizione=[composizione(origine_voce=origine)],
+            vincoli=[dict(vincolo(), origine_voce=origine, citazione=citazione_verificata())],
+        )
+        bozze = gap.requisiti_da_regole(snap, regioni_bando=[CALABRIA])
+        assert len(bozze) == 2
+        for bozza in bozze:
+            assert bozza.citazione["testo"] == "Passaggio del bando"
+            assert bozza.citazione["sezione"] == "D1-p3"
+            assert bozza.citazione["verificata"] is (origine == "confermata")
+            assert pv.requisito_da_riga(_riga_requisito(bozza)).regola.fonte == fonte
 
     def test_snapshot_come_dict_o_assente(self):
         assert gap.requisiti_da_regole(None) == []
@@ -687,7 +713,7 @@ def _cit(sezione, testo):
     return {"sezione": sezione, "testo": testo}
 
 
-def regole_estratte() -> dict:
+def regole_estratte(*, altri_vincoli: tuple = (), sezioni: dict | None = None) -> dict:
     """Regole post-elaborate VERE (partenariato_regole.post_elabora)."""
     from app.schemas.partenariato import PartenariatoEstrazione
     from app.services.partenariato_regole import post_elabora
@@ -719,6 +745,7 @@ def regole_estratte() -> dict:
             {"id": "V1", "tipo": "sede_operativa_regione", "descrizione": "Sede in Piemonte",
              "parametro": "", "momento": "domanda",
              "citazione": _cit("D1-p4", "devono avere sede operativa in Piemonte")},
+            *altri_vincoli,
         ],
         "regole_finanziarie": [
             {"id": "RF1", "descrizione": "Quota al massimo il 60% del fatturato medio",
@@ -730,7 +757,7 @@ def regole_estratte() -> dict:
         "documenti_richiesti": [], "fonti_insufficienti": False, "note": "",
     }
     return post_elabora(
-        PartenariatoEstrazione.model_validate(estrazione), SEZ_REGOLE, FONTI_REGOLE,
+        PartenariatoEstrazione.model_validate(estrazione), sezioni or SEZ_REGOLE, FONTI_REGOLE,
         LOOKUPS_REGOLE,
     )
 
@@ -781,6 +808,43 @@ class TestVociConfermate:
         # marcata «modificata» invece va bene
         dati["composizione"][-1]["origine_voce"] = "modificata"
         assert gap.errori_voci_confermate(RegoleCallSnapshot.model_validate(dati), regole) == []
+
+    def test_voce_della_scheda_solo_modificata_e_del_creatore(self):
+        """Un vincolo citato dalla scheda del catalogo (S2) e ritrovato alla
+        lettera resta da verificare: non si conferma così com'è; inserito come
+        «modificato», il suo requisito nel validatore è del creatore, non una
+        «Regola del bando» con il testo della scheda."""
+        from app.services.partenariato_regole import AVVISO_SCHEDA
+
+        v2 = {"id": "V2", "tipo": "sede_operativa_regione", "descrizione": "Sede in Lombardia",
+              "parametro": "", "momento": "domanda",
+              "citazione": _cit("S2", "sede operativa in Lombardia")}
+        sezioni = {**SEZ_REGOLE, "S2": "Possono partecipare le imprese con sede operativa in "
+                                       "Lombardia."}
+        regole = regole_estratte(altri_vincoli=(v2,), sezioni=sezioni)
+        estratta = next(v for v in regole["vincoli"] if v["id"] == "V2")
+        assert estratta["stato"] == "da_verificare"
+        assert estratta["citazione"]["verificata"] is True  # ritrovata, ma nella scheda
+        assert AVVISO_SCHEDA in estratta["avvisi"]
+
+        dati = conferma_tutto(regole)
+        assert [v["id"] for v in dati["vincoli"]] == ["V1"]
+        dati["vincoli"].append(
+            {k: x for k, x in estratta.items() if k not in _CAMPI_OUT_ESCLUSI}
+            | {"origine_voce": "confermata"}
+        )
+        errori = gap.errori_voci_confermate(RegoleCallSnapshot.model_validate(dati), regole)
+        assert len(errori) == 1 and "vincolo" in errori[0]
+        dati["vincoli"][-1]["origine_voce"] = "modificata"
+        snap = RegoleCallSnapshot.model_validate(dati)
+        assert gap.errori_voci_confermate(snap, regole) == []
+
+        bozze = {gap.id_voce(b.rif_origine): b
+                 for b in gap.requisiti_da_regole(snap, regioni_bando=[1, 2])}
+        assert bozze["V2"].citazione["testo"] == "sede operativa in Lombardia"
+        fonti = {rif: pv.requisito_da_riga(_riga_requisito(bozze[rif])).regola.fonte
+                 for rif in ("V1", "V2")}
+        assert fonti == {"V1": "bando", "V2": "creatore"}
 
     def test_voce_cambiata_non_e_piu_confermata(self):
         regole = regole_estratte()

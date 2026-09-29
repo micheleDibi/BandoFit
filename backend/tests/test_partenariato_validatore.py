@@ -44,7 +44,9 @@ from app.services.partner_call_gap import intervallo_budget
 from tests.fixtures.partenariati import esempio_guida as eg
 
 CALABRIA, LAZIO, LOMBARDIA = eg.CALABRIA, eg.LAZIO, eg.LOMBARDIA
-CIT = {"sezione": "S2", "testo": "Il partenariato è composto da almeno due soggetti",
+# Voce confermata: citazione ritrovata su una pagina di un documento ufficiale
+# (una voce della scheda del catalogo non si può confermare).
+CIT = {"sezione": "D1-p2", "testo": "Il partenariato è composto da almeno due soggetti",
        "verificata": True}
 BUDGET_ESATTO = intervallo_budget("2m_5m", "3100000.00")
 BUDGET_FASCIA = intervallo_budget("2m_5m")
@@ -330,7 +332,7 @@ def test_regola_di_origine_bando_o_creatore():
     assert minimo.regola.citazione.testo == CIT["testo"]
     assert massimo.regola.fonte == "creatore" and massimo.regola.citazione is None
     out = vista(v, "numero_partner:min", A, True)
-    assert out.regola.fonte == "bando" and out.regola.citazione.sezione == "S2"
+    assert out.regola.fonte == "bando" and out.regola.citazione.sezione == "D1-p2"
     assert vista(v, "somma_quote").regola is None  # controllo di coerenza
 
 

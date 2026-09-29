@@ -505,8 +505,19 @@ def requisiti_da_precheck(
     return bozze
 
 
-def _dump_citazione(citazione: CitazioneIn | None) -> dict | None:
-    return citazione.model_dump(mode="json", exclude_none=True) if citazione else None
+def _dump_citazione(voce: Any) -> dict | None:
+    """La citazione di una voce dello snapshot per il suo requisito. Fa fede
+    (`verificata`) solo per una voce `confermata`: una voce `modificata` (tra
+    cui ogni voce della scheda del catalogo, che entra solo così) la porta come
+    riferimento, e il validatore attribuisce il requisito al creatore, come
+    `partenariato_validatore._origine_voce` sullo snapshot."""
+    citazione: CitazioneIn | None = voce.citazione
+    if citazione is None:
+        return None
+    dati = citazione.model_dump(mode="json", exclude_none=True)
+    if voce.origine_voce != "confermata":
+        dati["verificata"] = False
+    return dati
 
 
 def _testo_composizione(voce: ComposizioneSnapshot) -> str:
@@ -543,7 +554,8 @@ def requisiti_da_regole(
       del bando (`regioni_bando`, dal catalogo); `requisito_capofila` e
       `altro` → `manuale`; gli altri restano regole del partenariato;
     - regole finanziarie → `regola_finanziaria` (ogni_membro se per ciascun
-      partner, altrimenti consorzio)."""
+      partner, altrimenti consorzio);
+    - la citazione fa fede solo per le voci `confermata` (`_dump_citazione`)."""
     if snapshot is None:
         return []
     if not isinstance(snapshot, RegoleCallSnapshot):
@@ -560,7 +572,7 @@ def requisiti_da_regole(
                 # si possono ritoccare senza cambiare requisito)
                 rif_origine=rif_con_impronta(voce.id, voce.tipo_soggetto,
                                              voce.tipo_soggetto_testo, voce.ruolo),
-                citazione=_dump_citazione(voce.citazione), categoria="composizione",
+                citazione=_dump_citazione(voce), categoria="composizione",
             )
         )
     for voce in snapshot.vincoli:
@@ -575,7 +587,7 @@ def requisiti_da_regole(
                 testo=_testo(voce.descrizione) or "Vincolo del bando",
                 criterio=criterio, ambito=ambito,
                 rif_origine=rif_con_impronta(voce.id, voce.tipo, voce.descrizione),
-                citazione=_dump_citazione(voce.citazione),
+                citazione=_dump_citazione(voce),
                 categoria="territoriale" if voce.tipo == "sede_operativa_regione" else "altro",
             )
         )
@@ -586,7 +598,7 @@ def requisiti_da_regole(
                 origine="regola_finanziaria",
                 testo=_testo(voce.descrizione) or "Regola finanziaria del bando",
                 criterio=criterio, ambito=ambito, rif_origine=_rif(voce.id),
-                citazione=_dump_citazione(voce.citazione), categoria="economico",
+                citazione=_dump_citazione(voce), categoria="economico",
             )
         )
     return bozze

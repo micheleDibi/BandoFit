@@ -3,13 +3,18 @@
 Il modello estrae, il codice decide che cosa vale. Per ogni voce:
 - la citazione si verifica sul testo inviato (`citazioni.verifica_citazione`,
   pagine adiacenti ed ellissi comprese); non ritrovata → `da_verificare`;
+- fa fede solo il testo dei documenti ufficiali (pagine `D<n>-p<m>`): una
+  citazione della scheda del catalogo (META, S1…) resta visibile, ma la voce
+  resta `da_verificare` con un avviso (`AVVISO_SCHEDA`), perché la scheda è
+  testo generato o classificato, non estratto dall'atto;
 - i controlli di coerenza e di RANGE (partner_min ≤ partner_max, percentuali
   0–100, minimo ≤ massimo, «non ammesso» con forme ammesse, regole
   finanziarie con `bilanci_indicatori.valida_regola`) declassano la voce a
   `da_verificare` con un avviso: MAI un'eccezione, la chiamata è già pagata;
 - `modalita_effettiva` = modalità dichiarata SOLO se la sua citazione è
-  verificata e coerente, altrimenti `non_determinabile` (è ciò che usa il
-  filtro «Ammette partenariato»); «non ammesso» vale solo se il passaggio
+  verificata su un documento ufficiale e coerente, altrimenti
+  `non_determinabile` (è ciò che usa il filtro «Ammette partenariato»);
+  «non ammesso» vale solo se il passaggio
   citato contiene un'esclusione esplicita della forma associata e la sua
   frase non la ammette (`esclusione_esplicita`);
 - una quota la cui frase non nomina il partenariato né chi la sostiene (o
@@ -333,11 +338,36 @@ def _documenti(fonti: Any) -> dict[int, dict]:
     return per_numero
 
 
+# La scheda del catalogo (META, S1…) e le junction dei beneficiari sono testo
+# GENERATO o CLASSIFICATO dal produttore del catalogo, non estratto dall'atto:
+# la generazione SEO ha inserito «in forma singola o associata» e
+# «partenariato pubblico-privato» in schede i cui atti non lo dicono. Una
+# citazione ritrovata lì resta visibile («Scheda del bando»), ma la voce resta
+# da verificare: fa fede solo il testo dei documenti ufficiali.
+AVVISO_SCHEDA = "Dalla scheda del catalogo: da verificare sul bando ufficiale"
+
+
+def _da_fonte_ufficiale(citazione: Citazione | None) -> bool:
+    """True se la citazione punta a una pagina di un documento ufficiale
+    («D1-p3» nel formato di `normalizza_sezione`, che accetta anche «[D1-P3]»,
+    «D1 pag. 3»…). La scheda del catalogo (META, S1…) e ogni altra sezione
+    non lo sono."""
+    if citazione is None or not isinstance(citazione.sezione, str):
+        return False
+    return _DOCUMENTO.fullmatch(normalizza_sezione(citazione.sezione)) is not None
+
+
 def _citazione(
-    citazione: Citazione | None, sezioni: dict[str, str], documenti: dict[int, dict]
+    citazione: Citazione | None,
+    sezioni: dict[str, str],
+    documenti: dict[int, dict],
+    avvisi: list[str],
 ):
     """(CitazioneRegolaOut | None, verificata). Sezione e testo entrambi ""
-    = citazione assente."""
+    = citazione assente. `verificata` (per la voce) = ritrovata nel testo E su
+    un documento ufficiale (`_da_fonte_ufficiale`); la citazione in uscita
+    dice solo se è stata ritrovata alla lettera. Una citazione della scheda del
+    catalogo aggiunge `AVVISO_SCHEDA` ad `avvisi`: la voce è da verificare."""
     if citazione is None:
         return None, False
     grezza = citazione.sezione if isinstance(citazione.sezione, str) else ""
@@ -345,7 +375,7 @@ def _citazione(
     if not grezza.strip() and not testo.strip():
         return None, False
     sezione = normalizza_sezione(grezza) or grezza.strip()[:40]
-    verificata = verifica_citazione(grezza, testo, sezioni)
+    ritrovata = verifica_citazione(grezza, testo, sezioni)
     url = pagina = None
     corrispondenza = _DOCUMENTO.fullmatch(sezione)
     if corrispondenza:
@@ -356,6 +386,7 @@ def _citazione(
         url = _url_https(doc.get("url"))
     elif sezione == "META" or _SEZIONE_SCHEDA.fullmatch(sezione):
         fonte = "Scheda del bando"
+        avvisi.append(AVVISO_SCHEDA)
     else:
         fonte = "Fonte non riconosciuta"
     return (
@@ -363,11 +394,11 @@ def _citazione(
             sezione=sezione[:40],
             fonte_etichetta=fonte,
             testo=_testo(testo) or "",
-            verificata=verificata,
+            verificata=ritrovata,
             url_documento=url,
             pagina=pagina,
         ),
-        verificata,
+        ritrovata and _da_fonte_ufficiale(citazione),
     )
 
 
@@ -803,8 +834,8 @@ def _modalita(
     sezioni,
     documenti,
 ) -> ModalitaOut:
-    citazione, verificata = _citazione(estrazione.modalita_citazione, sezioni, documenti)
     avvisi: list[str] = []
+    citazione, verificata = _citazione(estrazione.modalita_citazione, sezioni, documenti, avvisi)
     dichiarata = estrazione.modalita
     if (
         dichiarata != "non_determinabile"
@@ -862,8 +893,12 @@ def _conteggi(estrazione: PartenariatoEstrazione, sezioni, documenti):
     if minimo is not None and massimo is not None and minimo > massimo:
         avvisi_min.append("Il minimo supera il massimo")
         avvisi_max.append("Il minimo supera il massimo")
-    cit_min, ver_min = _citazione(estrazione.partner_min_citazione, sezioni, documenti)
-    cit_max, ver_max = _citazione(estrazione.partner_max_citazione, sezioni, documenti)
+    cit_min, ver_min = _citazione(
+        estrazione.partner_min_citazione, sezioni, documenti, avvisi_min
+    )
+    cit_max, ver_max = _citazione(
+        estrazione.partner_max_citazione, sezioni, documenti, avvisi_max
+    )
     return (
         ConteggioOut(valore=minimo, stato=_stato(ver_min, avvisi_min), citazione=cit_min,
                      avvisi=avvisi_min),
@@ -885,8 +920,8 @@ def _tipo_soggetto(valore: str, testo: str | None, avvisi: list[str]) -> tuple[s
 def _composizione(
     voce: ComposizioneVoce, sezioni, documenti, indice_regioni
 ) -> ComposizioneOut:
-    citazione, verificata = _citazione(voce.citazione, sezioni, documenti)
     avvisi: list[str] = []
+    citazione, verificata = _citazione(voce.citazione, sezioni, documenti, avvisi)
     minimo, leggibile_min = _intero(voce.minimo, minimo=True)
     massimo, leggibile_max = _intero(voce.massimo)
     if not leggibile_min:
@@ -988,8 +1023,8 @@ _CATEGORIA_DEL_RUOLO = {
 
 
 def _quota(voce, sezioni, documenti) -> QuotaOut:
-    citazione, verificata = _citazione(voce.citazione, sezioni, documenti)
     avvisi: list[str] = []
+    citazione, verificata = _citazione(voce.citazione, sezioni, documenti, avvisi)
     if voce.citazione.testo.strip() and not _sembra_quota(voce.citazione, sezioni):
         avvisi.append(_AVVISO_NON_QUOTA)
     minimo, leggibile_min = _numero(voce.min_percentuale, minimo=True)
@@ -1035,8 +1070,8 @@ def _momento(valore: str, avvisi: list[str]) -> str:
 
 
 def _vincolo(voce, sezioni, documenti) -> VincoloOut:
-    citazione, verificata = _citazione(voce.citazione, sezioni, documenti)
     avvisi: list[str] = []
+    citazione, verificata = _citazione(voce.citazione, sezioni, documenti, avvisi)
     tipo = _codice_o_residuo(voce.tipo, _TIPI_VINCOLO, "altro", "Tipo di vincolo non riconosciuto",
                              avvisi)
     descrizione = _testo(voce.descrizione) or ""
@@ -1086,6 +1121,7 @@ def _regola_finanziaria(
         avviso = f"{nome} non riconosciuta (variabile {', '.join(ignote)})"
         return None, f"{avviso}: {descrizione}" if descrizione else avviso
     avvisi: list[str] = []
+    citazione, verificata = _citazione(voce.citazione, sezioni, documenti, avvisi)
     unita = _codice(voce.unita, _UNITA)
     if unita is None:
         avvisi.append(f"Unità non riconosciuta: {_testo(voce.unita, 40) or '(vuota)'}")
@@ -1117,7 +1153,6 @@ def _regola_finanziaria(
         ),
         "unita": unita,
     }
-    citazione, verificata = _citazione(voce.citazione, sezioni, documenti)
     avvisi += [
         f"Regola non coerente: {errore}" for errore in valida_regola(RegolaFinanziaria(**campi))
     ]
@@ -1152,8 +1187,10 @@ def post_elabora(
         estrazione, partner_min.valore, partner_max.valore, sezioni, documenti
     )
 
-    cit_cost, ver_cost = _citazione(estrazione.costituzione_citazione, sezioni, documenti)
     avvisi_cost: list[str] = []
+    cit_cost, ver_cost = _citazione(
+        estrazione.costituzione_citazione, sezioni, documenti, avvisi_cost
+    )
     valore_cost = _codice_o_residuo(
         estrazione.costituzione, _COSTITUZIONE, "non_indicato",
         "Costituzione non riconosciuta", avvisi_cost,
@@ -1169,9 +1206,9 @@ def post_elabora(
 
     forme: list[FormaAmmessaOut] = []
     for voce in estrazione.forme_ammesse:
-        citazione, verificata = _citazione(voce.citazione, sezioni, documenti)
-        note = _testo(voce.note, 500)
         avvisi: list[str] = []
+        citazione, verificata = _citazione(voce.citazione, sezioni, documenti, avvisi)
+        note = _testo(voce.note, 500)
         codice = _codice(voce.forma, _FORME)
         if codice is None:
             # Forma ignota (o vuota): «altra», descritta dal testo del modello.
@@ -1194,8 +1231,8 @@ def post_elabora(
 
     documenti_richiesti: list[DocumentoRichiestoOut] = []
     for voce in estrazione.documenti_richiesti:
-        citazione, verificata = _citazione(voce.citazione, sezioni, documenti)
         avvisi = []
+        citazione, verificata = _citazione(voce.citazione, sezioni, documenti, avvisi)
         tipo = _codice_o_residuo(
             voce.tipo, _DOCUMENTI, "altro", "Tipo di documento non riconosciuto", avvisi
         )

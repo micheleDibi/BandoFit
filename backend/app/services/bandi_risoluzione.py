@@ -30,6 +30,9 @@ from app.core.errors import BandoRitiratoError, NotFoundError
 
 logger = logging.getLogger("bandofit.bandi_risoluzione")
 
+# Vista di lettura del catalogo (contratto DB bandi §3): solo bandi
+# pubblicati e non fusi, quindi niente predicato di pubblicazione.
+VISTA_BANDI = "bando_pubblico"
 STORICO_SELECT = "slug,bando_id,esito"
 FUSIONE_SELECT = "bando_id,master_id,master_slug"
 
@@ -153,7 +156,7 @@ async def risolvi_fusioni(secondary, ids: Iterable[int]) -> dict[int, Fusione]:
 
 
 async def carica_per_slug(secondary, slug: str, select: str) -> dict:
-    """Riga del bando pubblicato per slug, risolvendo i miss.
+    """Riga del bando pubblicato per slug (vista `bando_pubblico`), risolvendo i miss.
 
     - slug corrente → la sua riga;
     - slug spostato (storico 301 o fusione) → la riga del master, il cui
@@ -164,14 +167,7 @@ async def carica_per_slug(secondary, slug: str, select: str) -> dict:
     Gli errori della prima lettura NON si intercettano (vanno all'handler
     globale come prima di R0-b); quelli della risoluzione sì.
     """
-    resp = (
-        await secondary.table("bando")
-        .select(select)
-        .eq("slug", slug)
-        .eq("stato_processing", "completed")
-        .limit(1)
-        .execute()
-    )
+    resp = await secondary.table(VISTA_BANDI).select(select).eq("slug", slug).limit(1).execute()
     if resp.data:
         return dict(resp.data[0])
 
@@ -183,13 +179,12 @@ async def carica_per_slug(secondary, slug: str, select: str) -> dict:
 
     # Una sola risoluzione: il master si rilegge per id, mai di nuovo per slug.
     righe = await _leggi(
-        secondary.table("bando")
+        secondary.table(VISTA_BANDI)
         .select(select)
         .eq("id", esito.bando_id)
-        .eq("stato_processing", "completed")
         .not_.is_("slug", "null")
         .limit(1),
-        "bando",
+        VISTA_BANDI,
         slug,
     )
     if not righe or not isinstance(righe[0], dict):

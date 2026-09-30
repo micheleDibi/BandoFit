@@ -5,6 +5,7 @@ import type { BandoListItem } from "../../types";
 import { Badge } from "../ui/Badge";
 import { ScadenzaBadge, StatoBadge } from "./badges";
 import { CompatibilitaBadge } from "./CompatibilitaBadge";
+import { bandoInCorso, statoDelBando } from "./stato";
 
 export function BandoCard({ bando }: { bando: BandoListItem }) {
   // Stesso titolo del dettaglio: si preferisce quello esteso (più specifico),
@@ -12,6 +13,7 @@ export function BandoCard({ bando }: { bando: BandoListItem }) {
   const titolo = bando.titolo ?? bando.titolo_breve ?? "Bando senza titolo";
   const regioniVisibili = bando.regioni.slice(0, 2);
   const regioniExtra = bando.regioni.length - regioniVisibili.length;
+  const stato = statoDelBando(bando);
 
   return (
     <Link
@@ -24,7 +26,7 @@ export function BandoCard({ bando }: { bando: BandoListItem }) {
           pr-10: il toggle «salva» è sovrapposto in alto a destra (absolute,
           opaco) — senza spazio riservato coprirebbe l'ultimo badge della riga. */}
       <div className="flex flex-wrap items-center gap-2 pr-10">
-        <StatoBadge stato={bando.stato_bando} />
+        <StatoBadge stato={stato} />
         {bando.tipologia && <Badge tone="brand">{bando.tipologia.nome}</Badge>}
         {bando.compatibilita && <CompatibilitaBadge compatibilita={bando.compatibilita} />}
       </div>
@@ -62,7 +64,7 @@ export function BandoCard({ bando }: { bando: BandoListItem }) {
       </div>
 
       <div className="mt-3 border-t border-slate-100 pt-3">
-        <ScadenzaBadge dataScadenza={bando.data_scadenza} />
+        <ScadenzaBadge dataScadenza={bando.data_scadenza} conConto={bandoInCorso(stato)} />
       </div>
     </Link>
   );

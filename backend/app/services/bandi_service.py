@@ -11,19 +11,26 @@ Semantica: OR dentro la stessa faccetta, AND tra faccette diverse.
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.schemas.bando import BandoDetail, BandoListItem, Compatibilita
-from app.services.bandi_risoluzione import carica_per_slug
+from app.services.bandi_risoluzione import VISTA_BANDI, carica_per_slug
+from app.services.bando_scheda_link import (
+    calcola_allegati,
+    calcola_cta,
+    calcola_link_fonte,
+    carica_link_scheda,
+    fonte_ufficiale_pubblicabile,
+)
 from app.services.compatibility import CompanyFacets, compute_compatibilita
 from app.services.link_policy import scrub_bando_row
 from app.schemas.common import Page
 
 # Campi mostrati nelle card dell'elenco + embed di visualizzazione.
 LIST_SELECT = (
-    "id,slug,titolo,titolo_breve,descrizione_breve,stato_bando,livello,"
+    "id,slug,titolo,titolo_breve,descrizione_breve,stato_bando,stato_effettivo,livello,"
     "data_pubblicazione,data_apertura,data_scadenza,"
     "importo_totale_eur,importo_max_per_progetto_eur,ente_erogatore,"
     "tipologie_bando(id,nome),modalita_erogazione(id,nome),"
@@ -39,18 +46,30 @@ SCORING_EMBEDS = (
     "bando_codici_ateco(codice_ateco_id)"
 )
 
-DETAIL_SELECT = (
-    "id,slug,titolo,titolo_breve,descrizione_raw,descrizione_breve,stato_bando,livello,"
-    "data_pubblicazione,data_apertura,data_scadenza,"
-    "importo_totale_eur,importo_max_per_progetto_eur,ente_erogatore,"
-    "area_geografica,tematica,link_bando,link_candidatura,contenuto,allegati,"
-    "fonte_ufficiale_url,fonte_ufficiale_host,fonte_ufficiale_tipo,fonte_ufficiale_stato,"
-    "fonte_ufficiale_verificata_at,"
-    "tipologie_bando(id,nome),modalita_erogazione(id,nome),programmi(id,nome),"
-    "bando_regioni(regioni(id,nome)),bando_settori(settori(id,nome)),"
-    "bando_beneficiari(beneficiari(id,nome)),"
-    "bando_codici_ateco(codici_ateco(id,codice,descrizione))"
-)
+# Colonne deprecate lette SOLO come ripiego del pulsante e degli allegati
+# (contratto DB bandi §5.1). Quando il catalogo le copre con `bando_link` la
+# tupla si svuota: API e frontend non cambiano (`bando_scheda_link`).
+COLONNE_RIPIEGO_51: tuple[str, ...] = ("link_candidatura", "link_bando", "allegati")
+
+
+def _detail_select(ripieghi: tuple[str, ...]) -> str:
+    return (
+        "id,slug,titolo,titolo_breve,descrizione_breve,stato_bando,stato_effettivo,livello,"
+        "data_pubblicazione,data_apertura,data_scadenza,ora_apertura,ora_scadenza,"
+        "data_pubblicazione_verificata,data_apertura_verificata,data_scadenza_verificata,"
+        "importo_totale_eur,importo_max_per_progetto_eur,ente_erogatore,"
+        "area_geografica,tematica,contenuto,"
+        "fonte_ufficiale_url,fonte_ufficiale_host,fonte_ufficiale_tipo,fonte_ufficiale_stato,"
+        "fonte_ufficiale_verificata_at,fonte_ufficiale_e_atto,"
+        + "".join(f"{colonna}," for colonna in ripieghi)
+        + "tipologie_bando(id,nome),modalita_erogazione(id,nome),programmi(id,nome),"
+        "bando_regioni(regioni(id,nome)),bando_settori(settori(id,nome)),"
+        "bando_beneficiari(beneficiari(id,nome)),"
+        "bando_codici_ateco(codici_ateco(id,codice,descrizione))"
+    )
+
+
+DETAIL_SELECT = _detail_select(COLONNE_RIPIEGO_51)
 
 # faccetta -> (alias, junction, colonna id)
 JUNCTION_FACETS = {
@@ -140,18 +159,19 @@ def apply_filters(query, filters: BandiFilters, today: date | None = None):
     """Applica tutti i filtri a un query builder PostgREST (elenco bandi)."""
     today = today or today_italy()
 
-    # Ridondante rispetto alla RLS del secondario, ma esplicita il contratto.
-    query = query.eq("stato_processing", "completed").not_.is_("slug", "null")
+    # La vista contiene solo bandi pubblicati; lo slug non nullo resta come
+    # difesa (una riga senza slug non si può mostrare né linkare).
+    query = query.not_.is_("slug", "null")
 
     if filters.q:
         term = sanitize_fts_term(filters.q)
         if term:
-            # `ricerca`: colonna tsvector generata di `bando` (titolo, titolo_breve,
-            # descrizione_breve, titolo_raw), contratto DB bandi v11 §3/§7: un solo
-            # `@@` per riga invece dei cinque `to_tsvector` dell'`or` a più rami.
+            # `ricerca`: colonna tsvector generata, esposta dalla vista `bando_pubblico`
+            # (titolo, titolo_breve, descrizione_breve, titolo_raw), contratto DB bandi
+            # v11 §3: un solo `@@` per riga invece di un `to_tsvector` per colonna.
             query = query.filter("ricerca", "wfts(italian)", term)
     if filters.stato:
-        query = query.in_("stato_bando", filters.stato)
+        query = query.in_("stato_effettivo", filters.stato)
     if filters.livello:
         query = query.eq("livello", filters.livello)
     if filters.tipologie:
@@ -183,40 +203,28 @@ def apply_filters(query, filters: BandiFilters, today: date | None = None):
     return query
 
 
-# Un bando è "chiuso" se lo dice il catalogo O se la scadenza è passata: la
-# doppia condizione regge anche quando stato_bando non è aggiornato dalla
-# pipeline. Entrambi i segmenti passano dalla stessa guardia sugli stati
-# (STATI_SEGMENTATI o NULL): tra le righe che la soddisfano i due filtri sono
-# complementari (null-safe), ogni riga finisce in esattamente uno dei due;
-# 'sospeso', 'revocato' e qualunque stato non previsto non sono né aperti né
-# chiusi e restano fuori da ENTRAMBI (contratto DB bandi §4 e §7, R0-a: un
-# sospeso non viene mai chiuso dalla scadenza). PostgREST mette in AND i
-# parametri ``or`` ripetuti e gli altri filtri, ricerca full-text compresa.
+# I due segmenti poggiano su `stato_effettivo`, lo stato che il catalogo
+# calcola alla lettura con data e ora di Roma (contratto DB bandi §4): la
+# scadenza è già dentro lo stato, quindi `today` non serve più (resta nella
+# firma, che usano anche alert e partenariati). 'sospeso', 'revocato' e
+# qualunque stato non previsto non sono né aperti né chiusi e restano fuori
+# da ENTRAMBI. Uno stato NULL conta come aperto: un bando non deve sparire
+# in silenzio dalle liste. PostgREST mette in AND questi filtri con gli
+# altri, ricerca full-text compresa.
 
-STATI_SEGMENTATI = ("aperto", "in apertura prossimamente", "chiuso")
-
-
-def _solo_stati_segmentati(query):
-    # Valori fra doppi apici: "in apertura prossimamente" contiene spazi.
-    stati = ",".join(f'"{stato}"' for stato in STATI_SEGMENTATI)
-    return query.or_(f"stato_bando.in.({stati}),stato_bando.is.null")
+STATI_APERTI = ("aperto", "in apertura prossimamente")
 
 
 def apply_open_tier(query, today: date):
-    """Solo i bandi non chiusi: stato diverso da 'chiuso' E scadenza non passata
-    (i null contano come non chiusi: bandi a sportello o senza data)."""
-    return (
-        _solo_stati_segmentati(query)
-        .or_("stato_bando.neq.chiuso,stato_bando.is.null")
-        .or_(f"data_scadenza.gte.{today.isoformat()},data_scadenza.is.null")
-    )
+    """Solo i bandi aperti o in apertura (o senza stato)."""
+    # Valori fra doppi apici: "in apertura prossimamente" contiene spazi.
+    stati = ",".join(f'"{stato}"' for stato in STATI_APERTI)
+    return query.or_(f"stato_effettivo.in.({stati}),stato_effettivo.is.null")
 
 
 def apply_closed_tier(query, today: date):
-    """Solo i bandi chiusi: stato 'chiuso' O scadenza passata."""
-    return _solo_stati_segmentati(query).or_(
-        f"stato_bando.eq.chiuso,data_scadenza.lt.{today.isoformat()}"
-    )
+    """Solo i bandi chiusi."""
+    return query.eq("stato_effettivo", "chiuso")
 
 
 def _lookup(value: dict | None) -> dict | None:
@@ -272,6 +280,7 @@ def map_list_item(row: dict) -> BandoListItem:
         titolo_breve=row.get("titolo_breve"),
         descrizione_breve=row.get("descrizione_breve"),
         stato_bando=row.get("stato_bando"),
+        stato_effettivo=row.get("stato_effettivo"),
         livello=row.get("livello"),
         data_pubblicazione=row.get("data_pubblicazione"),
         data_apertura=row.get("data_apertura"),
@@ -285,21 +294,46 @@ def map_list_item(row: dict) -> BandoListItem:
     )
 
 
-def map_detail(row: dict) -> BandoDetail:
+def _ora(value: Any) -> time | None:
+    """Ora di Roma dal catalogo, tollerante: «24:00» («entro le ore 24») o un
+    valore non valido diventano None, che per il contratto DB bandi §4 vuol
+    dire «tutta la giornata». L'eventuale fuso si toglie (è già ora di Roma), e
+    così le frazioni di secondo: l'API espone sempre «HH:MM:SS»."""
+    if isinstance(value, time):
+        return value.replace(tzinfo=None, microsecond=0)
+    if not isinstance(value, str):
+        return None
+    try:
+        return time.fromisoformat(value.strip()).replace(tzinfo=None, microsecond=0)
+    except ValueError:
+        return None
+
+
+def map_detail(row: dict, link: list[dict] | None = None) -> BandoDetail:
+    """Dettaglio dalla riga (già filtrata da `scrub_bando_row`) e dalle righe
+    `bando_link` del bando (None o [] = solo i ripieghi della riga)."""
     base = map_list_item(row).model_dump()
+    link = link or []
+    fonte_url, fonte_host = fonte_ufficiale_pubblicabile(row)
     return BandoDetail(
         **base,
         area_geografica=row.get("area_geografica"),
         tematica=row.get("tematica") or [],
-        link_bando=row.get("link_bando"),
-        link_candidatura=row.get("link_candidatura"),
+        ora_apertura=_ora(row.get("ora_apertura")),
+        ora_scadenza=_ora(row.get("ora_scadenza")),
+        data_pubblicazione_verificata=row.get("data_pubblicazione_verificata"),
+        data_apertura_verificata=row.get("data_apertura_verificata"),
+        data_scadenza_verificata=row.get("data_scadenza_verificata"),
         contenuto=normalize_contenuto(row.get("contenuto")),
-        allegati=row.get("allegati") or [],
-        fonte_ufficiale_url=row.get("fonte_ufficiale_url"),
-        fonte_ufficiale_host=row.get("fonte_ufficiale_host"),
+        cta=calcola_cta(row, link),
+        link_fonte=calcola_link_fonte(row),
+        allegati=calcola_allegati(row, link),
+        fonte_ufficiale_url=fonte_url,
+        fonte_ufficiale_host=fonte_host,
         fonte_ufficiale_tipo=row.get("fonte_ufficiale_tipo"),
         fonte_ufficiale_stato=row.get("fonte_ufficiale_stato"),
         fonte_ufficiale_verificata_at=row.get("fonte_ufficiale_verificata_at"),
+        fonte_ufficiale_e_atto=row.get("fonte_ufficiale_e_atto"),
         programma=_lookup(row.get("programmi")),
         settori=_flatten_junction(row.get("bando_settori"), "settori"),
         beneficiari=_flatten_junction(row.get("bando_beneficiari"), "beneficiari"),
@@ -329,7 +363,7 @@ async def fetch_bandi(
     today = today_italy()
     select = build_list_select(filters, include_facets=company_facets is not None)
 
-    open_q = secondary.table("bando").select(select, count="exact")
+    open_q = secondary.table(VISTA_BANDI).select(select, count="exact")
     open_q = apply_open_tier(apply_filters(open_q, filters, today), today)
     open_q = (
         open_q.order(column, desc=desc_open, nullsfirst=False)
@@ -340,7 +374,7 @@ async def fetch_bandi(
     open_count = open_resp.count or 0
     rows = list(open_resp.data)
 
-    closed_q = secondary.table("bando").select(select, count="exact")
+    closed_q = secondary.table(VISTA_BANDI).select(select, count="exact")
     closed_q = apply_closed_tier(apply_filters(closed_q, filters, today), today)
     closed_q = closed_q.order(column, desc=desc_closed, nullsfirst=False).order(
         "id", desc=False
@@ -379,7 +413,8 @@ async def fetch_bando_for_ai(secondary, slug: str) -> dict:
     """Riga grezza del bando per la pipeline AI-check (la chiave della
     cache estrazioni è l'hash del testo serializzato, vedi
     `compute_content_hash`). `contenuto` è già normalizzato (gestione
-    del doppio-encoding).
+    del doppio-encoding). Nessuna lettura di `bando_link`: l'input
+    dell'AI-check resta la riga, con `stato_bando` e il jsonb `allegati`.
 
     Stessa risoluzione del dettaglio (`carica_per_slug`): uno slug spostato
     restituisce la riga del master (id e slug canonici), uno ritirato solleva
@@ -400,12 +435,15 @@ async def fetch_bando_by_slug(
 ) -> BandoDetail:
     """Dettaglio per slug. Slug spostato (storico 301 o fusione) → dettaglio
     del master, con lo slug canonico in `slug`; ritirato → 410; altrimenti
-    404 (vedi `bandi_risoluzione.carica_per_slug`)."""
+    404 (vedi `bandi_risoluzione.carica_per_slug`). Pulsanti e allegati dalle
+    righe `bando_link` del bando risolto più i ripieghi della riga; se quella
+    lettura non riesce, solo i ripieghi (`bando_scheda_link`)."""
     row = await carica_per_slug(secondary, slug, DETAIL_SELECT)
     # Normalizzare PRIMA di filtrare: un `contenuto` doppio-encodato non
     # verrebbe attraversato dal filtro dei link (map_detail è idempotente).
     row["contenuto"] = normalize_contenuto(row.get("contenuto"))
     row = scrub_bando_row(row)
-    detail = map_detail(row)
+    link = await carica_link_scheda(secondary, row["id"])
+    detail = map_detail(row, link)
     detail.compatibilita = _compat_for_row(row, company_facets, totale_regioni)
     return detail

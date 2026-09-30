@@ -1,5 +1,5 @@
-from datetime import date, datetime
-from typing import Any
+from datetime import date, datetime, time
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -38,7 +38,10 @@ class BandoListItem(BaseModel):
     titolo: str | None = None
     titolo_breve: str | None = None
     descrizione_breve: str | None = None
+    # Stato persistito, solo informativo: la verità è `stato_effettivo`
+    # (calcolato alla lettura dal catalogo, contratto DB bandi §4).
     stato_bando: str | None = None
+    stato_effettivo: str | None = None
     livello: str | None = None
     data_pubblicazione: date | None = None
     data_apertura: date | None = None
@@ -53,13 +56,44 @@ class BandoListItem(BaseModel):
     compatibilita: Compatibilita | None = None
 
 
+OrigineLink = Literal["candidatura", "link_candidatura", "fonte_ufficiale", "portale", "link_bando"]
+
+
+class LinkScheda(BaseModel):
+    """Un pulsante della scheda, già filtrato dal backend. `host` è
+    l'etichetta da mostrare; `origine` dice da quale fonte viene l'URL."""
+
+    url: str
+    host: str | None = None
+    origine: OrigineLink
+
+
+class AllegatoScheda(BaseModel):
+    """Un allegato della scheda, già filtrato e senza doppioni. `tipo`:
+    `atto`, `allegato` o il tipo dichiarato dal catalogo; `formato`: es.
+    `pdf`, se noto."""
+
+    url: str
+    etichetta: str | None = None
+    tipo: str | None = None
+    formato: str | None = None
+
+
 class BandoDetail(BandoListItem):
     area_geografica: str | None = None
     tematica: list[str] = []
-    link_bando: str | None = None
-    link_candidatura: str | None = None
+    ora_apertura: time | None = None
+    ora_scadenza: time | None = None
+    # True solo se la data ha una prova su un dominio ufficiale.
+    data_pubblicazione_verificata: bool | None = None
+    data_apertura_verificata: bool | None = None
+    data_scadenza_verificata: bool | None = None
     contenuto: dict[str, Any] | None = None
-    allegati: list[Any] = []
+    # Pulsante principale e pulsante «Fonte ufficiale» (la UI mostra il
+    # secondo solo se diverso dal primo), calcolati dal backend.
+    cta: LinkScheda | None = None
+    link_fonte: LinkScheda | None = None
+    allegati: list[AllegatoScheda] = []
     # Fonte ufficiale trovata dal produttore del catalogo. Tipi `str` e non
     # Literal: un valore nuovo di tipo/stato non deve rompere la validazione.
     fonte_ufficiale_url: str | None = None
@@ -67,6 +101,7 @@ class BandoDetail(BandoListItem):
     fonte_ufficiale_tipo: str | None = None  # ente | portale_pubblico
     fonte_ufficiale_stato: str | None = None  # trovata | in_verifica | non_trovata
     fonte_ufficiale_verificata_at: datetime | None = None
+    fonte_ufficiale_e_atto: bool | None = None
     programma: LookupItem | None = None
     settori: list[LookupItem] = []
     beneficiari: list[LookupItem] = []

@@ -1,6 +1,7 @@
 """Alert nuovi bandi: calcolo puro (date iniettate), gate per destinatario,
 ledger idempotente e run completa con contatori."""
 
+import logging
 from datetime import date
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -211,9 +212,12 @@ class FakeQuery:
         self._table = table
         self._action = "select"
         self._payload = None
+        self._count = None
+        self._range: tuple[int, int] | None = None
         self.filters: list = []
 
     def select(self, *args, **kwargs):
+        self._count = kwargs.get("count")
         return self
 
     def update(self, payload):
@@ -256,6 +260,12 @@ class FakeQuery:
         return self
 
     def order(self, *args, **kwargs):
+        self.filters.append(("order", args, kwargs))
+        return self
+
+    def range(self, start, end):
+        self._range = (start, end)
+        self.filters.append(("range", start, end))
         return self
 
     async def execute(self):
@@ -264,7 +274,19 @@ class FakeQuery:
             queue = self._owner.select_queues.get(self._table)
             if queue:
                 return SimpleNamespace(data=queue.pop(0))
-            return SimpleNamespace(data=self._owner.selects.get(self._table, []))
+            # Una tabella non prevista dal test è un errore, non una lista
+            # vuota: così una lettura sulla tabella sbagliata non passa inosservata.
+            if self._table not in self._owner.selects:
+                raise AssertionError(f"tabella inattesa: {self._table}")
+            righe = self._owner.selects[self._table]
+            totale = len(righe)
+            if self._range is not None:
+                inizio, fine = self._range
+                righe = righe[inizio : fine + 1]
+            if self._owner.max_rows is not None:
+                righe = righe[: self._owner.max_rows]  # come il max-rows di PostgREST
+            count = totale if self._count == "exact" else None
+            return SimpleNamespace(data=righe, count=count)
         if self._action == "upsert":
             preset = self._owner.upsert_results.get(self._table)
             if preset is not None:
@@ -299,6 +321,7 @@ class FakeClient:
         self.ops: list = []
         self.rpc_calls: list = []
         self.next_id = 100
+        self.max_rows: int | None = None
 
     def table(self, name: str) -> FakeQuery:
         return FakeQuery(self, name)
@@ -617,7 +640,7 @@ def primary_per_run_multi() -> FakeClient:
 class TestEseguiRun:
     async def test_happy_path(self, email_calls, notify_calls, stub_lookups):
         primary = primary_per_run()
-        secondary = FakeClient(selects={"bando": [bando_row()]})
+        secondary = FakeClient(selects={"bando_pubblico": [bando_row()]})
         riepilogo = await svc.esegui_run(primary, secondary, OGGI)
 
         assert riepilogo["esito"] == "ok"
@@ -655,8 +678,9 @@ class TestEseguiRun:
 
     async def test_opt_out_rispettato(self, email_calls, notify_calls, stub_lookups):
         primary = primary_per_run(abilitati=False)
-        secondary = FakeClient(selects={"bando": [bando_row()]})
+        secondary = FakeClient(selects={"bando_pubblico": [bando_row()]})
         riepilogo = await svc.esegui_run(primary, secondary, OGGI)
+        assert riepilogo["esito"] == "ok"
         assert riepilogo["destinatari"] == 0
         assert email_calls == []
 
@@ -666,8 +690,9 @@ class TestEseguiRun:
 
         monkeypatch.setattr(svc.email_service, "send_bandi_digest_email", fake_send)
         primary = primary_per_run()
-        secondary = FakeClient(selects={"bando": [bando_row()]})
+        secondary = FakeClient(selects={"bando_pubblico": [bando_row()]})
         riepilogo = await svc.esegui_run(primary, secondary, OGGI)
+        assert riepilogo["esito"] == "ok"
         assert riepilogo["email_fallite"] == 1
         fallita = [
             op
@@ -686,6 +711,79 @@ class TestEseguiRun:
         riepilogo = await svc.esegui_run(primary, BrokenSecondary(), OGGI)
         assert riepilogo["esito"] == "errore"
         assert "secondario giù" in riepilogo["dettagli"]["errore"]
+
+
+class TestCaricaCandidati:
+    """Candidati dalla vista `bando_pubblico`, a pagine: PostgREST del catalogo
+    non restituisce mai più di 1000 righe per richiesta (max-rows)."""
+
+    async def _carica(self, secondary):
+        return await svc.carica_candidati(
+            secondary, oggi=OGGI, attivazione=date(2026, 7, 1), orizzonte_giorni=60, fuso=ROMA
+        )
+
+    @staticmethod
+    def _righe(n: int) -> list[dict]:
+        return [bando_row(id=i, slug=f"bando-{i}") for i in range(1, n + 1)]
+
+    async def test_richiesta_sulla_vista(self):
+        secondary = FakeClient(selects={"bando_pubblico": [bando_row()]})
+        [c] = await self._carica(secondary)
+        assert c.id == 7
+        [(tabella, _, _, filtri)] = secondary.ops
+        assert tabella == "bando_pubblico"
+        assert ("eq", "stato_processing", "completed") not in filtri
+        assert ("is", "slug", "null") in filtri
+        assert ("order", ("id",), {}) in filtri
+        assert ("range", 0, svc.PAGINA_CANDIDATI - 1) in filtri
+        segmento, finestra = [f[1] for f in filtri if f[0] == "or"]
+        assert segmento.startswith("stato_effettivo.in.(")
+        assert finestra.startswith("data_pubblicazione.gte.")
+
+    async def test_oltre_mille_righe_a_pagine(self):
+        secondary = FakeClient(selects={"bando_pubblico": self._righe(2500)})
+        candidati = await self._carica(secondary)
+        assert len(candidati) == 2500
+        assert [f for op in secondary.ops for f in op[3] if f[0] == "range"] == [
+            ("range", 0, 999), ("range", 1000, 1999), ("range", 2000, 2999)
+        ]
+
+    async def test_esattamente_una_pagina_una_richiesta(self):
+        secondary = FakeClient(selects={"bando_pubblico": self._righe(1000)})
+        assert len(await self._carica(secondary)) == 1000
+        assert len(secondary.ops) == 1
+
+    async def test_max_rows_del_server_piu_basso(self):
+        # Il conteggio esatto guida la paginazione anche se il server tronca
+        # prima delle 1000 righe.
+        secondary = FakeClient(selects={"bando_pubblico": self._righe(1200)})
+        secondary.max_rows = 500
+        candidati = await self._carica(secondary)
+        assert len(candidati) == 1200
+        assert len(secondary.ops) == 3
+
+    async def test_doppioni_fra_pagine_scartati(self):
+        secondary = FakeClient(selects={"bando_pubblico": []})
+        prima = self._righe(1000)
+        secondary.select_queues["bando_pubblico"] = [prima, [prima[-1]], []]
+        candidati = await self._carica(secondary)
+        assert len(candidati) == 1000
+        assert len({c.id for c in candidati}) == 1000
+
+    async def test_tetto_di_pagine_con_warning(self, monkeypatch, caplog):
+        monkeypatch.setattr(svc, "MAX_PAGINE_CANDIDATI", 2)
+        secondary = FakeClient(selects={"bando_pubblico": self._righe(2500)})
+        with caplog.at_level(logging.WARNING, logger="bandofit.bando_alerts"):
+            candidati = await self._carica(secondary)
+        assert len(candidati) == 2000
+        assert len(secondary.ops) == 2
+        assert any("tetto" in r.getMessage() for r in caplog.records)
+
+    async def test_tabella_sbagliata_fallisce(self):
+        # Il fake non risponde su tabelle non previste: una lettura di
+        # `bando` non passerebbe inosservata.
+        with pytest.raises(AssertionError, match="tabella inattesa: bando_pubblico"):
+            await self._carica(FakeClient(selects={"bando": [bando_row()]}))
 
 
 class TestCaricaLimiti:
@@ -742,7 +840,7 @@ class TestCaricaCompanyFacets:
 class TestEseguiRunMulti:
     async def test_fanout_per_azienda(self, email_multi_calls, notify_calls, stub_lookups):
         primary = primary_per_run_multi()
-        secondary = FakeClient(selects={"bando": [bando_row()]})
+        secondary = FakeClient(selects={"bando_pubblico": [bando_row()]})
         riepilogo = await svc.esegui_run(primary, secondary, OGGI)
 
         assert riepilogo["esito"] == "ok"

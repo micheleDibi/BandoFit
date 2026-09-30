@@ -2,10 +2,12 @@
 
 I preferiti sono RIFERIMENTI al catalogo del DB secondario, non copie:
 si salva bando_id + uno snapshot minimo (slug/titolo/scadenza/stato) che fa
-da fallback di visualizzazione se il bando sparisce dal catalogo. La lista
-pagina sul PRIMARIO (ordine di salvataggio) e idrata i dati vivi dal
-secondario con una sola query per pagina (≤ 50 id: dentro il timeout di 3s
-del ruolo anon), più una su `bando_fusione` solo se qualche id manca.
+da fallback di visualizzazione se il bando sparisce dal catalogo. Lo stato
+dello snapshot è `stato_effettivo` al momento del salvataggio, nella colonna
+storica `stato_bando`. La lista pagina sul PRIMARIO (ordine di salvataggio) e
+idrata i dati vivi dalla vista `bando_pubblico` con una sola query per pagina
+(≤ 50 id: dentro il timeout di 3s del ruolo anon e sotto le 1000 righe di
+PostgREST), più una su `bando_fusione` solo se qualche id manca.
 """
 
 import logging
@@ -17,7 +19,7 @@ from app.schemas.bando import BandoListItem
 from app.schemas.common import Page
 from app.schemas.saved_bando import SavedBandoItem, SavedIdsOut
 from app.services import company_scope
-from app.services.bandi_risoluzione import carica_per_slug, risolvi_fusioni
+from app.services.bandi_risoluzione import VISTA_BANDI, carica_per_slug, risolvi_fusioni
 from app.services.bandi_service import LIST_SELECT, map_list_item
 
 logger = logging.getLogger("bandofit.saved_bandi")
@@ -40,6 +42,9 @@ def fallback_item(row: dict) -> BandoListItem:
         titolo_breve=row["bando_titolo"],
         descrizione_breve=None,
         stato_bando=row.get("stato_bando"),
+        # Non calcolato: il bando non è più nel catalogo. Lo stato dello
+        # snapshot resta in `stato_bando`, che il frontend usa come ripiego.
+        stato_effettivo=None,
         livello=None,
         data_pubblicazione=None,
         data_apertura=None,
@@ -137,7 +142,8 @@ async def save_bando(primary, secondary, user_id: str, active, slug: str) -> Sav
             "bando_slug": bando["slug"],
             "bando_titolo": _snapshot_titolo(bando),
             "data_scadenza": bando.get("data_scadenza"),
-            "stato_bando": bando.get("stato_bando"),
+            # Colonna storica, valore dalla verità del catalogo (contratto §4).
+            "stato_bando": bando.get("stato_effettivo"),
         }
         try:
             insert = await primary.table("saved_bandi").insert(row).execute()
@@ -193,10 +199,9 @@ async def list_saved(
 
     ids = [row["bando_id"] for row in rows]
     live_resp = (
-        await secondary.table("bando")
+        await secondary.table(VISTA_BANDI)
         .select(LIST_SELECT)
         .in_("id", ids)
-        .eq("stato_processing", "completed")
         .not_.is_("slug", "null")
         .execute()
     )

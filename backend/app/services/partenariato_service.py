@@ -66,6 +66,7 @@ from app.services import (
     pdf_testo,
 )
 from app.services.ai_check_prompts import serializza_sezioni
+from app.services.bandi_risoluzione import carica_per_slug, risolvi_fusioni
 from app.services.ai_prezzi import costo_cents, stima_cents
 from app.services.openapi_service import record_usage
 from app.services.partenariato_errori import raise_from_rpc
@@ -254,33 +255,49 @@ async def _avviata_at(primary, esecuzione_id) -> str | None:
     return _iso(resp.data[0].get("avviata_at")) if resp.data else None
 
 
+BANDO_BASE_SELECT = "id,slug,titolo,titolo_breve,stato_bando,stato_effettivo"
+
+
 async def _bando_base(secondary, slug: str) -> dict:
-    """Il minimo del bando per la GET (niente contenuto: la GET è in polling)."""
+    """Il minimo del bando per la GET (niente contenuto: la GET è in polling),
+    da `bando_pubblico`: uno slug spostato o fuso porta al master, uno
+    ritirato è 410 (`carica_per_slug`)."""
+    return await carica_per_slug(secondary, slug, BANDO_BASE_SELECT)
+
+
+async def _slug_pubblico(secondary, bando_id: int) -> str | None:
     resp = (
-        await secondary.table("bando")
-        .select("id,slug,titolo,titolo_breve,stato_bando")
-        .eq("slug", slug)
-        .eq("stato_processing", "completed")
+        await secondary.table("bando_pubblico")
+        .select("id,slug")
+        .eq("id", bando_id)
         .limit(1)
         .execute()
     )
-    if not resp.data:
-        raise NotFoundError("Bando non trovato")
-    return resp.data[0]
+    slug = resp.data[0].get("slug") if resp.data and isinstance(resp.data[0], dict) else None
+    return slug if isinstance(slug, str) and slug else None
 
 
 async def _slug_da_id(secondary, bando_id: int) -> str:
-    resp = (
-        await secondary.table("bando")
-        .select("id,slug")
-        .eq("id", bando_id)
-        .eq("stato_processing", "completed")
-        .limit(1)
-        .execute()
-    )
-    if not resp.data or not resp.data[0].get("slug"):
+    """Slug del bando per id, da `bando_pubblico`. Un id fuso porta allo slug
+    del master (`risolvi_fusioni`, una sola risoluzione); altrimenti 404. Gli
+    errori della risoluzione valgono 404, mai 5xx."""
+    slug = await _slug_pubblico(secondary, int(bando_id))
+    if slug:
+        return slug
+    fusione = (await risolvi_fusioni(secondary, [int(bando_id)])).get(int(bando_id))
+    if fusione is None:
         raise NotFoundError("Bando non trovato")
-    return resp.data[0]["slug"]
+    if fusione.master_slug:
+        return fusione.master_slug
+    try:
+        slug = await _slug_pubblico(secondary, fusione.master_id)
+    except Exception as exc:  # noqa: BLE001 — risoluzione: mai un 5xx
+        logger.warning("partenariati: master %s del bando fuso non leggibile (%s)",
+                       fusione.master_id, getattr(exc, "code", None) or type(exc).__name__)
+        slug = None
+    if not slug:
+        raise NotFoundError("Bando non trovato")
+    return slug
 
 
 # ------------------------------------------------------ stato e freschezza
@@ -378,6 +395,9 @@ def _to_out(
         "bando_id": int(bando["id"]),
         "bando_slug": bando.get("slug") or (row or {}).get("bando_slug") or "",
         "stato_bando": getattr(stato_pubblico, "stato_effettivo", None) or bando.get("stato_bando"),
+        "stato_effettivo": (
+            getattr(stato_pubblico, "stato_effettivo", None) or bando.get("stato_effettivo")
+        ),
     }
     if row is None:
         attiva = ai_attiva is not False
@@ -970,11 +990,11 @@ class InputModello(NamedTuple):
 
 
 def candidati_documenti(bando: dict, links, *, settings) -> list:
-    """Documenti da acquisire: da `bando_link`; dagli allegati del catalogo
-    SOLO se la lettura dei link è fallita (None)."""
+    """Documenti da acquisire: sempre l'unione delle righe `bando_link` (None
+    se la lettura è fallita) e degli allegati del catalogo, senza doppioni per
+    URL (`seleziona_candidati`)."""
     return bando_fonti_service.seleziona_candidati(
-        links, bando.get("allegati") if links is None else None,
-        settings.partenariato_max_documenti,
+        links, bando.get("allegati"), settings.partenariato_max_documenti,
     )
 
 

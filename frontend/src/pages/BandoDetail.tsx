@@ -21,6 +21,7 @@ import { CompatibilitaBadge } from "../components/bandi/CompatibilitaBadge";
 import { CompatibilitaCard } from "../components/bandi/CompatibilitaCard";
 import { ContenutoRenderer } from "../components/bandi/ContenutoRenderer";
 import { SaveBandoButton } from "../components/bandi/SaveBandoButton";
+import { bandoInCorso, dataConOra, statoDelBando } from "../components/bandi/stato";
 import { vaiASezionePartenariato } from "../components/partenariati/ancora";
 import { PartenariatoCard } from "../components/partenariati/PartenariatoCard";
 import { PartenariatoSection } from "../components/partenariati/PartenariatoSection";
@@ -32,7 +33,7 @@ import { useBando } from "../hooks/useBandi";
 import { useAddBandoDeadline } from "../hooks/useCalendar";
 import { useSlugCanonico } from "../hooks/useSlugCanonico";
 import { apiErrorCode, apiErrorMessage } from "../lib/api";
-import { formatDate, formatEur } from "../lib/format";
+import { formatEur } from "../lib/format";
 
 function MetaTile({
   icon: Icon,
@@ -110,14 +111,14 @@ export default function BandoDetail() {
   }
 
   const titolo = bando.titolo ?? bando.titolo_breve ?? "Bando";
-  // Fonte ufficiale (sito dell'ente o portale pubblico) solo se verificata come
-  // trovata; altrimenti si ripiega su `link_bando` come prima.
-  const fonteUfficiale =
-    bando.fonte_ufficiale_stato === "trovata" ? bando.fonte_ufficiale_url : null;
-  const hostFonte = fonteUfficiale ? bando.fonte_ufficiale_host : null;
-  const linkPrincipale = bando.link_candidatura ?? fonteUfficiale ?? bando.link_bando;
-  const linkFonte = fonteUfficiale ?? bando.link_bando;
-  const allegati = (bando.allegati ?? []).filter((a) => a && (a.url || a.link));
+  const stato = statoDelBando(bando);
+  const inCorso = bandoInCorso(stato);
+  // Pulsanti e allegati arrivano già scelti e filtrati dal backend: qui si
+  // decide solo cosa mostrare. Il pulsante principale solo a bando in corso;
+  // la fonte se diversa da lui (su un bando chiuso resta anche se coincideva).
+  const cta = inCorso ? bando.cta : null;
+  const fonte =
+    bando.link_fonte && bando.link_fonte.url !== cta?.url ? bando.link_fonte : null;
 
   // Solo i riquadri con un dato reale: niente box con "—".
   const metaTiles: { icon: typeof Banknote; label: string; value: string }[] = [];
@@ -136,10 +137,18 @@ export default function BandoDetail() {
     });
   }
   if (bando.data_apertura) {
-    metaTiles.push({ icon: CalendarDays, label: "Apertura", value: formatDate(bando.data_apertura) });
+    metaTiles.push({
+      icon: CalendarDays,
+      label: "Apertura",
+      value: dataConOra(bando.data_apertura, bando.ora_apertura),
+    });
   }
   if (bando.data_scadenza) {
-    metaTiles.push({ icon: CalendarDays, label: "Scadenza", value: formatDate(bando.data_scadenza) });
+    metaTiles.push({
+      icon: CalendarDays,
+      label: "Scadenza",
+      value: dataConOra(bando.data_scadenza, bando.ora_scadenza),
+    });
   }
 
   return (
@@ -155,7 +164,7 @@ export default function BandoDetail() {
       {/* Header */}
       <header className="mt-4">
         <div className="flex flex-wrap items-center gap-2">
-          <StatoBadge stato={bando.stato_bando} />
+          <StatoBadge stato={stato} />
           {bando.tipologia && <Badge tone="brand">{bando.tipologia.nome}</Badge>}
           {bando.modalita_erogazione && <Badge tone="slate">{bando.modalita_erogazione.nome}</Badge>}
           {bando.programma && <Badge tone="slate">{bando.programma.nome}</Badge>}
@@ -171,13 +180,18 @@ export default function BandoDetail() {
               {bando.ente_erogatore}
             </span>
           )}
-          <ScadenzaBadge dataScadenza={bando.data_scadenza} />
+          <ScadenzaBadge
+            dataScadenza={bando.data_scadenza}
+            oraScadenza={bando.ora_scadenza}
+            conConto={inCorso}
+          />
         </div>
 
-        {/* Azioni: salva + scadenza in calendario */}
+        {/* Azioni: salva + scadenza in calendario (solo a bando in corso) */}
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <SaveBandoButton bando={{ id: bando.id, slug: bando.slug }} variant="inline" />
           {bando.data_scadenza &&
+            inCorso &&
             (addDeadline.isSuccess ? (
               <LinkButton
                 to={`/app/calendario?m=${bando.data_scadenza.slice(0, 7)}`}
@@ -229,7 +243,7 @@ export default function BandoDetail() {
               <ContenutoRenderer sections={bando.contenuto.sections} />
             ) : (
               <p className="text-slate-500">
-                {linkPrincipale
+                {cta || fonte
                   ? "La scheda dettagliata non è ancora disponibile: consulta il bando ufficiale dal link a fianco."
                   : "La scheda dettagliata non è ancora disponibile."}
               </p>
@@ -256,33 +270,44 @@ export default function BandoDetail() {
               }}
             />
 
-            {linkPrincipale && (
+            {(cta || fonte) && (
               <Card className="p-5">
-                <h2 className="font-display text-sm font-semibold text-slate-900">Candidatura</h2>
+                <h2 className="font-display text-sm font-semibold text-slate-900">
+                  {cta ? "Candidatura" : "Link al bando"}
+                </h2>
                 <div className="mt-3 space-y-2">
-                  <a
-                    href={linkPrincipale}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={buttonClasses("primary", "md", "w-full")}
-                  >
-                    Vai al bando
-                    <ArrowUpRight className="size-4" aria-hidden />
-                  </a>
-                  {hostFonte && linkPrincipale === fonteUfficiale && (
-                    <p className="break-all text-center text-xs text-slate-500">
-                      Sito ufficiale: {hostFonte}
+                  {!inCorso && (
+                    <p className="text-sm text-slate-500">
+                      Il bando non è aperto: la candidatura non è disponibile.
                     </p>
                   )}
-                  {linkFonte && linkFonte !== linkPrincipale && (
+                  {cta && (
                     <a
-                      href={linkFonte}
+                      href={cta.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={buttonClasses("primary", "md", "w-full")}
+                    >
+                      Vai al bando
+                      <ArrowUpRight className="size-4" aria-hidden />
+                    </a>
+                  )}
+                  {cta?.origine === "fonte_ufficiale" && cta.host && (
+                    <p className="break-all text-center text-xs text-slate-500">
+                      Sito ufficiale: {cta.host}
+                    </p>
+                  )}
+                  {fonte && (
+                    <a
+                      href={fonte.url}
                       target="_blank"
                       rel="noopener noreferrer"
                       className={buttonClasses("secondary", "md", "w-full")}
                     >
                       <span className="min-w-0 truncate">
-                        {hostFonte ? `Fonte ufficiale · ${hostFonte}` : "Fonte ufficiale"}
+                        {fonte.origine === "fonte_ufficiale" && fonte.host
+                          ? `Fonte ufficiale · ${fonte.host}`
+                          : "Fonte ufficiale"}
                       </span>
                       <ExternalLink className="size-4 shrink-0" aria-hidden />
                     </a>
@@ -291,20 +316,21 @@ export default function BandoDetail() {
               </Card>
             )}
 
-            {allegati.length > 0 && (
+            {bando.allegati.length > 0 && (
               <Card className="p-5">
                 <h2 className="font-display text-sm font-semibold text-slate-900">Allegati</h2>
                 <ul className="mt-3 space-y-2">
-                  {allegati.map((allegato, i) => (
-                    <li key={i}>
+                  {bando.allegati.map((allegato, i) => (
+                    <li key={allegato.url}>
                       <a
-                        href={allegato.url ?? allegato.link}
+                        href={allegato.url}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-2 text-sm text-brand-600 underline-offset-2 hover:underline"
                       >
                         <FileText className="size-4 shrink-0" aria-hidden />
-                        {allegato.nome ?? allegato.titolo ?? `Allegato ${i + 1}`}
+                        {(allegato.etichetta || `Allegato ${i + 1}`) +
+                          (allegato.formato ? ` · ${allegato.formato.toUpperCase()}` : "")}
                       </a>
                     </li>
                   ))}

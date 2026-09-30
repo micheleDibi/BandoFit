@@ -47,7 +47,7 @@ def params_of(query) -> dict[str, list[str]]:
 
 
 def build(client, filters: BandiFilters):
-    query = client.from_("bando").select(build_list_select(filters))
+    query = client.from_("bando_pubblico").select(build_list_select(filters))
     return apply_filters(query, filters, today=TODAY)
 
 
@@ -56,6 +56,11 @@ class TestSelect:
         select = build_list_select(BandiFilters())
         assert "bando_regioni(regioni(id,nome))" in select
         assert "!inner" not in select
+
+    def test_select_ha_stato_effettivo_e_stato_bando(self):
+        colonne = build_list_select(BandiFilters()).split(",")
+        assert "stato_effettivo" in colonne
+        assert "stato_bando" in colonne  # resta, solo informativo
 
     def test_active_facets_add_aliased_inner_embeds(self):
         filters = BandiFilters(regioni=[1], settori=[2, 3])
@@ -69,16 +74,17 @@ class TestSelect:
 
 
 class TestBaseFilters:
-    def test_always_filters_completed_with_slug(self, client):
+    def test_solo_slug_non_nullo_senza_stato_processing(self, client):
+        # La vista è già filtrata sui pubblicati: resta la sola difesa sullo slug.
         params = params_of(build(client, BandiFilters()))
-        assert params["stato_processing"] == ["eq.completed"]
+        assert "stato_processing" not in params
         assert params["slug"] == ["not.is.null"]
+        assert set(params) == {"select", "slug"}
 
-    def test_stato_in(self, client):
+    def test_stato_in_su_stato_effettivo(self, client):
         params = params_of(build(client, BandiFilters(stato=["aperto", "in apertura prossimamente"])))
-        [value] = params["stato_bando"]
-        assert value.startswith("in.(")
-        assert "aperto" in value and "in apertura prossimamente" in value
+        assert params["stato_effettivo"] == ["in.(aperto,in apertura prossimamente)"]
+        assert "stato_bando" not in params
 
     def test_direct_columns(self, client):
         filters = BandiFilters(
@@ -155,46 +161,49 @@ class TestSorting:
         assert value.endswith("id.asc")
 
 
-GUARDIA_STATI = (
-    '(stato_bando.in.("aperto","in apertura prossimamente","chiuso"),stato_bando.is.null)'
+SEGMENTO_APERTI = (
+    '(stato_effettivo.in.("aperto","in apertura prossimamente"),stato_effettivo.is.null)'
 )
 
 
 class TestTiers:
-    """I due segmenti (non chiusi / chiusi) devono essere complementari e
-    null-safe: la partizione è il contratto su cui poggia la paginazione."""
+    """I due segmenti poggiano su ``stato_effettivo`` (contratto DB bandi §4):
+    aperti = aperto, in apertura o NULL; chiusi = chiuso."""
 
-    def test_open_tier_excludes_chiusi_and_scaduti(self, client):
+    def test_open_tier_su_stato_effettivo(self, client):
         params = params_of(apply_open_tier(build(client, BandiFilters()), TODAY))
-        assert params["or"] == [
-            GUARDIA_STATI,
-            "(stato_bando.neq.chiuso,stato_bando.is.null)",
-            "(data_scadenza.gte.2026-07-03,data_scadenza.is.null)",
-        ]
+        assert params["or"] == [SEGMENTO_APERTI]
+        assert "stato_bando" not in params
+        assert "data_scadenza" not in params
 
-    def test_closed_tier_matches_stato_or_scadenza_passata(self, client):
+    def test_closed_tier_su_stato_effettivo(self, client):
         params = params_of(apply_closed_tier(build(client, BandiFilters()), TODAY))
-        assert params["or"] == [
-            GUARDIA_STATI,
-            "(stato_bando.eq.chiuso,data_scadenza.lt.2026-07-03)",
-        ]
+        assert params["stato_effettivo"] == ["eq.chiuso"]
+        assert "or" not in params
+        assert "data_scadenza" not in params
 
-    def test_tier_or_coexists_with_fts(self, client):
-        # La ricerca full-text è un filtro a sé su ``ricerca``: gli ``or`` restano
-        # solo quelli del segmento, guardia R0-a compresa.
+    def test_segmenti_non_dipendono_dalla_data(self, client):
+        # La scadenza (con l'ora di Roma) è già dentro stato_effettivo.
+        for tier in (apply_open_tier, apply_closed_tier):
+            oggi = params_of(tier(build(client, BandiFilters()), TODAY))
+            altro = params_of(tier(build(client, BandiFilters()), date(2030, 1, 1)))
+            assert oggi == altro
+
+    def test_tier_coexists_with_fts(self, client):
+        # La ricerca full-text è un filtro a sé su ``ricerca``.
         params = params_of(apply_open_tier(build(client, BandiFilters(q="energia")), TODAY))
         assert params["ricerca"] == ["wfts(italian).energia"]
-        assert params["or"] == [
-            GUARDIA_STATI,
-            "(stato_bando.neq.chiuso,stato_bando.is.null)",
-            "(data_scadenza.gte.2026-07-03,data_scadenza.is.null)",
-        ]
+        assert params["or"] == [SEGMENTO_APERTI]
         params = params_of(apply_closed_tier(build(client, BandiFilters(q="energia")), TODAY))
         assert params["ricerca"] == ["wfts(italian).energia"]
-        assert params["or"] == [
-            GUARDIA_STATI,
-            "(stato_bando.eq.chiuso,data_scadenza.lt.2026-07-03)",
-        ]
+        assert params["stato_effettivo"] == ["eq.chiuso"]
+
+    def test_filtro_stato_utente_in_and_col_segmento(self, client):
+        # Il filtro dell'utente e il segmento sono due parametri distinti che
+        # PostgREST mette in AND.
+        filtri = BandiFilters(stato=["chiuso"])
+        params = params_of(apply_closed_tier(build(client, filtri), TODAY))
+        assert params["stato_effettivo"] == ["in.(chiuso)", "eq.chiuso"]
 
     def test_today_italy_is_a_date(self):
         assert isinstance(today_italy(), date)
@@ -254,62 +263,49 @@ def valuta(cond: str, row: dict) -> bool | None:
     return {"eq": value == arg, "neq": value != arg, "lt": value < arg, "gte": value >= arg}[op]
 
 
-FUTURA, PASSATA = "2026-08-01", "2026-06-01"
-
-
-def segmenti_di(client, stato: str | None, scadenza: str | None) -> set[str]:
-    """In quali segmenti finisce una riga: come WHERE, conta solo il vero."""
-    row = {"stato_bando": stato, "data_scadenza": scadenza}
+def segmenti_di(client, stato: str | None) -> set[str]:
+    """In quali segmenti finisce una riga con questo ``stato_effettivo``:
+    come WHERE, conta solo il vero."""
+    row = {"stato_effettivo": stato}
     out = set()
     for nome, tier in (("aperti", apply_open_tier), ("chiusi", apply_closed_tier)):
-        params = params_of(tier(client.from_("bando").select("id"), TODAY))
-        assert set(params) == {"select", "or"}  # nessun filtro sfugge al valutatore
-        if all(valuta(f"or{cond}", row) is True for cond in params["or"]):
+        params = params_of(tier(client.from_("bando_pubblico").select("id"), TODAY))
+        condizioni = [f"or{cond}" for cond in params.pop("or", [])]
+        params.pop("select")
+        condizioni += [f"{col}.{val}" for col, vals in params.items() for val in vals]
+        # nessun filtro sfugge al valutatore
+        assert all(c.startswith(("or(", "stato_effettivo.")) for c in condizioni)
+        if all(valuta(cond, row) is True for cond in condizioni):
             out.add(nome)
     return out
 
 
 class TestSegmentiPerStato:
-    """Contratto DB bandi §4 e §7 (R0-a): 'sospeso' e 'revocato' non sono né
-    aperti né chiusi; un sospeso non viene mai chiuso dalla scadenza. Gli
-    stati non previsti restano fuori come loro; NULL si comporta come prima."""
+    """Contratto DB bandi §4: 'sospeso' e 'revocato' non sono né aperti né
+    chiusi, e nemmeno gli stati non previsti. Uno stato NULL resta fra gli
+    aperti: un bando non deve sparire in silenzio dalle liste."""
 
     @pytest.mark.parametrize(
-        ("stato", "scadenza", "atteso"),
+        ("stato", "atteso"),
         [
-            # stati di oggi: comportamento invariato
-            ("aperto", FUTURA, {"aperti"}),
-            ("aperto", TODAY.isoformat(), {"aperti"}),  # il giorno di scadenza è ancora aperto
-            ("aperto", None, {"aperti"}),
-            ("aperto", PASSATA, {"chiusi"}),
-            ("in apertura prossimamente", FUTURA, {"aperti"}),
-            ("in apertura prossimamente", PASSATA, {"chiusi"}),
-            ("chiuso", FUTURA, {"chiusi"}),
-            ("chiuso", None, {"chiusi"}),
-            (None, FUTURA, {"aperti"}),
-            (None, None, {"aperti"}),
-            (None, PASSATA, {"chiusi"}),
-            # stati nuovi e sconosciuti: fuori da entrambi
-            ("sospeso", FUTURA, set()),
-            ("sospeso", PASSATA, set()),
-            ("sospeso", None, set()),
-            ("revocato", FUTURA, set()),
-            ("revocato", PASSATA, set()),
-            ("revocato", None, set()),
-            ("pippo", FUTURA, set()),
-            ("pippo", PASSATA, set()),
-            ("pippo", None, set()),
+            ("aperto", {"aperti"}),
+            ("in apertura prossimamente", {"aperti"}),
+            ("chiuso", {"chiusi"}),
+            (None, {"aperti"}),
+            ("sospeso", set()),
+            ("revocato", set()),
+            ("pippo", set()),
+            ("Aperto", set()),
         ],
     )
-    def test_segmento_della_riga(self, client, stato, scadenza, atteso):
-        assert segmenti_di(client, stato, scadenza) == atteso
+    def test_segmento_della_riga(self, client, stato, atteso):
+        assert segmenti_di(client, stato) == atteso
 
     def test_segmenti_complementari_sugli_stati_noti(self, client):
         # Ogni riga con stato noto (o NULL) sta in esattamente un segmento: la
         # somma dei due count resta il totale della paginazione.
         for stato in ("aperto", "in apertura prossimamente", "chiuso", None):
-            for scadenza in (FUTURA, TODAY.isoformat(), PASSATA, None):
-                assert len(segmenti_di(client, stato, scadenza)) == 1, (stato, scadenza)
+            assert len(segmenti_di(client, stato)) == 1, stato
 
 
 def bando_row(id_: int) -> dict:
@@ -319,9 +315,12 @@ def bando_row(id_: int) -> dict:
 class FakeBandiQuery:
     """Registra la catena di chiamate del builder e risponde con dati canned."""
 
-    def __init__(self, response: SimpleNamespace):
+    def __init__(self, name: str, response: SimpleNamespace):
+        self.name = name
         self._response = response
         self.select_kwargs: dict = {}
+        self.eq_filters: list[tuple] = []
+        self.in_filters: list[tuple] = []
         self.or_filters: list[str] = []
         self.filters: list[tuple[str, str, str]] = []
         self.orders: list[tuple] = []
@@ -332,7 +331,8 @@ class FakeBandiQuery:
         self.select_kwargs = kwargs
         return self
 
-    def eq(self, *args):
+    def eq(self, column, value):
+        self.eq_filters.append((column, value))
         return self
 
     @property
@@ -342,7 +342,8 @@ class FakeBandiQuery:
     def is_(self, *args):
         return self
 
-    def in_(self, *args):
+    def in_(self, column, values):
+        self.in_filters.append((column, list(values)))
         return self
 
     def gte(self, *args):
@@ -384,7 +385,7 @@ class FakeSecondary:
         self.queries: list[FakeBandiQuery] = []
 
     def table(self, name):
-        query = FakeBandiQuery(self._responses.pop(0))
+        query = FakeBandiQuery(name, self._responses.pop(0))
         self.queries.append(query)
         return query
 
@@ -397,6 +398,7 @@ class TestFetchBandi:
         ])
         page = await fetch_bandi(secondary, BandiFilters(), 1, 2, "pubblicazione_desc")
         open_q, closed_q = secondary.queries
+        assert (open_q.name, closed_q.name) == ("bando_pubblico", "bando_pubblico")
         assert [item.id for item in page.items] == [1, 2]
         assert page.total == 12
         assert open_q.range_args == (0, 1)
@@ -453,12 +455,11 @@ class TestFetchBandi:
         ])
         await fetch_bandi(secondary, BandiFilters(), 1, 20, "pubblicazione_desc")
         open_q, closed_q = secondary.queries
-        assert any("stato_bando.neq.chiuso" in f for f in open_q.or_filters)
-        assert any("data_scadenza.gte." in f for f in open_q.or_filters)
-        assert any("stato_bando.eq.chiuso" in f for f in closed_q.or_filters)
-        # la guardia sugli stati vale per entrambe le query (R0-a)
-        assert f"({open_q.or_filters[0]})" == GUARDIA_STATI
-        assert f"({closed_q.or_filters[0]})" == GUARDIA_STATI
+        assert [f"({f})" for f in open_q.or_filters] == [SEGMENTO_APERTI]
+        assert closed_q.or_filters == []
+        assert closed_q.eq_filters == [("stato_effettivo", "chiuso")]
+        for query in (open_q, closed_q):
+            assert "stato_processing" not in [c for c, _ in query.eq_filters]
 
     async def test_fts_is_applied_to_both_queries(self):
         secondary = FakeSecondary([
@@ -468,7 +469,19 @@ class TestFetchBandi:
         await fetch_bandi(secondary, BandiFilters(q="energia"), 1, 20, "pubblicazione_desc")
         for query in secondary.queries:
             assert query.filters == [("ricerca", "wfts(italian)", "energia")]
-            assert f"({query.or_filters[0]})" == GUARDIA_STATI
+        open_q, closed_q = secondary.queries
+        assert [f"({f})" for f in open_q.or_filters] == [SEGMENTO_APERTI]
+        assert closed_q.eq_filters == [("stato_effettivo", "chiuso")]
+
+    async def test_stato_effettivo_nelle_card(self):
+        secondary = FakeSecondary([
+            SimpleNamespace(data=[{**bando_row(1), "stato_effettivo": "aperto"}], count=1),
+            SimpleNamespace(data=[{**bando_row(2), "stato_effettivo": "chiuso"}], count=1),
+        ])
+        page = await fetch_bandi(secondary, BandiFilters(), 1, 5, "pubblicazione_desc")
+        assert [(i.stato_bando, i.stato_effettivo) for i in page.items] == [
+            ("aperto", "aperto"), ("aperto", "chiuso")
+        ]
 
     async def test_unknown_sort_falls_back_to_most_recent(self):
         secondary = FakeSecondary([
@@ -495,7 +508,7 @@ class TestFetchBandi:
 class TestCandidatiAlert:
     async def test_candidati_ereditano_il_segmento_aperti(self, client):
         # Gli alert riusano apply_open_tier: sospesi, revocati e stati non
-        # previsti non diventano mai candidati (contratto DB bandi §7, R0-a).
+        # previsti non diventano mai candidati (contratto DB bandi §4).
         secondary = FakeSecondary([SimpleNamespace(data=[], count=None)])
         await carica_candidati(
             secondary,
@@ -505,9 +518,11 @@ class TestCandidatiAlert:
             fuso=ZoneInfo("Europe/Rome"),
         )
         [query] = secondary.queries
-        segmento_aperti = params_of(apply_open_tier(client.from_("bando").select("id"), TODAY))
-        assert [f"({f})" for f in query.or_filters[:3]] == segmento_aperti["or"]
-        assert segmento_aperti["or"][0] == GUARDIA_STATI
+        segmento_aperti = params_of(
+            apply_open_tier(client.from_("bando_pubblico").select("id"), TODAY)
+        )
+        assert segmento_aperti["or"] == [SEGMENTO_APERTI]
+        assert f"({query.or_filters[0]})" == SEGMENTO_APERTI
 
 
 def filters_client() -> httpx.AsyncClient:
@@ -558,6 +573,7 @@ class TestMapping:
         "titolo_breve": "Bando regionale Lombardia",
         "descrizione_breve": "Contributi a fondo perduto",
         "stato_bando": "aperto",
+        "stato_effettivo": "chiuso",
         "livello": "flash_bando",
         "data_pubblicazione": "2026-05-26",
         "data_apertura": None,
@@ -575,6 +591,8 @@ class TestMapping:
     def test_map_list_item(self):
         item = map_list_item(self.ROW)
         assert item.slug == "lombardia-iniziativa-milo"
+        assert item.stato_bando == "aperto"
+        assert item.stato_effettivo == "chiuso"
         assert item.tipologia.nome == "Bandi regionali / locali"
         assert [r.nome for r in item.regioni] == ["Lombardia"]
 
@@ -583,7 +601,7 @@ class TestMapping:
             **self.ROW,
             "area_geografica": "Lombardia",
             "tematica": ["Smart cities"],
-            "link_bando": "https://example.com",
+            "link_bando": "https://example.com/bando",
             "link_candidatura": None,
             "contenuto": {"sections": []},
             "allegati": [],
@@ -600,6 +618,8 @@ class TestMapping:
         assert [b.nome for b in detail.beneficiari] == ["PMI"]
         assert detail.codici_ateco[0].codice == "49"
         assert detail.tematica == ["Smart cities"]
+        assert detail.cta.url == "https://example.com/bando"
+        assert detail.cta.origine == "link_bando"
 
     def test_map_handles_missing_embeds(self):
         row = {**self.ROW, "tipologie_bando": None, "bando_regioni": []}

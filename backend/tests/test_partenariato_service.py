@@ -326,24 +326,45 @@ class FakeDb:
 
 
 class FakeSecondary:
-    """Solo la lettura del bando per slug/id (il resto è monkeypatchato)."""
+    """Solo la lettura del bando per slug/id su `bando_pubblico` e la
+    risoluzione dei miss (il resto è monkeypatchato). La tabella `bando` non
+    si legge più."""
 
-    def __init__(self, righe: list[dict]):
+    TABELLE = ("bando_pubblico", "bando_slug_storico", "bando_fusione")
+
+    def __init__(self, righe: list[dict], fusioni: list[dict] | None = None):
         self.righe = righe
+        self.fusioni = fusioni or []
+        self.guasto_fusione: Exception | None = None
         self.letture = 0
+        self.tabelle: list[str] = []
 
     def table(self, nome):
         secondario = self
+        assert nome in self.TABELLE, f"tabella del catalogo inattesa: {nome}"
+        secondario.tabelle.append(nome)
 
         class _Q:
-            filtri: dict = {}
+            def __init__(self):
+                self.filtri: dict = {}
+                self.liste: dict = {}
 
             def select(self, *a, **k):
-                self.filtri = {}
                 return self
 
             def eq(self, c, v):
                 self.filtri[c] = v
+                return self
+
+            def in_(self, c, v):
+                self.liste[c] = list(v)
+                return self
+
+            @property
+            def not_(self):
+                return self
+
+            def is_(self, *a):
                 return self
 
             def limit(self, *a):
@@ -351,9 +372,14 @@ class FakeSecondary:
 
             async def execute(self):
                 secondario.letture += 1
-                dati = [r for r in secondario.righe
+                righe = {"bando_pubblico": secondario.righe, "bando_slug_storico": [],
+                         "bando_fusione": secondario.fusioni}[nome]
+                if nome == "bando_fusione" and secondario.guasto_fusione is not None:
+                    raise secondario.guasto_fusione
+                dati = [r for r in righe
                         if all(r.get(c) == v for c, v in self.filtri.items()
-                               if c in ("slug", "id"))]
+                               if c in ("slug", "id", "slug_originale"))
+                        and all(r.get(c) in v for c, v in self.liste.items())]
                 return SimpleNamespace(data=dati)
 
         return _Q()
@@ -1219,8 +1245,60 @@ class TestStatoEAltro:
     async def test_stato_non_estratta(self, catalogo):
         out = await stato(FakeDb(), catalogo, FakeAi())
         assert (out.stato, out.puo_avviare, out.stato_bando) == ("non_estratta", True, "aperto")
+        assert out.stato_effettivo == "aperto"
         out = await stato(FakeDb(), catalogo, FakeAi(enabled=False))
         assert (out.puo_avviare, out.motivo_non_avviabile) == (False, "ai_non_configurata")
+
+    async def test_stato_effettivo_dalla_vista(self, catalogo, monkeypatch):
+        # Senza lo stato dal lotto di `bando_pubblico` resta quello della riga
+        # letta per slug (sempre dalla vista, mai dalla tabella `bando`).
+        async def stati(secondary, ids):
+            return {}
+
+        monkeypatch.setattr("app.services.bando_fonti_service.leggi_stato_bandi", stati)
+        secondary = FakeSecondary([{**catalogo.bando, "stato_effettivo": "chiuso"}])
+        out = await ps.get_stato(FakeDb(), secondary, "bando-reti", ai=FakeAi())
+        assert (out.stato_effettivo, out.stato_bando) == ("chiuso", "aperto")
+        assert secondary.tabelle == ["bando_pubblico"]
+
+    async def test_slug_da_id_vista_e_fusioni(self):
+        master = {"id": 900, "slug": "master-900"}
+        fusa = {"bando_id": BANDO_ID, "slug_originale": "bando-reti", "master_id": 900,
+                "master_slug": "master-900"}
+        # id pubblicato: la sua riga, una lettura sola
+        secondary = FakeSecondary([master])
+        assert await ps._slug_da_id(secondary, 900) == "master-900"
+        assert secondary.tabelle == ["bando_pubblico"]
+        # id fuso: lo slug del master
+        secondary = FakeSecondary([master], fusioni=[fusa])
+        assert await ps._slug_da_id(secondary, BANDO_ID) == "master-900"
+        assert secondary.tabelle == ["bando_pubblico", "bando_fusione"]
+        # fusione senza slug del master: si rilegge il master per id
+        secondary = FakeSecondary([master], fusioni=[{**fusa, "master_slug": None}])
+        assert await ps._slug_da_id(secondary, BANDO_ID) == "master-900"
+        # né pubblicato né fuso, o fusioni non leggibili: 404, mai 5xx
+        with pytest.raises(NotFoundError):
+            await ps._slug_da_id(FakeSecondary([master]), BANDO_ID)
+        secondary = FakeSecondary([master], fusioni=[fusa])
+        secondary.guasto_fusione = APIError({"code": "57014", "message": "timeout"})
+        with pytest.raises(NotFoundError):
+            await ps._slug_da_id(secondary, BANDO_ID)
+
+    def test_candidati_unione_di_link_e_allegati(self):
+        # WP3: sempre l'unione di `bando_link` e del jsonb `allegati`, anche con
+        # la lettura dei link riuscita.
+        from app.core.config import get_settings
+
+        links = [LinkDocumento(id=1, bando_id=BANDO_ID, url="https://regione.example.it/a.pdf",
+                               dominio="regione.example.it", tipo="allegato", etichetta=None,
+                               content_type="application/pdf", ultimo_visto_at=None)]
+        allegati = [{"label": "Avviso", "url": "https://regione.example.it/a.pdf", "tipo": "pdf"},
+                    {"label": "Modulo", "url": "https://regione.example.it/b.pdf", "tipo": "pdf"}]
+        scelti = ps.candidati_documenti({"allegati": allegati}, links, settings=get_settings())
+        assert [(c.url, c.origine, c.etichetta) for c in scelti] == [
+            ("https://regione.example.it/a.pdf", "bando_link", "Avviso"),
+            ("https://regione.example.it/b.pdf", "allegati", "Modulo"),
+        ]
 
     async def test_aggiornabile_per_prompt_nuovo(self, catalogo, spawned):
         db = FakeDb()

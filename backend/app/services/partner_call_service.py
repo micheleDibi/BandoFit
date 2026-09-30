@@ -94,6 +94,7 @@ from app.core.errors import (
     AiNotConfiguredError,
     AppError,
     BadRequestError,
+    BandoRitiratoError,
     ForbiddenError,
     NotFoundError,
     UpstreamError,
@@ -144,6 +145,7 @@ from app.services import (
 )
 from app.services import partenariato_matching as pm
 from app.services import partner_profile_service as pps
+from app.services.bandi_risoluzione import carica_per_slug
 from app.services.bilanci_indicatori import calcola_fasce
 from app.services.notification_service import notify
 from app.services.openapi_mapping import build_dossier
@@ -238,6 +240,11 @@ MSG_NON_AMMESSO = (
 MSG_BANDO_NON_VERIFICABILE = (
     "Non riusciamo a verificare lo stato del bando in questo momento: riprova tra poco"
 )
+# Non si invita a ricreare la call sul master (una seconda call attiva della
+# stessa azienda sul master è la collisione che la rimappatura non risolve) e
+# non si promette lo spostamento (non avviene a rimappatura spenta né in
+# collisione).
+MSG_BANDO_FUSO = "Il bando è stato unito a un altro bando: per ora la call non si può pubblicare."
 MSG_SEGNALAZIONE_DOPPIA = "Hai già segnalato questo contenuto"
 MSG_LIMITE_SEGNALAZIONI = "Hai inviato molte segnalazioni oggi: riprova domani"
 MSG_TESTO_RIMOSSO = "[rimosso]"
@@ -620,16 +627,44 @@ async def _lookups(secondary):
         return None
 
 
+@dataclass(frozen=True)
+class BandoFuso:
+    """Stato di un bando assente da `bando_pubblico` perché fuso in un altro
+    (contratto DB bandi §6.2): né aperto né assente. Nessun motivo di
+    chiusura legato al bando (`motivo_chiusura_auto`); creazione e
+    pubblicazione restano bloccate finché la rimappatura dei fusi non sposta
+    la call sul master."""
+
+    master_id: int | None
+    stato_effettivo: None = None
+    data_scadenza: None = None
+
+
 async def _stato_bando(secondary, bando_id: int):
-    """(stato live da `bando_pubblico` o None se assente, letto?). Un errore
-    di lettura NON è un'assenza: `letto=False`."""
+    """(stato live da `bando_pubblico`, letto?). Sul miss si guarda
+    `bando_fusione`: un doppione fuso → `BandoFuso`, altrimenti None
+    (assente). Un errore di lettura, anche delle fusioni, NON è un'assenza:
+    `letto=False`."""
     try:
         stati = await bando_fonti_service.leggi_stato_bandi(secondary, [int(bando_id)])
+        stato = stati.get(int(bando_id))
+        if stato is None:
+            fusi = await bando_fonti_service.leggi_fusioni(secondary, [int(bando_id)])
+            if int(bando_id) in fusi:
+                return BandoFuso(fusi[int(bando_id)]), True
     except Exception as exc:  # noqa: BLE001
         logger.warning("call: stato del bando %s non leggibile (%s)", bando_id,
                        getattr(exc, "code", None) or type(exc).__name__)
         return None, False
-    return stati.get(int(bando_id)), True
+    return stato, True
+
+
+def _non_disponibile(stato_bando) -> AppError:
+    """409 `bando_non_disponibile`; per un bando fuso, il messaggio lo dice."""
+    status, codice, messaggio = RPC_ERRORS["bando_non_disponibile"]
+    if isinstance(stato_bando, BandoFuso):
+        messaggio = MSG_BANDO_FUSO
+    return AppError(status, codice, messaggio)
 
 
 def _aperto(stato_bando) -> bool:
@@ -1043,7 +1078,7 @@ def _motivi_blocco(
     if call.get("anonima") is False and not identita_verificata:
         blocca("identita_non_verificata_admin", MSG_IDENTITA_NON_VERIFICATA_ADMIN)
     if bando_letto and not _aperto(stato_bando):
-        blocca("bando_non_disponibile", RPC_ERRORS["bando_non_disponibile"][2])
+        blocca("bando_non_disponibile", _non_disponibile(stato_bando).message)
     if _non_ammesso(riga_bp) and not call.get("override_non_ammesso_motivo"):
         blocca("partenariato_non_ammesso", MSG_NON_AMMESSO)
     if not (call.get("titolo") or "").strip():
@@ -1402,17 +1437,9 @@ async def anteprima(primary, secondary, active, user: dict, call_id: Any) -> Ant
 
 
 async def _bando_catalogo(secondary, slug: str) -> dict:
-    resp = (
-        await secondary.table("bando")
-        .select(BANDO_CATALOGO_SELECT)
-        .eq("slug", slug)
-        .eq("stato_processing", "completed")
-        .limit(1)
-        .execute()
-    )
-    if not resp.data:
-        raise NotFoundError("Bando non trovato")
-    return resp.data[0]
+    """Riga del bando per slug da `bando_pubblico`: uno slug spostato o fuso
+    porta al master (la call nasce sul master), uno ritirato è 410."""
+    return await carica_per_slug(secondary, slug, BANDO_CATALOGO_SELECT)
 
 
 def _id_embed(valore: Any) -> int | None:
@@ -1447,7 +1474,7 @@ async def crea_bozza(primary, secondary, active, user: dict, dati: CallCreaIn
     if not letto:
         raise UpstreamError(MSG_BANDO_NON_VERIFICABILE)
     if not _aperto(stato_bando):
-        raise _errore_mappa("bando_non_disponibile")
+        raise _non_disponibile(stato_bando)
     riga_bp = await _riga_partenariato(primary, bando_id)
     if _non_ammesso(riga_bp) and not dati.override_non_ammesso_motivo:
         raise AppError(409, "partenariato_non_ammesso", MSG_NON_AMMESSO)
@@ -1628,18 +1655,12 @@ async def _bando_facet(secondary, slug: str) -> dict | None:
     """Facet del catalogo per i pre-check (id e nomi); None se il bando non
     si legge più (la gap analysis procede con le altre fonti)."""
     try:
-        resp = (
-            await secondary.table("bando")
-            .select(BANDO_FACET_SELECT)
-            .eq("slug", slug)
-            .eq("stato_processing", "completed")
-            .limit(1)
-            .execute()
-        )
+        return await carica_per_slug(secondary, slug, BANDO_FACET_SELECT)
+    except (NotFoundError, BandoRitiratoError):
+        return None
     except Exception as exc:  # noqa: BLE001
         logger.warning("call: facet del bando non leggibili (%s)", type(exc).__name__)
         return None
-    return resp.data[0] if resp.data else None
 
 
 def _regioni_bando(bando: Mapping | None) -> list[int]:
@@ -1872,7 +1893,7 @@ async def pubblica(primary, secondary, active, user: dict, call_id: Any,
     if not letto:
         raise UpstreamError(MSG_BANDO_NON_VERIFICABILE)
     if not _aperto(stato_bando):
-        raise _errore_mappa("bando_non_disponibile")
+        raise _non_disponibile(stato_bando)
     riga_bp = await _riga_partenariato(primary, call["bando_id"])
     if _non_ammesso(riga_bp) and not call.get("override_non_ammesso_motivo"):
         raise AppError(409, "partenariato_non_ammesso", MSG_NON_AMMESSO)

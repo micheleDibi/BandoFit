@@ -50,6 +50,7 @@ from app.services.ai_check_prompts import (
     compute_content_hash,
 )
 from app.services.ai_check_scoring import facet_prechecks, score_report
+from app.services.bandi_risoluzione import carica_per_slug
 from app.services.family_service import owner_and_editable
 from app.services.openapi_mapping import build_dossier
 from app.services.openapi_service import _acquire_lock, _release_lock, record_usage
@@ -615,15 +616,61 @@ async def _close_stale(primary, owner_id: str) -> None:
         logger.exception("chiusura analisi stale fallita")
 
 
+# Doppioni fusi letti per un master (in pratica pochi; sotto il max-rows 1000).
+LIMITE_DOPPIONI = 200
+
+
+async def _ids_del_bando(secondary, bando_slug: str) -> list[int] | None:
+    """Id del bando dello slug (il master, se lo slug è spostato o fuso) più
+    i suoi doppioni fusi (`bando_fusione?master_id=eq.X`): lo storico di un
+    bando comprende i report fatti sui doppioni prima della fusione. None se
+    lo slug non si risolve (404, 410 o errore di lettura): il chiamante
+    ripiega sul filtro per slug. Una lettura dei doppioni in errore lascia il
+    solo id del bando."""
+    try:
+        riga = await carica_per_slug(secondary, bando_slug, "id")
+    except AppError:
+        return None
+    except Exception as exc:  # noqa: BLE001 — lo storico si legge comunque
+        logger.warning("ai-check: bando dello storico non leggibile (%s)",
+                       getattr(exc, "code", None) or type(exc).__name__)
+        return None
+    bando_id = riga.get("id")
+    if not isinstance(bando_id, int) or isinstance(bando_id, bool):
+        return None
+    ids = [bando_id]
+    try:
+        resp = (
+            await secondary.table("bando_fusione")
+            .select("bando_id")
+            .eq("master_id", bando_id)
+            .limit(LIMITE_DOPPIONI)
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001 — senza doppioni, il solo bando
+        logger.warning("ai-check: doppioni del bando %s non leggibili (%s)", bando_id,
+                       getattr(exc, "code", None) or type(exc).__name__)
+        return ids
+    for r in resp.data or []:
+        doppione = r.get("bando_id") if isinstance(r, dict) else None
+        if isinstance(doppione, int) and not isinstance(doppione, bool) and doppione not in ids:
+            ids.append(doppione)
+    return ids
+
+
 async def list_checks(
     primary,
     active,
     bando_slug: str | None = None,
     page: int = 1,
     page_size: int = 20,
+    *,
+    secondary=None,
 ) -> AiChecksResponse:
     """Storico AI-check dell'azienda attiva. Con `bando_slug` include i report
-    completi (storico per bando, il primo è il più recente)."""
+    completi (storico per bando, il primo è il più recente). Con `secondary`
+    il filtro per bando è per id: il bando dello slug più i suoi doppioni
+    fusi (`_ids_del_bando`); senza, o se lo slug non si risolve, per slug."""
     # Parametro vuoto = nessun filtro: va normalizzato PRIMA, così filtro e
     # inclusione dei report restano coerenti (la lista globale è sintetica).
     bando_slug = (bando_slug or "").strip() or None
@@ -640,7 +687,13 @@ async def list_checks(
     if active.company_id is not None:
         query = query.eq("company_profile_id", active.company_id)
     if bando_slug:
-        query = query.eq("bando_slug", bando_slug)
+        bando_ids = (
+            await _ids_del_bando(secondary, bando_slug) if secondary is not None else None
+        )
+        if bando_ids:
+            query = query.in_("bando_id", bando_ids)
+        else:
+            query = query.eq("bando_slug", bando_slug)
     offset = (page - 1) * page_size
     resp = (
         await query.order("created_at", desc=True)

@@ -32,11 +32,15 @@ async def request_ai_check(
 async def list_ai_checks(
     active: ActiveCompanyDep,
     primary: PrimaryClient,
+    secondary: SecondaryClient,
     bando_slug: str | None = Query(default=None, max_length=255),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=50),
 ) -> AiChecksResponse:
-    return await ai_check_service.list_checks(primary, active, bando_slug, page, page_size)
+    # `secondary`: con `bando_slug` lo storico comprende i doppioni fusi nel bando.
+    return await ai_check_service.list_checks(
+        primary, active, bando_slug, page, page_size, secondary=secondary
+    )
 
 
 @router.get("/quota", response_model=AiQuotaOut)

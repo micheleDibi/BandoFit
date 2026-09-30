@@ -1,6 +1,7 @@
 import { ArrowRight, Bookmark, CalendarCheck, CalendarPlus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { SavableBandoCard } from "../components/bandi/SavableBandoCard";
+import { bandoInCorso, statoDelBando } from "../components/bandi/stato";
 import { Badge } from "../components/ui/Badge";
 import { Button, LinkButton } from "../components/ui/Button";
 import { Pagination } from "../components/ui/Pagination";
@@ -63,7 +64,8 @@ function UnavailableCard({ item }: { item: SavedBandoItem }) {
   );
 }
 
-/** Azione «scadenza in calendario» sotto la card di un bando salvato. */
+/** Azione «scadenza in calendario» sotto la card di un bando salvato. Si
+ *  aggiunge solo a bando in corso; «Nel calendario» resta comunque visibile. */
 function CalendarAction({ item }: { item: SavedBandoItem }) {
   const addDeadline = useAddBandoDeadline();
   if (!item.bando.data_scadenza) return null;
@@ -80,6 +82,7 @@ function CalendarAction({ item }: { item: SavedBandoItem }) {
       </LinkButton>
     );
   }
+  if (!bandoInCorso(statoDelBando(item.bando))) return null;
   return (
     <>
       <Button

@@ -117,8 +117,21 @@ async def lifespan(app: FastAPI):
                 app.state.primary, app.state.secondary, app.state.ai
             )
         )
+    # Rimappatura dei bandi fusi (contratto DB bandi §6.2): solo in `prova` o
+    # `attiva`; spenta di default. Un valore non ammesso non blocca l'avvio.
+    from app.services import catalogo_scheduler
+
+    app.state.catalogo_task = None
+    modalita = settings.rimappatura_fusi_modalita
+    if modalita not in catalogo_scheduler.MODALITA:
+        logger.error("RIMAPPATURA_FUSI_MODALITA non valida (ammessi: spenta, prova, attiva): "
+                     "rimappatura dei bandi fusi spenta")
+    elif modalita != "spenta":
+        app.state.catalogo_task = asyncio.create_task(
+            catalogo_scheduler.run_forever(app.state.primary, app.state.secondary)
+        )
     yield
-    for task_attr in ("alert_task", "payment_task", "partenariati_task"):
+    for task_attr in ("alert_task", "payment_task", "partenariati_task", "catalogo_task"):
         task = getattr(app.state, task_attr, None)
         if task is not None:
             task.cancel()

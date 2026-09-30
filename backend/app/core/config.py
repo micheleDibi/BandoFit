@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import ValidationError, model_validator
+from pydantic import ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -143,6 +143,14 @@ class Settings(BaseSettings):
     payment_scheduler_attivo: bool = True
     payment_ora_esecuzione: str = "06:00"
 
+    # Rimappatura dei bandi fusi nel DB primario (contratto DB bandi §6.2,
+    # migration 0043, services/catalogo_scheduler.py): `spenta` (default) |
+    # `prova` (conta e scrive il riassunto nel log, nessuna scrittura) |
+    # `attiva`. Un valore diverso lascia la rimappatura spenta con un log
+    # ERROR all'avvio, senza bloccare l'app. Minuti fra due passi (minimo 5).
+    rimappatura_fusi_modalita: str = "spenta"
+    rimappatura_fusi_intervallo_minuti: int = 60
+
     # AI-check (API Anthropic). Chiave vuota = feature disattivata (le rotte
     # rispondono 503 ai_not_configured). Ogni report costa ~0,10 $ di API.
     anthropic_api_key: str = ""
@@ -265,6 +273,11 @@ class Settings(BaseSettings):
     partner_bozze_documento_max_tokens: int = 8000
     partner_bozze_documento_timeout_seconds: float = 150.0
     partner_bozze_documento_stale_minuti: int = 10
+
+    @field_validator("rimappatura_fusi_modalita", mode="before")
+    @classmethod
+    def _normalizza_modalita(cls, valore):
+        return valore.strip().lower() if isinstance(valore, str) else valore
 
     @model_validator(mode="after")
     def _segreti_obbligatori_in_produzione(self) -> "Settings":

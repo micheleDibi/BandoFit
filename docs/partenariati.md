@@ -186,7 +186,7 @@ Il dump locale è del 3 luglio e precede la v1.1: non va usato per queste stime.
 - **R1. Fonti**:
   - `contenuto` + metadati del catalogo;
   - PDF da `bando_link` (`allegato`, `pagina_bando` se PDF; `atto` pronto per il futuro), ordinati per etichetta (avviso/bando/decreto > moduli);
-  - ripiego su `allegati` **solo** se `bando_link` risponde con un errore;
+  - più le voci del jsonb `allegati` della riga, sempre e senza doppioni per URL (dalla fase c del contratto DB bandi, §16; prima erano solo il ripiego su un errore di `bando_link`);
   - niente upload e niente curatela in v1 (Q16).
 - **R2. Download sicuro** (`services/download_sicuro.py`):
   - pool `httpcore` con backend di rete che valida **tutti** gli IP risolti (niente privati, mapped, 6to4, teredo, NAT64) e si connette all'IP validato;
@@ -868,6 +868,22 @@ Durante l'esecuzione mi fermo solo per ambiguità che cambiano comportamento o c
   - **`/me/entitlements`**: `partenariati.bozze_mese` è facoltativo nello schema (uno snapshot senza la chiave non invalida gli altri limiti; la UI non mostra il contatore);
   - **accessibilità** (dopo la revisione): l'esito di una bozza si annuncia anche mentre un'altra è in preparazione;
   - **tetto giornaliero per titolare** (rifinitura): `fn_partner_bozza_prenota` ha in più `p_limite_owner` (ultimo parametro, NULL = nessun tetto), passato a `fn_partenariati_ai_prenota` e contato sulle sole esecuzioni delle bozze dell'owner nel giorno; il backend passa `PARTNER_BOZZE_DOCUMENTO_LIMITE_OWNER_GIORNO` (10), così anche un piano illimitato non consuma in un giorno il budget «altri» condiviso con WP4 e WP5 (`429 ai_limite_giornaliero`). Il conteggio usa l'esclusione della 0034 (solo gli errori senza LLM a costo 0 non contano): a differenza del limite mensile conta anche `ai_non_disponibile`, perché è a costo ignoto e la sua riserva pesa sul budget del giorno, che è ciò che il tetto protegge.
+- **Fase (c) del contratto del DB bandi** — catalogo letto dalla vista pubblica e bandi fusi (migration 0043):
+  - il modulo legge il catalogo solo da `bando_pubblico`, mai dalla tabella `bando` né con il predicato di pubblicazione. La GET delle regole, la creazione della call e le facet dei pre-check passano da `carica_per_slug`: uno slug spostato o fuso porta al master, uno ritirato è 410. Lo slug dall'id (estrazione forzata dall'admin, valutazione) legge `bando_pubblico` e sul miss `bando_fusione`. Il batch notturno usa il segmento «aperti» di `stato_effettivo`;
+  - `GET /bandi/{slug}/partenariato` ha in più `stato_effettivo`, letto dalla vista (`stato_bando` resta);
+  - **bandi fusi**: un id assente da `bando_pubblico` ma presente in `bando_fusione` è un doppione fuso, non un bando sparito.
+    - Lo scheduler (`chiusura_call`) non marca la sua call con `bando_mancante_dal` e non la chiude per `bando_non_disponibile`, nemmeno con una marca di 7 giorni o più messa prima. Vale lo stesso per il controllo in lettura del dettaglio.
+    - Se `bando_fusione` non si legge, nessun bando assente è valutabile: un errore non vale «non fuso».
+    - Creazione e pubblicazione su un doppione restano bloccate: `409 bando_non_disponibile` con il messaggio «Il bando è stato unito a un altro bando: per ora la call non si può pubblicare.». Stesso testo nel motivo di blocco della bozza. Il messaggio non invita a ricreare la call sul master (una seconda call attiva della stessa azienda sul master è una collisione che la rimappatura non risolve) e non promette lo spostamento, che non avviene a rimappatura spenta né in collisione;
+  - **rimappatura dei fusi** (`services/rimappatura_fusi.py`, `services/catalogo_scheduler.py`; spenta di default, procedura in docs/deploy.md): le call attive su un doppione passano al master e perdono `bando_mancante_dal`.
+    - Una call in collisione con un'altra call attiva della stessa azienda sul master non si tocca: si conta come `in_collisione` e ricompare a ogni passo.
+    - La call rimappata tiene lo snapshot del doppione (titolo, programma, tipologia), che di norma coincide con quello del master; stato e scadenza del bando si riallineano con lo scheduler.
+    - Le call chiuse e le versioni non cambiano;
+  - **call «congelate» a rimappatura spenta**: finché la rimappatura resta spenta, una call su un doppione non si chiude se il master diventa chiuso, sospeso o revocato, e il suo snapshot non si aggiorna. Si risolve accendendo la rimappatura (prima `prova`, poi `attiva`);
+  - **documenti del WP3**: i candidati sono sempre l'unione delle righe di `bando_link` e del jsonb `allegati` della riga, senza doppioni per URL.
+    - A parità di URL vince la riga di `bando_link`; un'etichetta vuota prende il `label` del jsonb.
+    - Motivo: molte righe che sostituiscono il jsonb non sono ancora leggibili.
+    - Cambia il `catalogo_hash`: alla prossima estrazione i documenti si riacquisiscono, ma nessuna estrazione riparte da sola.
 - **Modulo completo (WP0-WP10)**. Resta per l'accensione in produzione:
   - **G1** sandbox openapi (§14): fixture reali al posto di quelle sintetiche e codici CEE ancora da verificare. Fino ad allora storico IT-advanced e bilancio ufficiale (WP1-WP2) sono in produzione ma spenti dietro `BILANCI_STORICO_ATTIVO` (§2.1 T1): chiuso G1 si accende la variabile nell'`environment` del backend e, dopo il deploy, si fissano prezzo e attivazione dell'addon `bilancio-ufficiale`;
   - **G2** tutte le migration dalla 0032 alla 0042, in ordine dallo SQL Editor del primario, **prima** del deploy e qualunque sia il flag: il backend legge colonne della 0036, 0041 e 0042 anche a modulo spento;

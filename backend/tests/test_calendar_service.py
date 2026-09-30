@@ -129,7 +129,7 @@ class TestCreateEvent:
 class TestCreateBandoEvent:
     async def test_deriva_data_e_titolo_dal_catalogo(self):
         primary = FakeDb({"calendar_events": []})
-        secondary = FakeDb({"bando": [BANDO_VIVO]})
+        secondary = FakeDb({"bando_pubblico": [BANDO_VIVO]})
         out = await calendar_service.create_bando_event(primary, secondary, USER_ID, _active(), "bando-x")
         [(inserted, _)] = primary.ops_for("calendar_events", "insert")
         assert inserted["tipo"] == "bando"
@@ -140,19 +140,30 @@ class TestCreateBandoEvent:
         assert inserted["bando_slug"] == "bando-x"
         assert out.tipo == "bando"
 
+    async def test_legge_la_vista_del_catalogo(self):
+        # Fase c: una sola lettura su `bando_pubblico`, senza predicato di
+        # pubblicazione (la vista è già filtrata).
+        primary = FakeDb({"calendar_events": []})
+        secondary = FakeDb({"bando_pubblico": [BANDO_VIVO]})
+        await calendar_service.create_bando_event(primary, secondary, USER_ID, _active(), "bando-x")
+        assert [table for table, *_ in secondary.ops] == ["bando_pubblico"]
+        [(_, filters)] = secondary.ops_for("bando_pubblico", "select")
+        assert filters["slug"] == "bando-x"
+        assert "stato_processing" not in filters
+
     async def test_bando_senza_scadenza(self):
-        secondary = FakeDb({"bando": [{**BANDO_VIVO, "data_scadenza": None}]})
+        secondary = FakeDb({"bando_pubblico": [{**BANDO_VIVO, "data_scadenza": None}]})
         with pytest.raises(BadRequestError):
             await calendar_service.create_bando_event(FakeDb(), secondary, USER_ID, _active(), "bando-x")
 
     async def test_bando_sparito(self):
-        secondary = FakeDb({"bando": []})
+        secondary = FakeDb({"bando_pubblico": []})
         with pytest.raises(NotFoundError):
             await calendar_service.create_bando_event(FakeDb(), secondary, USER_ID, _active(), "x")
 
     async def test_slug_spostato_evento_sul_master(self):
         primary = FakeDb({"calendar_events": []})
-        secondary = FakeDb({"bando": catalogo_per_id(BANDO_VIVO), "bando_slug_storico": STORICO_301})
+        secondary = FakeDb({"bando_pubblico": catalogo_per_id(BANDO_VIVO), "bando_slug_storico": STORICO_301})
         out = await calendar_service.create_bando_event(
             primary, secondary, USER_ID, _active(), "vecchio-slug"
         )
@@ -166,7 +177,7 @@ class TestCreateBandoEvent:
     async def test_slug_ritirato_410_primario_mai_interrogato(self):
         primary = FakeDb()
         secondary = FakeDb({
-            "bando": [],
+            "bando_pubblico": [],
             "bando_slug_storico": [{"slug": "ritirato", "bando_id": None, "esito": "410"}],
         })
         with pytest.raises(BandoRitiratoError):
@@ -176,7 +187,7 @@ class TestCreateBandoEvent:
     async def test_master_senza_scadenza_resta_400(self):
         # Il controllo sulla scadenza viene dopo la risoluzione: vale sul master.
         secondary = FakeDb({
-            "bando": catalogo_per_id({**BANDO_VIVO, "data_scadenza": None}),
+            "bando_pubblico": catalogo_per_id({**BANDO_VIVO, "data_scadenza": None}),
             "bando_slug_storico": STORICO_301,
         })
         with pytest.raises(BadRequestError):
@@ -194,7 +205,7 @@ class TestCreateBandoEvent:
             return []
 
         primary = FakeDb({"calendar_events": calendar_events})
-        secondary = FakeDb({"bando": [BANDO_VIVO]})
+        secondary = FakeDb({"bando_pubblico": [BANDO_VIVO]})
         out = await calendar_service.create_bando_event(primary, secondary, USER_ID, _active(), "bando-x")
         assert not primary.ops_for("calendar_events", "insert")
         assert out.id == EVENT_ID
@@ -211,7 +222,7 @@ class TestCreateBandoEvent:
 
         primary = FakeDb({"calendar_events": calendar_events})
         primary.insert_fail_unique.add("calendar_events")
-        secondary = FakeDb({"bando": [BANDO_VIVO]})
+        secondary = FakeDb({"bando_pubblico": [BANDO_VIVO]})
         out = await calendar_service.create_bando_event(primary, secondary, USER_ID, _active(), "bando-x")
         assert out.id == EVENT_ID
 

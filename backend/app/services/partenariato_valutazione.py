@@ -316,11 +316,10 @@ async def analizza_bando(secondary, bando_id: int) -> dict:
     settings = get_settings()
     slug = await partenariato_service._slug_da_id(secondary, bando_id)
     bando = await bandi_service.fetch_bando_for_ai(secondary, slug)
-    links = await bando_fonti_service.leggi_link_documenti(secondary, bando_id)
-    candidati = bando_fonti_service.seleziona_candidati(
-        links, bando.get("allegati") if links is None else None,
-        settings.partenariato_max_documenti,
-    )
+    # Link del bando RISOLTO: un id fuso porta al master, e la RLS non espone
+    # i link del doppione.
+    links = await bando_fonti_service.leggi_link_documenti(secondary, int(bando["id"]))
+    candidati = partenariato_service.candidati_documenti(bando, links, settings=settings)
     scaricati = [
         await download_sicuro.scarica_pdf(
             c.url, max_bytes=settings.partenariato_pdf_max_bytes,

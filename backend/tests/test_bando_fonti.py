@@ -1,6 +1,7 @@
 """Test delle fonti documentali del catalogo (WP3): letture da `bando_pubblico`
 e `bando_link` con un secondario finto, normalizzazione del content-type,
-priorità e selezione dei candidati, ripiego su `allegati`."""
+priorità e selezione dei candidati (unione di `bando_link` e `allegati`),
+doppioni fusi da `bando_fusione`."""
 
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
@@ -9,10 +10,13 @@ import pytest
 from postgrest.exceptions import APIError
 
 from app.services.bando_fonti_service import (
+    BLOCCO_FUSIONI,
     BLOCCO_STATI,
+    SELECT_FUSIONE,
     SELECT_LINK,
     SELECT_STATO,
     LinkDocumento,
+    leggi_fusioni,
     leggi_link_documenti,
     leggi_stato_bandi,
     normalizza_content_type,
@@ -125,6 +129,42 @@ class TestLeggiStatoBandi:
         db = FakeSecondary(errori={"bando_pubblico": APIError({"code": "42P01", "message": "x"})})
         with pytest.raises(APIError):
             await leggi_stato_bandi(db, [1])
+
+
+# ------------------------------------------------------------ bando_fusione
+
+
+class TestLeggiFusioni:
+    async def test_blocchi_da_cento_e_parsing(self):
+        ids = list(range(1, 151))
+
+        def righe(q: FakeQuery):
+            (_, _, blocco), = [f for f in q.filtri if f[0] == "in"]
+            fusi = [{"bando_id": i, "master_id": 1000 + i} for i in blocco if i % 10 == 0]
+            # riga malformata e id non richiesto: ignorati; master non intero → None
+            return fusi + [{"bando_id": "x"}, {"bando_id": 999, "master_id": 1},
+                           {"bando_id": blocco[0], "master_id": "?"}]
+
+        db = FakeSecondary(righe={"bando_fusione": righe})
+        fusi = await leggi_fusioni(db, ids + [10, True])
+        assert [len(f[2]) for q in db.query for f in q.filtri if f[0] == "in"] == [100, 50]
+        assert all(q.tabella == "bando_fusione" and q.select_arg == SELECT_FUSIONE
+                   for q in db.query)
+        assert BLOCCO_FUSIONI == 100
+        assert fusi[10] == 1010 and fusi[150] == 1150
+        assert fusi[1] is None and fusi[101] is None  # master non leggibile
+        assert 999 not in fusi and len(fusi) == 17
+
+    async def test_nessun_id_nessuna_query(self):
+        db = FakeSecondary()
+        assert await leggi_fusioni(db, []) == {}
+        assert db.query == []
+
+    async def test_errore_propaga(self):
+        # A differenza di `risolvi_fusioni`: un errore non vale «non fuso».
+        db = FakeSecondary(errori={"bando_fusione": APIError({"code": "42501", "message": "x"})})
+        with pytest.raises(APIError):
+            await leggi_fusioni(db, [1])
 
 
 # ------------------------------------------------------------ bando_link
@@ -279,7 +319,7 @@ class TestSelezionaCandidati:
         assert [c.formato for c in scelti] == ["pdf", "altro"]
         assert scelti[1].url == "https://e.it/download.php?id=7"
 
-    def test_ripiego_su_allegati_solo_se_bando_link_in_errore(self):
+    def test_allegati_del_jsonb(self):
         allegati = [
             {"label": "Avviso pubblico", "url": "https://ente.it/avviso.pdf", "tipo": "pdf"},
             {"label": "Modulo", "url": "https://ente.it/modulo.docx", "tipo": "docx"},
@@ -293,8 +333,39 @@ class TestSelezionaCandidati:
         assert scelti[0].tipo == "allegato"
         assert scelti[0].link_id is None
         assert scelti[0].dominio == "ente.it"
-        # bando_link ha risposto (anche con zero righe): niente ripiego.
-        assert seleziona_candidati([], allegati, 4) == []
+        # anche con bando_link letto (qui senza righe) il jsonb resta fra i candidati
+        assert [c.url for c in seleziona_candidati([], allegati, 4)] == [
+            "https://ente.it/avviso.pdf"]
+
+    def test_barra_finale_non_fa_un_doppione(self):
+        # Stessa regola della scheda (contratto §3): URL uguali dopo aver tolto
+        # la barra finale, anche fra bando_link e jsonb.
+        links = [link("https://ente.it/avviso/", etichetta=None, id_=5),
+                 link("https://ente.it/avviso", etichetta="Avviso", id_=6)]
+        allegati = [{"label": "Avviso pubblico", "url": "https://ente.it/avviso", "tipo": "pdf"}]
+        scelti = seleziona_candidati(links, allegati, 10)
+        assert [(c.url, c.origine, c.link_id) for c in scelti] == [
+            ("https://ente.it/avviso/", "bando_link", 5)]
+        assert scelti[0].etichetta == "Avviso pubblico"
+
+    def test_unione_senza_doppioni_vince_bando_link(self):
+        links = [
+            link("https://ente.it/avviso.pdf", tipo="atto", id_=5),
+            link("https://ente.it/allegato-a.pdf", etichetta="Allegato A", id_=6),
+        ]
+        allegati = [
+            # stesso URL di una riga: vince la riga, che prende l'etichetta
+            {"label": "Avviso pubblico", "url": "https://ente.it/avviso.pdf", "tipo": "pdf"},
+            {"label": "Allegato B", "url": "https://ente.it/allegato-b.pdf", "tipo": "pdf"},
+            # stesso URL di una riga con etichetta: la riga tiene la sua
+            {"label": "Altro nome", "url": "https://ente.it/allegato-a.pdf", "tipo": "pdf"},
+        ]
+        scelti = seleziona_candidati(links, allegati, 10)
+        assert [(c.url, c.origine, c.link_id, c.etichetta) for c in scelti] == [
+            ("https://ente.it/avviso.pdf", "bando_link", 5, "Avviso pubblico"),
+            ("https://ente.it/allegato-a.pdf", "bando_link", 6, "Allegato A"),
+            ("https://ente.it/allegato-b.pdf", "allegati", None, "Allegato B"),
+        ]
 
     def test_etichetta_ripulita_dai_domini_esclusi(self):
         links = [link("https://e.it/a.pdf", etichetta="Avviso (fonte obiettivoeuropa.com)")]

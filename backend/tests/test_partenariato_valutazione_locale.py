@@ -246,6 +246,21 @@ async def preparati(cat, ids=(1, 2, 3)):
     return settings, secondary, bandi
 
 
+class TestBandoRisolto:
+    async def test_link_letti_sul_bando_risolto(self, cat, monkeypatch):
+        # Voce del campione su un id fuso (101) nel bando 1: scheda e link
+        # sono quelli del master, mai del doppione.
+        async def slug_da_id(secondary, bando_id):
+            return "bando-1" if bando_id == 101 else f"bando-{bando_id}"
+
+        monkeypatch.setattr(ps, "_slug_da_id", slug_da_id)
+        settings = loc.impostazioni_locali()
+        secondary = await loc.crea_secondario(settings)
+        b = await loc.prepara_bando(secondary, {"bando_id": 101}, settings=settings)
+        assert b.esito != "errore" and b.slug == "bando-1"
+        assert cat.download == ["https://ente.example.it/1.pdf"]
+
+
 # ------------------------------------------------------------ spesa
 
 

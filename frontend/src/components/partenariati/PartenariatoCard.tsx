@@ -6,6 +6,7 @@ import { analisiInCorso, usePartenariatoBando } from "../../hooks/usePartenariat
 import { apiErrorCode } from "../../lib/api";
 import { PARTENARIATO_COPY } from "../../lib/copy";
 import type { PartenariatoBando } from "../../types";
+import { statoDelBando } from "../bandi/stato";
 import { Button, LinkButton } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Skeleton } from "../ui/states";
@@ -72,7 +73,8 @@ function CtaCall({ slug, dati }: { slug: string; dati: PartenariatoBando }) {
     );
   }
   // Senza lo stato del bando si mostra: il wizard ricontrolla e spiega.
-  const aperto = dati.stato_bando === null || bandoAperto(dati.stato_bando);
+  const stato = statoDelBando(dati);
+  const aperto = stato === null || bandoAperto(stato);
   if (mie.isPending || !azienda?.editable || !aperto) return null;
   return (
     <LinkButton

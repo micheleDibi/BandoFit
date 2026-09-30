@@ -315,7 +315,8 @@ async def prepara_bando(secondary, voce: dict, *, settings) -> BandoValutato:
     try:
         b.slug = await ps._slug_da_id(secondary, b.bando_id)
         bando = await bandi_service.fetch_bando_for_ai(secondary, b.slug)
-        links = await bando_fonti_service.leggi_link_documenti(secondary, b.bando_id)
+        # Link del bando RISOLTO (un id fuso porta al master).
+        links = await bando_fonti_service.leggi_link_documenti(secondary, int(bando["id"]))
         candidati = ps.candidati_documenti(bando, links, settings=settings)
         scaricati = await ps.scarica_documenti(candidati, settings=settings)
         testi = await ps.leggi_documenti(scaricati, settings=settings)

@@ -417,6 +417,47 @@ def scrivi_campione(tmp_path):
     return percorso
 
 
+class TestAnalizzaBando:
+    async def test_documenti_dall_unione_di_link_e_allegati(self, senza_rete, monkeypatch):
+        # Stessa selezione della produzione (`candidati_documenti`): con i link
+        # letti, anche le voci del jsonb `allegati` sono candidati.
+        bando = {"id": 1, "slug": "uno", "titolo": "Bando uno", "contenuto": None,
+                 "allegati": [{"label": "Bando", "url": "https://ente.example.it/bando.pdf",
+                               "tipo": "pdf"}]}
+
+        async def fetch(secondary, slug):
+            return bando
+
+        monkeypatch.setattr("app.services.bandi_service.fetch_bando_for_ai", fetch)
+        await val.analizza_bando(FakeSecondary([bando]), 1)
+        assert sorted(senza_rete) == ["https://ente.example.it/avviso.pdf",
+                                      "https://ente.example.it/bando.pdf"]
+
+
+    async def test_link_letti_sul_bando_risolto(self, senza_rete, monkeypatch):
+        # Un id fuso porta al master: i link si leggono sul master, perché la
+        # RLS non espone quelli del doppione.
+        master = {"id": 900, "slug": "master-900", "titolo": "Master", "contenuto": None,
+                  "allegati": []}
+        letti: list[int] = []
+
+        async def slug_da_id(secondary, bando_id):
+            return "master-900"
+
+        async def fetch(secondary, slug):
+            return master
+
+        async def link(secondary, bando_id):
+            letti.append(bando_id)
+            return []
+
+        monkeypatch.setattr("app.services.partenariato_service._slug_da_id", slug_da_id)
+        monkeypatch.setattr("app.services.bandi_service.fetch_bando_for_ai", fetch)
+        monkeypatch.setattr("app.services.bando_fonti_service.leggi_link_documenti", link)
+        await val.analizza_bando(FakeSecondary([]), 101)
+        assert letti == [900]
+
+
 class TestCli:
     def test_offline_senza_rete(self, senza_rete, tmp_path):
         out = tmp_path / "offline.json"

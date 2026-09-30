@@ -7,9 +7,10 @@ import {
   PauseCircle,
   XCircle,
 } from "lucide-react";
-import { daysUntil, formatDate } from "../../lib/format";
-import type { AiEsito, StatoBando } from "../../types";
+import { daysUntil } from "../../lib/format";
+import type { AiEsito } from "../../types";
 import { Badge } from "../ui/Badge";
+import { dataConOra } from "./stato";
 
 /** Esito dell'AI-check. Il report è generato da un modello e può sbagliare:
  *  il linguaggio resta costruttivo — mai un «bocciato» secco. Per l'esito
@@ -35,7 +36,8 @@ export function AiEsitoBadge({ esito }: { esito: AiEsito }) {
   return null;
 }
 
-export function StatoBadge({ stato }: { stato: StatoBando | null }) {
+/** Stringa libera: un valore nuovo del catalogo ha il badge neutro in fondo. */
+export function StatoBadge({ stato }: { stato: string | null }) {
   if (!stato) return null;
   if (stato === "aperto") {
     return (
@@ -87,15 +89,37 @@ export function StatoBadge({ stato }: { stato: StatoBando | null }) {
   );
 }
 
-export function ScadenzaBadge({ dataScadenza }: { dataScadenza: string | null }) {
+/** Scadenza con il conto alla rovescia. Con `conConto` falso (bando non aperto
+ *  né in apertura, vedi `bandoInCorso`) resta solo la data, neutra: un bando
+ *  chiuso, sospeso o revocato non ha un «Scade tra…» né i colori d'urgenza.
+ *  Una data passata dice sempre «Scaduto il…». */
+export function ScadenzaBadge({
+  dataScadenza,
+  oraScadenza,
+  conConto = true,
+}: {
+  dataScadenza: string | null;
+  oraScadenza?: string | null;
+  conConto?: boolean;
+}) {
   const giorni = daysUntil(dataScadenza);
   if (giorni === null) return null;
+  const quando = dataConOra(dataScadenza, oraScadenza);
 
   if (giorni < 0) {
     return (
       <span className="inline-flex items-center gap-1 text-xs text-slate-400">
         <CalendarClock className="size-3.5" aria-hidden />
-        Scaduto il {formatDate(dataScadenza)}
+        Scaduto il {quando}
+      </span>
+    );
+  }
+
+  if (!conConto) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+        <CalendarClock className="size-3.5" aria-hidden />
+        Scadenza: {quando}
       </span>
     );
   }
@@ -118,7 +142,7 @@ export function ScadenzaBadge({ dataScadenza }: { dataScadenza: string | null })
         : giorni === 1
           ? "Scade domani"
           : `Scade tra ${giorni} giorni`}
-      <span className="text-slate-400">· {formatDate(dataScadenza)}</span>
+      <span className="text-slate-400">· {quando}</span>
     </span>
   );
 }

@@ -9,6 +9,7 @@ snapshot del bando; errore del catalogo che non vale come assenza; notifica
 al creatore e al titolare con dedup)."""
 
 import asyncio
+import logging
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -17,12 +18,13 @@ import pytest
 from postgrest.exceptions import APIError
 
 from app.core.errors import AppError
+from app.services import bando_fonti_service
 from app.services import partenariati_scheduler as sched
 from app.services.partenariato_prompts import PARTENARIATO_PROMPT_VERSION, SCHEMA_VERSION
 
 OGGI = date(2026, 9, 28)
-NESSUNA_CALL = {"controllate": 0, "chiuse": 0, "bando_mancante": 0, "snapshot_aggiornati": 0,
-                "errori": 0, "bandi_letti": True}
+NESSUNA_CALL = {"controllate": 0, "chiuse": 0, "bando_mancante": 0, "bandi_fusi": 0,
+                "snapshot_aggiornati": 0, "errori": 0, "bandi_letti": True}
 
 
 @pytest.fixture(autouse=True)
@@ -123,20 +125,24 @@ class FakeCatalogo:
     def __init__(self, righe):
         self.righe = righe
         self.query: list = []
+        self.tabelle: list[str] = []
 
     def table(self, nome):
         catalogo = self
+        catalogo.tabelle.append(nome)
 
         class _Q:
             def __init__(self):
                 self.intervallo = (0, 0)
                 catalogo.query.append(self)
                 self.or_filtri: list = []
+                self.eq_filtri: list = []
 
             def select(self, *a, **k):
                 return self
 
             def eq(self, *a):
+                self.eq_filtri.append(a)
                 return self
 
             @property
@@ -303,8 +309,11 @@ class TestBatch:
         catalogo = FakeCatalogo([riga_bando(1, True), riga_bando(2, False), riga_bando(3, True)])
         trovati = await sched._bandi_con_segnali(catalogo, OGGI)
         assert [r["id"] for r in trovati] == [1, 3]
-        # segmento aperti del catalogo (stesse guardie dell'elenco)
-        assert any("data_scadenza.gte" in f for f in catalogo.query[0].or_filtri)
+        # segmento aperti della vista (stesse guardie dell'elenco), senza il
+        # predicato di pubblicazione: la vista contiene solo i pubblicati
+        assert catalogo.tabelle == ["bando_pubblico"]
+        assert any("stato_effettivo.in." in f for f in catalogo.query[0].or_filtri)
+        assert catalogo.query[0].eq_filtri == []
 
     async def test_pagine_del_catalogo(self, monkeypatch):
         monkeypatch.setattr(sched, "BATCH_PAGINA", 2)
@@ -419,6 +428,10 @@ def _call_db():
     from tests.test_partner_call_service import FakeDb, FakeSecondary, riga_bando_pubblico
 
     return FakeDb(), FakeSecondary, riga_bando_pubblico
+
+
+def _fusione(bando_id: int, master_id: int = 900) -> dict:
+    return {"bando_id": bando_id, "master_id": master_id, "master_slug": f"master-{master_id}"}
 
 
 def _pubblicata(db, scadenza: date, **modifiche) -> dict:
@@ -540,6 +553,74 @@ class TestChiusuraCall:
         assert (db.call(call["id"])["stato"], db.call(call["id"])["motivo_chiusura"]) == (
             "chiusa_annullata", "bando_non_disponibile")
 
+    async def test_bando_fuso_non_e_mancante(self, caplog):
+        # Un id assente da `bando_pubblico` ma presente in `bando_fusione` è un
+        # doppione fuso, non un bando sparito: niente marca, niente chiusura
+        # per assenza (nemmeno con una marca di prima), un log. Il bando
+        # davvero assente si marca come prima.
+        db, Secondary, _ = _call_db()
+        fusa = _pubblicata(db, OGGI + timedelta(days=60))
+        gia_marcata = _pubblicata(db, OGGI + timedelta(days=60), bando_id=202,
+                                  bando_mancante_dal=(OGGI - timedelta(days=10)).isoformat())
+        sparita = _pubblicata(db, OGGI + timedelta(days=60), bando_id=203)
+        secondary = Secondary(pubblici=[],
+                              fusioni=[_fusione(fusa["bando_id"]), _fusione(202, 901)])
+        with caplog.at_level(logging.INFO, logger="bandofit.partenariati_scheduler"):
+            esiti = await sched.chiusura_call(db, secondary, OGGI)
+        assert (esiti["bandi_fusi"], esiti["bando_mancante"]) == (2, 1)
+        assert (esiti["chiuse"], esiti["errori"]) == (0, 0)
+        assert db.call(fusa["id"])["bando_mancante_dal"] is None
+        assert db.call(gia_marcata["id"])["stato"] == "pubblicata"
+        assert db.call(sparita["id"])["bando_mancante_dal"] == OGGI.isoformat()
+        # colonne per nome, un blocco con i soli id assenti
+        assert secondary.select_fusione == ["bando_id,master_id"]
+        assert secondary.blocchi_fusione == [[fusa["bando_id"], 202, 203]]
+        fusi = [r.getMessage() for r in caplog.records if "fuso" in r.getMessage()]
+        assert len(fusi) == 2 and any("202" in m and "901" in m for m in fusi)
+        # dopo 7 giorni la call del bando fuso resta aperta, l'altra si chiude
+        await sched.chiusura_call(db, secondary, OGGI + timedelta(days=7))
+        assert db.call(fusa["id"])["stato"] == "pubblicata"
+        assert db.call(gia_marcata["id"])["stato"] == "pubblicata"
+        assert (db.call(sparita["id"])["stato"], db.call(sparita["id"])["motivo_chiusura"]) == (
+            "chiusa_annullata", "bando_non_disponibile")
+
+    async def test_fusioni_in_errore_non_valgono_come_assenza(self):
+        # Senza `bando_fusione` non si sa se un id assente è fuso: nessuna
+        # marca e nessuna chiusura per assenza; il resto del passo procede.
+        db, Secondary, riga = _call_db()
+        chiusa = _pubblicata(db, OGGI + timedelta(days=60))
+        scaduta = _pubblicata(db, OGGI - timedelta(days=1), bando_id=202)
+        marcata = _pubblicata(db, OGGI + timedelta(days=60), bando_id=203,
+                              bando_mancante_dal=(OGGI - timedelta(days=10)).isoformat())
+        nuova = _pubblicata(db, OGGI + timedelta(days=60), bando_id=204)
+        secondary = Secondary(pubblici=[riga(stato_effettivo="chiuso")])
+        secondary.guasto_fusione = RuntimeError("rete")
+        esiti = await sched.chiusura_call(db, secondary, OGGI)
+        assert (esiti["errori"], esiti["bando_mancante"], esiti["bandi_fusi"]) == (1, 0, 0)
+        assert (db.call(chiusa["id"])["stato"], db.call(chiusa["id"])["motivo_chiusura"]) == (
+            "scaduta", "bando_chiuso")
+        assert db.call(scaduta["id"])["stato"] == "scaduta"
+        assert db.call(marcata["id"])["stato"] == "pubblicata"
+        assert db.call(nuova["id"])["bando_mancante_dal"] is None
+
+    async def test_fusioni_a_blocchi_solo_sugli_assenti(self, monkeypatch):
+        monkeypatch.setattr(bando_fonti_service, "BLOCCO_FUSIONI", 2)
+        db, Secondary, riga = _call_db()
+        _pubblicata(db, OGGI + timedelta(days=60))  # bando presente
+        for bando_id in (202, 203, 204):
+            _pubblicata(db, OGGI + timedelta(days=60), bando_id=bando_id)
+        secondary = Secondary(pubblici=[riga()], fusioni=[_fusione(204)])
+        esiti = await sched.chiusura_call(db, secondary, OGGI)
+        assert secondary.blocchi_fusione == [[202, 203], [204]]
+        assert (esiti["bando_mancante"], esiti["bandi_fusi"]) == (2, 1)
+
+    async def test_nessun_assente_nessuna_lettura_delle_fusioni(self):
+        db, Secondary, riga = _call_db()
+        _pubblicata(db, OGGI + timedelta(days=60))
+        secondary = Secondary(pubblici=[riga()])
+        await sched.chiusura_call(db, secondary, OGGI)
+        assert "bando_fusione" not in secondary.letture
+
     async def test_bando_ritrovato_aggiorna_lo_snapshot(self):
         db, Secondary, riga = _call_db()
         call = _pubblicata(db, OGGI + timedelta(days=60),
@@ -580,6 +661,7 @@ class TestChiusuraCall:
         secondary.guasto_pubblico = RuntimeError("rete")
         esiti = await sched.chiusura_call(db, secondary, OGGI)
         assert esiti["bandi_letti"] is False and esiti["bando_mancante"] == 0
+        assert "bando_fusione" not in secondary.letture
         assert db.call(scaduta["id"])["stato"] == "scaduta"  # la scadenza non dipende dal bando
         assert db.call(aperta["id"])["stato"] == "pubblicata"
         assert db.call(aperta["id"])["bando_mancante_dal"] is None

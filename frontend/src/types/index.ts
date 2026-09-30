@@ -18,7 +18,7 @@ export interface Page<T> {
 }
 
 /** Stati del catalogo (contratto DB bandi §4). Il catalogo può introdurre valori
- *  nuovi prima di noi: a runtime `stato_bando` può essere anche un'altra stringa,
+ *  nuovi prima di noi: a runtime lo stato può essere anche un'altra stringa,
  *  che `StatoBadge` mostra con un badge neutro. */
 export type StatoBando =
   | "aperto"
@@ -55,7 +55,11 @@ export interface BandoListItem {
   titolo: string | null;
   titolo_breve: string | null;
   descrizione_breve: string | null;
+  /** Solo informativo: lo stato da mostrare è `stato_effettivo`. */
   stato_bando: StatoBando | null;
+  /** Stato calcolato dal catalogo alla lettura (per esempio chiuso dopo la
+   *  scadenza): è quello da mostrare, con `stato_bando` come ripiego. */
+  stato_effettivo: StatoBando | null;
   livello: "flash_bando" | "guida_bando" | null;
   data_pubblicazione: string | null;
   data_apertura: string | null;
@@ -92,16 +96,50 @@ export interface ContenutoSection {
   items?: Array<string | ContenutoItem>;
 }
 
+/** Da dove viene un link della scheda (lo sceglie il backend). */
+export type OrigineLinkScheda =
+  | "candidatura"
+  | "link_candidatura"
+  | "fonte_ufficiale"
+  | "portale"
+  | "link_bando";
+
+/** Link della scheda già scelto e filtrato dal backend: il frontend lo rende
+ *  così com'è, senza ricalcolarlo. */
+export interface LinkScheda {
+  url: string;
+  host: string | null;
+  origine: OrigineLinkScheda;
+}
+
+/** Allegato della scheda, normalizzato dal backend (senza doppioni, già filtrato). */
+export interface AllegatoScheda {
+  url: string;
+  etichetta: string | null;
+  /** `atto`, `allegato` o un altro tipo del catalogo. */
+  tipo: string | null;
+  formato: string | null;
+}
+
 export interface BandoDetail extends BandoListItem {
   area_geografica: string | null;
   tematica: string[];
-  link_bando: string | null;
-  link_candidatura: string | null;
   contenuto: { sections?: ContenutoSection[] } | null;
-  allegati: Array<{ nome?: string; titolo?: string; url?: string; link?: string }>;
-  /** Fonte ufficiale del bando (sito dell'ente o portale pubblico). L'URL va
-   *  usato solo con `fonte_ufficiale_stato === "trovata"`. Stringhe libere: un
-   *  valore nuovo del catalogo non deve rompere nulla. */
+  /** Pulsante principale della scheda. */
+  cta: LinkScheda | null;
+  /** Pulsante secondario «Fonte ufficiale»: si mostra solo se diverso da `cta`. */
+  link_fonte: LinkScheda | null;
+  allegati: AllegatoScheda[];
+  /** Orari "HH:MM:SS", se il catalogo li conosce. */
+  ora_apertura: string | null;
+  ora_scadenza: string | null;
+  data_pubblicazione_verificata: boolean | null;
+  data_apertura_verificata: boolean | null;
+  data_scadenza_verificata: boolean | null;
+  fonte_ufficiale_e_atto: boolean | null;
+  /** Fonte ufficiale del bando (sito dell'ente o portale pubblico): la UI usa
+   *  `cta` e `link_fonte`, che la includono già. Stringhe libere: un valore
+   *  nuovo del catalogo non deve rompere nulla. */
   fonte_ufficiale_url: string | null;
   fonte_ufficiale_host: string | null;
   /** `ente` | `portale_pubblico` */
@@ -1662,6 +1700,8 @@ export interface PartenariatoBando {
   /** Call di partenariato aperte sul bando (dal WP5; oggi 0). */
   calls_aperte: number;
   stato_bando: string | null;
+  /** Stato calcolato dal catalogo: se c'è, vale lui (ripiego su `stato_bando`). */
+  stato_effettivo?: string | null;
 }
 
 /** `GET /partenariati/vocabolario`: vocabolario controllato versionato. */

@@ -40,7 +40,7 @@ from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import httpcore
 
-from app.services.link_policy import is_blocked_link
+from app.services.link_policy import host_non_normalizzabile, is_blocked_link
 
 logger = logging.getLogger("bandofit.partenariati")
 
@@ -122,11 +122,13 @@ def host_negato(host: str | None) -> bool:
 
 
 def _host_come_browser(host: str) -> str | None:
-    """L'host come lo risolve un browser: percent-decoding, IDNA (che fa anche
-    NFKC: «ｏｂｉｅｔｔｉｖｏｅｕｒｏｐａ.com» → «obiettivoeuropa.com»), minuscolo, senza
-    punto finale. None se non è codificabile."""
+    """Host normalizzato come un browser, minuscolo e senza punto finale.
+    None se non è normalizzabile."""
+    grezzo = unquote(host).rstrip(".")
+    if host_non_normalizzabile(grezzo):
+        return None
     try:
-        return unquote(host).rstrip(".").encode("idna").decode("ascii").lower()
+        return grezzo.encode("idna").decode("ascii").lower()
     except UnicodeError:
         return None
 

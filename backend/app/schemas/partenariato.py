@@ -678,6 +678,9 @@ class PartenariatoBandoOut(BaseModel):
     motivo_non_avviabile: str | None = None
     calls_aperte: int = 0
     stato_bando: str | None = None
+    # Stato effettivo del bando da `bando_pubblico` (contratto DB bandi §4):
+    # il frontend lo usa con ripiego su `stato_bando`.
+    stato_effettivo: str | None = None
 
 
 class AvviaAnalisiIn(BaseModel):

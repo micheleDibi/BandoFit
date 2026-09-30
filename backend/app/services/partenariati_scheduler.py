@@ -31,7 +31,9 @@ Passi del WP5:
   annullata; scadenza della call → scaduta; stato LIVE del bando
   (`bando_pubblico`, a blocchi): chiuso o sospeso → scaduta, revocato →
   annullata, assente → `bando_mancante_dal` e dopo 7 giorni annullata
-  (`bando_non_disponibile`). Un errore di lettura del catalogo non è
+  (`bando_non_disponibile`). Un assente presente in `bando_fusione` è un
+  doppione fuso, non un bando mancante: nessuna marca, nessuna chiusura per
+  assenza, un log. Un errore di lettura del catalogo (o delle fusioni) non è
   un'assenza: salta solo i motivi del bando. Snapshot del bando aggiornato
   quando cambia. A ogni chiusura una notifica al creatore e al titolare
   (dedup per call).
@@ -231,7 +233,7 @@ async def chiusura_call(primary, secondary, oggi: date) -> dict:
     aggiornare sono isolati: un errore conta in `errori` e non ferma il
     resto."""
     calls = await _call_aperte(primary)
-    esiti = {"controllate": len(calls), "chiuse": 0, "bando_mancante": 0,
+    esiti = {"controllate": len(calls), "chiuse": 0, "bando_mancante": 0, "bandi_fusi": 0,
              "snapshot_aggiornati": 0, "errori": 0, "bandi_letti": True}
     if not calls:
         return esiti
@@ -241,6 +243,25 @@ async def chiusura_call(primary, secondary, oggi: date) -> dict:
     except Exception:
         logger.error("partenariati scheduler: stato dei bandi non leggibile", exc_info=True)
         stati, esiti["bandi_letti"] = {}, False
+    # Un id assente dalla vista può essere un doppione fuso (contratto §6.2):
+    # non è «mancante» e la sua call non si marca né si chiude per assenza
+    # (la rimappatura dei fusi la sposta sul master). Se `bando_fusione` non
+    # si legge, nessun assente è valutabile.
+    non_valutabili: set[int] = set()
+    assenti = [i for i in bando_ids if i not in stati] if esiti["bandi_letti"] else []
+    if assenti:
+        try:
+            fusi = await bando_fonti_service.leggi_fusioni(secondary, assenti)
+        except Exception:
+            esiti["errori"] += 1
+            logger.error("partenariati scheduler: bando_fusione non leggibile, nessun bando "
+                         "assente marcato mancante", exc_info=True)
+            non_valutabili = set(assenti)
+        else:
+            for bando_id, master_id in fusi.items():
+                logger.info("partenariati scheduler: bando %s fuso nel %s, non mancante",
+                            bando_id, master_id)
+            non_valutabili, esiti["bandi_fusi"] = set(fusi), len(fusi)
     non_vive = await _aziende_non_vive(
         primary, sorted({str(c["company_profile_id"]) for c in calls})
     )
@@ -249,10 +270,11 @@ async def chiusura_call(primary, secondary, oggi: date) -> dict:
     for call in calls:
         try:
             stato = stati.get(int(call["bando_id"]))
+            valutabile = esiti["bandi_letti"] and int(call["bando_id"]) not in non_valutabili
             esito = partner_call_service.motivo_chiusura_auto(
                 call,
                 stato_bando=stato,
-                bando_letto=esiti["bandi_letti"],
+                bando_letto=valutabile,
                 azienda_viva=str(call["company_profile_id"]) not in non_vive,
                 oggi=oggi,
             )
@@ -260,7 +282,7 @@ async def chiusura_call(primary, secondary, oggi: date) -> dict:
                 if await partner_call_service.chiudi_automaticamente(primary, call, *esito):
                     esiti["chiuse"] += 1
                 continue
-            if not esiti["bandi_letti"]:
+            if not valutabile:
                 continue
             if stato is None:
                 if call.get("bando_mancante_dal") is None:
@@ -319,12 +341,10 @@ async def _bandi_con_segnali(secondary, oggi: date) -> list[dict]:
     trovati: list[dict] = []
     offset = 0
     while len(trovati) < BATCH_MAX_BANDI * 3:
-        query = secondary.table("bando").select(
+        query = secondary.table("bando_pubblico").select(
             "id,slug,titolo,titolo_breve,descrizione_breve,contenuto"
         )
-        query = bandi_service.apply_open_tier(
-            query.eq("stato_processing", "completed").not_.is_("slug", "null"), oggi
-        )
+        query = bandi_service.apply_open_tier(query.not_.is_("slug", "null"), oggi)
         resp = await query.order("id").range(offset, offset + BATCH_PAGINA - 1).execute()
         righe = [r for r in (resp.data or []) if isinstance(r, dict) and r.get("slug")]
         # Regex su centinaia di schede: fuori dall'event loop.

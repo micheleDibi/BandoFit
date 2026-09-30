@@ -183,10 +183,16 @@ class TestIndirizzi:
             "https://ｏｂｉｅｔｔｉｖｏｅｕｒｏｐａ.com/avviso.pdf",
             "https://ｆａｓｉ.eu/avviso.pdf",
             "https://www.fasi%2Eeu/avviso.pdf",
+            "https://\u1da0asi.eu/avviso.pdf",
+            "https://www.\u1d52biettivoeuropa.com/avviso.pdf",
+            "https://\U0001f130.regione.it/avviso.pdf",
         ],
     )
     def test_url_negato_con_host_normalizzato_dal_browser(self, url):
         assert url_negato(url)
+
+    def test_host_internazionale_non_negato(self):
+        assert not url_negato("https://www.citt\u00e0.it/avviso.pdf")
 
 
 # ------------------------------------------------------------ URL rifiutati

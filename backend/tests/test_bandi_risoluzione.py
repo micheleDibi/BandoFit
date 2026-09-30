@@ -1,7 +1,7 @@
-"""Test della risoluzione dei miss sul catalogo bandi (R0-b): storico degli
-slug (301/410/annullato), fusioni, riletta del master e regola difensiva
-sugli errori delle letture di risoluzione — con un fake del secondario per
-nome di tabella."""
+"""Test della risoluzione dei miss sul catalogo bandi (R0-b, letture sulla
+vista `bando_pubblico` dalla fase c): storico degli slug (301/410/annullato),
+fusioni, riletta del master e regola difensiva sugli errori delle letture di
+risoluzione — con un fake del secondario per nome di tabella."""
 
 import logging
 from types import SimpleNamespace
@@ -54,6 +54,10 @@ class FakeQuery:
         chiave = f"{column}__not_is" if self._negato else f"{column}__is"
         self._negato = False
         self.filters[chiave] = value
+        return self
+
+    def order(self, column, *args, **kwargs):
+        self.filters["__order"] = column
         return self
 
     def limit(self, n):
@@ -127,29 +131,29 @@ def test_bando_ritirato_error_default():
 
 async def test_slug_trovato_una_sola_query():
     riga = {"id": 1, "slug": "bando-a", "titolo": "A"}
-    db = FakeSecondary({"bando": [riga]})
+    db = FakeSecondary({"bando_pubblico": [riga]})
 
     out = await carica_per_slug(db, "bando-a", SELECT)
 
     assert out == riga
     assert out is not riga  # copia, non la riga del client
     assert db.ops == [(
-        "bando",
+        "bando_pubblico",
         SELECT,
-        {"slug": "bando-a", "stato_processing": "completed", "__limit": 1},
+        {"slug": "bando-a", "__limit": 1},
     )]
 
 
 async def test_storico_301_rilegge_il_master_per_id():
     db = FakeSecondary({
-        "bando": _bando_per_id(),
+        "bando_pubblico": _bando_per_id(),
         "bando_slug_storico": [{"slug": "vecchio", "bando_id": 42, "esito": "301"}],
     })
 
     out = await carica_per_slug(db, "vecchio", SELECT)
 
     assert out == MASTER
-    assert db.tabelle() == ["bando", "bando_slug_storico", "bando"]
+    assert db.tabelle() == ["bando_pubblico", "bando_slug_storico", "bando_pubblico"]
     storico = db.ops[1]
     assert storico[1] == "slug,bando_id,esito"
     assert storico[2] == {"slug": "vecchio", "__limit": 1}
@@ -157,7 +161,6 @@ async def test_storico_301_rilegge_il_master_per_id():
     assert riletta[1] == SELECT
     assert riletta[2] == {
         "id": 42,
-        "stato_processing": "completed",
         "slug__not_is": "null",
         "__limit": 1,
     }
@@ -165,7 +168,7 @@ async def test_storico_301_rilegge_il_master_per_id():
 
 async def test_storico_301_master_assente_404():
     db = FakeSecondary({
-        "bando": _bando_per_id(None),
+        "bando_pubblico": _bando_per_id(None),
         "bando_slug_storico": [{"slug": "vecchio", "bando_id": 42, "esito": "301"}],
     })
 
@@ -174,12 +177,12 @@ async def test_storico_301_master_assente_404():
 
     assert exc.value.message == "Bando non trovato"
     # Nessuna catena: dopo la riletta non si risolve di nuovo.
-    assert db.tabelle() == ["bando", "bando_slug_storico", "bando"]
+    assert db.tabelle() == ["bando_pubblico", "bando_slug_storico", "bando_pubblico"]
 
 
 async def test_storico_410_ritirato():
     db = FakeSecondary({
-        "bando": _bando_per_id(),
+        "bando_pubblico": _bando_per_id(),
         "bando_slug_storico": [{"slug": "ritirato", "bando_id": 42, "esito": "410"}],
         "bando_fusione": [{"bando_id": 7, "master_id": 42, "master_slug": "bando-master"}],
     })
@@ -189,12 +192,12 @@ async def test_storico_410_ritirato():
 
     assert exc.value.status_code == 410
     assert exc.value.code == "bando_ritirato"
-    assert db.tabelle() == ["bando", "bando_slug_storico"]
+    assert db.tabelle() == ["bando_pubblico", "bando_slug_storico"]
 
 
 async def test_storico_annullato_passa_alla_fusione():
     db = FakeSecondary({
-        "bando": _bando_per_id(),
+        "bando_pubblico": _bando_per_id(),
         "bando_slug_storico": [{"slug": "doppione", "bando_id": 7, "esito": "annullato"}],
         "bando_fusione": [{"bando_id": 7, "master_id": 42, "master_slug": "bando-master"}],
     })
@@ -202,7 +205,7 @@ async def test_storico_annullato_passa_alla_fusione():
     out = await carica_per_slug(db, "doppione", SELECT)
 
     assert out == MASTER
-    assert db.tabelle() == ["bando", "bando_slug_storico", "bando_fusione", "bando"]
+    assert db.tabelle() == ["bando_pubblico", "bando_slug_storico", "bando_fusione", "bando_pubblico"]
     fusione = db.ops[2]
     assert fusione[1] == "bando_id,master_id,master_slug"
     assert fusione[2] == {"slug_originale": "doppione", "__limit": 1}
@@ -211,14 +214,14 @@ async def test_storico_annullato_passa_alla_fusione():
 
 async def test_storico_vuoto_passa_alla_fusione():
     db = FakeSecondary({
-        "bando": _bando_per_id(),
+        "bando_pubblico": _bando_per_id(),
         "bando_fusione": [{"bando_id": 7, "master_id": 42, "master_slug": "bando-master"}],
     })
 
     out = await carica_per_slug(db, "doppione", SELECT)
 
     assert out == MASTER
-    assert db.tabelle() == ["bando", "bando_slug_storico", "bando_fusione", "bando"]
+    assert db.tabelle() == ["bando_pubblico", "bando_slug_storico", "bando_fusione", "bando_pubblico"]
 
 
 @pytest.mark.parametrize("riga_storico", [
@@ -230,7 +233,7 @@ async def test_storico_vuoto_passa_alla_fusione():
 ])
 async def test_storico_malformato_passa_alla_fusione(riga_storico):
     db = FakeSecondary({
-        "bando": _bando_per_id(),
+        "bando_pubblico": _bando_per_id(),
         "bando_slug_storico": [riga_storico],
         "bando_fusione": [{"bando_id": 7, "master_id": 42, "master_slug": "bando-master"}],
     })
@@ -238,7 +241,7 @@ async def test_storico_malformato_passa_alla_fusione(riga_storico):
     out = await carica_per_slug(db, "x", SELECT)
 
     assert out == MASTER
-    assert db.tabelle() == ["bando", "bando_slug_storico", "bando_fusione", "bando"]
+    assert db.tabelle() == ["bando_pubblico", "bando_slug_storico", "bando_fusione", "bando_pubblico"]
 
 
 async def test_niente_da_nessuna_parte_404():
@@ -250,7 +253,7 @@ async def test_niente_da_nessuna_parte_404():
     assert exc.value.status_code == 404
     assert exc.value.code == "not_found"
     assert exc.value.message == "Bando non trovato"
-    assert db.tabelle() == ["bando", "bando_slug_storico", "bando_fusione"]
+    assert db.tabelle() == ["bando_pubblico", "bando_slug_storico", "bando_fusione"]
 
 
 @pytest.mark.parametrize("riga_fusione", [
@@ -260,27 +263,27 @@ async def test_niente_da_nessuna_parte_404():
     {"bando_id": 7},
 ])
 async def test_fusione_malformata_404(riga_fusione):
-    db = FakeSecondary({"bando": _bando_per_id(), "bando_fusione": [riga_fusione]})
+    db = FakeSecondary({"bando_pubblico": _bando_per_id(), "bando_fusione": [riga_fusione]})
 
     with pytest.raises(NotFoundError):
         await carica_per_slug(db, "doppione", SELECT)
 
-    assert db.tabelle() == ["bando", "bando_slug_storico", "bando_fusione"]
+    assert db.tabelle() == ["bando_pubblico", "bando_slug_storico", "bando_fusione"]
 
 
 async def test_errore_sulla_prima_lettura_propagato():
     errore = _pg_error("57014")
-    db = FakeSecondary(fail={"bando": errore})
+    db = FakeSecondary(fail={"bando_pubblico": errore})
 
     with pytest.raises(APIError) as exc:
         await carica_per_slug(db, "bando-a", SELECT)
 
     assert exc.value is errore
-    assert db.tabelle() == ["bando"]
+    assert db.tabelle() == ["bando_pubblico"]
 
 
 async def test_timeout_sulla_prima_lettura_propagato():
-    db = FakeSecondary(fail={"bando": httpx.ReadTimeout("timeout")})
+    db = FakeSecondary(fail={"bando_pubblico": httpx.ReadTimeout("timeout")})
 
     with pytest.raises(httpx.ReadTimeout):
         await carica_per_slug(db, "bando-a", SELECT)
@@ -289,7 +292,7 @@ async def test_timeout_sulla_prima_lettura_propagato():
 async def test_errore_sullo_storico_404_senza_fusione():
     db = FakeSecondary(
         {
-            "bando": _bando_per_id(),
+            "bando_pubblico": _bando_per_id(),
             "bando_fusione": [{"bando_id": 7, "master_id": 42, "master_slug": "bando-master"}],
         },
         fail={"bando_slug_storico": _pg_error("PGRST205")},
@@ -299,7 +302,7 @@ async def test_errore_sullo_storico_404_senza_fusione():
         await carica_per_slug(db, "doppione", SELECT)
 
     assert exc.value.message == "Bando non trovato"
-    assert db.tabelle() == ["bando", "bando_slug_storico"]
+    assert db.tabelle() == ["bando_pubblico", "bando_slug_storico"]
 
 
 async def test_timeout_sullo_storico_404():
@@ -311,7 +314,7 @@ async def test_timeout_sullo_storico_404():
 
 async def test_errore_httpx_sulla_fusione_404():
     db = FakeSecondary(
-        {"bando": _bando_per_id()},
+        {"bando_pubblico": _bando_per_id()},
         fail={"bando_fusione": httpx.ConnectError("rete giù")},
     )
 
@@ -319,7 +322,7 @@ async def test_errore_httpx_sulla_fusione_404():
         await carica_per_slug(db, "doppione", SELECT)
 
     assert exc.value.message == "Bando non trovato"
-    assert db.tabelle() == ["bando", "bando_slug_storico", "bando_fusione"]
+    assert db.tabelle() == ["bando_pubblico", "bando_slug_storico", "bando_fusione"]
 
 
 async def test_errore_apierror_sulla_fusione_404():
@@ -336,17 +339,17 @@ async def test_errore_apierror_sulla_fusione_404():
 async def test_errore_sulla_riletta_del_master_404(errore):
     db = FakeSecondary(
         {
-            "bando": _bando_per_id(),
+            "bando_pubblico": _bando_per_id(),
             "bando_slug_storico": [{"slug": "vecchio", "bando_id": 42, "esito": "301"}],
         },
-        fail={"bando": _solo_riletta(errore)},
+        fail={"bando_pubblico": _solo_riletta(errore)},
     )
 
     with pytest.raises(NotFoundError) as exc:
         await carica_per_slug(db, "vecchio", SELECT)
 
     assert exc.value.message == "Bando non trovato"
-    assert db.tabelle() == ["bando", "bando_slug_storico", "bando"]
+    assert db.tabelle() == ["bando_pubblico", "bando_slug_storico", "bando_pubblico"]
 
 
 async def test_log_con_tabella_e_codice_slug_troncato(caplog):
@@ -555,23 +558,22 @@ async def postgrest_reale(monkeypatch):
         return SimpleNamespace(data=rows, count=len(rows))
 
     async with AsyncPostgrestClient("http://x") as client:
-        builder = type(client.from_("bando").select("id"))
+        builder = type(client.from_("bando_pubblico").select("id"))
         monkeypatch.setattr(builder, "execute", execute)
         yield RealSecondary(client), registro, risposte
 
 
 async def test_builder_reali_301_rilegge_il_master(postgrest_reale):
     db, registro, risposte = postgrest_reale
-    risposte["bando"] = lambda params: [MASTER] if "id" in params else []
+    risposte["bando_pubblico"] = lambda params: [MASTER] if "id" in params else []
     risposte["bando_slug_storico"] = [{"slug": "vecchio", "bando_id": 42, "esito": "301"}]
 
     assert await carica_per_slug(db, "vecchio", SELECT) == MASTER
 
     assert registro == [
-        ("bando", [
+        ("bando_pubblico", [
             ("select", SELECT),
             ("slug", "eq.vecchio"),
-            ("stato_processing", "eq.completed"),
             ("limit", "1"),
         ]),
         ("bando_slug_storico", [
@@ -579,10 +581,9 @@ async def test_builder_reali_301_rilegge_il_master(postgrest_reale):
             ("slug", "eq.vecchio"),
             ("limit", "1"),
         ]),
-        ("bando", [
+        ("bando_pubblico", [
             ("select", SELECT),
             ("id", "eq.42"),
-            ("stato_processing", "eq.completed"),
             ("slug", "not.is.null"),
             ("limit", "1"),
         ]),

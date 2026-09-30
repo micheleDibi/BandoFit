@@ -2,7 +2,8 @@
 
 Il dominio bloccato non deve mai uscire dall'API: né dai link diretti
 (`link_bando`/`link_candidatura`), né dagli allegati, né dai segmenti
-«link» annidati dentro `contenuto`.
+«link» annidati dentro `contenuto`. In più, il filtro dei link su tutte le
+fonti della scheda (`link_pubblicabile`, `host_pubblicabile`).
 """
 
 from types import SimpleNamespace
@@ -16,13 +17,51 @@ from app.services.bandi_service import (
     normalize_contenuto,
 )
 from app.services.link_policy import (
+    BLOCKED_LINK_HOSTS,
+    DOMINI_ESCLUSI,
+    host_pubblicabile,
     is_blocked_link,
+    link_pubblicabile,
+    normalizza_host,
     scrub_bando_row,
     scrub_text_mentions,
 )
 
 
+# Varianti del dominio escluso che un browser porta comunque al dominio.
+VARIANTI_ESCLUSO = [
+    "https://WWW.ObiettivoEuropa.COM/x",
+    "https://www.obiettivoeuropa.com./x",
+    "https://www.obiettivoeuropa.com:443/x",
+    "https://obiettivoeuropa%2Ecom/x",
+    "https://www.obiettivoeuropa%2ecom/x",
+    "https://www.obiettivoeuropa.com%2e/x",
+    "https://ｏｂｉｅｔｔｉｖｏｅｕｒｏｐａ.com/x",
+    "https://www.obiettivoeuropa\u3002com/x",
+    "https://www.\u1d52biettivoeuropa.com/x",
+]
+IDN_LEGITTIMO = "https://www.citt\u00e0.it/bando"
+
+
 class TestIsBlockedLink:
+    @pytest.mark.parametrize("url", VARIANTI_ESCLUSO)
+    def test_varianti_del_dominio_escluso(self, url):
+        assert is_blocked_link(url)
+
+    def test_host_non_normalizzabile_escluso(self):
+        assert is_blocked_link("https://\u1da0acebook.com/x")
+        assert is_blocked_link("https://www.\u1da0.it/x")
+
+    def test_dominio_internazionale_ammesso(self):
+        assert not is_blocked_link(IDN_LEGITTIMO)
+
+    def test_link_non_web_invariati(self):
+        # Nessun host da normalizzare o host che non è il dominio escluso.
+        assert not is_blocked_link("tel:+39 06 1234")
+        assert not is_blocked_link("mailto:info@regione.it")
+        assert not is_blocked_link("/bandi/x")
+        assert not is_blocked_link("#sezione")
+
     def test_blocca_dominio_esatto_e_sottodomini(self):
         assert is_blocked_link("https://obiettivoeuropa.com/bandi/x")
         assert is_blocked_link("https://www.obiettivoeuropa.com/bandi/x")
@@ -210,6 +249,31 @@ class TestScrubAllegati:
 
 
 class TestScrubContenuto:
+    @pytest.mark.parametrize("url", VARIANTI_ESCLUSO)
+    def test_segmento_link_con_variante_degrada_a_testo(self, url):
+        contenuto = {"sections": [{"type": "paragraph", "segments": [
+            {"kind": "link", "url": url, "text": "Fondazione Varesotto"},
+        ]}]}
+        row = scrub_bando_row({"contenuto": contenuto})
+        assert row["contenuto"]["sections"][0]["segments"] == [
+            {"kind": "text", "text": "Fondazione Varesotto"}
+        ]
+
+    @pytest.mark.parametrize("url", VARIANTI_ESCLUSO)
+    def test_link_diretti_con_variante_azzerati(self, url):
+        row = scrub_bando_row({"link_bando": url, "link_candidatura": url,
+                               "allegati": [{"url": url, "label": "x"}]})
+        assert row["link_bando"] is None
+        assert row["link_candidatura"] is None
+        assert row["allegati"] == []
+
+    def test_segmento_link_internazionale_intatto(self):
+        segmento = {"kind": "link", "url": IDN_LEGITTIMO, "text": "Comune"}
+        contenuto = {"sections": [{"type": "paragraph", "segments": [dict(segmento)]}]}
+        row = scrub_bando_row({"contenuto": contenuto, "link_bando": IDN_LEGITTIMO})
+        assert row["contenuto"]["sections"][0]["segments"] == [segmento]
+        assert row["link_bando"] == IDN_LEGITTIMO
+
     def test_segmento_link_bloccato_degrada_a_testo(self):
         # Ancora in mezzo alla frase: il testo resta, il link no.
         contenuto = {
@@ -408,10 +472,13 @@ class TestDettaglioSerializzato:
         # Stessa pipeline di fetch_bando_by_slug: normalizza → filtra → mappa.
         row = riga_dettaglio()
         row["contenuto"] = normalize_contenuto(row["contenuto"])
-        detail = map_detail(scrub_bando_row(row))
+        detail = map_detail(scrub_bando_row(row), [{
+            "id": 1, "bando_id": 1, "url": BLOCKED, "tipo": "candidatura",
+            "etichetta": None, "content_type": None, "ultimo_visto_at": None,
+        }])
         assert "obiettivoeuropa" not in detail.model_dump_json()
-        assert detail.link_bando is None
-        assert detail.link_candidatura is None
+        assert detail.cta is None
+        assert detail.link_fonte is None
         assert detail.allegati == []
         assert detail.fonte_ufficiale_url is None
         assert detail.fonte_ufficiale_host is None
@@ -447,18 +514,22 @@ class TestScrubTextMentions:
 class FakeSecondary:
     """Catena select→eq→limit→execute del client PostgREST, senza rete.
 
-    Di default ammette solo `bando` e restituisce `row` a ogni lettura.
-    Con `storico=[riga]` simula uno slug spostato: la lettura per slug su
-    `bando` non trova nulla, `bando_slug_storico` restituisce `storico` e la
-    riletta del master per id restituisce `row`."""
+    Di default ammette solo `bando_pubblico` (che restituisce `row` a ogni
+    lettura) e `bando_link` (che restituisce `link`). Con `storico=[riga]`
+    simula uno slug spostato: la lettura per slug su `bando_pubblico` non
+    trova nulla, `bando_slug_storico` restituisce `storico` e la riletta del
+    master per id restituisce `row`."""
 
-    def __init__(self, row: dict, *, storico: list | None = None):
+    def __init__(self, row: dict, *, storico: list | None = None, link: list | None = None):
         self.row = row
         self.storico = storico
+        self.link = link or []
         self.tabelle: list[str] = []
 
     def table(self, name: str):
-        ammesse = {"bando"} if self.storico is None else {"bando", "bando_slug_storico"}
+        ammesse = {"bando_pubblico", "bando_link"}
+        if self.storico is not None:
+            ammesse.add("bando_slug_storico")
         assert name in ammesse
         self.tabelle.append(name)
         fake = self
@@ -481,10 +552,18 @@ class FakeSecondary:
             def is_(self, *args):
                 return self
 
+            def in_(self, *args):
+                return self
+
+            def order(self, *args, **kwargs):
+                return self
+
             def limit(self, *args):
                 return self
 
             async def execute(self):
+                if name == "bando_link":
+                    return SimpleNamespace(data=[dict(r) for r in fake.link])
                 if name == "bando_slug_storico":
                     return SimpleNamespace(data=list(fake.storico))
                 if fake.storico is not None and self.per_slug:
@@ -502,9 +581,25 @@ class TestFetchApplicaIlFiltro:
     chiamate a scrub_bando_row non farebbe fallire la suite."""
 
     async def test_fetch_bando_by_slug_filtra(self):
-        detail = await fetch_bando_by_slug(FakeSecondary(riga_dettaglio()), "bando-test")
-        assert "obiettivoeuropa" not in detail.model_dump_json()
-        assert detail.link_bando is None
+        link = [
+            {"id": i, "bando_id": 1, "url": url, "tipo": tipo, "etichetta": "x",
+             "content_type": None, "ultimo_visto_at": None}
+            for i, (tipo, url) in enumerate([
+                ("candidatura", BLOCKED),
+                ("portale", "https://m.facebook.com/regione"),
+                ("atto", "https://news.infobandi.it/atto.pdf"),
+                ("allegato", "https://www.youtube.com/watch?v=1"),
+            ], start=1)
+        ]
+        detail = await fetch_bando_by_slug(
+            FakeSecondary(riga_dettaglio(), link=link), "bando-test"
+        )
+        dump = detail.model_dump_json()
+        for dominio in ("obiettivoeuropa", "facebook", "infobandi", "youtube"):
+            assert dominio not in dump
+        assert detail.cta is None
+        assert detail.link_fonte is None
+        assert detail.allegati == []
 
     async def test_fetch_bando_for_ai_filtra(self):
         row = await fetch_bando_for_ai(FakeSecondary(riga_dettaglio()), "bando-test")
@@ -522,18 +617,222 @@ class TestFetchApplicaIlFiltro:
         # Slug spostato: la riga del master passa dallo stesso filtro.
         db = FakeSecondary(riga_dettaglio(), storico=[STORICO_301])
         detail = await fetch_bando_by_slug(db, "vecchio-slug")
-        assert db.tabelle == ["bando", "bando_slug_storico", "bando"]
+        assert db.tabelle == ["bando_pubblico", "bando_slug_storico", "bando_pubblico", "bando_link"]
         assert detail.slug == "bando-test"
         assert "obiettivoeuropa" not in detail.model_dump_json()
-        assert detail.link_bando is None
+        assert detail.cta is None
         assert detail.fonte_ufficiale_url is None
 
     async def test_fetch_bando_for_ai_filtra_anche_il_master(self):
         db = FakeSecondary(riga_dettaglio(), storico=[STORICO_301])
         row = await fetch_bando_for_ai(db, "vecchio-slug")
-        assert db.tabelle == ["bando", "bando_slug_storico", "bando"]
+        assert db.tabelle == ["bando_pubblico", "bando_slug_storico", "bando_pubblico"]
         assert row["slug"] == "bando-test"
         assert "obiettivoeuropa" not in str(row)
         assert row["contenuto"]["sections"][0]["segments"] == [
             {"kind": "text", "text": "vedi"}
         ]
+
+
+# ------------------------------------------- filtro dei link della scheda
+
+
+class TestLinkPubblicabile:
+    def test_link_ufficiale_ammesso(self):
+        assert link_pubblicabile(OK) == (OK, "bandi.regione.piemonte.it")
+
+    def test_spazi_ai_bordi_tolti(self):
+        assert link_pubblicabile(f"  {OK}\n") == (OK, "bandi.regione.piemonte.it")
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "javascript:alert(1)",
+            "JAVASCRIPT:alert(1)",
+            "data:text/html,<a>x</a>",
+            "mailto:bandi@regione.it",
+            "ftp://ftp.regione.it/bando.pdf",
+            "file:///etc/passwd",
+            "www.regione.it/bando",
+            "//www.regione.it/bando",
+            "https:/www.regione.it/bando",
+            "https:\\\\www.regione.it\\bando",
+            "https://",
+            "http:///percorso",
+        ],
+    )
+    def test_solo_http_e_https_con_host(self, url):
+        assert link_pubblicabile(url) is None
+
+    def test_schema_maiuscolo_ammesso(self):
+        assert link_pubblicabile("HTTPS://www.regione.it/x") == (
+            "HTTPS://www.regione.it/x", "www.regione.it"
+        )
+        assert link_pubblicabile("http://www.regione.it/x")[1] == "www.regione.it"
+
+    @pytest.mark.parametrize(
+        ("url", "host"),
+        [
+            ("https://WWW.Regione.IT/x", "www.regione.it"),
+            ("https://www.regione.it:8443/x", "www.regione.it"),
+            ("https://www.regione.it./x", "www.regione.it"),
+            ("https://www%2Eregione%2Eit/x", "www.regione.it"),
+            ("https://ｗｗｗ．ｒｅｇｉｏｎｅ．ｉｔ/x", "www.regione.it"),
+        ],
+    )
+    def test_host_normalizzato(self, url, host):
+        assert link_pubblicabile(url)[1] == host
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            # aggregatori, sottodomini compresi
+            "https://obiettivoeuropa.com/x",
+            "https://www.fasi.eu/x",
+            "https://europafacile.net/x",
+            "https://www.contributiregione.it/x",
+            "https://finanziamentinews.it/x",
+            "https://bandi.it/x",
+            "https://www.infobandi.it/x",
+            "https://ticonsiglio.com/x",
+            "https://contributieuropa.com/x",
+            "https://first.aster.it/x",
+            # social, video, messaggistica
+            "https://www.facebook.com/regione",
+            "https://m.facebook.com/regione",
+            "https://instagram.com/x",
+            "https://x.com/regione",
+            "https://twitter.com/regione",
+            "https://it.linkedin.com/company/x",
+            "https://www.threads.net/@x",
+            "https://pinterest.com/x",
+            "https://www.tiktok.com/@x",
+            "https://www.youtube.com/watch?v=1",
+            "https://youtu.be/1",
+            "https://vimeo.com/1",
+            "https://t.me/canale",
+            "https://telegram.me/canale",
+            "https://wa.me/39333",
+            "https://chat.whatsapp.com/x",
+        ],
+    )
+    def test_domini_esclusi(self, url):
+        assert link_pubblicabile(url) is None
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://WWW.FACEBOOK.COM/x",
+            "https://www.facebook.com./x",
+            "https://www.facebook.com:443/x",
+            "https://www%2Efacebook%2Ecom/x",
+            "https://ｗｗｗ．ｆａｃｅｂｏｏｋ．ｃｏｍ/x",
+            "https://www.obiettivoeuropa.com%2e/x",
+            "https://\u1da0acebook.com/x",
+            "https://www.\u1d52biettivoeuropa.com/x",
+            "https://\u1da0asi.eu/x",
+        ],
+    )
+    def test_domini_esclusi_anche_camuffati(self, url):
+        assert link_pubblicabile(url) is None
+
+    @pytest.mark.parametrize("url", VARIANTI_ESCLUSO)
+    def test_varianti_del_dominio_escluso(self, url):
+        assert link_pubblicabile(url) is None
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://box.com/a",
+            "https://notfacebook.com/a",
+            "https://facebook.com.regione.it/a",
+            "https://www.regione.it/?ref=facebook.com",
+            "https://www.bandi.regione.it/x",
+            "https://tme.it/x",
+        ],
+    )
+    def test_nessun_falso_positivo(self, url):
+        assert link_pubblicabile(url) is not None
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://www.regione.it/a b",
+            "https://www.regione.it/a\tb",
+            "https://www.regio\nne.it/a",
+            "https://www.regione.it/\x00",
+            "https://www.regione.it/a\u00a0b",
+            "https://www.regione.it\\@facebook.com/",
+        ],
+    )
+    def test_spazi_controllo_e_backslash(self, url):
+        assert link_pubblicabile(url) is None
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://utente@www.regione.it/",
+            "https://utente:segreto@www.regione.it/",
+            "https://www.regione.it@www.facebook.com/",
+        ],
+    )
+    def test_credenziali_nell_url(self, url):
+        assert link_pubblicabile(url) is None
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://localhost/x",
+            "https://[::1]/x",
+            "https://intranet/x",
+            "https://www.regione%25.it/x",
+            "https://" + "a" * 70 + ".it/x",
+            "https://\U0001f130.it/x",
+            "https://www.\u1da0.it/x",
+        ],
+    )
+    def test_host_non_valido(self, url):
+        assert link_pubblicabile(url) is None
+
+    @pytest.mark.parametrize("valore", [None, "", "   ", 42, ["https://www.regione.it"]])
+    def test_valori_non_stringa_o_vuoti(self, valore):
+        assert link_pubblicabile(valore) is None
+
+
+class TestHostPubblicabile:
+    def test_host_normalizzato(self):
+        assert host_pubblicabile(" WWW.Regione.it. ") == "www.regione.it"
+        assert host_pubblicabile("www.regione.it:443") == "www.regione.it"
+
+    @pytest.mark.parametrize(
+        "host",
+        [None, "", "www.youtube.com", "obiettivoeuropa.com", "m.facebook.com",
+         "www.regione.it/percorso x", "localhost", 42],
+    )
+    def test_host_escluso_o_non_valido(self, host):
+        assert host_pubblicabile(host) is None
+
+    def test_normalizza_host(self):
+        assert normalizza_host("WWW.Regione.IT.") == "www.regione.it"
+        assert normalizza_host(None) is None
+        assert normalizza_host("a..it") is None
+        assert normalizza_host("\u1da0acebook.com") is None
+        assert normalizza_host("www.citt\u00e0.it") == "www.xn--citt-3na.it"
+
+    def test_host_internazionale_ammesso(self):
+        assert link_pubblicabile("https://www.citt\u00e0.it/bando") == (
+            "https://www.citt\u00e0.it/bando", "www.xn--citt-3na.it"
+        )
+
+
+class TestListeSeparate:
+    def test_domini_esclusi_contengono_quelli_di_oggi(self):
+        assert BLOCKED_LINK_HOSTS <= DOMINI_ESCLUSI
+
+    def test_menzioni_nei_testi_invariate(self):
+        # La denylist completa vale solo per i link della scheda: le regex
+        # sulle menzioni nei testi non devono tagliare «x.com» o «t.me».
+        assert BLOCKED_LINK_HOSTS == frozenset({"obiettivoeuropa.com"})
+        testo = "scrivere a box.com, vedi x.com e t.me per aggiornamenti"
+        assert scrub_text_mentions(testo) == testo
+        assert not is_blocked_link("https://x.com/regione")

@@ -30,6 +30,7 @@ from postgrest.exceptions import APIError
 from app.core.config import get_settings
 from app.schemas.bando import LookupsOut
 from app.services import email_service, lookup_service, notification_service
+from app.services.bandi_risoluzione import VISTA_BANDI
 from app.services.bandi_service import (
     LIST_SELECT,
     SCORING_EMBEDS,
@@ -44,6 +45,13 @@ logger = logging.getLogger("bandofit.bando_alerts")
 PUNTEGGIO_MINIMO = 60
 
 CANDIDATE_SELECT = LIST_SELECT + SCORING_EMBEDS + ",created_at"
+
+# PostgREST del catalogo non restituisce mai più di 1000 righe per richiesta
+# (max-rows): i candidati si leggono a pagine, ordinate per id, finché non si
+# raggiunge il conteggio esatto. Il tetto di pagine evita un ciclo infinito
+# se il conteggio non torna.
+PAGINA_CANDIDATI = 1000
+MAX_PAGINE_CANDIDATI = 20
 
 _DIMENSIONI_LABEL = {
     "regioni": "Regioni",
@@ -216,22 +224,41 @@ async def carica_candidati(
 ) -> list[BandoCandidato]:
     """Bandi visibili, non chiusi, con riferimento nella finestra utile."""
     cutoff = max(attivazione, oggi - timedelta(days=orizzonte_giorni))
-    query = (
-        secondary.table("bando")
-        .select(CANDIDATE_SELECT)
-        .eq("stato_processing", "completed")
-        .not_.is_("slug", "null")
-    )
-    query = apply_open_tier(query, oggi)
-    # Pre-filtro grezzo a DB (la finestra esatta la applica filtra_candidati):
-    # pubblicazione recente O (pubblicazione assente E ingestione recente).
-    query = query.or_(
-        f"data_pubblicazione.gte.{cutoff.isoformat()},"
-        f"and(data_pubblicazione.is.null,created_at.gte.{cutoff.isoformat()})"
-    )
-    resp = await query.execute()
+    righe: list[dict] = []
+    visti: set = set()
+    offset = 0
+    for _ in range(MAX_PAGINE_CANDIDATI):
+        query = (
+            secondary.table(VISTA_BANDI)
+            .select(CANDIDATE_SELECT, count="exact")
+            .not_.is_("slug", "null")
+        )
+        query = apply_open_tier(query, oggi)
+        # Pre-filtro grezzo a DB (la finestra esatta la applica filtra_candidati):
+        # pubblicazione recente O (pubblicazione assente E ingestione recente).
+        query = query.or_(
+            f"data_pubblicazione.gte.{cutoff.isoformat()},"
+            f"and(data_pubblicazione.is.null,created_at.gte.{cutoff.isoformat()})"
+        )
+        resp = await query.order("id").range(offset, offset + PAGINA_CANDIDATI - 1).execute()
+        dati = resp.data or []
+        offset += len(dati)
+        # Fra una pagina e l'altra il catalogo può cambiare: niente doppioni.
+        for riga in dati:
+            if riga.get("id") not in visti:
+                visti.add(riga.get("id"))
+                righe.append(riga)
+        totale = getattr(resp, "count", None)
+        finito = offset >= totale if totale is not None else len(dati) < PAGINA_CANDIDATI
+        if not dati or finito:
+            break
+    else:
+        logger.warning(
+            "alert bandi: raggiunto il tetto di %s pagine di candidati, lettura troncata",
+            MAX_PAGINE_CANDIDATI,
+        )
     candidati, fuori_orizzonte = filtra_candidati(
-        resp.data or [],
+        righe,
         oggi=oggi,
         attivazione=attivazione,
         orizzonte_giorni=orizzonte_giorni,

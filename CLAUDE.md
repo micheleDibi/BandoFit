@@ -45,7 +45,7 @@ Sviluppo in locale; produzione con Docker Compose dietro reverse proxy (Cloudfla
 - Pagamenti: le righe di `purchases` sono immutabili; mai piani a pagamento gratis, da nessun percorso
 
 ## Da non toccare
-- DB secondario: sola lettura per costruzione (anon key + RLS). Contratto in `docs/contratto-db-bandi.md`
+- DB secondario: sola lettura per costruzione (anon key + RLS). Contratto in `docs/contratto-db-bandi.md` (copia locale, non tracciata). Dalla fase (c) il catalogo si legge da `bando_pubblico` e `bando_link` (più le tabelle di risoluzione `bando_fusione`/`bando_slug_storico` e i lookup): mai la tabella `bando`; le colonne deprecate solo tramite `COLONNE_RIPIEGO_51`
 - `database_secondario_dump/`: dati proprietari, solo riferimento locale (ignorato da git)
 - `.env` e `.env.*`: mai committare credenziali (solo `.env.example`)
 - Tabella `user_addons`: deprecata, congelata in sola lettura come rete di rollback
@@ -58,3 +58,4 @@ Sviluppo in locale; produzione con Docker Compose dietro reverse proxy (Cloudfla
 - `RATE_LIMIT_PEPPER` è obbligatorio in deploy; cambiarlo azzera i contatori del rate limit
 - IP client: non usare `FORWARDED_ALLOW_IPS=*` (prende il primo elemento di X-Forwarded-For, falsificabile). Vedi `core/net.py` e `docs/deploy.md`
 - DB secondario: PostgREST ha `max-rows` = 1000: una richiesta senza `limit` non restituisce mai più di 1000 righe
+- Rimappatura dei bandi fusi (`RIMAPPATURA_FUSI_MODALITA` = spenta | prova | attiva): richiede la migration 0043 sul primario; la variabile arriva al container solo se aggiunta all'`environment` del backend in `docker-compose.yml`

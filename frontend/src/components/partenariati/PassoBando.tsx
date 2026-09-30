@@ -19,6 +19,8 @@ import type {
   Page,
   RuoloCreatoreCall,
 } from "../../types";
+import { StatoBadge } from "../bandi/badges";
+import { dataConOra, statoDelBando } from "../bandi/stato";
 import { Button, LinkButton } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Skeleton } from "../ui/states";
@@ -119,11 +121,13 @@ function SceltaNomeCall({
 function SchedaBando({
   titolo,
   scadenza,
+  oraScadenza,
   stato,
   slug,
 }: {
   titolo: string;
   scadenza: string | null;
+  oraScadenza?: string | null;
   stato: string | null;
   slug: string;
 }) {
@@ -137,10 +141,10 @@ function SchedaBando({
         {scadenza && (
           <span className="inline-flex items-center gap-1">
             <CalendarClock className="size-4 text-slate-400" aria-hidden />
-            Scade il {formatDate(scadenza)}
+            Scade il {dataConOra(scadenza, oraScadenza)}
           </span>
         )}
-        {stato && <span>Stato: {stato}</span>}
+        <StatoBadge stato={stato} />
       </p>
       <div className="mt-3" aria-live="polite">
         {regole.isPending ? (
@@ -301,7 +305,7 @@ function RicercaBando({ onScegli }: { onScegli: (slug: string) => void }) {
         ) : (
           <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
             {ricerca.data!.items.map((b) => {
-              const aperto = bandoAperto(b.stato_bando);
+              const aperto = bandoAperto(statoDelBando(b));
               return (
                 <li key={b.id}>
                   <button
@@ -321,7 +325,7 @@ function RicercaBando({ onScegli }: { onScegli: (slug: string) => void }) {
                       )}
                     </span>
                     <span className="shrink-0 text-xs text-slate-500">
-                      {aperto ? "Scegli" : "Chiuso"}
+                      {aperto ? "Scegli" : "Non aperto"}
                     </span>
                   </button>
                 </li>
@@ -383,7 +387,7 @@ export function PassoBandoNuova({
   }
 
   const b = bando.data;
-  const aperto = bandoAperto(b.stato_bando);
+  const aperto = bandoAperto(statoDelBando(b));
   const bloccato = !editable || !aperto || !!esistente || statoPiano === "non_incluso";
 
   const invia = async () => {
@@ -413,7 +417,13 @@ export function PassoBandoNuova({
 
   return (
     <div className="space-y-4">
-      <SchedaBando titolo={b.titolo || b.slug} scadenza={b.data_scadenza} stato={b.stato_bando} slug={slug} />
+      <SchedaBando
+        titolo={b.titolo || b.slug}
+        scadenza={b.data_scadenza}
+        oraScadenza={b.ora_scadenza}
+        stato={statoDelBando(b)}
+        slug={slug}
+      />
       <div className="flex flex-wrap gap-2">
         <Button variant="ghost" size="sm" onClick={() => onScegliBando(null)}>
           Scegli un altro bando

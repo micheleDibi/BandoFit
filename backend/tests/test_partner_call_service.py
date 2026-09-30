@@ -1022,12 +1022,32 @@ def riga_bando_pubblico(**modifiche) -> dict:
     return riga
 
 
+def fusione(bando_id: int = BANDO_ID, master_id: int = 900) -> dict:
+    return {"bando_id": bando_id, "slug_originale": SLUG, "master_id": master_id,
+            "master_slug": f"master-{master_id}"}
+
+
+def _filtra(righe: list[dict], filtri: list) -> list[dict]:
+    return [copy.deepcopy(r) for r in righe if all(r.get(c) == v for c, v in filtri)]
+
+
 class FakeSecondary:
-    def __init__(self, bandi=None, pubblici=None):
+    """Catalogo finto. `bando_pubblico`: per lista di id lo stato (righe
+    `pubblici`, `leggi_stato_bandi`), per `eq` la scheda (righe `bandi`,
+    `carica_per_slug`). `bando_fusione`: per lista di `bando_id` o per `eq`
+    (righe `fusioni`). `bando_slug_storico`: per `eq` (righe `storico`). La
+    tabella `bando` non si legge più."""
+
+    def __init__(self, bandi=None, pubblici=None, fusioni=None, storico=None):
         self.bandi = [riga_bando()] if bandi is None else bandi
         self.pubblici = [riga_bando_pubblico()] if pubblici is None else pubblici
+        self.fusioni = fusioni or []
+        self.storico = storico or []
         self.guasto_pubblico: Exception | None = None
+        self.guasto_fusione: Exception | None = None
         self.letture: list[str] = []
+        self.blocchi_fusione: list[list[int]] = []
+        self.select_fusione: list[str] = []
 
     def table(self, nome):
         sec = self
@@ -1035,8 +1055,11 @@ class FakeSecondary:
         class _Q:
             def __init__(self):
                 self.filtri = []
+                self.liste = []
+                self.colonne = None
 
-            def select(self, *a, **k):
+            def select(self, colonne="*", *a, **k):
+                self.colonne = colonne
                 return self
 
             def eq(self, c, v):
@@ -1044,7 +1067,14 @@ class FakeSecondary:
                 return self
 
             def in_(self, c, v):
-                self.filtri.append((c, list(v)))
+                self.liste.append((c, list(v)))
+                return self
+
+            @property
+            def not_(self):
+                return self
+
+            def is_(self, *a):
                 return self
 
             def limit(self, n):
@@ -1053,15 +1083,24 @@ class FakeSecondary:
             async def execute(self):
                 sec.letture.append(nome)
                 if nome == "bando_pubblico":
-                    if sec.guasto_pubblico is not None:
-                        raise sec.guasto_pubblico
-                    ids = next(v for c, v in self.filtri if c == "id")
-                    return SimpleNamespace(data=[r for r in sec.pubblici if r["id"] in ids])
-                if nome == "bando":
-                    return SimpleNamespace(data=[
-                        copy.deepcopy(r) for r in sec.bandi
-                        if all(r.get(c) == v for c, v in self.filtri)
-                    ])
+                    if self.liste:
+                        if sec.guasto_pubblico is not None:  # solo la lettura dello stato
+                            raise sec.guasto_pubblico
+                        ids = next(v for c, v in self.liste if c == "id")
+                        return SimpleNamespace(data=[r for r in sec.pubblici if r["id"] in ids])
+                    return SimpleNamespace(data=_filtra(sec.bandi, self.filtri))
+                if nome == "bando_fusione":
+                    if sec.guasto_fusione is not None:
+                        raise sec.guasto_fusione
+                    if self.liste:
+                        ids = next(v for c, v in self.liste if c == "bando_id")
+                        sec.blocchi_fusione.append(ids)
+                        sec.select_fusione.append(self.colonne)
+                        return SimpleNamespace(
+                            data=[r for r in sec.fusioni if r["bando_id"] in ids])
+                    return SimpleNamespace(data=_filtra(sec.fusioni, self.filtri))
+                if nome == "bando_slug_storico":
+                    return SimpleNamespace(data=_filtra(sec.storico, self.filtri))
                 raise AssertionError(f"tabella del catalogo inattesa: {nome}")
 
         return _Q()
@@ -1246,6 +1285,19 @@ class TestCreaBozza:
         codici = {m.codice for m in out.motivi_blocco}
         assert {"titolo_mancante", "regole_non_confermate", "posizioni_mancanti"} <= codici
         assert out.puo_pubblicare is False
+
+    async def test_slug_fuso_crea_la_call_sul_master(self):
+        # Lo slug del doppione porta al master (`carica_per_slug`): la call
+        # nasce sul master, mai su un bando fuori dalla vista.
+        db = FakeDb()
+        master = riga_bando(id=900, slug="master-900")
+        secondary = FakeSecondary(
+            bandi=[master], pubblici=[riga_bando_pubblico(id=900, slug="master-900")],
+            fusioni=[fusione()])
+        await pcs.crea_bozza(db, secondary, titolare(), USER_OWNER, crea_in())
+        [p] = db.chiamate("fn_partner_call_crea_bozza")
+        assert (p["p_bando"]["id"], p["p_bando"]["slug"]) == (900, "master-900")
+        assert "bando" not in secondary.letture
 
     async def test_nominativa_senza_verifica_dell_identita_409(self):
         """WP9: la call nominativa vale solo per un'azienda con l'identità
@@ -1577,6 +1629,39 @@ class TestChiusuraInLettura:
         call = db.call_pronta(bando_mancante_dal=(oggi() - timedelta(days=7)).isoformat())
         out = await leggi(db, call, secondary=FakeSecondary(pubblici=[]))
         assert (out.stato, out.motivo_chiusura) == ("chiusa_annullata", "bando_non_disponibile")
+
+    @pytest.mark.parametrize("stato", ["bozza", "pubblicata"])
+    async def test_bando_fuso_non_chiude_anche_se_marcato(self, stato):
+        # Un bando assente dalla vista ma fuso in un altro non è «mancante»:
+        # la marca messa prima (10 giorni) non chiude la call all'apertura.
+        db = FakeDb()
+        call = db.call_pronta(stato=stato, pubblicata_at=_iso(),
+                              scadenza_call=(oggi() + timedelta(days=10)).isoformat(),
+                              bando_mancante_dal=(oggi() - timedelta(days=10)).isoformat())
+        secondary = FakeSecondary(pubblici=[], fusioni=[fusione()])
+        out = await leggi(db, call, secondary=secondary)
+        assert out.stato == stato and db.chiamate("fn_partner_call_chiudi_auto") == []
+        assert secondary.blocchi_fusione == [[BANDO_ID]]
+        if stato == "bozza":
+            # la bozza non si pubblica, e il motivo lo dice
+            [motivo] = [m for m in out.motivi_blocco if m.codice == "bando_non_disponibile"]
+            assert motivo.messaggio == pcs.MSG_BANDO_FUSO
+
+    async def test_fusioni_non_leggibili_non_chiudono(self):
+        db = FakeDb()
+        call = db.call_pronta(bando_mancante_dal=(oggi() - timedelta(days=10)).isoformat())
+        secondary = FakeSecondary(pubblici=[])
+        secondary.guasto_fusione = RuntimeError("rete")
+        out = await leggi(db, call, secondary=secondary)
+        assert out.stato == "bozza" and db.chiamate("fn_partner_call_chiudi_auto") == []
+        assert "bando_non_disponibile" not in {m.codice for m in out.motivi_blocco}
+
+    async def test_bando_presente_nessuna_lettura_delle_fusioni(self):
+        db = FakeDb()
+        call = db.call_pronta()
+        secondary = FakeSecondary()
+        await leggi(db, call, secondary=secondary)
+        assert "bando_fusione" not in secondary.letture and "bando" not in secondary.letture
 
     def test_motivo_chiusura_puro(self):
         stato = StatoBando(id=1, slug="x", stato_effettivo="aperto", data_scadenza=None,
@@ -2902,6 +2987,37 @@ class TestPubblica:
         call = db.call_pronta()
         secondary = FakeSecondary()
         secondary.guasto_pubblico = RuntimeError("rete")
+        with pytest.raises(UpstreamError):
+            await pcs.pubblica(db, secondary, titolare(), USER_OWNER, call["id"])
+
+    async def test_bando_fuso_non_si_pubblica(self):
+        db = FakeDb()
+        call = db.call_pronta()
+        errore = await attendi_codice(
+            pcs.pubblica(db, FakeSecondary(pubblici=[], fusioni=[fusione()]), titolare(),
+                         USER_OWNER, call["id"]),
+            "bando_non_disponibile", 409,
+        )
+        assert errore.message == pcs.MSG_BANDO_FUSO
+        # non invita a ricreare la call sul master (collisione che la rimappatura
+        # non risolve)
+        assert "ricrea" not in errore.message
+        assert db.chiamate("fn_partner_call_pubblica") == []
+
+    async def test_bando_assente_messaggio_di_sempre(self):
+        db = FakeDb()
+        call = db.call_pronta()
+        errore = await attendi_codice(
+            pcs.pubblica(db, FakeSecondary(pubblici=[]), titolare(), USER_OWNER, call["id"]),
+            "bando_non_disponibile", 409,
+        )
+        assert errore.message != pcs.MSG_BANDO_FUSO
+
+    async def test_fusioni_non_leggibili_fail_closed(self):
+        db = FakeDb()
+        call = db.call_pronta()
+        secondary = FakeSecondary(pubblici=[])
+        secondary.guasto_fusione = RuntimeError("rete")
         with pytest.raises(UpstreamError):
             await pcs.pubblica(db, secondary, titolare(), USER_OWNER, call["id"])
 

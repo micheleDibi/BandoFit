@@ -10,8 +10,9 @@ class SaveBandoIn(BaseModel):
 
 
 class SavedBandoItem(BaseModel):
-    """Un bando salvato: la card viva dal catalogo quando disponibile,
-    altrimenti il fallback costruito dallo snapshot."""
+    """Un bando salvato: la card viva dal catalogo quando disponibile (con
+    `stato_effettivo`), altrimenti il fallback costruito dallo snapshot
+    (`stato_effettivo` null, lo stato salvato in `stato_bando`)."""
 
     bando: BandoListItem
     disponibile: bool

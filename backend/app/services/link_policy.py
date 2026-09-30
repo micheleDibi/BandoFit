@@ -11,8 +11,9 @@ catalogo (`fetch_bando_by_slug` e `fetch_bando_for_ai` in
 """
 
 import re
+import unicodedata
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 # Confronto sull'host: vale il dominio esatto e ogni sottodominio (www
 # incluso), mai la substring sull'URL intero (un `?ref=` non blocca).
@@ -24,8 +25,26 @@ BLOCKED_LINK_HOSTS = frozenset({"obiettivoeuropa.com"})
 _SCHEME = re.compile(r"^[a-z][a-z0-9+.\-]*:/*", re.IGNORECASE)
 
 
+def host_non_normalizzabile(host: str) -> bool:
+    """True se l'host non si può normalizzare come in un browser."""
+    return any(unicodedata.ucd_3_2_0.category(c) == "Cn" for c in host)
+
+
+def _host_normalizzato(host: str) -> str | None:
+    """Host normalizzato come un browser, minuscolo e senza punto finale;
+    None se non normalizzabile."""
+    grezzo = unquote(host.strip()).rstrip(".")
+    if host_non_normalizzabile(grezzo):
+        return None
+    try:
+        return grezzo.encode("idna").decode("ascii").lower().rstrip(".")
+    except UnicodeError:
+        return None
+
+
 def is_blocked_link(url: Any) -> bool:
-    """True se l'URL punta (anche via sottodominio) a un dominio escluso."""
+    """True se l'URL punta (anche via sottodominio) a un dominio escluso.
+    Un host non normalizzabile vale come escluso."""
     if not isinstance(url, str):
         return False
     candidate = _SCHEME.sub("", url.strip().replace("\\", "/"))
@@ -35,7 +54,9 @@ def is_blocked_link(url: Any) -> bool:
         return False
     if not host:
         return False
-    host = host.rstrip(".").lower()
+    host = _host_normalizzato(host)
+    if host is None:
+        return True
     return any(
         host == blocked or host.endswith("." + blocked)
         for blocked in BLOCKED_LINK_HOSTS
@@ -167,3 +188,85 @@ def scrub_bando_row(row: dict) -> dict:
     if isinstance(row.get("contenuto"), dict):
         row["contenuto"] = _scrub_contenuto(row["contenuto"])
     return row
+
+
+# --- Link della scheda: pulsanti e allegati ---------------------------------
+# Filtro dei link su tutte le fonti (contratto DB bandi §5): ogni URL che la
+# scheda mostra come pulsante o come allegato passa da `link_pubblicabile`,
+# qualunque colonna o tabella lo fornisca. È una lista separata da
+# BLOCKED_LINK_HOSTS, che pilota anche le regex sulle menzioni nei testi:
+# lì un dominio breve come «x.com» taglierebbe testo legittimo.
+DOMINI_ESCLUSI = BLOCKED_LINK_HOSTS | frozenset(
+    {
+        # aggregatori
+        "fasi.eu", "europafacile.net", "contributiregione.it", "finanziamentinews.it",
+        "bandi.it", "infobandi.it", "ticonsiglio.com", "contributieuropa.com",
+        "first.aster.it",
+        # social, video, messaggistica
+        "facebook.com", "instagram.com", "x.com", "twitter.com", "linkedin.com",
+        "threads.net", "pinterest.com", "tiktok.com", "youtube.com", "youtu.be",
+        "vimeo.com", "t.me", "telegram.me", "wa.me", "whatsapp.com",
+    }
+)
+
+# Spazi (anche Unicode), caratteri di controllo e backslash: un URL che li
+# contiene non si mostra, il browser lo interpreterebbe a modo suo.
+_CARATTERI_VIETATI = re.compile(r"[\s\x00-\x1f\x7f\\]")
+_HOST_AMMESSO = frozenset("abcdefghijklmnopqrstuvwxyz0123456789.-_")
+
+
+def normalizza_host(host: Any) -> str | None:
+    """Host normalizzato come un browser, minuscolo e senza punto finale.
+    None se vuoto, non normalizzabile o con caratteri che un nome di dominio
+    non ammette."""
+    if not isinstance(host, str):
+        return None
+    norm = _host_normalizzato(host)
+    if norm is None or "." not in norm or not set(norm) <= _HOST_AMMESSO:
+        return None
+    return norm
+
+
+def _dominio_escluso(host: str) -> bool:
+    return any(host == d or host.endswith("." + d) for d in DOMINI_ESCLUSI)
+
+
+def host_pubblicabile(host: Any) -> str | None:
+    """Host senza schema (es. `fonte_ufficiale_host`), normalizzato, se può
+    fare da etichetta a un link; None se vuoto, non valido o escluso."""
+    if not isinstance(host, str) or _CARATTERI_VIETATI.search(host.strip()):
+        return None
+    try:
+        grezzo = urlsplit("//" + host.strip()).hostname
+    except ValueError:
+        return None
+    norm = normalizza_host(grezzo)
+    if norm is None or _dominio_escluso(norm) or is_blocked_link(norm):
+        return None
+    return norm
+
+
+def link_pubblicabile(url: Any) -> tuple[str, str] | None:
+    """`(url, host normalizzato)` se l'URL può uscire dall'API come pulsante o
+    allegato della scheda, altrimenti None.
+
+    Solo `http`/`https` con un host; niente spazi, caratteri di controllo,
+    backslash o credenziali; host fuori dai domini esclusi, sottodomini
+    compresi. L'URL restituito è quello ricevuto, senza spazi ai bordi."""
+    if not isinstance(url, str):
+        return None
+    url = url.strip()
+    if not url or _CARATTERI_VIETATI.search(url):
+        return None
+    try:
+        parti = urlsplit(url)
+        grezzo = parti.hostname
+        credenziali = parti.username is not None or parti.password is not None
+    except ValueError:
+        return None
+    if parti.scheme.lower() not in _FONTE_SCHEMI or credenziali or not grezzo:
+        return None
+    host = normalizza_host(grezzo)
+    if host is None or _dominio_escluso(host) or is_blocked_link(url):
+        return None
+    return url, host

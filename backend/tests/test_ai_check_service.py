@@ -686,6 +686,87 @@ class TestLettura:
         assert ("fn_entitlement_snapshot", {"p_user_id": OWNER}) in primary.rpcs
 
 
+def _catalogo(*, fusioni=(), guasto_doppioni=False) -> FakePrimary:
+    """Secondario finto per lo storico per bando: `bando_pubblico` per slug,
+    `bando_fusione` per master (coppie doppione → master) e per slug (nessuna
+    fusione), `bando_slug_storico` vuoto."""
+
+    def pubblico(filtri):
+        return [{"id": 17774, "slug": SLUG}] if filtri.get("slug") == SLUG else []
+
+    def fusione(filtri):
+        if "master_id" not in filtri:
+            return []
+        if guasto_doppioni:
+            from postgrest.exceptions import APIError as PgError
+
+            raise PgError({"message": "x", "code": "57014", "hint": None, "details": None})
+        return [{"bando_id": d} for d, m in fusioni if m == filtri["master_id"]]
+
+    return FakePrimary({"bando_pubblico": pubblico, "bando_fusione": fusione,
+                        "bando_slug_storico": []})
+
+
+def _filtri_lista(primary) -> dict:
+    [filtri] = [f for _, f in primary.ops_for("ai_checks", "select")
+                if "bando_id__in" in f or "bando_slug" in f]
+    return filtri
+
+
+class TestStoricoPerBando:
+    async def test_bando_e_suoi_doppioni_fusi(self):
+        primary = FakePrimary(base_selects(ai_checks=[READY_ROW]))
+        secondary = _catalogo(fusioni=[(555, 17774), (556, 17774), (777, 1)])
+        resp = await ai_check_service.list_checks(primary, _active(), bando_slug=SLUG,
+                                                  secondary=secondary)
+        filtri = _filtri_lista(primary)
+        assert filtri["bando_id__in"] == [17774, 555, 556] and "bando_slug" not in filtri
+        assert filtri["family_parent_id"] == OWNER
+        assert resp.items[0].report == {"schema_version": 1}
+        [(_, _, _, f_fusione)] = [o for o in secondary.ops if o[0] == "bando_fusione"]
+        assert f_fusione == {"master_id": 17774}
+        assert all(o[0] != "bando" for o in secondary.ops)
+
+    async def test_slug_non_risolto_ripiega_sullo_slug(self):
+        primary = FakePrimary(base_selects(ai_checks=[READY_ROW]))
+        await ai_check_service.list_checks(primary, _active(), bando_slug="ritirato-o-ignoto",
+                                           secondary=_catalogo())
+        assert _filtri_lista(primary) == {
+            "family_parent_id": OWNER, "company_profile_id": COMPANY_ID,
+            "bando_slug": "ritirato-o-ignoto"}
+
+    async def test_doppioni_non_leggibili_solo_il_bando(self):
+        primary = FakePrimary(base_selects(ai_checks=[READY_ROW]))
+        await ai_check_service.list_checks(primary, _active(), bando_slug=SLUG,
+                                           secondary=_catalogo(guasto_doppioni=True))
+        assert _filtri_lista(primary)["bando_id__in"] == [17774]
+
+    async def test_catalogo_non_leggibile_ripiega_sullo_slug(self):
+        class Rotto:
+            def table(self, nome):
+                raise RuntimeError("rete")
+
+        primary = FakePrimary(base_selects(ai_checks=[READY_ROW]))
+        await ai_check_service.list_checks(primary, _active(), bando_slug=SLUG, secondary=Rotto())
+        assert _filtri_lista(primary)["bando_slug"] == SLUG
+
+    async def test_il_router_passa_il_secondario(self, monkeypatch):
+        from app.api.routers import ai_check as router
+
+        ricevuti = {}
+
+        async def finto(primary, active, bando_slug, page, page_size, *, secondary=None):
+            ricevuti.update(bando_slug=bando_slug, secondary=secondary)
+            return "ok"
+
+        monkeypatch.setattr(ai_check_service, "list_checks", finto)
+        secondario = object()
+        esito = await router.list_ai_checks(active=_active(), primary=object(),
+                                            secondary=secondario, bando_slug=SLUG, page=1,
+                                            page_size=20)
+        assert esito == "ok" and ricevuti == {"bando_slug": SLUG, "secondary": secondario}
+
+
 class TestBudgetMembro:
     """WP6 (0031): un membro ATTIVO avvia l'AI-check sulle aziende visibili
     (garantite dal resolver) entro il budget assegnato dal titolare — il

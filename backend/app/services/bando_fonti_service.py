@@ -6,10 +6,13 @@ Letture sul DB secondario (anon key, sola lettura, colonne sempre per nome):
   `faq`), righe già filtrate dalla RLS (solo `pubblicabile`, 2xx, mai
   aggregatori). `select=*` risponde 42501: mai usarlo.
 
-`allegati` della riga del bando (deprecata, dopo `scrub_bando_row`) è il
-ripiego SOLO quando `bando_link` risponde con un errore: se risponde con zero
-righe il produttore ha escluso i link di proposito, e non si reintroducono.
-Ogni URL passa comunque da `link_policy` e dalla denylist del contratto §5.
+- `bando_fusione`: i doppioni fusi fra gli id assenti dalla vista.
+
+I candidati documentali sono sempre l'unione delle righe `bando_link` e del
+jsonb `allegati` della riga del bando (deprecato, dopo `scrub_bando_row`),
+senza doppioni per URL: molte righe sostitutive del jsonb non sono ancora
+leggibili (contratto §5.1). Ogni URL passa comunque da `link_policy` e dalla
+denylist del contratto §5.
 """
 
 import logging
@@ -30,7 +33,9 @@ TipoLink = Literal["allegato", "atto", "pagina_bando", "faq"]
 TIPI_DOCUMENTO: tuple[TipoLink, ...] = ("allegato", "atto", "pagina_bando", "faq")
 SELECT_STATO = "id,slug,stato_effettivo,data_scadenza,ultimo_cambiamento_at"
 SELECT_LINK = "id,bando_id,url,dominio,tipo,etichetta,content_type,ultimo_visto_at"
+SELECT_FUSIONE = "bando_id,master_id"
 BLOCCO_STATI = 100
+BLOCCO_FUSIONI = 100
 MAX_LINK = 50
 MAX_ETICHETTA = 200
 
@@ -188,10 +193,39 @@ async def leggi_stato_bandi(secondary, ids: list[int]) -> dict[int, StatoBando]:
     return risultato
 
 
+async def leggi_fusioni(secondary, ids: list[int]) -> dict[int, int | None]:
+    """Doppioni fusi fra `ids` (di solito gli assenti da `bando_pubblico`):
+    `{bando_id: master_id}`, a blocchi di 100 id (contratto §6.2). Gli errori
+    PROPAGANO, a differenza di `bandi_risoluzione.risolvi_fusioni`: non
+    sapere se un id è fuso non deve valere come «non fuso» (il chiamante
+    marcherebbe o chiuderebbe una call per un bando che c'è ancora)."""
+    unici = list(dict.fromkeys(i for i in ids if isinstance(i, int) and not isinstance(i, bool)))
+    fusi: dict[int, int | None] = {}
+    for inizio in range(0, len(unici), BLOCCO_FUSIONI):
+        blocco = unici[inizio : inizio + BLOCCO_FUSIONI]
+        resp = (
+            await secondary.table("bando_fusione")
+            .select(SELECT_FUSIONE)
+            .in_("bando_id", blocco)
+            .execute()
+        )
+        for riga in resp.data or []:
+            bando_id = riga.get("bando_id") if isinstance(riga, dict) else None
+            if isinstance(bando_id, int) and not isinstance(bando_id, bool) and bando_id in blocco:
+                master_id = riga.get("master_id")
+                fusi[bando_id] = (
+                    master_id
+                    if isinstance(master_id, int) and not isinstance(master_id, bool)
+                    else None
+                )
+    return fusi
+
+
 async def leggi_link_documenti(secondary, bando_id: int) -> list[LinkDocumento] | None:
     """Link documentali del bando da `bando_link`. None SOLO su errore
-    (tabella assente 42P01, permesso 42501, timeout…): è il segnale per il
-    ripiego su `allegati`. Una lista vuota è una risposta valida."""
+    (tabella assente 42P01, permesso 42501, timeout…): restano i soli
+    `allegati` e il documento mancato può essere transitorio. Una lista vuota
+    è una risposta valida."""
     try:
         resp = (
             await secondary.table("bando_link")
@@ -325,11 +359,14 @@ def _rango(tipo: str, testo_etichetta: str) -> int:
 
 
 def _chiave_url(url: str) -> str:
+    """Chiave dei doppioni: schema e host in minuscolo, senza la barra finale
+    del path (come la scheda del bando, contratto §3)."""
     try:
         parti = urlsplit(url.strip())
     except ValueError:
         return url.strip()
-    return f"{parti.scheme.lower()}://{(parti.netloc or '').lower()}{parti.path}?{parti.query}"
+    percorso = parti.path[:-1] if parti.path.endswith("/") else parti.path
+    return f"{parti.scheme.lower()}://{(parti.netloc or '').lower()}{percorso}?{parti.query}"
 
 
 def _https(url: str) -> bool:
@@ -339,38 +376,51 @@ def _https(url: str) -> bool:
         return False
 
 
+def _voce_allegato(voce) -> tuple[str, str | None, str | None] | None:
+    """(url, etichetta, formato dichiarato) di una voce del jsonb `allegati`."""
+    if not isinstance(voce, dict):
+        return None
+    url = voce.get("url") or voce.get("link")
+    if not isinstance(url, str) or not url.strip():
+        return None
+    etichetta = voce.get("label") or voce.get("etichetta")
+    formato_dichiarato = voce.get("tipo") if isinstance(voce.get("tipo"), str) else None
+    return url.strip(), etichetta if isinstance(etichetta, str) else None, formato_dichiarato
+
+
 def seleziona_candidati(
     links: list[LinkDocumento] | None,
-    allegati_fallback: list | None,
+    allegati: list | None,
     max_documenti: int,
 ) -> list[Candidato]:
     """Documenti da scaricare, in ordine di priorità, al massimo
-    `max_documenti`. Da `links` (bando_link) se la lettura è riuscita, anche
-    se vuota; da `allegati_fallback` SOLO se `links` è None. Esclusi: URL non
-    https, bloccati dalla policy o dalla denylist, formati certamente non PDF;
-    `pagina_bando` e `faq` passano solo se dichiarati PDF. Deduplica per URL."""
+    `max_documenti`. Sempre l'unione delle righe `links` (bando_link; None se
+    la lettura è fallita) e delle voci del jsonb `allegati`, senza doppioni
+    per URL: a parità di URL vince la riga di `bando_link`, e un'etichetta
+    vuota si completa con il `label` del jsonb. Esclusi: URL non https,
+    bloccati dalla policy o dalla denylist, formati certamente non PDF;
+    `pagina_bando` e `faq` passano solo se dichiarati PDF."""
     if max_documenti <= 0:
         return []
+    voci = [v for v in (_voce_allegato(voce) for voce in allegati or []) if v is not None]
+    etichette_jsonb: dict[str, str] = {}
+    for url, etichetta, _ in voci:
+        if etichetta and etichetta.strip():
+            etichette_jsonb.setdefault(_chiave_url(url), etichetta)
     grezzi: list[tuple[str, str | None, str | None, str, str | None, str, int | None]] = []
-    if links is not None:
-        for link in links:
-            grezzi.append(
-                (link.url, link.etichetta, link.dominio, link.tipo, link.content_type,
-                 "bando_link", link.id)
-            )
-    else:
-        for voce in allegati_fallback or []:
-            if not isinstance(voce, dict):
-                continue
-            url = voce.get("url") or voce.get("link")
-            if not isinstance(url, str) or not url.strip():
-                continue
-            etichetta = voce.get("label") or voce.get("etichetta")
-            formato_dichiarato = voce.get("tipo") if isinstance(voce.get("tipo"), str) else None
-            grezzi.append(
-                (url.strip(), etichetta if isinstance(etichetta, str) else None, None,
-                 "allegato", formato_dichiarato, "allegati", None)
-            )
+    chiavi_link: set[str] = set()
+    for link in links or []:
+        chiave = _chiave_url(link.url)
+        chiavi_link.add(chiave)
+        etichetta = link.etichetta if (link.etichetta or "").strip() else etichette_jsonb.get(chiave)
+        grezzi.append(
+            (link.url, etichetta, link.dominio, link.tipo, link.content_type, "bando_link",
+             link.id)
+        )
+    for url, etichetta, formato_dichiarato in voci:
+        if _chiave_url(url) in chiavi_link:
+            continue
+        grezzi.append((url, etichetta, None, "allegato", formato_dichiarato, "allegati", None))
     candidati: list[tuple[int, int, int, Candidato]] = []
     for ordine, riga in enumerate(grezzi):
         url, etichetta, dominio, tipo, content_type, origine, link_id = riga

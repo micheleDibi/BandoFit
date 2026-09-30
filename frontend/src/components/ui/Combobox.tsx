@@ -1,6 +1,8 @@
 import { Check, ChevronDown, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
+import { inputClasses } from "./Field";
+import { InlineError } from "./InlineError";
 
 export interface ComboboxOption {
   id: number;
@@ -33,6 +35,7 @@ export function Combobox({
 }) {
   const inputId = useId();
   const listboxId = useId();
+  const errorId = `${inputId}-errore`;
   const containerRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -97,11 +100,11 @@ export function Combobox({
   };
 
   return (
-    <div className="space-y-1.5" ref={containerRef}>
-      <label htmlFor={inputId} className="block text-sm font-medium text-slate-700">
+    <div className="flex flex-col gap-1.5" ref={containerRef}>
+      <label htmlFor={inputId} className="block text-small font-medium text-ink">
         {label}
         {required && (
-          <span className="text-red-500" aria-hidden>
+          <span className="text-danger" aria-hidden>
             {" "}
             *
           </span>
@@ -115,6 +118,7 @@ export function Combobox({
           aria-controls={listboxId}
           aria-autocomplete="list"
           aria-invalid={!!error}
+          aria-describedby={error ? errorId : undefined}
           autoComplete="off"
           disabled={disabled}
           value={open ? search : (selected?.label ?? "")}
@@ -126,11 +130,9 @@ export function Combobox({
           }}
           onKeyDown={handleKeyDown}
           className={cn(
-            "h-10 w-full rounded-lg border border-slate-300 bg-white px-3 pr-16 text-sm text-slate-900",
-            "placeholder:text-slate-400 transition-colors duration-150",
-            "focus:border-brand-500 focus:outline-2 focus:outline-offset-0 focus:outline-brand-500/30",
-            "disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500",
-            error && "border-red-400 focus:border-red-500",
+            inputClasses,
+            "pr-16",
+            error && "border-danger focus:border-danger focus-visible:outline-danger",
           )}
         />
         <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
@@ -142,12 +144,15 @@ export function Combobox({
                 onChange(null);
                 setSearch("");
               }}
-              className="cursor-pointer rounded p-1 text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-brand-500"
+              className="cursor-pointer rounded-mark p-1 text-ink-3 transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
             >
               <X className="size-3.5" aria-hidden />
             </button>
           )}
-          <ChevronDown className={cn("size-4 text-slate-400 transition-transform", open && "rotate-180")} aria-hidden />
+          <ChevronDown
+            className={cn("size-4 text-ink-3 transition-transform", open && "rotate-180")}
+            aria-hidden
+          />
         </div>
 
         {open && (
@@ -155,10 +160,10 @@ export function Combobox({
             id={listboxId}
             role="listbox"
             aria-label={label}
-            className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+            className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-panel border border-line bg-sheet p-1.5 shadow-overlay"
           >
             {filtered.length === 0 && (
-              <li className="px-3 py-2 text-sm text-slate-400">Nessun risultato</li>
+              <li className="px-2.5 py-2 text-body text-ink-3">Nessun risultato</li>
             )}
             {filtered.map((option, index) => (
               <li
@@ -171,21 +176,21 @@ export function Combobox({
                 }}
                 onMouseEnter={() => setHighlighted(index)}
                 className={cn(
-                  "flex cursor-pointer items-start gap-2 px-3 py-2 text-sm",
-                  index === highlighted ? "bg-brand-50 text-brand-800" : "text-slate-700",
+                  "flex cursor-pointer items-start gap-2 rounded-md px-2.5 py-2 text-body",
+                  index === highlighted ? "bg-desk text-ink" : "text-ink",
                 )}
               >
                 <Check
                   className={cn(
-                    "mt-0.5 size-3.5 shrink-0",
-                    option.id === value ? "text-brand-600" : "text-transparent",
+                    "mt-0.5 size-4 shrink-0",
+                    option.id === value ? "text-accent" : "text-transparent",
                   )}
                   aria-hidden
                 />
                 <span>
                   {option.label}
                   {option.sublabel && (
-                    <span className="block text-xs text-slate-400">{option.sublabel}</span>
+                    <span className="block text-small text-ink-3">{option.sublabel}</span>
                   )}
                 </span>
               </li>
@@ -194,11 +199,9 @@ export function Combobox({
         )}
       </div>
       {error ? (
-        <p className="text-sm text-red-600" role="alert">
-          {error}
-        </p>
+        <InlineError id={errorId}>{error}</InlineError>
       ) : helper ? (
-        <p className="text-sm text-slate-500">{helper}</p>
+        <p className="text-small text-ink-3">{helper}</p>
       ) : null}
     </div>
   );

@@ -161,7 +161,7 @@ function Costi({ c }: { c: CostiPartenariati }) {
         const voci = c.voci.filter((v) => v.valuta === valuta);
         const totale = c.totali.find((t) => t.valuta === valuta);
         return (
-          <Card key={valuta} className="overflow-hidden">
+          <Card key={valuta} className="overflow-hidden p-0">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-left text-sm">
                 <caption className="px-4 pt-4 text-left font-display text-base font-semibold text-slate-900">

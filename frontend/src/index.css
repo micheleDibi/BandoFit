@@ -1,7 +1,10 @@
 @import "tailwindcss";
 
+/* Token del design system: la fonte dei nomi è docs/design-system.md.
+   Il colore non basta mai da solo: ogni stato ha anche una parola. */
 @theme {
-  /* Brand — navy BandoFit (ancorato al logo: brand-900 ≈ #182448 del wordmark) */
+  /* Brand — navy BandoFit (ancorato al logo: brand-900 ≈ #182448 del wordmark).
+     La scala si usa solo tramite i ruoli qui sotto (accent, accent-hover, accent-soft, accent-line). */
   --color-brand-50: #f3f5f9;
   --color-brand-100: #e4e8f4;
   --color-brand-200: #c2cded;
@@ -14,14 +17,147 @@
   --color-brand-900: #182549;
   --color-brand-950: #0f172f;
 
-  /* Superfici e testo */
+  /* Inchiostro: il navy del logo e due grigi freddi leggibili */
+  --color-ink: #212b50; /* testo principale e titoli (13,8:1 su bianco) */
+  --color-ink-2: #45556c; /* testo secondario: metadati, descrizioni, voci di menu (7,6:1) */
+  --color-ink-3: #566580; /* testo terziario: etichette dei dati, note, aiuto, segnaposto (5,9:1) */
+  --color-ink-off: #90a1b9; /* solo segni senza significato (punto neutro, icone spente): mai per testo */
+  --color-on-accent: #ffffff; /* testo su accent e su ink */
+
+  /* Superfici e filetti */
+  --color-sheet: #ffffff; /* il foglio: contenuto, campi, menu, finestre */
+  --color-desk: #f7f9fc; /* il piano: barra laterale, pannelli */
+  --color-sunken: #eef2f7; /* fondo incassato: etichette, segmenti, barre vuote, voce al passaggio */
+  --color-line: #e2e8f0; /* filetto che separa; non delimita un controllo */
+  --color-line-control: #8290a8; /* bordo dei controlli e della testata delle tabelle (3,2:1) */
+  /* `surface` = `desk`: resta finché le pagine vecchie usano `bg-surface` */
   --color-surface: #f7f9fc;
+
+  /* Azione */
+  --color-accent: var(--color-brand-500); /* azione primaria, scheda attiva, anello del focus */
+  --color-accent-hover: var(--color-brand-600); /* primario al passaggio; testo dei link */
+  --color-accent-soft: var(--color-brand-100); /* fondo del pulsante testuale al passaggio; avatar */
+  --color-accent-line: var(--color-brand-200); /* filetto dell'avviso informativo */
+
+  /* Fit: il verde del logo, solo compatibilità, «Aperto» e conferme (3,2:1: mai per testo) */
+  --color-fit: #1aa38c;
+  --color-fit-ink: #0e7a68; /* testo di esito positivo e di «Aperto» (5,3:1) */
+  --color-fit-soft: #e6f5f2;
+
+  /* Attenzione: scadenza entro 30 giorni, «In apertura» */
+  --color-warning-ink: #973c00;
+  --color-warning-soft: #fffbeb;
+  --color-warning-line: #f0c36b;
+
+  /* Errori, scadenza entro 7 giorni, azioni distruttive */
+  --color-danger: #c10007;
+  --color-danger-soft: #fef2f2;
+  --color-danger-line: #f1a5a8;
+
+  /* Velo sotto finestre e cassetti */
+  --color-veil: rgb(33 43 80 / 0.4);
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-display: "Sora", "Inter", ui-sans-serif, system-ui, sans-serif;
 
+  /* Stili di testo: scala chiusa (niente `text-[..px]`). Il peso è nel token solo
+     dove è diverso da 400, così `text-body`/`text-small`/`text-prose` non azzerano
+     un grassetto ereditato; `font-*` esplicito vince comunque. Gli stili in Sora
+     (`title-*`, `figure*`, `due-day`) sono completati dalle `@utility` più sotto. */
+  --text-title-bando: 28px;
+  --text-title-bando--line-height: 36px;
+  --text-title-bando--letter-spacing: -0.015em;
+  --text-title-bando--font-weight: 600;
+  --text-title-page: 24px;
+  --text-title-page--line-height: 32px;
+  --text-title-page--letter-spacing: -0.01em;
+  --text-title-page--font-weight: 600;
+  --text-title-section: 18px;
+  --text-title-section--line-height: 26px;
+  --text-title-section--font-weight: 600;
+  --text-figure: 28px;
+  --text-figure--line-height: 32px;
+  --text-figure--font-weight: 600;
+  --text-figure-sm: 18px;
+  --text-figure-sm--line-height: 24px;
+  --text-figure-sm--font-weight: 600;
+  --text-due-day: 26px;
+  --text-due-day--line-height: 28px;
+  --text-due-day--letter-spacing: -0.02em;
+  --text-due-day--font-weight: 600;
+  --text-prose: 16px;
+  --text-prose--line-height: 26px;
+  --text-row-title: 16px;
+  --text-row-title--line-height: 24px;
+  --text-row-title--font-weight: 600;
+  --text-body: 14px;
+  --text-body--line-height: 22px;
+  --text-title-group: 14px;
+  --text-title-group--line-height: 20px;
+  --text-title-group--font-weight: 600;
+  --text-small: 13px;
+  --text-small--line-height: 20px;
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+  --text-caption--font-weight: 500;
+
+  /* Raggi */
+  --radius-mark: 4px; /* etichette, caselle di spunta */
+  --radius-control: 8px; /* pulsanti, campi, filtri, avvisi */
+  --radius-panel: 12px; /* pannelli, card, menu, finestre */
+  --radius-pill: 999px; /* solo avatar, contatori, filtri attivi, barre */
+
+  /* Ombre: `overlay` è l'unica del design system (menu, finestre, notifiche a comparsa);
+     `card*` restano finché le pagine vecchie le usano. */
+  --shadow-overlay: 0 12px 32px -8px rgb(33 43 80 / 0.28), 0 2px 6px rgb(33 43 80 / 0.08);
   --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.05), 0 1px 3px 0 rgb(15 23 42 / 0.06);
   --shadow-card-hover: 0 4px 6px -1px rgb(15 23 42 / 0.07), 0 10px 15px -3px rgb(15 23 42 / 0.08);
+}
+
+/* Sora solo tramite questi stili: la utility aggiunge la famiglia (e le cifre
+   tabellari, dove la cifra è il contenuto) ai token `--text-*` del tema. */
+@utility text-title-bando {
+  font-family: var(--font-display);
+  font-size: var(--text-title-bando);
+  line-height: var(--text-title-bando--line-height);
+  letter-spacing: var(--text-title-bando--letter-spacing);
+  font-weight: var(--text-title-bando--font-weight);
+  text-wrap: balance;
+}
+@utility text-title-page {
+  font-family: var(--font-display);
+  font-size: var(--text-title-page);
+  line-height: var(--text-title-page--line-height);
+  letter-spacing: var(--text-title-page--letter-spacing);
+  font-weight: var(--text-title-page--font-weight);
+}
+@utility text-title-section {
+  font-family: var(--font-display);
+  font-size: var(--text-title-section);
+  line-height: var(--text-title-section--line-height);
+  font-weight: var(--text-title-section--font-weight);
+}
+@utility text-figure {
+  font-family: var(--font-display);
+  font-size: var(--text-figure);
+  line-height: var(--text-figure--line-height);
+  font-weight: var(--text-figure--font-weight);
+  font-variant-numeric: tabular-nums;
+}
+@utility text-figure-sm {
+  font-family: var(--font-display);
+  font-size: var(--text-figure-sm);
+  line-height: var(--text-figure-sm--line-height);
+  font-weight: var(--text-figure-sm--font-weight);
+  font-variant-numeric: tabular-nums;
+}
+@utility text-due-day {
+  font-family: var(--font-display);
+  font-size: var(--text-due-day);
+  line-height: var(--text-due-day--line-height);
+  letter-spacing: var(--text-due-day--letter-spacing);
+  font-weight: var(--text-due-day--font-weight);
+  font-variant-numeric: tabular-nums;
 }
 
 html {
@@ -29,7 +165,7 @@ html {
 }
 
 body {
-  @apply bg-surface font-sans text-slate-800 antialiased;
+  @apply bg-sheet font-sans text-body text-ink antialiased;
   text-rendering: optimizeLegibility;
 }
 
@@ -38,6 +174,13 @@ h2,
 h3,
 h4 {
   @apply font-display;
+}
+
+@layer base {
+  /* Anello del focus uguale ovunque; un componente può ridefinirlo con le sue utility. */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
+  }
 }
 
 /* Cifre tabellari per importi e date nelle tabelle/card */
@@ -58,7 +201,8 @@ h4 {
   }
 }
 
-/* Backdrop del <dialog> nativo */
+/* Velo del <dialog> nativo: il token `veil`, con il valore in chiaro per i
+   browser in cui ::backdrop non eredita le variabili dalla radice. */
 dialog::backdrop {
-  background: rgb(7 23 64 / 0.5);
+  background: var(--color-veil, rgb(33 43 80 / 0.4));
 }

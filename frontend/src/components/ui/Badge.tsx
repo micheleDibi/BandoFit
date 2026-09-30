@@ -3,24 +3,18 @@ import { cn } from "../../lib/cn";
 
 type Tone = "brand" | "emerald" | "amber" | "slate" | "red";
 
-const tones: Record<Tone, string> = {
-  brand: "bg-brand-50 text-brand-700 ring-brand-200",
-  emerald: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-  amber: "bg-amber-50 text-amber-700 ring-amber-200",
-  slate: "bg-slate-100 text-slate-600 ring-slate-200",
-  red: "bg-red-50 text-red-700 ring-red-200",
-};
-
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
+  /** Accettato per compatibilità, non colora più: lo stato in parole lo fa `Status`. */
   tone?: Tone;
 }
 
-export function Badge({ tone = "slate", className, ...props }: BadgeProps) {
+/** Etichetta neutra (il `Tag` delle tavole): fondo `sunken`, testo `ink-2`,
+ *  raggio `mark`, 12px 500. Qualunque tono, lo stesso aspetto. */
+export function Badge({ tone: _tone = "slate", className, ...props }: BadgeProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset",
-        tones[tone],
+        "inline-flex h-6 items-center gap-1 rounded-mark bg-sunken px-2 text-caption text-ink-2",
         className,
       )}
       {...props}

@@ -17,7 +17,8 @@ import { cn } from "../../lib/cn";
  *  posizione `fixed`: dentro una tabella con `overflow-x-auto`/`overflow-hidden`
  *  un pannello `absolute` verrebbe tagliato. Tastiera: ↑/↓/Home/End tra le voci,
  *  Esc chiude e riporta il focus al trigger, click fuori chiude. Nessuna
- *  dipendenza esterna. */
+ *  dipendenza esterna. Aspetto: foglio con raggio `panel` e `shadow-overlay`,
+ *  voci alte 36px. */
 
 interface MenuCtx {
   close: (returnFocus?: boolean) => void;
@@ -149,10 +150,10 @@ export function Menu({ label, children, triggerIcon, triggerClassName }: MenuPro
           }
         }}
         className={cn(
-          "inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-slate-500",
-          "transition-colors duration-150 hover:bg-slate-100 hover:text-slate-800",
-          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500",
-          open && "bg-slate-100 text-slate-800",
+          "inline-flex size-9 cursor-pointer items-center justify-center rounded-control text-ink-2",
+          "transition-colors duration-150 hover:bg-sunken hover:text-ink",
+          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+          open && "bg-sunken text-ink",
           triggerClassName,
         )}
       >
@@ -169,7 +170,7 @@ export function Menu({ label, children, triggerIcon, triggerClassName }: MenuPro
             aria-label={label}
             onKeyDown={onPanelKeyDown}
             style={{ position: "fixed", top: coords.top, right: coords.right }}
-            className="z-50 min-w-48 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+            className="z-50 flex min-w-[220px] flex-col gap-0.5 rounded-panel border border-line bg-sheet p-1.5 shadow-overlay"
           >
             <MenuContext.Provider value={{ close }}>{children}</MenuContext.Provider>
           </div>,
@@ -204,23 +205,28 @@ export function MenuItem({ children, onSelect, disabled, title, danger, icon }: 
         ctx?.close();
       }}
       className={cn(
-        "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors duration-150",
+        "flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-body font-medium",
+        "transition-colors duration-150",
         // Focus roving (programmatico): lo sfondo È l'indicatore di focus —
-        // un outline verrebbe tagliato dal pannello overflow-hidden.
+        // un outline verrebbe tagliato dal pannello.
         "focus:outline-none",
         disabled
-          ? "cursor-not-allowed text-slate-300"
+          ? "cursor-not-allowed text-ink-3"
           : danger
-            ? "cursor-pointer text-red-600 hover:bg-red-50 focus:bg-red-50"
-            : "cursor-pointer text-slate-700 hover:bg-slate-100 focus:bg-slate-100",
+            ? "cursor-pointer text-danger hover:bg-danger-soft focus:bg-danger-soft"
+            : "cursor-pointer text-ink hover:bg-desk focus:bg-desk",
       )}
     >
-      {icon && <span className="shrink-0 text-current" aria-hidden>{icon}</span>}
+      {icon && (
+        <span className="shrink-0 text-current [&_svg]:size-4" aria-hidden>
+          {icon}
+        </span>
+      )}
       {children}
     </button>
   );
 }
 
 export function MenuSeparator() {
-  return <div role="separator" className="my-1 border-t border-slate-100" />;
+  return <div role="separator" className="my-1 border-t border-line" />;
 }

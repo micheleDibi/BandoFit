@@ -6,12 +6,18 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 import { cn } from "../../lib/cn";
+import { InlineError } from "./InlineError";
 
-const inputClasses =
-  "h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 " +
-  "placeholder:text-slate-400 transition-colors duration-150 " +
-  "focus:border-brand-500 focus:outline-2 focus:outline-offset-0 focus:outline-brand-500/30 " +
-  "disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500";
+/** Classi comuni dei controlli: bordo `line-control`, altezza 40, raggio
+ *  `control`; a fuoco il bordo diventa `accent` (l'anello lo dà la regola
+ *  globale, qui senza scarto per non staccarsi dal bordo). */
+export const inputClasses =
+  "h-10 w-full rounded-control border border-line-control bg-sheet px-3 text-body text-ink " +
+  "placeholder:text-ink-3 transition-colors duration-150 " +
+  "focus:border-accent focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-accent " +
+  "disabled:cursor-not-allowed disabled:bg-sunken disabled:text-ink-3";
+
+const errorClasses = "border-danger focus:border-danger focus-visible:outline-danger";
 
 interface FieldWrapperProps {
   label: string;
@@ -19,16 +25,25 @@ interface FieldWrapperProps {
   error?: string;
   helper?: string;
   htmlFor: string;
+  errorId: string;
   children: React.ReactNode;
 }
 
-function FieldWrapper({ label, required, error, helper, htmlFor, children }: FieldWrapperProps) {
+function FieldWrapper({
+  label,
+  required,
+  error,
+  helper,
+  htmlFor,
+  errorId,
+  children,
+}: FieldWrapperProps) {
   return (
-    <div className="space-y-1.5">
-      <label htmlFor={htmlFor} className="block text-sm font-medium text-slate-700">
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={htmlFor} className="block text-small font-medium text-ink">
         {label}
         {required && (
-          <span className="text-red-500" aria-hidden>
+          <span className="text-danger" aria-hidden>
             {" "}
             *
           </span>
@@ -36,11 +51,9 @@ function FieldWrapper({ label, required, error, helper, htmlFor, children }: Fie
       </label>
       {children}
       {error ? (
-        <p className="text-sm text-red-600" role="alert">
-          {error}
-        </p>
+        <InlineError id={errorId}>{error}</InlineError>
       ) : helper ? (
-        <p className="text-sm text-slate-500">{helper}</p>
+        <p className="text-small text-ink-3">{helper}</p>
       ) : null}
     </div>
   );
@@ -56,14 +69,23 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(
   ({ label, error, helper, required, id, className, ...props }, ref) => {
     const autoId = useId();
     const fieldId = id ?? autoId;
+    const errorId = `${fieldId}-errore`;
     return (
-      <FieldWrapper label={label} required={required} error={error} helper={helper} htmlFor={fieldId}>
+      <FieldWrapper
+        label={label}
+        required={required}
+        error={error}
+        helper={helper}
+        htmlFor={fieldId}
+        errorId={errorId}
+      >
         <input
           ref={ref}
           id={fieldId}
           required={required}
           aria-invalid={!!error}
-          className={cn(inputClasses, error && "border-red-400 focus:border-red-500", className)}
+          aria-describedby={error ? errorId : undefined}
+          className={cn(inputClasses, error && errorClasses, className)}
           {...props}
         />
       </FieldWrapper>
@@ -82,17 +104,26 @@ export const TextareaField = forwardRef<HTMLTextAreaElement, TextareaFieldProps>
   ({ label, error, helper, required, id, className, ...props }, ref) => {
     const autoId = useId();
     const fieldId = id ?? autoId;
+    const errorId = `${fieldId}-errore`;
     return (
-      <FieldWrapper label={label} required={required} error={error} helper={helper} htmlFor={fieldId}>
+      <FieldWrapper
+        label={label}
+        required={required}
+        error={error}
+        helper={helper}
+        htmlFor={fieldId}
+        errorId={errorId}
+      >
         <textarea
           ref={ref}
           id={fieldId}
           required={required}
           aria-invalid={!!error}
+          aria-describedby={error ? errorId : undefined}
           className={cn(
             inputClasses,
-            "h-auto min-h-20 resize-y py-2 leading-relaxed",
-            error && "border-red-400 focus:border-red-500",
+            "h-auto min-h-20 resize-y py-2",
+            error && errorClasses,
             className,
           )}
           {...props}
@@ -113,14 +144,23 @@ export const SelectField = forwardRef<HTMLSelectElement, SelectFieldProps>(
   ({ label, error, helper, required, id, className, children, ...props }, ref) => {
     const autoId = useId();
     const fieldId = id ?? autoId;
+    const errorId = `${fieldId}-errore`;
     return (
-      <FieldWrapper label={label} required={required} error={error} helper={helper} htmlFor={fieldId}>
+      <FieldWrapper
+        label={label}
+        required={required}
+        error={error}
+        helper={helper}
+        htmlFor={fieldId}
+        errorId={errorId}
+      >
         <select
           ref={ref}
           id={fieldId}
           required={required}
           aria-invalid={!!error}
-          className={cn(inputClasses, "cursor-pointer", error && "border-red-400", className)}
+          aria-describedby={error ? errorId : undefined}
+          className={cn(inputClasses, "cursor-pointer", error && errorClasses, className)}
           {...props}
         >
           {children}

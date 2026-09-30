@@ -191,7 +191,7 @@ export function TabellaCard({
   children: ReactNode;
 }) {
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden p-0">
       <div className="overflow-x-auto">
         <table
           className={`w-full min-w-[760px] text-left text-sm ${attenuata ? "opacity-60 transition-opacity" : ""}`}

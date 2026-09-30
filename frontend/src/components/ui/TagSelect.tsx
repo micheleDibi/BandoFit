@@ -1,6 +1,7 @@
 import { Building2, Check, ChevronDown, Plus } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
+import { inputClasses } from "./Field";
 
 export interface TagSelectOption {
   id: number;
@@ -94,7 +95,7 @@ export function TagSelect({
       </label>
       <div className="relative">
         <Plus
-          className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"
+          className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3"
           aria-hidden
         />
         <input
@@ -112,15 +113,11 @@ export function TagSelect({
             if (!open) setOpen(true);
           }}
           onKeyDown={handleKeyDown}
-          className={cn(
-            "h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-9 text-sm text-slate-900",
-            "placeholder:text-slate-400 transition-colors duration-150",
-            "focus:border-brand-500 focus:outline-2 focus:outline-offset-0 focus:outline-brand-500/30",
-          )}
+          className={cn(inputClasses, "pl-9 pr-9")}
         />
         <ChevronDown
           className={cn(
-            "pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-slate-400 transition-transform",
+            "pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-ink-3 transition-transform",
             open && "rotate-180",
           )}
           aria-hidden
@@ -133,10 +130,10 @@ export function TagSelect({
           role="listbox"
           aria-label={label}
           aria-multiselectable="true"
-          className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+          className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-panel border border-line bg-sheet p-1.5 shadow-overlay"
         >
           {filtered.length === 0 && (
-            <li className="px-3 py-2 text-sm text-slate-400">Nessun risultato</li>
+            <li className="px-2.5 py-2 text-body text-ink-3">Nessun risultato</li>
           )}
           {filtered.map((option, index) => {
             const isInherited = inherited.includes(option.id);
@@ -153,30 +150,27 @@ export function TagSelect({
                 }}
                 onMouseEnter={() => setHighlighted(index)}
                 className={cn(
-                  "flex items-start gap-2 px-3 py-2 text-sm",
+                  "flex items-start gap-2 rounded-md px-2.5 py-2 text-body",
                   isInherited
-                    ? "cursor-default text-slate-400"
-                    : cn(
-                        "cursor-pointer",
-                        index === highlighted ? "bg-brand-50 text-brand-800" : "text-slate-700",
-                      ),
+                    ? "cursor-default text-ink-3"
+                    : cn("cursor-pointer text-ink", index === highlighted && "bg-desk"),
                 )}
               >
                 <Check
                   className={cn(
-                    "mt-0.5 size-3.5 shrink-0",
-                    isSelected && !isInherited ? "text-brand-600" : "text-transparent",
+                    "mt-0.5 size-4 shrink-0",
+                    isSelected && !isInherited ? "text-accent" : "text-transparent",
                   )}
                   aria-hidden
                 />
                 <span className="min-w-0 flex-1">
                   {option.label}
                   {option.sublabel && (
-                    <span className="block truncate text-xs text-slate-400">{option.sublabel}</span>
+                    <span className="block truncate text-small text-ink-3">{option.sublabel}</span>
                   )}
                 </span>
                 {isInherited && (
-                  <span className="inline-flex shrink-0 items-center gap-1 text-xs text-slate-400">
+                  <span className="inline-flex shrink-0 items-center gap-1 text-caption text-ink-3">
                     <Building2 className="size-3" aria-hidden />
                     dall'azienda
                   </span>

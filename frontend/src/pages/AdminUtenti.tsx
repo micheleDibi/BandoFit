@@ -401,7 +401,7 @@ export default function AdminUtenti() {
       )}
 
       <Card
-        className="mt-5 overflow-hidden"
+        className="mt-5 overflow-hidden p-0"
         aria-busy={isPending || isPlaceholderData}
       >
         {isPending ? (

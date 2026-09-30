@@ -1,34 +1,46 @@
-import { Loader2 } from "lucide-react";
 import { forwardRef, type ButtonHTMLAttributes } from "react";
 import { Link, type LinkProps } from "react-router-dom";
 import { cn } from "../../lib/cn";
+import { Spinner } from "./Spinner";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 type Size = "sm" | "md" | "lg";
 
+/** Un solo pulsante pieno per schermata (`primary`); gli altri sono secondari
+ *  (bordo `line-control`), testuali (`ghost`, il «quiet» delle tavole) o
+ *  distruttivi (`danger`: bordo e testo in danger, mai pieno). */
 const variants: Record<Variant, string> = {
-  primary:
-    "bg-brand-500 text-white hover:bg-brand-600 active:bg-brand-700 shadow-sm",
-  secondary:
-    "bg-white text-slate-700 border border-slate-300 hover:border-brand-400 hover:text-brand-600 active:bg-brand-50",
-  ghost: "text-slate-600 hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200",
-  danger: "bg-red-600 text-white hover:bg-red-700 active:bg-red-800 shadow-sm",
+  primary: "bg-accent text-on-accent hover:bg-accent-hover",
+  secondary: "border-line-control bg-sheet text-ink hover:bg-desk",
+  ghost: "text-accent-hover hover:bg-accent-soft",
+  danger: "border-danger bg-sheet text-danger hover:bg-danger-soft",
 };
 
+// `sm` cambia taglia con `text-small` (13/20): il peso 600 va ridetto, perché
+// `text-small` sostituisce `text-title-group` nella merge.
 const sizes: Record<Size, string> = {
-  sm: "h-9 px-3 text-sm gap-1.5",
-  md: "h-10 px-4 text-sm gap-2",
-  lg: "h-12 px-6 text-base gap-2",
+  sm: "h-8 px-3 gap-2 text-small font-semibold",
+  md: "h-10 px-4 gap-2",
+  lg: "h-12 px-5 gap-2",
+};
+
+// Il testuale ha meno spazio ai lati (bf-btn-quiet): non ha un bordo da riempire.
+const ghostSizes: Record<Size, string> = {
+  sm: "px-2",
+  md: "px-2.5",
+  lg: "px-3",
 };
 
 export function buttonClasses(variant: Variant = "primary", size: Size = "md", className?: string) {
   return cn(
-    "inline-flex cursor-pointer items-center justify-center rounded-lg font-medium",
+    "inline-flex cursor-pointer items-center justify-center whitespace-nowrap rounded-control",
+    "border border-transparent text-title-group",
     "transition-colors duration-150",
-    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500",
+    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
     "disabled:pointer-events-none disabled:opacity-50",
     variants[variant],
     sizes[size],
+    variant === "ghost" && ghostSizes[size],
     className,
   );
 }
@@ -47,7 +59,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       className={buttonClasses(variant, size, className)}
       {...props}
     >
-      {loading && <Loader2 className="size-4 animate-spin" aria-hidden />}
+      {loading && <Spinner size="sm" className="text-current" />}
       {children}
     </button>
   ),

@@ -14,7 +14,7 @@ interface DossierSectionProps {
 export function DossierSection({ title, icon, defaultOpen = true, children }: DossierSectionProps) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden p-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

@@ -157,7 +157,7 @@ export function SubscriptionManagement({
       ) : management.isPending || !data ? (
         <Skeleton className="mt-4 h-48 w-full max-w-2xl" />
       ) : (
-        <Card className="mt-4 max-w-2xl divide-y divide-slate-100">
+        <Card className="mt-4 max-w-2xl divide-y divide-slate-100 p-0">
           {/* Cambio programmato: informa e lascia annullare */}
           {data.cambio_programmato && (
             <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-50/60 p-5">

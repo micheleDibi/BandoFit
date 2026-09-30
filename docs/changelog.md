@@ -14,6 +14,15 @@ Secondo giro di allineamento alla fase (c) del contratto del catalogo (dopo le c
 - **Sviluppo**: `backend/scripts/stampa_richieste_catalogo.py` stampa le richieste R1-R8 verso il catalogo senza rete né credenziali, per il confronto con il contratto.
 - **Azione manuale**: applicare la 0045 sul primario prima del deploy (senza, il passo della rimappatura registra un errore a ogni giro e rimappa lo stesso).
 
+## 2026-09-30 — Redesign del frontend, ondata 1: design system e cornice
+
+Prima tappa del redesign completo dell'interfaccia (progettato e approvato su Claude Design). In questa tappa cambiano le fondamenta; le pagine restano quelle di oggi, dentro la nuova cornice.
+- **Design system** (`docs/design-system.md`): token con un ruolo (inchiostro dal navy del logo, superfici, filetti, azione, il verde del logo per la compatibilità, stati), scala tipografica chiusa (Sora solo per titoli e cifre), raggi per gerarchia, un'unica ombra; regole «mai / sempre», scrittura e glossario.
+- **Componenti** (`src/components/ui/`): i primitivi esistenti rifatti con i token e le stesse props; ~30 componenti nuovi (pagina e intestazione, schede con `useTab`, tabella, fisarmonica, passi, fatti chiave, stato in parole, scadenza, compatibilità, pannello, avvisi, errore in linea, notifiche a comparsa, conferma, avanzamento, suggerimento, pulsante di sola icona, link, popover, cassetto, avatar, chip, filtro, segmento, ricerca, select, casella, radio, interruttore, campo password, cornice di accesso). `lib/cn.ts` conosce i nuovi stili.
+- **Cornice**: barra laterale su desktop con azienda attiva, voci raggruppate («Servizi», «La tua azienda», «Progettista», «Amministrazione»), Notifiche e account in fondo; barra in alto e cassetto su mobile; niente footer. `/app` apre una Home (segnaposto fino alla prossima tappa). Accessi non consentiti → pagina «non disponibile» dentro la cornice; il ritorno dopo il login conserva query e ancora; i vecchi indirizzi reindirizzano.
+- **Sviluppo**: vetrina dei componenti a `/_vetrina` (solo `npm run dev`); testi divisi in `lib/copy/<dominio>.ts`; inoltro `/api` all'API di produzione dal server di sviluppo.
+- Nessuna migration. Questa tappa non si rilascia da sola: il redesign va in produzione in un solo rilascio, a lavoro finito (fino ad allora la Home è un segnaposto e alcune pagine di Abbonamento non hanno una voce di menu).
+
 ## 2026-09-30 — Correzioni del catalogo: paginazione e link
 
 Un errore nell'elenco dei bandi e tre allineamenti al contratto del catalogo sui link della scheda.

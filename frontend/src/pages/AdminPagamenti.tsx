@@ -91,7 +91,7 @@ function SezioneAcquisti() {
         </select>
       </div>
 
-      <Card className="mt-5 overflow-hidden" aria-busy={isPending || isPlaceholderData}>
+      <Card className="mt-5 overflow-hidden p-0" aria-busy={isPending || isPlaceholderData}>
         {isPending ? (
           <div className="space-y-3 p-5">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -212,7 +212,7 @@ function SezioneFatture() {
         </select>
       </div>
 
-      <Card className="mt-5 overflow-hidden" aria-busy={isPending || isPlaceholderData}>
+      <Card className="mt-5 overflow-hidden p-0" aria-busy={isPending || isPlaceholderData}>
         {isPending ? (
           <div className="space-y-3 p-5">
             {Array.from({ length: 6 }).map((_, i) => (

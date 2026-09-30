@@ -377,7 +377,7 @@ export default function Preferenze() {
       <div className="mt-6 grid items-start gap-6 lg:grid-cols-[320px_1fr]">
         {/* Colonna sinistra: il profilo ereditato dall'azienda */}
         <aside className="space-y-4 lg:sticky lg:top-20">
-          <Card className="overflow-hidden">
+          <Card className="overflow-hidden p-0">
             <div className="border-b border-slate-100 bg-gradient-to-br from-brand-50 to-white px-5 py-4">
               <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
                 <Building2 className="size-4 text-brand-500" aria-hidden />

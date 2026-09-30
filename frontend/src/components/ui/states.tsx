@@ -1,15 +1,17 @@
-import { AlertTriangle, SearchX } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
 import { Button } from "./Button";
 
+/** Rettangolo su `sunken`, senza animazione: mentre arrivano i dati si vede
+ *  la forma del contenuto, non un effetto. */
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn("animate-pulse rounded-lg bg-slate-200/70", className)} aria-hidden />;
+  return <div className={cn("rounded-mark bg-sunken", className)} aria-hidden />;
 }
 
 export function BandoCardSkeleton() {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-card">
+    <div className="rounded-panel border border-line bg-sheet p-5">
       <div className="flex items-center gap-2">
         <Skeleton className="h-5 w-16" />
         <Skeleton className="h-5 w-24" />
@@ -25,6 +27,8 @@ export function BandoCardSkeleton() {
   );
 }
 
+/** Stato vuoto: che cosa manca e un'azione per cominciare, allineati a
+ *  sinistra, senza icona. `icon` è accettata per compatibilità e ignorata. */
 export function EmptyState({
   title,
   description,
@@ -33,35 +37,38 @@ export function EmptyState({
   title: string;
   description?: string;
   action?: ReactNode;
+  icon?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
-      <div className="rounded-full bg-brand-50 p-3 text-brand-500">
-        <SearchX className="size-7" aria-hidden />
-      </div>
-      <h3 className="mt-4 font-display text-base font-semibold text-slate-900">{title}</h3>
-      {description && <p className="mt-1 max-w-sm text-sm text-slate-500">{description}</p>}
-      {action && <div className="mt-5">{action}</div>}
+    <div className="flex max-w-[520px] flex-col items-start gap-2 py-8">
+      <h3 className="text-row-title text-ink">{title}</h3>
+      {description && <p className="text-body text-ink-2">{description}</p>}
+      {action && <div className="mt-2">{action}</div>}
     </div>
   );
 }
 
+/** Errore: che cosa è successo e come rimediare, con «Riprova» se c'è qualcosa
+ *  da ritentare (per 404/410 non si passa `onRetry`). I default sono neutri:
+ *  vale anche per errori che non sono di caricamento (chi sa di più passa `title`). */
 export function ErrorState({
-  message = "Si è verificato un errore durante il caricamento.",
+  title = "Qualcosa è andato storto.",
+  message = "Riprova tra qualche istante.",
   onRetry,
 }: {
+  title?: string;
   message?: string;
   onRetry?: () => void;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-red-200 bg-red-50/50 px-6 py-16 text-center">
-      <div className="rounded-full bg-red-100 p-3 text-red-600">
-        <AlertTriangle className="size-7" aria-hidden />
-      </div>
-      <h3 className="mt-4 font-display text-base font-semibold text-slate-900">Qualcosa è andato storto</h3>
-      <p className="mt-1 max-w-sm text-sm text-slate-600">{message}</p>
+    <div className="flex max-w-[520px] flex-col items-start gap-2 py-8" role="alert">
+      <h3 className="flex items-start gap-2 text-row-title text-ink">
+        <TriangleAlert className="mt-0.5 size-5 shrink-0 text-danger" aria-hidden />
+        {title}
+      </h3>
+      <p className="text-body text-ink-2">{message}</p>
       {onRetry && (
-        <Button variant="secondary" className="mt-5" onClick={onRetry}>
+        <Button variant="secondary" className="mt-2" onClick={onRetry}>
           Riprova
         </Button>
       )}

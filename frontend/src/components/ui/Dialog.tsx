@@ -1,5 +1,7 @@
 import { X } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
+import { cn } from "../../lib/cn";
+import { IconButton } from "./IconButton";
 
 export interface DialogProps {
   open: boolean;
@@ -15,7 +17,9 @@ export interface DialogProps {
   size?: "md" | "lg";
 }
 
-/** Modale basata sull'elemento <dialog> nativo: focus trap ed Esc gratis. */
+/** Modale basata sull'elemento <dialog> nativo: focus trap ed Esc gratis.
+ *  Foglio con raggio `panel` e `shadow-overlay`; il velo lo dà la regola
+ *  globale `dialog::backdrop` (token `veil`). */
 export function Dialog({
   open,
   onClose,
@@ -47,25 +51,27 @@ export function Dialog({
         // click sul backdrop = chiusura
         if (dismissible && e.target === ref.current) onClose();
       }}
-      className={`m-auto w-full ${size === "lg" ? "max-w-lg" : "max-w-md"} rounded-xl border border-slate-200 bg-white p-0 shadow-xl backdrop:bg-brand-950/50`}
-    >
-      <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-        <h2 className="font-display text-base font-semibold text-slate-900">{title}</h2>
-        {dismissible && (
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Chiudi"
-            className="cursor-pointer rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-brand-500"
-          >
-            <X className="size-5" aria-hidden />
-          </button>
-        )}
-      </div>
-      <div className="px-5 py-4 text-sm text-slate-600">{children}</div>
-      {footer && (
-        <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4">{footer}</div>
+      className={cn(
+        "m-auto w-full rounded-panel bg-sheet p-0 text-ink shadow-overlay",
+        size === "lg" ? "max-w-[640px]" : "max-w-[480px]",
       )}
+    >
+      <div className="flex flex-col gap-4 p-6">
+        <div className="flex items-start justify-between gap-4">
+          <h2 className="text-title-section text-ink">{title}</h2>
+          {dismissible && (
+            <IconButton
+              label="Chiudi"
+              icon={<X />}
+              size="sm"
+              onClick={onClose}
+              className="-mr-2 -mt-1"
+            />
+          )}
+        </div>
+        <div className="text-body text-ink-2">{children}</div>
+        {footer && <div className="flex flex-wrap justify-end gap-2">{footer}</div>}
+      </div>
     </dialog>
   );
 }

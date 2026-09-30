@@ -43,6 +43,9 @@ const LIST_KEYS = ["stato", ...NUMERIC_FACETS] as const;
 
 const DEFAULT_SORT = "pubblicazione_desc";
 
+// Il backend accetta `page` al massimo fino a questo valore (oltre risponde 422).
+const PAGINA_MASSIMA = 100000;
+
 function parseCsvNumbers(raw: string | null): number[] {
   if (!raw) return [];
   return raw
@@ -96,7 +99,7 @@ export function useBandiFilters() {
         ? parsePartenariato(searchParams.get("partenariato"))
         : null,
       sort: searchParams.get("sort") ?? DEFAULT_SORT,
-      page: Math.max(1, parsePositiveInt(searchParams.get("page")) ?? 1),
+      page: Math.min(PAGINA_MASSIMA, Math.max(1, parsePositiveInt(searchParams.get("page")) ?? 1)),
     }),
     [searchParams, partenariatoDaUrl],
   );

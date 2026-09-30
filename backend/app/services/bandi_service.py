@@ -15,6 +15,8 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from postgrest.exceptions import APIError
+
 from app.schemas.bando import BandoDetail, BandoListItem, Compatibilita
 from app.services.bandi_risoluzione import VISTA_BANDI, carica_per_slug
 from app.services.bando_scheda_link import (
@@ -341,6 +343,25 @@ def map_detail(row: dict, link: list[dict] | None = None) -> BandoDetail:
     )
 
 
+async def _pagina_segmento(costruisci, offset: int, quante: int) -> tuple[list[dict], int]:
+    """Righe `offset..offset+quante-1` di un segmento e suo conteggio esatto.
+
+    `costruisci` crea da zero la query del segmento a ogni chiamata: i builder
+    di postgrest-py accumulano i parametri e non si riusano. Con il conteggio
+    esatto, un offset oltre le righe del segmento fa rispondere al catalogo
+    «intervallo non soddisfacibile» (PGRST103): vale come pagina vuota, e il
+    conteggio si rilegge con una richiesta senza offset. Ogni altro errore
+    risale invariato."""
+    try:
+        resp = await costruisci().range(offset, offset + quante - 1).execute()
+    except APIError as exc:
+        if exc.code != "PGRST103":
+            raise
+        resp = await costruisci().limit(1).execute()
+        return [], resp.count or 0
+    return list(resp.data or []), resp.count or 0
+
+
 async def fetch_bandi(
     secondary,
     filters: BandiFilters,
@@ -354,7 +375,8 @@ async def fetch_bandi(
     """Elenco paginato in due segmenti: prima i bandi non chiusi, poi i chiusi
     — sempre in coda, qualunque ordinamento. PostgREST non sa ordinare per
     espressioni, quindi il confine è realizzato con due query complementari;
-    la pagina a cavallo del confine unisce le due code."""
+    la pagina a cavallo del confine unisce le due code. Una pagina oltre
+    l'ultima è vuota, con il totale esatto."""
     if filters.bando_ids is not None and not filters.bando_ids:
         # `id=in.()` non va mandato al catalogo: nessun id ammesso = pagina vuota.
         return Page.build([], 0, page, page_size)
@@ -363,21 +385,14 @@ async def fetch_bandi(
     today = today_italy()
     select = build_list_select(filters, include_facets=company_facets is not None)
 
-    open_q = secondary.table(VISTA_BANDI).select(select, count="exact")
-    open_q = apply_open_tier(apply_filters(open_q, filters, today), today)
-    open_q = (
-        open_q.order(column, desc=desc_open, nullsfirst=False)
-        .order("id", desc=False)
-        .range(offset, offset + page_size - 1)
-    )
-    open_resp = await open_q.execute()
-    open_count = open_resp.count or 0
-    rows = list(open_resp.data)
+    def segmento(tier, desc: bool):
+        """Query nuova di un segmento: conteggio esatto, filtri, ordinamento."""
+        q = secondary.table(VISTA_BANDI).select(select, count="exact")
+        q = tier(apply_filters(q, filters, today), today)
+        return q.order(column, desc=desc, nullsfirst=False).order("id", desc=False)
 
-    closed_q = secondary.table(VISTA_BANDI).select(select, count="exact")
-    closed_q = apply_closed_tier(apply_filters(closed_q, filters, today), today)
-    closed_q = closed_q.order(column, desc=desc_closed, nullsfirst=False).order(
-        "id", desc=False
+    rows, open_count = await _pagina_segmento(
+        lambda: segmento(apply_open_tier, desc_open), offset, page_size
     )
 
     need = page_size - len(rows)
@@ -385,14 +400,17 @@ async def fetch_bandi(
         # Offset dentro il segmento dei chiusi: 0 se la pagina è a cavallo del
         # confine, oltre se la pagina è tutta nel segmento dei chiusi.
         closed_offset = max(0, offset - open_count)
-        closed_resp = await closed_q.range(closed_offset, closed_offset + need - 1).execute()
-        rows.extend(closed_resp.data)
+        closed_rows, closed_count = await _pagina_segmento(
+            lambda: segmento(apply_closed_tier, desc_closed), closed_offset, need
+        )
+        rows.extend(closed_rows)
     else:
         # Pagina piena di non chiusi: serve comunque il conteggio dei chiusi
         # per il totale della paginazione.
-        closed_resp = await closed_q.limit(1).execute()
+        closed_resp = await segmento(apply_closed_tier, desc_closed).limit(1).execute()
+        closed_count = closed_resp.count or 0
 
-    total = open_count + (closed_resp.count or 0)
+    total = open_count + closed_count
 
     # Le due query non condividono uno snapshot: un bando che cambia segmento
     # tra l'una e l'altra (pipeline di ingestione) comparirebbe in entrambe le

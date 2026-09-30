@@ -28,6 +28,20 @@ export default function BandiList() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
 
+  // Pagina oltre l'ultima (URL a mano, link vecchio, totale calato): si
+  // rientra sull'ultima piena. Mai sui dati segnaposto della query precedente.
+  useEffect(() => {
+    if (
+      data &&
+      !isPlaceholderData &&
+      filters.page > 1 &&
+      data.items.length === 0 &&
+      data.total > 0
+    ) {
+      update({ page: Math.max(1, data.total_pages) }, { keepPage: true });
+    }
+  }, [data, isPlaceholderData, filters.page, update]);
+
   // Drawer filtri: chiusura con Esc, focus iniziale sul pulsante di chiusura,
   // blocco dello scroll di sfondo mentre è aperto.
   useEffect(() => {

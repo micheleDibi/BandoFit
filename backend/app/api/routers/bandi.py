@@ -76,7 +76,9 @@ async def list_bandi(
     primary: PrimaryClient,
     secondary: SecondaryClient,
     filters: Annotated[BandiFilters, Depends(parse_filters)],
-    page: int = Query(default=1, ge=1),
+    # Tetto alla pagina: oltre l'ultima l'elenco risponde vuoto, ma un offset
+    # smisurato non deve arrivare al catalogo.
+    page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=20, ge=1, le=50),
     sort: str = Query(default=DEFAULT_SORT),
     # Nessun vincolo di formato: un valore qualunque si ignora, mai un 422.

@@ -8,6 +8,10 @@ Lo stesso vale per la fonte ufficiale (`fonte_ufficiale_url`/`_host`).
 Il filtro si applica alla riga grezza del bando alla frontiera del
 catalogo (`fetch_bando_by_slug` e `fetch_bando_for_ai` in
 `bandi_service`), unico punto di passaggio di tutte le superfici.
+
+I link cliccabili (pulsanti, allegati e segmenti «link» di `contenuto`)
+passano in più da `link_pubblicabile`: solo `http`/`https` ben formati,
+fuori da una lista più ampia di domini (`DOMINI_ESCLUSI`).
 """
 
 import re
@@ -116,8 +120,11 @@ _SEGMENT_URL_KEYS = ("url", "href", "link")
 
 def _scrub_segments(segments: list) -> list:
     """Un segmento col dominio nel testo visibile cade per intero, link o
-    no; uno con il solo link bloccato perde il link ma tiene il testo (di
-    solito è un'ancora in mezzo a una frase: toglierlo la spezzerebbe)."""
+    no. Gli URL di un segmento passano dal filtro dei link su tutte le fonti
+    (`link_pubblicabile`), come pulsanti e allegati: se passano tutti il
+    segmento resta, con gli URL restituiti dal filtro; se anche uno solo non
+    passa, il segmento perde il link ma tiene il testo (di solito è un'ancora
+    in mezzo a una frase: toglierlo la spezzerebbe)."""
     out = []
     for seg in segments:
         if not isinstance(seg, dict):
@@ -125,8 +132,15 @@ def _scrub_segments(segments: list) -> list:
             continue
         if _mentions_blocked_host(seg.get("text")):
             continue
-        if not any(is_blocked_link(seg.get(key)) for key in _SEGMENT_URL_KEYS):
-            out.append(seg)
+        # Una chiave URL con valore nullo vale come assente; ogni altro valore,
+        # anche non stringa o vuoto, deve passare il filtro.
+        esiti = {
+            key: link_pubblicabile(seg[key])
+            for key in _SEGMENT_URL_KEYS
+            if seg.get(key) is not None
+        }
+        if all(esito is not None for esito in esiti.values()):
+            out.append({**seg, **{key: esito[0] for key, esito in esiti.items()}})
             continue
         clean = {k: v for k, v in seg.items() if k not in _SEGMENT_URL_KEYS}
         if clean.get("kind") == "link":
@@ -190,12 +204,13 @@ def scrub_bando_row(row: dict) -> dict:
     return row
 
 
-# --- Link della scheda: pulsanti e allegati ---------------------------------
+# --- Link della scheda: pulsanti, allegati e link del testo -----------------
 # Filtro dei link su tutte le fonti (contratto DB bandi §5): ogni URL che la
-# scheda mostra come pulsante o come allegato passa da `link_pubblicabile`,
-# qualunque colonna o tabella lo fornisca. È una lista separata da
-# BLOCKED_LINK_HOSTS, che pilota anche le regex sulle menzioni nei testi:
-# lì un dominio breve come «x.com» taglierebbe testo legittimo.
+# scheda mostra come pulsante, come allegato o come link dentro `contenuto`
+# passa da `link_pubblicabile`, qualunque colonna o tabella lo fornisca. È una
+# lista separata da BLOCKED_LINK_HOSTS, che continua a pilotare le regex sulle
+# menzioni nei testi: lì un dominio breve come «x.com» taglierebbe testo
+# legittimo.
 DOMINI_ESCLUSI = BLOCKED_LINK_HOSTS | frozenset(
     {
         # aggregatori
@@ -210,9 +225,13 @@ DOMINI_ESCLUSI = BLOCKED_LINK_HOSTS | frozenset(
 )
 
 # Spazi (anche Unicode), caratteri di controllo e backslash: un URL che li
-# contiene non si mostra, il browser lo interpreterebbe a modo suo.
+# contiene non si mostra, il browser lo interpreterebbe a modo suo. Fa
+# eccezione lo spazio semplice dopo l'host di un URL: `link_pubblicabile` lo
+# codifica prima di questo controllo (`_spazi_codificati`).
 _CARATTERI_VIETATI = re.compile(r"[\s\x00-\x1f\x7f\\]")
 _HOST_AMMESSO = frozenset("abcdefghijklmnopqrstuvwxyz0123456789.-_")
+# Un altro indirizzo che comincia dopo uno spazio: due URL in un campo solo.
+_SECONDO_URL = re.compile(r" +https?://", re.IGNORECASE)
 
 
 def normalizza_host(host: Any) -> str | None:
@@ -246,16 +265,39 @@ def host_pubblicabile(host: Any) -> str | None:
     return norm
 
 
-def link_pubblicabile(url: Any) -> tuple[str, str] | None:
-    """`(url, host normalizzato)` se l'URL può uscire dall'API come pulsante o
-    allegato della scheda, altrimenti None.
+def _spazi_codificati(url: str) -> str | None:
+    """L'URL con ogni spazio semplice codificato `%20`, come fa un browser in
+    percorso, query e frammento (contratto DB bandi §5). None se dopo uno
+    spazio comincia un altro indirizzo, o se lo spazio cade nello schema o
+    nell'host: lì nessuna codifica dà un indirizzo valido."""
+    if _SECONDO_URL.search(url):
+        return None
+    if " " not in url:
+        return url
+    try:
+        parti = urlsplit(url)
+    except ValueError:
+        return None
+    # Con uno spazio nello schema non c'è alcuno schema riconoscibile.
+    if not parti.scheme or " " in parti.netloc:
+        return None
+    # Sostituzione sulla stringa, senza ricomporre l'URL: il resto (maiuscole
+    # dello schema, `?` o `#` finali) esce com'è arrivato.
+    return url.replace(" ", "%20")
 
-    Solo `http`/`https` con un host; niente spazi, caratteri di controllo,
-    backslash o credenziali; host fuori dai domini esclusi, sottodomini
-    compresi. L'URL restituito è quello ricevuto, senza spazi ai bordi."""
+
+def link_pubblicabile(url: Any) -> tuple[str, str] | None:
+    """`(url, host normalizzato)` se l'URL può uscire dall'API come pulsante,
+    allegato o link nel testo della scheda, altrimenti None.
+
+    Solo `http`/`https` con un host; niente spazi Unicode, tabulazioni, a
+    capo, caratteri di controllo, backslash o credenziali; host fuori dai
+    domini esclusi, sottodomini compresi. L'URL restituito è quello ricevuto,
+    senza spazi ai bordi e con gli spazi semplici dopo l'host codificati
+    `%20`: è quello da mostrare e da confrontare."""
     if not isinstance(url, str):
         return None
-    url = url.strip()
+    url = _spazi_codificati(url.strip())
     if not url or _CARATTERI_VIETATI.search(url):
         return None
     try:

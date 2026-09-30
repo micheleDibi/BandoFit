@@ -16,7 +16,6 @@ ripieghi: un warning nel log, mai un 5xx.
 
 import logging
 from collections.abc import Iterator
-from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
@@ -107,29 +106,8 @@ def _id_riga(riga: dict) -> float:
     return float("inf")
 
 
-def _istante(valore: Any) -> datetime | None:
-    if not isinstance(valore, str):
-        return None
-    try:
-        istante = datetime.fromisoformat(valore.strip())
-    except ValueError:
-        return None
-    return istante if istante.tzinfo else istante.replace(tzinfo=timezone.utc)
-
-
 def _righe(link: list[dict], tipo: str) -> list[dict]:
     return [r for r in link if isinstance(r, dict) and r.get("tipo") == tipo]
-
-
-def _per_recenza(righe: list[dict]) -> list[dict]:
-    """`ultimo_visto_at` più recente per primo (i NULL in coda), a parità
-    l'id più basso."""
-
-    def chiave(riga: dict):
-        istante = _istante(riga.get("ultimo_visto_at"))
-        return (istante is None, -istante.timestamp() if istante else 0.0, _id_riga(riga))
-
-    return sorted(righe, key=chiave)
 
 
 def _per_id(righe: list[dict]) -> list[dict]:
@@ -184,12 +162,17 @@ def _link(url: Any, origine: OrigineLink, host_dichiarato: Any = None) -> LinkSc
 
 def fonte_ufficiale_pubblicabile(riga: dict) -> tuple[Any, Any]:
     """`(fonte_ufficiale_url, fonte_ufficiale_host)` come possono uscire
-    dall'API: se il filtro dei link ne scarta uno, cadono entrambi."""
+    dall'API: se il filtro dei link ne scarta uno, cadono entrambi. L'URL è
+    quello restituito dal filtro, lo stesso di `cta` e `link_fonte`."""
     url = riga.get("fonte_ufficiale_url")
     host = riga.get("fonte_ufficiale_host")
-    url_ok = url is None or link_pubblicabile(url) is not None
+    if url is not None:
+        ammesso = link_pubblicabile(url)
+        if ammesso is None:
+            return None, None
+        url = ammesso[0]
     host_ok = _testo(host) is None or host_pubblicabile(host) is not None
-    return (url, host) if url_ok and host_ok else (None, None)
+    return (url, host) if host_ok else (None, None)
 
 
 def _fonte_trovata(riga: dict) -> bool:
@@ -197,14 +180,14 @@ def _fonte_trovata(riga: dict) -> bool:
 
 
 def _candidati_cta(riga: dict, link: list[dict]) -> Iterator[LinkScheda | None]:
-    for r in _per_recenza(_righe(link, "candidatura")):
+    for r in _per_id(_righe(link, "candidatura")):
         yield _link(r.get("url"), "candidatura")
     yield _link(riga.get("link_candidatura"), "link_candidatura")
     if _fonte_trovata(riga):
         yield _link(
             riga.get("fonte_ufficiale_url"), "fonte_ufficiale", riga.get("fonte_ufficiale_host")
         )
-    for r in _per_recenza(_righe(link, "portale")):
+    for r in _per_id(_righe(link, "portale")):
         yield _link(r.get("url"), "portale")
     yield _link(riga.get("link_bando"), "link_bando")
 
@@ -212,9 +195,9 @@ def _candidati_cta(riga: dict, link: list[dict]) -> Iterator[LinkScheda | None]:
 def calcola_cta(riga: dict, link: list[dict]) -> LinkScheda | None:
     """Pulsante principale, nell'ordine del §5.1: riga `candidatura` →
     `link_candidatura` → fonte ufficiale (solo se `trovata`) → riga
-    `portale` → `link_bando`. Con più righe dello stesso tipo vince la più
-    recente (`ultimo_visto_at`), a parità l'id più basso. Il primo URL
-    ammesso dal filtro vince."""
+    `portale` → `link_bando`. Con più righe dello stesso tipo vince l'id più
+    basso (la lettura è con `order=id`); `ultimo_visto_at` non si usa, perché
+    avanza a ogni verifica. Il primo URL ammesso dal filtro vince."""
     return next((c for c in _candidati_cta(riga, link) if c is not None), None)
 
 

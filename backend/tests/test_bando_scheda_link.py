@@ -106,35 +106,39 @@ class TestOrdineCta:
 
 
 class TestPiuRigheDelloStessoTipo:
-    def test_vince_la_piu_recente(self):
+    @pytest.mark.parametrize("tipo", ["candidatura", "portale"])
+    def test_vince_l_id_piu_basso(self, tipo):
+        # `ultimo_visto_at` avanza a ogni verifica: non decide il pulsante.
         link = [
-            _link(1, "candidatura", "https://a.it/", visto="2026-09-01T10:00:00+00:00"),
-            _link(2, "candidatura", "https://b.it/", visto="2026-09-20T10:00:00+00:00"),
+            _link(1, tipo, "https://a.it/", visto="2026-09-01T10:00:00+00:00"),
+            _link(2, tipo, "https://b.it/", visto="2026-09-20T10:00:00+00:00"),
         ]
-        assert _cta(_riga(), link) == ("candidatura", "https://b.it/")
+        assert _cta(_riga(), link) == (tipo, "https://a.it/")
 
-    def test_a_parita_vince_l_id_piu_basso(self):
+    @pytest.mark.parametrize("tipo", ["candidatura", "portale"])
+    def test_l_ordine_di_arrivo_non_conta(self, tipo):
         link = [
-            _link(9, "portale", "https://b.it/"),
-            _link(4, "portale", "https://a.it/"),
+            _link(9, tipo, "https://b.it/", visto="2026-09-20T10:00:00+00:00"),
+            _link(4, tipo, "https://a.it/", visto="2026-09-01T10:00:00+00:00"),
         ]
-        assert _cta(_riga(), link) == ("portale", "https://a.it/")
+        assert _cta(_riga(), link) == (tipo, "https://a.it/")
 
-    def test_confronto_sull_istante_non_sulla_stringa(self):
-        # 10:00+02:00 = 08:00Z, più vecchio di 09:30Z.
-        link = [
-            _link(1, "candidatura", "https://a.it/", visto="2026-09-01T10:00:00+02:00"),
-            _link(2, "candidatura", "https://b.it/", visto="2026-09-01T09:30:00Z"),
-        ]
-        assert _cta(_riga(), link) == ("candidatura", "https://b.it/")
-
-    @pytest.mark.parametrize("visto", [None, "", "non-una-data", 12345])
-    def test_ultimo_visto_mancante_o_invalido_in_coda(self, visto):
+    @pytest.mark.parametrize(
+        "visto", [None, "", "non-una-data", 12345, "2020-01-01T00:00:00+00:00",
+                  "2030-01-01T00:00:00+00:00"]
+    )
+    def test_ultimo_visto_non_cambia_il_pulsante(self, visto):
+        fisso = "2026-09-10T00:00:00+00:00"
         link = [
             _link(1, "candidatura", "https://a.it/", visto=visto),
-            _link(2, "candidatura", "https://b.it/", visto="2020-01-01T00:00:00+00:00"),
+            _link(2, "candidatura", "https://b.it/", visto=fisso),
         ]
-        assert _cta(_riga(), link) == ("candidatura", "https://b.it/")
+        assert _cta(_riga(), link) == ("candidatura", "https://a.it/")
+        link = [
+            _link(1, "candidatura", "https://a.it/", visto=fisso),
+            _link(2, "candidatura", "https://b.it/", visto=visto),
+        ]
+        assert _cta(_riga(), link) == ("candidatura", "https://a.it/")
 
     def test_righe_malformate_ignorate(self):
         link = ["non-un-dict", {"tipo": "candidatura"}, {"tipo": "candidatura", "url": None},
@@ -167,12 +171,22 @@ class TestFiltroSulPulsante:
             "https://news.fasi.eu/bando",
             "https://t.me/canale",
             "https://utente:segreto@regione.it/",
-            "https://regione.it/a b",
+            "https://regio ne.it/a",
+            "https://regione.it/a.pdf https://regione.it/b.pdf",
+            "https://regione.it/a\tb",
         ],
     )
     def test_url_non_pubblicabili_mai_pulsante(self, url):
         riga = _riga(link_candidatura=url, link_bando=url)
         assert _cta(riga, [_link(1, "candidatura", url)]) is None
+
+    def test_spazio_nel_percorso_codificato_nel_pulsante(self):
+        atteso = "https://regione.it/avviso%202026/domanda"
+        link = [_link(1, "candidatura", "https://regione.it/avviso 2026/domanda")]
+        assert _cta(_riga(), link) == ("candidatura", atteso)
+        riga = _riga(link_bando="https://regione.it/avviso 2026/domanda")
+        assert _cta(riga) == ("link_bando", atteso)
+        assert calcola_link_fonte(riga).url == atteso
 
     def test_host_normalizzato_per_le_righe(self):
         cta = calcola_cta(_riga(), [_link(1, "portale", "https://WWW.Mimit.GOV.it:443/x")])
@@ -257,6 +271,27 @@ class TestFonteUfficialePubblicabile:
         riga["fonte_ufficiale_host"] = host
         assert fonte_ufficiale_pubblicabile(riga) == (None, None)
 
+    def test_url_con_spazio_codificato_come_nei_pulsanti(self):
+        riga = _fonte(link_bando=BANDO)
+        riga["fonte_ufficiale_url"] = " https://www.regione.it/bando 2026/avviso.pdf "
+        atteso = "https://www.regione.it/bando%202026/avviso.pdf"
+        assert fonte_ufficiale_pubblicabile(riga) == (atteso, "www.regione.it")
+        assert calcola_cta(riga, []).url == atteso
+        assert calcola_link_fonte(riga).url == atteso
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://www.regio ne.it/bando",
+            "https://www.regione.it/a.pdf https://www.regione.it/b.pdf",
+            "https://www.regione.it/a b",
+        ],
+    )
+    def test_url_con_spazio_non_codificabile_cadono_insieme(self, url):
+        riga = _fonte()
+        riga["fonte_ufficiale_url"] = url
+        assert fonte_ufficiale_pubblicabile(riga) == (None, None)
+
     def test_niente_da_mostrare(self):
         assert calcola_link_fonte(_riga()) is None
         assert calcola_link_fonte(_riga(link_bando="javascript:void(0)")) is None
@@ -325,6 +360,44 @@ class TestAllegati:
             {"label": "5", "url": "https://x.it/a//"},
         ])
         assert [e for _, e, _, _ in _allegati(riga)] == ["1", "2", "3", "5"]
+
+    def test_spazio_nel_percorso_codificato(self):
+        link = [_link(1, "allegato", "https://x.it/docs/Avviso pubblico 2026.pdf",
+                      etichetta="Avviso")]
+        assert _allegati(_riga(), link) == [
+            ("https://x.it/docs/Avviso%20pubblico%202026.pdf", "Avviso", "allegato", "pdf")
+        ]
+
+    def test_spazio_nel_percorso_codificato_anche_dal_jsonb(self):
+        riga = _riga(allegati=[{"label": "Modulo", "url": "https://x.it/Modulo A.docx"}])
+        assert _allegati(riga) == [("https://x.it/Modulo%20A.docx", "Modulo", "allegato", "docx")]
+
+    def test_doppione_con_spazio_codificato_e_grezzo(self):
+        # La riga arriva già codificata, la voce del jsonb no: è lo stesso file.
+        link = [_link(1, "allegato", "https://x.it/Avviso%20pubblico.pdf", etichetta=None)]
+        riga = _riga(allegati=[
+            {"label": "Avviso", "url": "https://x.it/Avviso pubblico.pdf", "tipo": "pdf"},
+        ])
+        assert _allegati(riga, link) == [
+            ("https://x.it/Avviso%20pubblico.pdf", "Avviso", "allegato", "pdf")
+        ]
+        # vale anche al contrario e dentro il solo jsonb
+        link = [_link(1, "atto", "https://x.it/Avviso pubblico.pdf", etichetta="Atto")]
+        riga = _riga(allegati=[
+            {"label": "A", "url": "https://x.it/Avviso%20pubblico.pdf"},
+            {"label": "B", "url": "https://x.it/Avviso pubblico.pdf"},
+        ])
+        assert _allegati(riga, link) == [
+            ("https://x.it/Avviso%20pubblico.pdf", "Atto", "atto", "pdf")
+        ]
+
+    def test_allegato_con_due_url_o_spazio_nell_host_scartato(self):
+        link = [
+            _link(1, "allegato", "https://x.it/a.pdf https://x.it/b.pdf"),
+            _link(2, "allegato", "https://x .it/a.pdf"),
+            _link(3, "allegato", "https://x.it/ok.pdf"),
+        ]
+        assert [u for u, *_ in _allegati(_riga(), link)] == ["https://x.it/ok.pdf"]
 
     def test_doppioni_nel_jsonb(self):
         riga = _riga(allegati=[

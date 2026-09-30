@@ -398,6 +398,125 @@ class TestScrubContenuto:
         row = scrub_bando_row({"contenuto": contenuto})
         assert row["contenuto"] == contenuto
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://www.fasi.eu/x",
+            "https://m.facebook.com/x",
+            "https://youtu.be/x",
+            "https://it.linkedin.com/company/x",
+            "javascript:alert(1)",
+            "JavaScript:alert(1)",
+            "data:text/html,x",
+            "mailto:a@b.it",
+            "tel:+390212345",
+            "ftp://ftp.regione.it/x",
+            "www.regione.it/x",
+            "/bandi/x",
+            "https://ente.it/a\\b",
+            "https://utente:segreto@ente.it/x",
+            "https://ente.it/a.pdf https://ente.it/b.pdf",
+            "https://en te.it/x",
+        ],
+    )
+    @pytest.mark.parametrize("chiave", ["url", "href", "link"])
+    def test_segmento_link_non_pubblicabile_degrada_a_testo(self, url, chiave):
+        contenuto = {"sections": [{"type": "paragraph", "segments": [
+            {"kind": "text", "text": "Scrivere a "},
+            {"kind": "link", chiave: url, "text": "ufficio bandi"},
+        ]}]}
+        row = scrub_bando_row({"contenuto": contenuto})
+        assert row["contenuto"]["sections"][0]["segments"] == [
+            {"kind": "text", "text": "Scrivere a "},
+            {"kind": "text", "text": "ufficio bandi"},
+        ]
+
+    @pytest.mark.parametrize(
+        "url",
+        ["https://www.regione.it/x", "http://www.regione.it/x", "HTTPS://www.regione.it/x",
+         "https://www.regione.it/x?a=1#sez"],
+    )
+    def test_segmento_link_pubblicabile_invariato(self, url):
+        segmento = {"kind": "link", "url": url, "text": "portale"}
+        contenuto = {"sections": [{"type": "paragraph", "segments": [dict(segmento)]}]}
+        row = scrub_bando_row({"contenuto": contenuto})
+        assert row["contenuto"]["sections"][0]["segments"] == [segmento]
+
+    def test_segmento_link_esce_con_l_url_del_filtro(self):
+        contenuto = {"sections": [{"type": "paragraph", "segments": [
+            {"kind": "link", "href": "  https://www.regione.it/avviso 2026.pdf ", "text": "avviso"},
+        ]}]}
+        row = scrub_bando_row({"contenuto": contenuto})
+        assert row["contenuto"]["sections"][0]["segments"] == [
+            {"kind": "link", "href": "https://www.regione.it/avviso%202026.pdf", "text": "avviso"}
+        ]
+
+    def test_kind_non_link_con_url_non_pubblicabile_conservato(self):
+        contenuto = {"sections": [{"type": "paragraph", "segments": [
+            {"kind": "bold", "url": "mailto:a@b.it", "text": "in evidenza"},
+            {"kind": "bold", "url": "https://www.regione.it/x", "text": "con link"},
+        ]}]}
+        row = scrub_bando_row({"contenuto": contenuto})
+        assert row["contenuto"]["sections"][0]["segments"] == [
+            {"kind": "bold", "text": "in evidenza"},
+            {"kind": "bold", "url": "https://www.regione.it/x", "text": "con link"},
+        ]
+
+    def test_chiave_url_nulla_vale_come_assente(self):
+        segmento = {"kind": "link", "url": None, "href": OK, "text": "portale"}
+        contenuto = {"sections": [{"type": "paragraph", "segments": [dict(segmento)]}]}
+        row = scrub_bando_row({"contenuto": contenuto})
+        assert row["contenuto"]["sections"][0]["segments"] == [segmento]
+
+    @pytest.mark.parametrize("valore", [123, "", "   ", ["https://www.regione.it/x"], {"a": 1}, 0])
+    def test_chiave_url_presente_ma_non_valida_degrada_a_testo(self, valore):
+        contenuto = {"sections": [{"type": "paragraph", "segments": [
+            {"kind": "link", "url": valore, "href": OK, "text": "portale"},
+        ]}]}
+        row = scrub_bando_row({"contenuto": contenuto})
+        assert row["contenuto"]["sections"][0]["segments"] == [
+            {"kind": "text", "text": "portale"}
+        ]
+
+    def test_piu_chiavi_url_tutte_o_nessuna(self):
+        contenuto = {"sections": [{"type": "paragraph", "segments": [
+            {"kind": "link", "href": OK, "url": "https://www.regione.it/a b", "text": "due buone"},
+            {"kind": "link", "href": OK, "url": "https://t.me/canale", "text": "una esclusa"},
+            {"kind": "link", "href": "mailto:a@b.it", "link": OK, "text": "una non web"},
+        ]}]}
+        row = scrub_bando_row({"contenuto": contenuto})
+        assert row["contenuto"]["sections"][0]["segments"] == [
+            {"kind": "link", "href": OK, "url": "https://www.regione.it/a%20b",
+             "text": "due buone"},
+            {"kind": "text", "text": "una esclusa"},
+            {"kind": "text", "text": "una non web"},
+        ]
+
+    def test_segmento_senza_chiavi_url_invariato(self):
+        segmenti = [{"kind": "link", "text": "senza indirizzo"}, {"kind": "text", "text": "x"},
+                    {"kind": "text", "text": "y", "url": None}]
+        contenuto = {"sections": [{"type": "paragraph", "segments": [dict(s) for s in segmenti]}]}
+        row = scrub_bando_row({"contenuto": contenuto})
+        assert row["contenuto"]["sections"][0]["segments"] == segmenti
+
+    def test_il_filtro_non_muta_il_contenuto_originale(self):
+        segmento = {"kind": "link", "url": "https://www.regione.it/a b", "text": "avviso"}
+        contenuto = {"sections": [{"type": "paragraph", "segments": [segmento]}]}
+        scrub_bando_row({"contenuto": contenuto})
+        assert segmento == {"kind": "link", "url": "https://www.regione.it/a b", "text": "avviso"}
+
+    def test_menzioni_nel_testo_restano_sulla_lista_breve(self):
+        # Il testo visibile non si tocca per i domini della lista ampia.
+        contenuto = {"sections": [{"type": "paragraph", "segments": [
+            {"kind": "text", "text": "seguici su x.com e t.me"},
+            {"kind": "link", "url": "https://t.me/canale", "text": "canale t.me"},
+        ]}]}
+        row = scrub_bando_row({"contenuto": contenuto})
+        assert row["contenuto"]["sections"][0]["segments"] == [
+            {"kind": "text", "text": "seguici su x.com e t.me"},
+            {"kind": "text", "text": "canale t.me"},
+        ]
+
     def test_contenuto_null_o_stringa_passthrough(self):
         assert scrub_bando_row({"contenuto": None})["contenuto"] is None
         # Il chiamante normalizza prima del filtro: una stringa residua
@@ -757,15 +876,77 @@ class TestLinkPubblicabile:
     @pytest.mark.parametrize(
         "url",
         [
-            "https://www.regione.it/a b",
             "https://www.regione.it/a\tb",
             "https://www.regio\nne.it/a",
             "https://www.regione.it/\x00",
             "https://www.regione.it/a\u00a0b",
             "https://www.regione.it\\@facebook.com/",
+            "https://www.regione.it/a\\b",
+            "https://www.regione.it/a b\tc",
+            "https://www.regione.it/a b\u00a0c",
+            "https://www.regione.it/a b\\c",
+            "https://www.regione.it/a b\x00",
         ],
     )
     def test_spazi_controllo_e_backslash(self, url):
+        assert link_pubblicabile(url) is None
+
+    @pytest.mark.parametrize(
+        ("url", "atteso"),
+        [
+            ("https://www.regione.it/a b.pdf", "https://www.regione.it/a%20b.pdf"),
+            ("https://www.regione.it/a b", "https://www.regione.it/a%20b"),
+            ("https://www.regione.it/avviso  2026   bis.pdf",
+             "https://www.regione.it/avviso%20%202026%20%20%20bis.pdf"),
+            ("https://www.regione.it/doc?nome=a b&v=1", "https://www.regione.it/doc?nome=a%20b&v=1"),
+            ("https://www.regione.it/doc#parte due", "https://www.regione.it/doc#parte%20due"),
+            ("https://www.regione.it/a b?q=c d#e f", "https://www.regione.it/a%20b?q=c%20d#e%20f"),
+            ("HTTPS://www.regione.it/a b", "HTTPS://www.regione.it/a%20b"),
+            ("https://www.regione.it/a b?", "https://www.regione.it/a%20b?"),
+            ("https://www.regione.it/a b#", "https://www.regione.it/a%20b#"),
+            ("  https://www.regione.it/a b.pdf \n", "https://www.regione.it/a%20b.pdf"),
+            ("https://www.regione.it/a%20b c.pdf", "https://www.regione.it/a%20b%20c.pdf"),
+            ("https://www.regione.it/a b?u=https://www.ente.it/c",
+             "https://www.regione.it/a%20b?u=https://www.ente.it/c"),
+        ],
+    )
+    def test_spazio_semplice_codificato(self, url, atteso):
+        assert link_pubblicabile(url) == (atteso, "www.regione.it")
+
+    def test_url_gia_codificato_invariato(self):
+        url = "https://www.regione.it/a%20b.pdf"
+        assert link_pubblicabile(url) == (url, "www.regione.it")
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://ente.it/a.pdf https://fasi.eu/b",
+            "https://ente.it/a.pdf https://www.regione.it/b.pdf",
+            "https://ente.it/a.pdf HTTP://x.it",
+            "https://ente.it/a.pdf   http://x.it",
+            "https://ente.it/a b.pdf https://ente.it/c.pdf",
+            "https://ente.it/?next= https://www.regione.it/",
+        ],
+    )
+    def test_secondo_url_dopo_lo_spazio(self, url):
+        assert link_pubblicabile(url) is None
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://en te.it/",
+            "https://www.regione.it /a",
+            "https:// www.regione.it/a",
+            "https://www.regione.it: 80/a",
+            "https://www.regione.it :80/a",
+            "ht tp://www.regione.it/a",
+            "ht tps://www.regione.it/a b",
+            "https: //www.regione.it/a",
+            "https:/ /www.regione.it/a",
+            "www.regione.it/a b",
+        ],
+    )
+    def test_spazio_nello_schema_o_nell_host(self, url):
         assert link_pubblicabile(url) is None
 
     @pytest.mark.parametrize(

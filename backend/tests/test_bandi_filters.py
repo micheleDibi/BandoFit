@@ -13,9 +13,14 @@ import httpx
 import pytest
 from fastapi import Depends, FastAPI
 from postgrest import AsyncPostgrestClient
+from postgrest.exceptions import APIError
 
+from app.api import deps
+from app.api.deps import ActiveCompany
+from app.api.routers import bandi as bandi_router
 from app.api.routers.bandi import parse_filters
 from app.core.errors import register_exception_handlers
+from app.schemas.bando import LookupsOut
 from app.services.bando_alert_service import carica_candidati
 from app.services.bandi_service import (
     BandiFilters,
@@ -390,6 +395,86 @@ class FakeSecondary:
         return query
 
 
+# Gli id del finto catalogo sono la posizione della riga nel proprio segmento:
+# 0, 1, 2… per i non chiusi, ID_CHIUSI + 0, 1, 2… per i chiusi.
+ID_CHIUSI = 100_000
+
+
+class FakeQuerySegmento(FakeBandiQuery):
+    """Query del finto catalogo. Un builder serve una richiesta sola: non
+    ammette un secondo range/limit né una seconda esecuzione."""
+
+    def __init__(self, name: str, catalogo: "FakeCatalogo"):
+        super().__init__(name, SimpleNamespace(data=[], count=0))
+        self._catalogo = catalogo
+        self._eseguita = False
+
+    def _mai_paginata(self):
+        assert self.range_args is None and self.limit_arg is None, "builder riusato"
+
+    def range(self, start, end):
+        self._mai_paginata()
+        return super().range(start, end)
+
+    def limit(self, size):
+        self._mai_paginata()
+        return super().limit(size)
+
+    async def execute(self):
+        assert not self._eseguita, "builder riusato"
+        self._eseguita = True
+        return self._catalogo.rispondi(self)
+
+
+class FakeCatalogo:
+    """Finto catalogo con due segmenti di righe, che risponde come quello vero
+    quando si chiede il conteggio esatto: pagina vuota se l'offset è uguale al
+    numero di righe del segmento, errore PGRST103 se lo supera."""
+
+    def __init__(self, aperti: int, chiusi: int, *, errore_aperti: Exception | None = None):
+        self.righe = {"aperti": aperti, "chiusi": chiusi}
+        self.errore_aperti = errore_aperti
+        self.queries: list[FakeQuerySegmento] = []
+
+    def table(self, name):
+        query = FakeQuerySegmento(name, self)
+        self.queries.append(query)
+        return query
+
+    @staticmethod
+    def segmento_di(query: FakeBandiQuery) -> str:
+        if ("stato_effettivo", "chiuso") in query.eq_filters:
+            return "chiusi"
+        assert any("stato_effettivo.in." in f for f in query.or_filters), "query senza segmento"
+        return "aperti"
+
+    def richieste(self, segmento: str) -> list[tuple]:
+        """(range, limit) delle richieste fatte a un segmento, in ordine."""
+        return [
+            (q.range_args, q.limit_arg) for q in self.queries if self.segmento_di(q) == segmento
+        ]
+
+    def rispondi(self, query: FakeQuerySegmento) -> SimpleNamespace:
+        segmento = self.segmento_di(query)
+        if segmento == "aperti" and self.errore_aperti is not None:
+            raise self.errore_aperti
+        righe = self.righe[segmento]
+        if query.range_args is not None:
+            inizio, fine = query.range_args
+        else:
+            inizio, fine = 0, (query.limit_arg or righe) - 1
+        if query.select_kwargs.get("count") == "exact" and inizio > righe:
+            raise APIError({
+                "code": "PGRST103", "message": "Requested range not satisfiable",
+                "details": None, "hint": None,
+            })
+        base = ID_CHIUSI if segmento == "chiusi" else 0
+        return SimpleNamespace(
+            data=[bando_row(base + i) for i in range(inizio, min(fine + 1, righe))],
+            count=righe,
+        )
+
+
 class TestFetchBandi:
     async def test_page_of_open_still_counts_closed_in_total(self):
         secondary = FakeSecondary([
@@ -425,15 +510,13 @@ class TestFetchBandi:
 
     async def test_page_fully_inside_closed_tier_offsets_into_it(self):
         # 3 non chiusi, pagina 3 da 2 (offset 4): tutta nel segmento chiusi.
-        secondary = FakeSecondary([
-            SimpleNamespace(data=[], count=3),
-            SimpleNamespace(data=[bando_row(103), bando_row(104)], count=6),
-        ])
-        page = await fetch_bandi(secondary, BandiFilters(), 3, 2, "scadenza_asc")
-        _, closed_q = secondary.queries
-        assert [item.id for item in page.items] == [103, 104]
+        catalogo = FakeCatalogo(3, 6)
+        page = await fetch_bandi(catalogo, BandiFilters(), 3, 2, "scadenza_asc")
+        assert [item.id for item in page.items] == [ID_CHIUSI + 1, ID_CHIUSI + 2]
         assert page.total == 9
-        assert closed_q.range_args == (1, 2)
+        # dei non chiusi, oltre il loro numero, resta da leggere il conteggio
+        assert catalogo.richieste("aperti") == [((4, 5), None), (None, 1)]
+        assert catalogo.richieste("chiusi") == [((1, 2), None)]
 
     async def test_scadenza_asc_flips_direction_for_closed_tier(self):
         # tra i non chiusi la scadenza più vicina, tra i chiusi la chiusura
@@ -503,6 +586,197 @@ class TestFetchBandi:
         ])
         page = await fetch_bandi(secondary, BandiFilters(), 1, 4, "pubblicazione_desc")
         assert [item.id for item in page.items] == [1, 2, 50]
+
+
+def _ids(page) -> list[int]:
+    return [item.id for item in page.items]
+
+
+class TestFetchBandiOltreIlSegmento:
+    """Una pagina che cade oltre le righe di un segmento, o oltre l'ultima
+    pagina, non è un errore: risponde con le righe che ci sono e il totale
+    esatto (contratto DB bandi §8). 1433 non chiusi, 747 chiusi, 20 per
+    pagina: 2180 bandi, 109 pagine."""
+
+    @staticmethod
+    async def _pagina(catalogo, page: int, filters: BandiFilters | None = None):
+        return await fetch_bandi(
+            catalogo, filters or BandiFilters(), page, 20, "pubblicazione_desc"
+        )
+
+    async def test_pagina_a_cavallo_del_confine(self):
+        catalogo = FakeCatalogo(1433, 747)
+        page = await self._pagina(catalogo, 72)
+        assert _ids(page) == [*range(1420, 1433), *range(ID_CHIUSI, ID_CHIUSI + 7)]
+        assert (page.total, page.total_pages) == (2180, 109)
+        assert catalogo.richieste("aperti") == [((1420, 1439), None)]
+        assert catalogo.richieste("chiusi") == [((0, 6), None)]
+
+    async def test_prima_pagina_tutta_nei_chiusi(self):
+        catalogo = FakeCatalogo(1433, 747)
+        page = await self._pagina(catalogo, 73)
+        assert _ids(page) == list(range(ID_CHIUSI + 7, ID_CHIUSI + 27))
+        assert page.total == 2180
+        assert catalogo.richieste("aperti") == [((1440, 1459), None), (None, 1)]
+        assert catalogo.richieste("chiusi") == [((7, 26), None)]
+
+    async def test_offset_uguale_ai_non_chiusi_senza_ripiego(self):
+        # 1440 non chiusi: la pagina 73 comincia esattamente dove finiscono.
+        catalogo = FakeCatalogo(1440, 747)
+        page = await self._pagina(catalogo, 73)
+        assert _ids(page) == list(range(ID_CHIUSI, ID_CHIUSI + 20))
+        assert page.total == 2187
+        assert catalogo.richieste("aperti") == [((1440, 1459), None)]
+        assert catalogo.richieste("chiusi") == [((0, 19), None)]
+
+    async def test_ultima_pagina(self):
+        catalogo = FakeCatalogo(1433, 747)
+        page = await self._pagina(catalogo, 109)
+        assert _ids(page) == list(range(ID_CHIUSI + 727, ID_CHIUSI + 747))
+        assert page.total == 2180
+        assert catalogo.richieste("chiusi") == [((727, 746), None)]
+
+    async def test_pagina_subito_dopo_l_ultima(self):
+        catalogo = FakeCatalogo(1433, 747)
+        page = await self._pagina(catalogo, 110)
+        assert page.items == []
+        assert (page.total, page.total_pages) == (2180, 109)
+        assert catalogo.richieste("chiusi") == [((747, 766), None)]
+
+    async def test_pagina_oltre_l_ultima(self):
+        catalogo = FakeCatalogo(1433, 747)
+        page = await self._pagina(catalogo, 111)
+        assert page.items == []
+        assert (page.total, page.total_pages) == (2180, 109)
+        assert catalogo.richieste("aperti") == [((2200, 2219), None), (None, 1)]
+        assert catalogo.richieste("chiusi") == [((767, 786), None), (None, 1)]
+        # prima i non chiusi, poi i chiusi: l'ordine delle richieste non cambia
+        assert [catalogo.segmento_di(q) for q in catalogo.queries] == [
+            "aperti", "aperti", "chiusi", "chiusi"
+        ]
+        # il conteggio si rilegge con le stesse condizioni della pagina
+        for query in catalogo.queries:
+            assert query.name == "bando_pubblico"
+            assert query.select_kwargs == {"count": "exact"}
+
+    async def test_filtro_chiuso_seconda_pagina(self):
+        catalogo = FakeCatalogo(0, 45)
+        page = await self._pagina(catalogo, 2, BandiFilters(stato=["chiuso"]))
+        assert _ids(page) == list(range(ID_CHIUSI + 20, ID_CHIUSI + 40))
+        assert (page.total, page.total_pages) == (45, 3)
+        assert catalogo.richieste("aperti") == [((20, 39), None), (None, 1)]
+        assert catalogo.richieste("chiusi") == [((20, 39), None)]
+        for query in catalogo.queries:
+            assert query.in_filters == [("stato_effettivo", ["chiuso"])]
+
+    async def test_filtro_chiuso_ultima_pagina(self):
+        catalogo = FakeCatalogo(0, 45)
+        page = await self._pagina(catalogo, 3, BandiFilters(stato=["chiuso"]))
+        assert _ids(page) == list(range(ID_CHIUSI + 40, ID_CHIUSI + 45))
+        assert page.total == 45
+
+    async def test_nessun_bando_e_pagina_oltre(self):
+        catalogo = FakeCatalogo(0, 0)
+        page = await self._pagina(catalogo, 5)
+        assert page.items == []
+        assert (page.total, page.total_pages) == (0, 0)
+
+    async def test_pagina_piena_di_non_chiusi_invariata(self):
+        catalogo = FakeCatalogo(1433, 747)
+        page = await self._pagina(catalogo, 1)
+        assert _ids(page) == list(range(20))
+        assert page.total == 2180
+        assert catalogo.richieste("aperti") == [((0, 19), None)]
+        assert catalogo.richieste("chiusi") == [(None, 1)]
+
+    async def test_un_altro_errore_del_catalogo_si_propaga(self):
+        errore = APIError({
+            "code": "57014", "message": "canceling statement due to statement timeout",
+            "details": None, "hint": None,
+        })
+        catalogo = FakeCatalogo(1433, 747, errore_aperti=errore)
+        with pytest.raises(APIError) as sollevata:
+            await self._pagina(catalogo, 73)
+        assert sollevata.value is errore
+        assert catalogo.richieste("aperti") == [((1440, 1459), None)]
+        assert catalogo.richieste("chiusi") == []
+
+
+def _client_elenco(monkeypatch, secondary) -> httpx.AsyncClient:
+    """App minima con la rotta dell'elenco e gli handler di `core/errors.py`
+    (quello degli errori del catalogo sta in `main.py` e qui non serve)."""
+    async def lookups(_secondary):
+        return LookupsOut(
+            regioni=[], settori=[], beneficiari=[], codici_ateco=[],
+            tipologie_bando=[], modalita_erogazione=[], programmi=[],
+        )
+
+    async def facets(_primary, _active, _lookups):
+        return None
+
+    monkeypatch.setattr(bandi_router, "get_lookups", lookups)
+    monkeypatch.setattr(bandi_router, "get_company_facets", facets)
+    app = FastAPI()
+    register_exception_handlers(app)
+    app.include_router(bandi_router.router, prefix="/api/v1")
+    utente = "a0000000-0000-0000-0000-000000000001"
+    app.dependency_overrides[deps.get_current_user] = lambda: {"id": utente}
+    app.dependency_overrides[deps.active_company] = lambda: ActiveCompany(
+        company_id=None, owner_id=utente, editable=True, is_multi=False
+    )
+    app.dependency_overrides[deps.get_primary] = lambda: object()
+    app.dependency_overrides[deps.get_secondary] = lambda: secondary
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+class TestEndpointElencoOltreIlSegmento:
+    async def test_pagina_nei_chiusi_200(self, monkeypatch):
+        async with _client_elenco(monkeypatch, FakeCatalogo(1433, 747)) as client:
+            resp = await client.get("/api/v1/bandi", params={"page": 73})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["items"]) == 20
+        assert (body["total"], body["page"], body["total_pages"]) == (2180, 73, 109)
+
+    async def test_filtro_chiuso_seconda_pagina_200(self, monkeypatch):
+        async with _client_elenco(monkeypatch, FakeCatalogo(0, 45)) as client:
+            resp = await client.get("/api/v1/bandi", params={"stato": "chiuso", "page": 2})
+        assert resp.status_code == 200
+        assert (len(resp.json()["items"]), resp.json()["total"]) == (20, 45)
+
+    async def test_pagina_oltre_l_ultima_200_vuota(self, monkeypatch):
+        async with _client_elenco(monkeypatch, FakeCatalogo(1433, 747)) as client:
+            resp = await client.get("/api/v1/bandi", params={"page": 500})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["items"] == []
+        assert (body["total"], body["total_pages"]) == (2180, 109)
+
+    async def test_pagina_massima_200_vuota(self, monkeypatch):
+        catalogo = FakeCatalogo(1433, 747)
+        async with _client_elenco(monkeypatch, catalogo) as client:
+            resp = await client.get("/api/v1/bandi", params={"page": 100_000})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["items"] == []
+        assert (body["total"], body["page"], body["total_pages"]) == (2180, 100_000, 109)
+        # la richiesta arriva al catalogo con l'offset della pagina chiesta
+        assert catalogo.richieste("aperti")[0] == ((1_999_980, 1_999_999), None)
+
+    @pytest.mark.parametrize("page", [100_001, 10**9, 10**19])
+    async def test_pagina_oltre_il_massimo_422(self, monkeypatch, page):
+        catalogo = FakeCatalogo(1433, 747)
+        async with _client_elenco(monkeypatch, catalogo) as client:
+            resp = await client.get("/api/v1/bandi", params={"page": page})
+        assert resp.status_code == 422
+        assert resp.json()["error"]["code"] == "validation_error"
+        # il catalogo non viene interrogato
+        assert catalogo.queries == []
+
+    async def test_pagina_zero_422(self, monkeypatch):
+        async with _client_elenco(monkeypatch, FakeCatalogo(1, 1)) as client:
+            resp = await client.get("/api/v1/bandi", params={"page": 0})
+        assert resp.status_code == 422
 
 
 class TestCandidatiAlert:

@@ -5,9 +5,11 @@ import type { ContenutoItem, ContenutoSection, ContenutoSegment } from "../../ty
 function Segment({ segment }: { segment: ContenutoSegment }) {
   const text = segment.text ?? "";
   // Nei dati reali l'URL dei link vive in `url` (in `href` nelle versioni più vecchie).
-  const link = segment.href ?? segment.url;
+  const grezzo = segment.href ?? segment.url;
+  const link = typeof grezzo === "string" ? grezzo.trim() : "";
   if (segment.kind === "bold") return <strong className="font-semibold text-slate-900">{text}</strong>;
-  if (segment.kind === "link" && link) {
+  // Si rende come link solo un indirizzo http(s): il resto resta testo semplice.
+  if (segment.kind === "link" && /^https?:\/\//i.test(link)) {
     return (
       <a
         href={link}

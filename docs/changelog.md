@@ -2,6 +2,16 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-09-30 — Correzioni del catalogo: paginazione e link
+
+Un errore nell'elenco dei bandi e tre allineamenti al contratto del catalogo sui link della scheda.
+- **Elenco bandi**: sfogliando oltre i bandi non chiusi (le ultime pagine dell'elenco, il filtro «Chiuso» dalla seconda pagina, una ricerca con pochi bandi aperti) l'elenco rispondeva «Servizio dati momentaneamente non disponibile». Ora ogni pagina risponde: una pagina oltre le righe di un segmento, o oltre l'ultima, dà `200` con le righe che ci sono (anche nessuna) e il `total` esatto, mai un `5xx`. Un timeout del catalogo resta `504`. `page` accetta al massimo 100000: oltre, `422` come per gli altri parametri non validi.
+- **Link con spazi**: un indirizzo con uno spazio semplice dopo l'host non si scarta più: lo spazio si codifica `%20` (percorso, query e frammento), così tornano visibili gli allegati e i pulsanti che lo contenevano. Una riga con `%20` e una voce con lo spazio sono lo stesso allegato. `fonte_ufficiale_url` esce nella stessa forma di `cta` e `link_fonte`. Restano scartati gli indirizzi con lo spazio nello schema o nell'host, quelli con un secondo indirizzo dopo lo spazio e quelli con tabulazioni, a capo, caratteri di controllo o barra rovesciata.
+- **Link nel testo del bando**: i link dentro `contenuto` passano dallo stesso filtro di pulsanti e allegati. I link `mailto:` e i link verso domini non ammessi (social, video, messaggistica, aggregatori) diventano testo semplice: il testo resta, si perde solo il collegamento. Gli input di AI-check e partenariati non cambiano.
+- **Pulsante principale**: fra più righe dello stesso tipo vince l'id più basso; `ultimo_visto_at` non si usa più, così il pulsante non cambia da una verifica all'altra.
+- Frontend: nell'elenco dei bandi una pagina oltre l'ultima rientra sull'ultima pagina valida, senza voci in più nella cronologia (la pagina letta dall'URL è limitata a 100000, il massimo accettato dal backend); nel testo del bando un segmento si rende come link solo se l'indirizzo è `http(s)`, altrimenti è testo semplice.
+- Nessuna migration. **Azione manuale**: ricostruire il frontend.
+
 ## 2026-09-30 — Preparazione all'accensione di rimappatura, bilanci e partenariati ⚠️ migration 0044
 
 Correzioni che rendono sicuro accendere in produzione, una alla volta, la rimappatura dei bandi fusi, lo storico dei bilanci con il bilancio ufficiale e il modulo partenariati. Procedura in `docs/deploy.md`, «Accensione delle funzioni».

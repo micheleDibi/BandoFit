@@ -1,7 +1,14 @@
+import logging
 from functools import lru_cache
 
 from pydantic import ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger("bandofit.config")
+
+# Rimappatura dei bandi fusi: minuti fra due passi (default e minimo).
+INTERVALLO_RIMAPPATURA_DEFAULT = 60
+INTERVALLO_RIMAPPATURA_MINIMO = 5
 
 
 class Settings(BaseSettings):
@@ -147,9 +154,11 @@ class Settings(BaseSettings):
     # migration 0043, services/catalogo_scheduler.py): `spenta` (default) |
     # `prova` (conta e scrive il riassunto nel log, nessuna scrittura) |
     # `attiva`. Un valore diverso lascia la rimappatura spenta con un log
-    # ERROR all'avvio, senza bloccare l'app. Minuti fra due passi (minimo 5).
+    # ERROR all'avvio, senza bloccare l'app. Minuti fra due passi: un intero
+    # >= 5; un valore non intero o minore vale 60, con un log ERROR, sempre
+    # senza bloccare l'avvio.
     rimappatura_fusi_modalita: str = "spenta"
-    rimappatura_fusi_intervallo_minuti: int = 60
+    rimappatura_fusi_intervallo_minuti: int = INTERVALLO_RIMAPPATURA_DEFAULT
 
     # AI-check (API Anthropic). Chiave vuota = feature disattivata (le rotte
     # rispondono 503 ai_not_configured). Ogni report costa ~0,10 $ di API.
@@ -278,6 +287,26 @@ class Settings(BaseSettings):
     @classmethod
     def _normalizza_modalita(cls, valore):
         return valore.strip().lower() if isinstance(valore, str) else valore
+
+    @field_validator("rimappatura_fusi_intervallo_minuti", mode="before")
+    @classmethod
+    def _intervallo_tollerante(cls, valore):
+        minuti = None
+        if isinstance(valore, int) and not isinstance(valore, bool):
+            minuti = valore
+        elif isinstance(valore, str):
+            try:
+                minuti = int(valore.strip())
+            except ValueError:
+                pass
+        if minuti is None or minuti < INTERVALLO_RIMAPPATURA_MINIMO:
+            logger.error(
+                "RIMAPPATURA_FUSI_INTERVALLO_MINUTI non valido (ammesso: intero >= %d): "
+                "si usano %d minuti", INTERVALLO_RIMAPPATURA_MINIMO,
+                INTERVALLO_RIMAPPATURA_DEFAULT,
+            )
+            return INTERVALLO_RIMAPPATURA_DEFAULT
+        return minuti
 
     @model_validator(mode="after")
     def _segreti_obbligatori_in_produzione(self) -> "Settings":

@@ -10,7 +10,7 @@ Internet ──HTTPS──▶ reverse proxy del server ──▶ 127.0.0.1:FRONT
 ## Prerequisiti
 
 - Docker + plugin Compose sul server (`docker compose version`).
-- Progetto Supabase **primario** creato con le 3 migration eseguite (vedi [setup.md](setup.md)).
+- Progetto Supabase **primario** con tutte le migration di `supabase/migrations/` eseguite in ordine di numero, oggi dalla 0001 alla 0044 (vedi [setup.md](setup.md) e «Migration del DB primario» sotto).
 - Credenziali del **secondario** (URL + anon key).
 - Un dominio puntato al server, con il reverse proxy già in uso (nginx/caddy/traefik).
 
@@ -39,12 +39,12 @@ Compila `.env`:
 | `ALERT_ORA_INVIO` / `ALERT_SCHEDULER_ATTIVO` | ora locale (Europe/Rome) della run giornaliera, default `08:00`; lo scheduler si può spegnere con `false` (la run resta lanciabile da `POST /admin/alerts/run`) |
 | `SMTP_HOST/PORT/USER/PASSWORD` + `EMAIL_FROM` | casella SMTP per le email di invito (es. OVH, vedi sotto); in alternativa `RESEND_API_KEY`; senza nessuno dei due le email vengono solo loggate |
 | `OPENAPI_EMAIL` + `OPENAPI_API_KEY` + `OPENAPI_ENV` | credenziali openapi.it per l'import dei dati aziendali e la verifica CF (da console.openapi.com; le API "Company" e "Risk" vanno attivate una tantum dalla Libreria API; dal modulo bilanci anche **IT-advanced** e **Visure Camerali** (`bilancio-ottico`, `impresa`) — se mancano fallisce solo il prodotto nuovo, grazie ai token separati; dopo il deploy, e solo a storico acceso (`BILANCI_STORICO_ATTIVO`, riga sotto), prezzo e attivazione dell'addon `bilancio-ufficiale` si fanno da AdminAddon). `OPENAPI_ENV=production` in deploy; le chiavi sandbox/produzione sono diverse. Vuote = importazione disattivata, il resto dell'app funziona. **Ogni import consuma credito** (IT-full ~0,30 € + IVA) |
-| `BILANCI_STORICO_ATTIVO` | storico dei bilanci (IT-advanced nell'anteprima dell'import e in «Recupera i bilanci») e bilancio ufficiale, entrambi a pagamento: **spento di default**. Da spento l'anteprima non chiama IT-advanced, le rotte del recupero e del bilancio ufficiale rispondono 404 e il frontend non le mostra; l'import IT-full e la lettura dei bilanci già salvati restano come sono. Si accende **dopo G1**, la verifica in sandbox delle risposte reali (`docs/partenariati.md` §14). **Azione manuale**: `docker-compose.yml` non passa la variabile al container, per accenderla va aggiunta all'`environment` del servizio backend. Prima di rispegnerla non devono esserci richieste di bilancio ufficiale ancora aperte: a storico spento non avanzano |
+| `BILANCI_STORICO_ATTIVO` | storico dei bilanci (IT-advanced nell'anteprima dell'import e in «Recupera i bilanci») e bilancio ufficiale, entrambi a pagamento: **spento di default**. Da spento l'anteprima non chiama IT-advanced, le rotte del recupero e del bilancio ufficiale rispondono 404 e il frontend non le mostra; l'import IT-full e la lettura dei bilanci già salvati restano come sono. `docker-compose.yml` la passa al container (default `false`): si imposta nel `.env`. Procedura, con le prove su un'azienda propria, in «Accensione delle funzioni» sotto. A storico acceso parte anche il failsafe del bilancio ufficiale. Prima di rispegnerla non devono esserci richieste di bilancio ufficiale ancora aperte: a storico spento non avanzano |
 | `ANTHROPIC_API_KEY` + `AI_CHECK_MODEL` | chiave API Anthropic per l'AI-check (da console.anthropic.com); modello default `claude-sonnet-5`. Vuota = AI-check disattivato, il resto dell'app funziona. **Ogni report consuma credito API** (~0,10–0,20 $; meno con l'estrazione del bando in cache). Le quote per gli utenti si impostano dai piani (campo AI-check) |
-| `PARTENARIATI_ATTIVO` (+ `PARTENARIATO_BATCH_BUDGET_CENTS_GIORNO`) | modulo partenariati (migration 0034-0042, da eseguire tutte in ordine dallo SQL Editor del primario **prima** del deploy, anche a modulo spento: il backend legge colonne della 0036, 0041 e 0042 qualunque sia il flag; procedura in «Migration del DB primario» sotto): spento di default. **Azione manuale**: `docker-compose.yml` non passa queste variabili al container, per accenderlo vanno aggiunte a mano all'`environment` del servizio backend. Budget giornalieri fail-closed in centesimi USD: `PARTENARIATO_BUDGET_CENTS_GIORNO` (500, estrazioni delle regole), `PARTENARIATI_AI_BUDGET_CENTS_GIORNO_ALTRI` (200), batch notturno `PARTENARIATO_BATCH_BUDGET_CENTS_GIORNO` (0 = spento; consigliato 300 se lo accendi). Usa `ANTHROPIC_API_KEY`: senza chiave le estrazioni e la bozza AI del profilo rispondono 503. Profilo partner (migration 0035): `PARTNER_BOZZA_AI_LIMITE_GIORNO` (3 per azienda), `PARTNER_BOZZA_AI_LIMITE_UTENTE_GIORNO` (10 per titolare), `PARTNER_BOZZA_AI_MAX_TOKENS`, `PARTNER_BOZZA_AI_TIMEOUT_SECONDS`, `PARTNER_BOZZA_AI_STALE_MINUTI`: facoltative, i default sono quelli di produzione (se servono, stessa azione manuale sull'`environment`). Call di partenariato (migration 0036 e 0037): `PARTNER_CALL_BOZZE_MAX` (5 bozze per azienda), `PARTNER_CALL_AI_LIMITE_GIORNO` (10 proposte AI al giorno per call e servizio), `PARTNER_CALL_AI_LIMITE_OWNER_GIORNO` (30 per titolare su tutti i servizi delle call), `PARTNER_CALL_AI_MAX_TOKENS`, `PARTNER_CALL_AI_TIMEOUT_SECONDS`, `PARTNER_CALL_AI_STALE_MINUTI`, `PARTNER_CALL_SCADENZA_DEFAULT_GIORNI` (60), `PARTNER_SEGNALAZIONI_LIMITE_GIORNO` (10): facoltative, stessi default di produzione e stessa azione manuale se servono. I limiti di call attive e candidature stanno sui piani (AdminPiani), non nell'`.env`. Matching, notifiche e digest (migration 0038): `PARTENARIATO_PESO_COPERTURA` / `_AFFINITA` / `_COMPLEMENTARITA` / `_COMPLETEZZA` / `_ROTAZIONE` (0.50/0.20/0.10/0.10/0.10), `PARTENARIATO_PENALITA_DATO_MANCANTE` (5), `PARTENARIATO_PENALITA_MAX` (20), `PARTENARIATO_SUGGERITI_PAGINA` (20), `PARTENARIATO_NOTIFICHE_TOP_K` (20), `PARTENARIATO_NOTIFICHE_SOGLIA` (50), `PARTENARIATO_NOTIFICHE_TETTO_SETTIMANA` (3), `PARTENARIATO_INDICE_TTL_SECONDS` (60), `PARTENARIATO_DIGEST_GIORNO` (0 = lunedì), `PARTENARIATO_DIGEST_ORA` (`08:30`): facoltative, stessi default di produzione e stessa azione manuale se servono. Il digest settimanale usa l'email già configurata (`SMTP_*`/`RESEND_API_KEY`, `EMAIL_FROM`) con `FRONTEND_URL` e `API_PUBLIC_URL` per i link, come gli alert sui bandi: nessuna variabile nuova per l'invio. La disiscrizione pubblica `/api/v1/partenariati/email/unsubscribe` risponde anche a modulo spento. Candidature, inviti e chat (migration 0039): `PARTNER_INVITO_TTL_GIORNI` (14), `PARTNER_INVITI_MAX_PER_CALL` (30), `PARTNER_CANDIDATURE_LIMITE_GIORNO` (10), `PARTNER_INVITI_LIMITE_GIORNO` (50), `PARTNER_MESSAGGI_LIMITE_ORA` (120): facoltative, stessi default di produzione e stessa azione manuale se servono; le email di evento usano lo stesso canale del digest. Consulto dalla call, moderazione, admin e verifica dell'identità (migration 0041): nessuna variabile nuova (le email di moderazione usano lo stesso canale; il passo notturno `ricalcolo_validazioni` gira nella run dello scheduler del modulo). Bozze AI dei documenti (migration 0042): `PARTNER_BOZZE_DOCUMENTO_LIMITE_OWNER_GIORNO` (10 bozze al giorno per titolare, anche con un piano illimitato), `PARTNER_BOZZE_DOCUMENTO_MAX_TOKENS` (8000), `PARTNER_BOZZE_DOCUMENTO_TIMEOUT_SECONDS` (150), `PARTNER_BOZZE_DOCUMENTO_STALE_MINUTI` (10): facoltative, stessi default di produzione e stessa azione manuale se servono; il limite mensile sta sui piani (AdminPiani), il failsafe `failsafe_bozze` gira nella run dello scheduler del modulo; il PDF usa lo stesso motore degli altri export. Prima di accendere il flag in produzione i testi legali segnaposto vanno rivisti dal legale (vedi «Partenariati: testi legali da rivedere» sotto) |
+| `PARTENARIATI_ATTIVO` (+ `PARTENARIATO_BATCH_BUDGET_CENTS_GIORNO`) | modulo partenariati (migration 0034-0042, da eseguire tutte in ordine dallo SQL Editor del primario **prima** del deploy, anche a modulo spento: il backend legge colonne della 0036, 0041 e 0042 qualunque sia il flag; procedura in «Migration del DB primario» sotto): spento di default. `docker-compose.yml` passa al container `PARTENARIATI_ATTIVO` e i tre budget giornalieri qui sotto, con gli stessi default di `config.py`: si impostano nel `.env`, procedura in «Accensione delle funzioni» sotto. Le altre variabili facoltative del modulo no: se servono, **azione manuale**, vanno aggiunte all'`environment` del servizio backend. Budget giornalieri fail-closed in centesimi USD: `PARTENARIATO_BUDGET_CENTS_GIORNO` (500, estrazioni delle regole), `PARTENARIATI_AI_BUDGET_CENTS_GIORNO_ALTRI` (200), batch notturno `PARTENARIATO_BATCH_BUDGET_CENTS_GIORNO` (0 = spento; consigliato 300 se lo accendi). Usa `ANTHROPIC_API_KEY`: senza chiave le estrazioni e la bozza AI del profilo rispondono 503. Profilo partner (migration 0035): `PARTNER_BOZZA_AI_LIMITE_GIORNO` (3 per azienda), `PARTNER_BOZZA_AI_LIMITE_UTENTE_GIORNO` (10 per titolare), `PARTNER_BOZZA_AI_MAX_TOKENS`, `PARTNER_BOZZA_AI_TIMEOUT_SECONDS`, `PARTNER_BOZZA_AI_STALE_MINUTI`: facoltative, i default sono quelli di produzione (se servono, stessa azione manuale sull'`environment`). Call di partenariato (migration 0036 e 0037): `PARTNER_CALL_BOZZE_MAX` (5 bozze per azienda), `PARTNER_CALL_AI_LIMITE_GIORNO` (10 proposte AI al giorno per call e servizio), `PARTNER_CALL_AI_LIMITE_OWNER_GIORNO` (30 per titolare su tutti i servizi delle call), `PARTNER_CALL_AI_MAX_TOKENS`, `PARTNER_CALL_AI_TIMEOUT_SECONDS`, `PARTNER_CALL_AI_STALE_MINUTI`, `PARTNER_CALL_SCADENZA_DEFAULT_GIORNI` (60), `PARTNER_SEGNALAZIONI_LIMITE_GIORNO` (10): facoltative, stessi default di produzione e stessa azione manuale se servono. I limiti di call attive e candidature stanno sui piani (AdminPiani), non nell'`.env`. Matching, notifiche e digest (migration 0038): `PARTENARIATO_PESO_COPERTURA` / `_AFFINITA` / `_COMPLEMENTARITA` / `_COMPLETEZZA` / `_ROTAZIONE` (0.50/0.20/0.10/0.10/0.10), `PARTENARIATO_PENALITA_DATO_MANCANTE` (5), `PARTENARIATO_PENALITA_MAX` (20), `PARTENARIATO_SUGGERITI_PAGINA` (20), `PARTENARIATO_NOTIFICHE_TOP_K` (20), `PARTENARIATO_NOTIFICHE_SOGLIA` (50), `PARTENARIATO_NOTIFICHE_TETTO_SETTIMANA` (3), `PARTENARIATO_INDICE_TTL_SECONDS` (60), `PARTENARIATO_DIGEST_GIORNO` (0 = lunedì), `PARTENARIATO_DIGEST_ORA` (`08:30`): facoltative, stessi default di produzione e stessa azione manuale se servono. Il digest settimanale usa l'email già configurata (`SMTP_*`/`RESEND_API_KEY`, `EMAIL_FROM`) con `FRONTEND_URL` e `API_PUBLIC_URL` per i link, come gli alert sui bandi: nessuna variabile nuova per l'invio. La disiscrizione pubblica `/api/v1/partenariati/email/unsubscribe` risponde anche a modulo spento. Candidature, inviti e chat (migration 0039): `PARTNER_INVITO_TTL_GIORNI` (14), `PARTNER_INVITI_MAX_PER_CALL` (30), `PARTNER_CANDIDATURE_LIMITE_GIORNO` (10), `PARTNER_INVITI_LIMITE_GIORNO` (50), `PARTNER_MESSAGGI_LIMITE_ORA` (120): facoltative, stessi default di produzione e stessa azione manuale se servono; le email di evento usano lo stesso canale del digest. Consulto dalla call, moderazione, admin e verifica dell'identità (migration 0041): nessuna variabile nuova (le email di moderazione usano lo stesso canale; il passo notturno `ricalcolo_validazioni` gira nella run dello scheduler del modulo). Bozze AI dei documenti (migration 0042): `PARTNER_BOZZE_DOCUMENTO_LIMITE_OWNER_GIORNO` (10 bozze al giorno per titolare, anche con un piano illimitato), `PARTNER_BOZZE_DOCUMENTO_MAX_TOKENS` (8000), `PARTNER_BOZZE_DOCUMENTO_TIMEOUT_SECONDS` (150), `PARTNER_BOZZE_DOCUMENTO_STALE_MINUTI` (10): facoltative, stessi default di produzione e stessa azione manuale se servono; il limite mensile sta sui piani (AdminPiani), il failsafe `failsafe_bozze` gira nella run dello scheduler del modulo; il PDF usa lo stesso motore degli altri export. I testi legali segnaposto vanno rivisti con il legale e poi portati nel codice (vedi «Partenariati: testi legali da rivedere» sotto) |
 | `REVOLUT_SECRET_KEY` + `REVOLUT_ENV` + `REVOLUT_WEBHOOK_SECRET` | pagamenti (Revolut Merchant API, migration 0026): chiave segreta del Merchant account (Revolut Business → APIs → Merchant API), ambiente (`production` in deploy: la **sandbox è un account Business separato** — sandbox-business.revolut.com — con chiavi **diverse**, da far corrispondere all'ambiente) e signing secret `wsk_...` restituito alla registrazione del webhook via API (verifica della firma HMAC — vedi «Pagamenti» sotto). Chiave vuota = modulo pagamenti disattivato (503), il resto dell'app funziona |
 | `PAYMENT_SCHEDULER_ATTIVO` / `PAYMENT_ORA_ESECUZIONE` | scheduler dei pagamenti (preavvisi, rinnovi automatici, retry, fine grazia, recupero righe del registro fatture): attivo di default, run giornaliera alle `06:00` locali (Europe/Rome). `false` = nessun rinnovo/downgrade automatico (utile in sviluppo) |
-| `RIMAPPATURA_FUSI_MODALITA` / `RIMAPPATURA_FUSI_INTERVALLO_MINUTI` | rimappatura periodica dei bandi fusi nel catalogo (migration 0043): **spenta di default**; `prova` conta senza modificare nulla, `attiva` scrive; un passo ogni 60 minuti (minimo 5). Un valore non ammesso lascia la rimappatura spenta con un log ERROR, senza bloccare l'avvio. **Azione manuale**: `docker-compose.yml` non passa queste variabili al container, vanno aggiunte all'`environment` del servizio backend. Procedura in «Catalogo: rimappatura dei bandi fusi» sotto |
+| `RIMAPPATURA_FUSI_MODALITA` / `RIMAPPATURA_FUSI_INTERVALLO_MINUTI` | rimappatura periodica dei bandi fusi nel catalogo (migration 0043): **spenta di default**; `prova` conta senza modificare nulla, `attiva` scrive; un passo ogni 60 minuti. Un valore non ammesso non blocca l'avvio e lascia un log ERROR: una modalità sconosciuta lascia la rimappatura spenta, un intervallo non intero o minore di 5 vale 60. `docker-compose.yml` le passa entrambe al container: si impostano nel `.env`. Procedura in «Accensione delle funzioni» sotto |
 | `VITE_REVOLUT_MODE` | modalità del widget Revolut nel **browser**: `prod` in produzione — il default è `sandbox`, che non muove denaro vero e in produzione non funzionerebbe. Variabile `VITE_*`: cotta nel bundle, rebuild del frontend dopo la modifica |
 | `RATE_LIMIT_PEPPER` | **obbligatoria in deploy**: con `ENV=production` il backend si rifiuta di partire senza. Generarla con `openssl rand -hex 32`. Sceglierla **una volta sola** — cambiarla azzera i contatori anti-enumerazione in corso, perché i bucket derivano da lei; a modulo partenariati acceso rende da ricalcolare anche le chiavi dei collegamenti societari: finché il backfill notturno non le ricalcola (fino a 200 aziende per notte) quelle aziende non compaiono tra i suggerimenti né ricevono notifiche proattive |
 | `TRUSTED_PROXY_HOPS` | quanti proxy fidati stanno davanti al backend, default **2** (Cloudflare + reverse proxy). Vedi «IP del client» sotto: da regolare solo se la catena è diversa |
@@ -138,6 +138,23 @@ server {
 
 Con questo schema frontend e API stanno sulla **stessa origine** (`https://bandofit.example.com`), quindi CORS non entra mai in gioco lato browser.
 
+**Log di accesso.** Nel backend, le righe di log delle richieste HTTP, in uscita e in entrata, non contengono query string né credenziali. Quelle di nginx sul server sì: il formato predefinito registra il path con la query e il `Referer`, che può contenerla a sua volta. Il formato va configurato a mano, per esempio così:
+
+```nginx
+# nel blocco http {}
+log_format senza_query '$remote_addr - [$time_local] "$request_method $uri $server_protocol" '
+                       '$status $body_bytes_sent "$http_user_agent"';
+
+# nel blocco server {} di BandoFit, al posto dell'access_log predefinito
+access_log /var/log/nginx/bandofit.access.log senza_query;
+```
+
+Anche l'`error_log` di nginx, sugli errori verso il backend (502/504), scrive la richiesta con la query e il referrer, e il suo formato non si configura. Si può alzarne il livello (`error_log /var/log/nginx/bandofit.error.log crit;`), rinunciando però ai messaggi sugli errori verso il backend; altrimenti va tenuto presente chi accede a quel file.
+
+Con Nginx Proxy Manager il log del proxy host usa un formato proprio, con path, query e referer, che dall'interfaccia non si cambia: vale la stessa avvertenza sull'accesso a quei file.
+
+Il nginx interno al container frontend non tiene log di accesso (`access_log off;` in `frontend/deploy/nginx.conf`): li tiene il proxy davanti. Vale dalla prima ricostruzione del frontend (`docker compose up -d --build`).
+
 `cloudflare-ips.conf` è un `allow` per ogni rete pubblicata su [cloudflare.com/ips](https://www.cloudflare.com/ips/) (una quindicina IPv4 più una manciata IPv6) seguito da `deny all;`. La lista cambia di rado ma cambia: quando succede il sintomo è un 403 per gli utenti dietro le reti nuove, quindi vale un promemoria periodico o un cron che la riscarichi.
 
 ### IP del client (rate limiting di `/auth/register`)
@@ -215,7 +232,7 @@ Ogni passaggio resta nel registro delle verifiche (append-only) e nell'audit.
 
 ## Partenariati: testi legali da rivedere
 
-Prima di accendere `PARTENARIATI_ATTIVO` in produzione vanno rivisti con il legale, e poi aggiornati nel codice facendo salire la loro versione:
+Questi testi sono segnaposto: vanno rivisti con il legale e poi portati nel codice, facendo salire la loro versione:
 - l'informativa per il profilo partner e quella per il referente (`partenariato_informativa.py`, versione `2026-10-bozza-2`, marcate «BOZZA — DA RIVEDERE CON IL LEGALE»): descrivono la verifica dell'identità da parte dell'admin, il nome solo se scelto e verificato, la rivelazione solo tra aziende verificate, l'accesso della moderazione ai messaggi segnalati e la conservazione; restano da completare titolare del trattamento e contatto privacy, la base giuridica di verifica e moderazione e la durata di conservazione del registro delle verifiche (segnaposto tra parentesi quadre). Chi aveva acconsentito alla versione precedente vede un banner di riconferma: se il legale chiede un nuovo consenso esplicito invece del banner, va cambiata la regola in `partner_profile_service`;
 - lo **statement of reasons** della moderazione (`partenariato_moderazione_testi.py`, marcato «BOZZA — DA RIVEDERE CON IL LEGALE»): riferimento puntuale ai Termini d'uso, fondamento normativo, indirizzo per i riesami delle decisioni d'ufficio e delle restrizioni nate da un ricorso;
 - i testi del ricorso e delle vie di ricorso esterne e la nota di segnalazione nella UI (`lib/copy.ts`: `MODERAZIONE_COPY`, `CALL_COPY`);
@@ -231,16 +248,111 @@ Cosa fa un passo in modalità `attiva`:
 - **eventi del calendario** del bando: passano al master; se l'evento del master c'è già, quello del doppione si elimina se non ha note, altrimenti diventa un evento personale;
 - **call di partenariato attive**: passano al master; se l'azienda ha già una call attiva sul master restano dove sono e compaiono nel log come «in collisione» a ogni passo. Le call chiuse non cambiano;
 - storico degli AI-check, alert inviati, estrazioni, consulenze e acquisti conservano il bando originale;
-- ogni riga modificata o eliminata lascia una voce in `audit_log` (`catalogo.rimappatura_fuso`) con i valori precedenti, così un'eventuale separazione del doppione si ripristina a mano.
+- ogni riga modificata o eliminata lascia una voce in `audit_log` (`catalogo.rimappatura_fuso`) con i valori precedenti: se il catalogo separa di nuovo il doppione, le righe si riportano indietro con la funzione della 0044 (vedi «Ripristino dopo la separazione di un doppione» in «Accensione delle funzioni»).
 
-Procedura di accensione:
-1. Applicare la migration `0043_rimappatura_fusi.sql` («Migration del DB primario» qui sotto, con il reload dello schema). Va fatto **prima** di impostare una modalità diversa da `spenta`: senza la 0043 ogni passo registra l'errore «fn_bandi_in_uso assente … la migration 0043 va applicata» e non fa nulla.
-2. Deploy del backend: la rimappatura resta spenta.
-3. Aggiungere all'`environment` del servizio backend in `docker-compose.yml` le righe `RIMAPPATURA_FUSI_MODALITA: ${RIMAPPATURA_FUSI_MODALITA:-spenta}` e `RIMAPPATURA_FUSI_INTERVALLO_MINUTI: ${RIMAPPATURA_FUSI_INTERVALLO_MINUTI:-60}`; nel `.env` impostare `RIMAPPATURA_FUSI_MODALITA=prova`; poi `docker compose up -d backend`.
-4. Controllare i log con `docker compose logs backend | grep "rimappatura fusi"`. Ogni passo scrive un riassunto: id in uso, coppie trovate, totali per tabella e le prime 50 coppie (doppione → master). In `prova` nulla viene modificato. Gli errori di una singola coppia (per esempio un salvataggio concorrente dello stesso bando) si ripetono al passo dopo.
-5. Se i numeri sono plausibili, impostare `RIMAPPATURA_FUSI_MODALITA=attiva` e rilanciare `docker compose up -d backend`, che ricrea il container con il nuovo environment (un `docker compose restart` non rilegge il `.env`): il primo passo parte all'avvio, poi uno a ogni intervallo.
+Accensione, controlli e spegnimento: «Accensione delle funzioni» qui sotto, punto 1.
 
-Per spegnerla: `RIMAPPATURA_FUSI_MODALITA=spenta` e `docker compose up -d backend` (anche qui non basta un restart). Le righe già spostate restano sul master.
+## Accensione delle funzioni
+
+Tre funzioni nascono spente e si accendono in produzione una alla volta, in quest'ordine: rimappatura dei bandi fusi, storico dei bilanci e bilancio ufficiale, partenariati. Si passa alla successiva solo quando i controlli della precedente sono puliti.
+
+### Come si cambia una variabile (vale per tutte)
+
+1. Le variabili si impostano **solo nel `.env`** accanto a `docker-compose.yml`. Il compose le passa già al container del backend, con gli stessi default di `config.py` (funzioni spente): `BILANCI_STORICO_ATTIVO`, `RIMAPPATURA_FUSI_MODALITA`, `RIMAPPATURA_FUSI_INTERVALLO_MINUTI`, `PARTENARIATI_ATTIVO` e i tre budget giornalieri dei partenariati. `docker-compose.yml` non si modifica.
+2. Si applica con `docker compose up -d backend`, che ricrea il container con il nuovo environment. **Mai `docker compose restart`**: riavvia il container con l'environment di prima e la modifica non ha effetto.
+3. Si controlla che il container veda il valore giusto:
+   ```bash
+   docker compose exec backend env | grep -E 'RIMAPPATURA_FUSI|BILANCI_STORICO|PARTENARIAT'
+   ```
+   Poi `docker compose logs --since 5m backend` non deve mostrare errori all'avvio (per esempio «RIMAPPATURA_FUSI_MODALITA non valida» o «RIMAPPATURA_FUSI_INTERVALLO_MINUTI non valido»).
+4. Si spegne allo stesso modo: il valore spento nel `.env` (oppure si toglie la riga, e vale il default spento), poi `docker compose up -d backend` e lo stesso controllo.
+
+### 1. Rimappatura dei bandi fusi
+
+Prerequisiti: la migration **0043** applicata sul primario, con il reload dello schema («Migration del DB primario» sotto); senza, ogni passo registra l'errore «fn_bandi_in_uso assente … la migration 0043 va applicata» e non fa nulla. Prima di passare ad `attiva` va applicata anche la **0044**, che permette di annullare un passo (vedi «Ripristino dopo la separazione di un doppione» sotto).
+
+1. Nel `.env`: `RIMAPPATURA_FUSI_MODALITA=prova`. L'intervallo resta di 60 minuti se `RIMAPPATURA_FUSI_INTERVALLO_MINUTI` non si imposta. Poi `docker compose up -d backend` e il controllo con `env | grep`.
+2. Controllare i log: `docker compose logs backend | grep "rimappatura fusi"`. Il primo passo parte all'avvio, poi uno a ogni intervallo. Ogni passo scrive un riassunto: modalità, id in uso, coppie trovate e scartate, errori, totali per tabella e le prime 50 coppie (doppione → master). In `prova` nulla viene modificato. Il riassunto è a **WARNING** quando il passo ha errori o coppie scartate, altrimenti a INFO: `docker compose logs backend | grep "WARNING bandofit.catalogo_scheduler"` mostra solo i passi da guardare. Gli errori di una singola coppia (per esempio un salvataggio concorrente dello stesso bando) si ripetono al passo dopo.
+3. Se i numeri sono plausibili e non ci sono errori che si ripetono, `RIMAPPATURA_FUSI_MODALITA=attiva`, `docker compose up -d backend` e il controllo con `env | grep`.
+4. Dopo l'accensione: il primo passo in `attiva` parte all'avvio: il suo riassunto inizia con `rimappatura fusi (attiva)` e riporta i totali delle righe spostate. Dal passo successivo i totali tornano a zero, salvo le call «in collisione», che ricompaiono a ogni passo finché l'azienda ha una call attiva anche sul master.
+5. **Prima di ogni lotto di fusioni o di una separazione nel catalogo** si torna a `prova` (`.env` e `docker compose up -d backend`). Si controllano i riassunti dei passi con il catalogo aggiornato e solo dopo si torna ad `attiva`.
+
+Per spegnerla: `RIMAPPATURA_FUSI_MODALITA=spenta` e `docker compose up -d backend`. Le righe già spostate restano sul master.
+
+#### Ripristino dopo la separazione di un doppione
+
+Serve la migration 0044, applicata dopo la 0043 (aggiunge solo la funzione `fn_ripristina_rimappatura`). Si lavora dallo SQL Editor del primario:
+
+1. Nel `.env` `RIMAPPATURA_FUSI_MODALITA=prova` (o `spenta`), poi `docker compose up -d backend`. Verificare che il catalogo non elenchi più il doppione in `bando_fusione`, altrimenti il passo successivo lo rimappa di nuovo. Il catalogo si legge solo con la chiave anon, dal container del backend; il comando deve stampare `[]`:
+   ```bash
+   docker compose exec backend python -c "import os, urllib.request as u; r = u.Request(os.environ['SECONDARY_SUPABASE_URL'] + '/rest/v1/bando_fusione?select=bando_id&bando_id=eq.<doppione>', headers={'apikey': os.environ['SECONDARY_SUPABASE_ANON_KEY']}); print(u.urlopen(r).read().decode())"
+   ```
+2. Prova, che non scrive nulla (è il default): `select public.fn_ripristina_rimappatura(<doppione>, '<dal>'::timestamptz);`. Il risultato riporta, per tabella, i conteggi `{ripristinate, in_conflitto}`. `<dal>` è un istante anteriore alla prima rimappatura del doppione; nel dubbio `'-infinity'`.
+3. Scrittura: `select public.fn_ripristina_rimappatura(<doppione>, '<dal>'::timestamptz, false);`. Deve restituire gli stessi conteggi della prova. Rilanciarla non riapplica nulla. Ogni riga ripristinata lascia una voce `catalogo.ripristino_rimappatura` in `audit_log`.
+4. Le righe `in_conflitto` non vengono toccate e restano da vedere a mano. Sono le voci `catalogo.rimappatura_fuso` del doppione che nessuna voce `catalogo.ripristino_rimappatura` cita (in quest'ultima, `payload->'voce'` è l'id della voce d'origine). Se più doppioni dello stesso master tornano separati, si ripristinano tutti, poi si rilancia il ripristino (prova, poi scrittura) di quelli con righe `in_conflitto`. Un preferito o una scadenza restano sul master finché non è ripristinata la riga di un altro doppione dello stesso master che la rimappatura aveva eliminato per causa loro. Se quell'altro doppione resta fuso, la riga resta sul master e va vista a mano.
+5. Solo dopo, se serve, si torna ad `attiva`.
+
+### 2. Storico dei bilanci e bilancio ufficiale
+
+Prerequisiti:
+- le migration 0032 e 0033 applicate (fanno parte del rilascio 0032-0042);
+- nella console openapi di **produzione** (non la sandbox) attivati Company **IT-advanced** e **Visure Camerali** (`bilancio-ottico`, `impresa`), con il credito controllato: senza, falliscono solo questi prodotti;
+- `OPENAPI_ENV=production` con le chiavi di produzione.
+
+La procedura non presuppone la verifica in sandbox G1 (`docs/partenariati.md` §2.1 T1): le prove dei passi 3 e 4 su un'azienda propria sono il primo controllo sulle risposte reali.
+
+1. Nel `.env`: `BILANCI_STORICO_ATTIVO=true`, poi `docker compose up -d backend` e il controllo con `env | grep`.
+2. Controlli dopo l'accensione:
+   - nessun errore nei log d'avvio;
+   - nella pagina Azienda compare «Recupera i bilanci»;
+   - parte anche il failsafe del bilancio ufficiale, un giro ogni 10 minuti. Con openapi non configurato non parte e lo dice con un WARNING («failsafe non avviato, openapi non configurato»): nessuna via fa avanzare le richieste aperte, né il failsafe né la lettura della pagina, e restano aperte finché openapi non torna configurato. Esamina solo le richieste nate nell'ambiente openapi in uso. Nei log scrive `bilancio ufficiale: failsafe, N richieste aperte esaminate, M saltate perché nate nell'altro ambiente openapi` solo quando N o M sono diversi da 0. Se M è maggiore di 0 ci sono richieste aperte nate nell'altro ambiente (per esempio dopo un cambio di `OPENAPI_ENV`), che il failsafe non interroga: si chiudono tornando all'ambiente in cui sono nate, oppure a mano con un accredito.
+3. Prova su un'azienda propria (lo storico IT-advanced costa circa 0,10 €):
+   - importazione da partita IVA: l'anteprima mostra gli anni dei bilanci recuperati;
+   - dopo la conferma, la sezione Bilanci li riporta anno per anno;
+   - un secondo import della stessa azienda non ripaga lo storico: nel registro consumi (`api_usage_events`, service `IT-advanced`) non compare una riga nuova.
+4. **Solo dopo** questi controlli: prezzo e attivazione dell'addon `bilancio-ufficiale` in AdminAddon. A storico spento non ha senso, e un addon gratuito non si può attivare. Poi la prova su un'azienda propria:
+   - acquisto di 1 unità;
+   - richiesta con un **anno esplicito** (4,50 € al provider);
+   - esito di solito entro 15 minuti, con il PDF scaricabile e i numeri nella sezione Bilanci.
+5. Da tenere d'occhio: `docker compose logs backend | grep "chiusa senza rimborso"`. Ogni richiesta chiusa senza rimborso automatico (scaduta, o esito ignoto oltre 24 ore) va valutata per un accredito manuale.
+
+Per spegnerlo:
+1. Prima si disattiva l'addon `bilancio-ufficiale` in AdminAddon: niente nuovi acquisti né richieste.
+2. Poi si aspetta che non restino richieste aperte. Controllo dallo SQL Editor:
+   ```sql
+   select stato, count(*) from company_bilancio_richieste
+   where stato in ('in_invio', 'in_lavorazione', 'esito_ignoto') group by stato;
+   ```
+   A storico spento le richieste aperte non avanzano più, né dal failsafe né dalle letture.
+3. Infine `BILANCI_STORICO_ATTIVO=false`, `docker compose up -d backend` e il controllo con `env | grep`.
+
+Le rotte tornano 404. I bilanci già registrati restano nella sezione Bilanci, ma i PDF del bilancio ufficiale non si scaricano finché la funzione non si riaccende.
+
+### 3. Partenariati
+
+Prerequisiti:
+- le migration 0032-0042 applicate (le richiede già il rilascio);
+- `ANTHROPIC_API_KEY` impostata: senza chiave le estrazioni delle regole e le bozze AI rispondono 503;
+- l'invio email già configurato (`SMTP_*` o `RESEND_API_KEY`, `EMAIL_FROM`), con `FRONTEND_URL` e `API_PUBLIC_URL` per i link: digest ed email di evento usano lo stesso canale degli alert;
+- nella console Anthropic, un **tetto di spesa mensile** sull'organizzazione della chiave. La chiave è la stessa dell'AI-check, quindi il tetto vale per entrambi: va dimensionato sui budget giornalieri del modulo (con i default circa 7 $ al giorno) più il consumo dell'AI-check. Raggiunto il tetto, il provider rifiuta le chiamate, anche quelle dell'AI-check;
+- i testi legali segnaposto: vedi «Partenariati: testi legali da rivedere» sopra.
+
+1. Nel `.env`: `PARTENARIATI_ATTIVO=true`. I budget giornalieri, in centesimi di USD e fail-closed, restano ai default se non si impostano: `PARTENARIATO_BUDGET_CENTS_GIORNO=500` (estrazioni delle regole), `PARTENARIATI_AI_BUDGET_CENTS_GIORNO_ALTRI=200` (bozza del profilo, proposte della call, bozze dei documenti), `PARTENARIATO_BATCH_BUDGET_CENTS_GIORNO=0` (batch notturno spento). Poi `docker compose up -d backend` e il controllo con `env | grep`.
+2. In AdminPiani, che mostra i campi solo a modulo acceso: per i piani diversi da Gratuito, Smart, Pro e Advisor (per esempio quelli su misura) si impostano «Call di partenariato attive», «Candidature al mese» e «Bozze di documenti al mese». Partono da 0, cioè non incluse: finché restano a 0, i clienti di quei piani non creano call né candidature.
+3. Controlli dopo l'accensione:
+   - nessun errore nei log d'avvio;
+   - dal browser, con un utente loggato: nella risposta di `GET /api/v1/me` (strumenti per sviluppatori → Rete) `funzioni.partenariati` è `true`;
+   - nel menu dell'app compare «Partenariati», e per gli admin anche in Admin;
+   - lo scheduler del modulo scrive una riga al giorno in `partenariati_runs`. Se l'accensione è dopo le 05:30 (ora di Roma), la riga di oggi arriva subito dopo l'avvio, altrimenti alle 05:30. Dallo SQL Editor: `select giorno, riepilogo from partenariati_runs order by giorno desc limit 3;`. Nel `riepilogo` nessun passo deve valere `"errore"`;
+   - disiscrizione: `curl -s -o /dev/null -w '%{http_code}\n' 'https://bandofit.example.com/api/v1/partenariati/email/unsubscribe?token=prova&tipo=digest'` risponde 200 (pagina di conferma: il GET non cambia nulla). Alla prima email ricevuta (digest del lunedì alle 08:30 o email di evento), il link in fondo porta alla stessa pagina: dopo il bottone, nelle Preferenze l'email risulta disattivata.
+4. Da tenere d'occhio: le regole salvate prima del prompt v3 risultano da aggiornare e si riestraggono a pagamento all'apertura della sezione, dentro il budget del giorno. Il batch notturno resta spento finché il suo budget è 0.
+
+Per fermare solo la spesa AI senza spegnere il modulo: `PARTENARIATO_BUDGET_CENTS_GIORNO=0` e `PARTENARIATI_AI_BUDGET_CENTS_GIORNO_ALTRI=0`, poi `docker compose up -d backend`. Le nuove chiamate al modello vengono rifiutate, il resto del modulo funziona.
+
+Per spegnerlo: `PARTENARIATI_ATTIVO=false`, poi `docker compose up -d backend` e il controllo con `env | grep`.
+- Le rotte del modulo tornano 404, il menu sparisce, scheduler e digest non partono.
+- La disiscrizione `/api/v1/partenariati/email/unsubscribe` continua a rispondere, perché un link già inviato deve funzionare.
+- I dati restano; i limiti in AdminPiani restano salvati ma nascosti.
 
 ## Operazioni ricorrenti
 
@@ -262,7 +374,7 @@ docker compose down
 
 ### Migration del DB primario (prima del deploy)
 
-Le migration nuove (`supabase/migrations/NNNN_nome.sql`, segnalate con ⚠️ nel changelog) si eseguono dallo SQL Editor del primario, in ordine di numero, **prima** del deploy del backend che le usa. Per il rilascio dei bilanci e del modulo partenariati (branch `feat/partenariati`) servono **tutte** le migration dalla 0032 alla 0042, in ordine, prima del deploy e qualunque sia lo stato dei flag: il backend legge colonne della 0036, 0041 e 0042 anche a modulo spento. Ogni file va eseguito dentro una transazione, con un limite all'attesa dei lock subito dopo `begin;`:
+Le migration nuove (`supabase/migrations/NNNN_nome.sql`, segnalate con ⚠️ nel changelog) si eseguono dallo SQL Editor del primario, in ordine di numero, **prima** del deploy del backend che le usa. Per il rilascio dei bilanci e del modulo partenariati (branch `feat/partenariati`) servono **tutte** le migration dalla 0032 alla 0042, in ordine, prima del deploy e qualunque sia lo stato dei flag: il backend legge colonne della 0036, 0041 e 0042 anche a modulo spento. Poi la **0043** (rimappatura dei bandi fusi), che serve prima di impostare `RIMAPPATURA_FUSI_MODALITA` diversa da `spenta`, e la **0044** (ripristino della rimappatura: aggiunge solo una funzione), da applicare prima di passare ad `attiva` (vedi «Accensione delle funzioni» sopra). Ogni file va eseguito dentro una transazione, con un limite all'attesa dei lock subito dopo `begin;`:
 
 ```sql
 begin;

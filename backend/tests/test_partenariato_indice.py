@@ -234,6 +234,8 @@ class FakeQuery:
                 trovate = trovate[self.intervallo[0]: self.intervallo[1] + 1]
             if self.limite is not None:
                 trovate = trovate[: self.limite]
+            if db.max_righe is not None:
+                trovate = trovate[: db.max_righe]  # come il max-rows di PostgREST
             dati = [self._proietta(self.tabella, r, self.colonne) for r in trovate]
             return SimpleNamespace(data=dati, count=totale if self.conta else None)
         if self.op == "delete":
@@ -275,6 +277,9 @@ class FakePrimary:
         self.guasti: dict = {}
         self.rpc_guasti: dict = {}
         self.email_non_verificate: set[str] = set()
+        # max-rows di PostgREST (None = nessun tetto): vale per le select e per
+        # le RPC che restituiscono righe
+        self.max_righe: int | None = None
         self._id = 0
         # colonne che possono mancare nelle righe di test (null)
         self.colonne_note = {
@@ -301,7 +306,10 @@ class FakePrimary:
                 guasto = db.rpc_guasti.get(nome)
                 if guasto is not None:
                     raise guasto
-                return SimpleNamespace(data=getattr(db, f"_{nome}")(params))
+                dati = getattr(db, f"_{nome}")(params)
+                if isinstance(dati, list) and db.max_righe is not None:
+                    dati = dati[: db.max_righe]
+                return SimpleNamespace(data=dati)
 
         return _Rpc()
 
@@ -390,16 +398,21 @@ class FakePrimary:
 
 
 class FakeSecondary:
-    """Catalogo finto: solo `bando_pubblico` (stato live dei bandi)."""
+    """Catalogo finto: `bando_pubblico` (stato live dei bandi) e
+    `bando_fusione` (doppione → master)."""
 
-    def __init__(self, stati: dict[int, str] | None = None):
+    def __init__(self, stati: dict[int, str] | None = None,
+                 fusi: dict[int, int] | None = None):
         self.stati = stati or {}
+        self.fusi = fusi or {}
         self.guasto: Exception | None = None
+        self.guasto_fusioni: Exception | None = None
         self.letture = 0
+        self.letture_fusioni = 0
 
     def table(self, nome):
         sec = self
-        assert nome == "bando_pubblico", nome
+        assert nome in ("bando_pubblico", "bando_fusione"), nome
 
         class _Q:
             def __init__(self):
@@ -413,6 +426,14 @@ class FakeSecondary:
                 return self
 
             async def execute(self):
+                if nome == "bando_fusione":
+                    sec.letture_fusioni += 1
+                    if sec.guasto_fusioni is not None:
+                        raise sec.guasto_fusioni
+                    return SimpleNamespace(data=[
+                        {"bando_id": i, "master_id": sec.fusi[i]}
+                        for i in self.ids if i in sec.fusi
+                    ])
                 sec.letture += 1
                 if sec.guasto is not None:
                     raise sec.guasto
@@ -804,6 +825,61 @@ async def test_catalogo_in_errore_ripiega_sullo_snapshot_e_la_cache_vale_10_minu
     assert sec.letture == letture  # stato dei bandi in cache
 
 
+def _secondario_con_guida_fusa() -> FakeSecondary:
+    """Il bando della call guida è un doppione fuso: assente dalla vista,
+    presente in `bando_fusione`."""
+    return FakeSecondary({g.BANDO_ALTRO: "aperto", g.BANDO_ALTRO + 1: "aperto"},
+                         fusi={g.BANDO_GUIDA: g.BANDO_ALTRO})
+
+
+async def test_bando_fuso_non_fa_sparire_la_call_e_vale_lo_snapshot():
+    db, _ = await scenario_guida()
+    sec = _secondario_con_guida_fusa()
+    idx = await partenariato_indice.indice(db, sec)
+    assert g.CALL_GUIDA_ID in idx.matching.calls and g.CALL_GUIDA_ID in idx.bacheca
+    assert sec.letture_fusioni == 1
+    # lo snapshot decide: una call fusa con lo snapshot «chiuso» resta fuori
+    db.una("partner_calls", id=g.CALL_GUIDA_ID)["bando_stato_effettivo"] = "chiuso"
+    partenariato_indice.reset()
+    idx = await partenariato_indice.indice(db, sec)
+    assert g.CALL_GUIDA_ID not in idx.matching.calls
+
+
+async def test_bando_fuso_in_cache_come_gli_altri_stati():
+    db, _ = await scenario_guida()
+    sec = _secondario_con_guida_fusa()
+    await partenariato_indice.indice(db, sec)
+    partenariato_indice.invalida()
+    idx = await partenariato_indice.indice(db, sec)
+    assert g.CALL_GUIDA_ID in idx.matching.calls
+    assert sec.letture_fusioni == 1
+
+
+async def test_bando_fusione_illeggibile_non_vale_sparito_e_non_resta_in_cache():
+    db, _ = await scenario_guida()
+    sec = _secondario_con_guida_fusa()
+    sec.guasto_fusioni = RuntimeError("bando_fusione giù")
+    idx = await partenariato_indice.indice(db, sec)
+    assert g.CALL_GUIDA_ID in idx.matching.calls  # snapshot «aperto»
+    assert g.CALL_ALTRA_ID in idx.matching.calls  # gli altri bandi dalla vista
+    # alla ricarica dopo si riprova: ora il bando risulta sparito davvero
+    sec.guasto_fusioni, sec.fusi = None, {}
+    letture = sec.letture
+    partenariato_indice.invalida()
+    idx = await partenariato_indice.indice(db, sec)
+    assert g.CALL_GUIDA_ID not in idx.matching.calls
+    assert sec.letture_fusioni == 2
+    assert sec.letture == letture + 1  # solo il bando non verificato si rilegge
+
+
+async def test_budget_conta_la_lettura_delle_fusioni():
+    db, _ = await scenario_guida()
+    idx_vista = await partenariato_indice.indice(db, secondario_guida())
+    partenariato_indice.reset()
+    idx_fusa = await partenariato_indice.indice(db, _secondario_con_guida_fusa())
+    assert idx_fusa.query == idx_vista.query + 1
+
+
 async def test_t5_registro_di_un_altra_piva_non_conta():
     db, sec = await scenario_guida()
     db.una("company_data", company_profile_id=g.COMPANY["Y"])["piva_fetched"] = "99999999999"
@@ -975,7 +1051,7 @@ async def test_budget_di_query_con_500_aziende_e_200_call():
     assert all(p.collegamenti_ok for p in idx.matching.candidati.values())
     assert idx.query <= 20, idx.query
     letture_primario = len(db.letture())
-    assert letture_primario + sec.letture <= 20
+    assert letture_primario + sec.letture + sec.letture_fusioni <= 20
 
 
 class TestHookDeiCollegamenti:

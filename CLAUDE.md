@@ -58,4 +58,4 @@ Sviluppo in locale; produzione con Docker Compose dietro reverse proxy (Cloudfla
 - `RATE_LIMIT_PEPPER` è obbligatorio in deploy; cambiarlo azzera i contatori del rate limit
 - IP client: non usare `FORWARDED_ALLOW_IPS=*` (prende il primo elemento di X-Forwarded-For, falsificabile). Vedi `core/net.py` e `docs/deploy.md`
 - DB secondario: PostgREST ha `max-rows` = 1000: una richiesta senza `limit` non restituisce mai più di 1000 righe
-- Rimappatura dei bandi fusi (`RIMAPPATURA_FUSI_MODALITA` = spenta | prova | attiva): richiede la migration 0043 sul primario; la variabile arriva al container solo se aggiunta all'`environment` del backend in `docker-compose.yml`
+- Funzioni con interruttore (`RIMAPPATURA_FUSI_MODALITA` = spenta | prova | attiva, `BILANCI_STORICO_ATTIVO`, `PARTENARIATI_ATTIVO` e i budget del modulo): default spenti in `docker-compose.yml`, si cambiano solo dal `.env` del server e si applicano con `docker compose up -d backend` (un `restart` non rilegge il `.env`). La rimappatura richiede le migration 0043/0044. Procedura: «Accensione delle funzioni» in `docs/deploy.md`

@@ -307,6 +307,37 @@ async def _anni_acquisiti(primary, company_id: str) -> list[int]:
     return sorted({int(r["anno"]) for r in (resp.data or [])})
 
 
+async def _anni_posseduti(primary, company_id: str) -> tuple[set[int], int | None]:
+    """Esercizi di cui l'azienda ha già il bilancio ufficiale: registrati da
+    un XBRL (`_anni_acquisiti`) o consegnati da una richiesta `completata`
+    (anno letto dal documento, altrimenti quello richiesto), anche senza
+    numeri leggibili: lo stesso documento tornerebbe identico, a pagamento.
+
+    Il secondo valore serve solo alla guardia di «ultimo disponibile»: per
+    una richiesta completata ad anno ignoto (né richiesto né letto),
+    l'esercizio più recente che può aver consegnato, cioè l'anno della
+    richiesta − 1 (None se non ce ne sono)."""
+    anni = set(await _anni_acquisiti(primary, company_id))
+    resp = (
+        await primary.table("company_bilancio_richieste")
+        .select("anno_richiesto,anno_bilancio,created_at")
+        .eq("company_profile_id", str(company_id))
+        .eq("stato", "completata")
+        .execute()
+    )
+    ignoto: int | None = None
+    for riga in resp.data or []:
+        anno = riga.get("anno_bilancio") or riga.get("anno_richiesto")
+        if anno is not None:
+            anni.add(int(anno))
+            continue
+        creata = openapi_service._parse_ts(riga.get("created_at"))
+        if creata is not None:
+            stima = creata.astimezone(_FUSO_ITALIA).year - 1
+            ignoto = stima if ignoto is None else max(ignoto, stima)
+    return anni, ignoto
+
+
 async def _addon_attivo(primary) -> dict | None:
     resp = (
         await primary.table("addons")
@@ -639,13 +670,37 @@ async def _dati_richiesta(primary, active) -> tuple[dict, dict, str]:
     return company_row, dati, piva
 
 
+def _verifica_ultimo_disponibile(posseduti: set[int], anno_ignoto: int | None) -> None:
+    """«Ultimo disponibile» (anno None): l'esercizio che il provider
+    restituirebbe non si conosce prima di pagare. Regola prudente: se
+    l'azienda ha già un bilancio ufficiale da anno corrente − 2 in poi, può
+    essere proprio quello (a inizio anno l'ultimo depositato è spesso di due
+    esercizi fa), quindi si chiede un anno esplicito. 409, nessuna spesa."""
+    soglia = _adesso().astimezone(_FUSO_ITALIA).year - 2
+    noto = max(posseduti, default=None)
+    if noto is not None and noto >= soglia:
+        raise AppError(
+            409,
+            "bilancio_gia_presente",
+            f"Hai già il bilancio ufficiale {noto} di questa azienda: con «ultimo disponibile» "
+            "potresti riceverlo di nuovo. Scegli l'esercizio che ti serve",
+        )
+    if anno_ignoto is not None and anno_ignoto >= soglia:
+        raise AppError(
+            409,
+            "bilancio_gia_presente",
+            "Hai già un bilancio ufficiale recente di questa azienda: con «ultimo disponibile» "
+            "potresti riceverlo di nuovo. Scegli l'esercizio che ti serve",
+        )
+
+
 async def richiedi(primary, openapi, active, user: dict, anno: int | None) -> BilancioRichiestaOut:
     """Richiede il bilancio ufficiale (bilancio ottico, A PAGAMENTO) per
     l'azienda attiva, consumando SEMPRE 1 unità dell'addon del titolare.
 
     Prima della spesa, in ordine: servizio configurato, titolare, azienda e
-    P.IVA importata, niente società di persone, anno non già acquisito (con
-    «ultimo disponibile»: ultimo esercizio chiuso non già acquisito), addon
+    P.IVA importata, niente società di persone, anno non già posseduto (con
+    «ultimo disponibile»: nessun bilancio ufficiale da anno corrente − 2), addon
     attivo, unità disponibili (cortesia: l'arbitro è la RPC), nessuna
     richiesta aperta, `/impresa` per le forme non SC (prenotata nel tetto
     giornaliero openapi dell'owner). Poi la RPC (tetti, consumo atomico) e
@@ -669,24 +724,16 @@ async def richiedi(primary, openapi, active, user: dict, anno: int | None) -> Bi
             "Le società di persone non depositano il bilancio: il bilancio ufficiale non è "
             "disponibile",
         )
-    anni_acquisiti = await _anni_acquisiti(primary, company_id)
-    if anno is not None and anno in anni_acquisiti:
+    posseduti, anno_ignoto = await _anni_posseduti(primary, company_id)
+    if anno is not None and anno in posseduti:
         raise AppError(
             409,
             "bilancio_gia_presente",
-            f"Hai già il bilancio ufficiale {anno} di questa azienda: i suoi numeri sono nei "
-            "bilanci",
+            f"Hai già il bilancio ufficiale {anno} di questa azienda: lo trovi nella sezione "
+            "Bilanci",
         )
-    ultimo_chiuso = _adesso().astimezone(_FUSO_ITALIA).year - 1
-    if anno is None and ultimo_chiuso in anni_acquisiti:
-        # «Ultimo disponibile» riporterebbe il bilancio dell'ultimo esercizio
-        # chiuso, che c'è già: si pagherebbe lo stesso documento.
-        raise AppError(
-            409,
-            "bilancio_gia_presente",
-            f"Hai già l'ultimo bilancio ufficiale disponibile ({ultimo_chiuso}) di questa "
-            "azienda: scegli un esercizio precedente",
-        )
+    if anno is None:
+        _verifica_ultimo_disponibile(posseduti, anno_ignoto)
     addon = await _addon_attivo(primary)
     if addon is None:
         raise NotFoundError("Il bilancio ufficiale non è al momento disponibile")
@@ -827,15 +874,44 @@ async def _invia(
 
 # ------------------------------------------------------------------ avanzamento
 
+def _stesso_ambiente(riga: dict, openapi) -> bool:
+    """La richiesta è nata nell'ambiente openapi in uso (sandbox o
+    produzione). Quelle dell'altro ambiente (dopo un cambio di
+    `OPENAPI_ENV`) non si interrogano né si chiudono: il provider non le
+    conosce e le chiuderebbe, o rimborserebbe, a torto."""
+    return bool(riga.get("sandbox")) == bool(openapi.sandbox)
+
+
+def _avanzabile(riga: dict, openapi) -> bool:
+    """Una richiesta si fa avanzare (e si chiude) solo se è aperta, se
+    openapi è configurato e se è nata nell'ambiente in uso. Senza provider
+    le chiusure a tempo chiuderebbero come scadute richieste forse pronte e
+    già pagate: restano aperte finché openapi non torna configurato (come
+    nel failsafe, che in quel caso non parte)."""
+    return (
+        riga.get("stato") in STATI_APERTI
+        and bool(openapi.enabled)
+        and _stesso_ambiente(riga, openapi)
+    )
+
+
 async def avanza(primary, openapi, riga: dict, *, gia_reclamata: bool = False) -> None:
     """Fa avanzare UNA richiesta aperta. Idempotente e senza eccezioni (gira
     in background): chi non vince il claim non fa nulla; `gia_reclamata`
-    se il claim l'ha già preso il chiamante (poll-on-read)."""
-    if riga.get("stato") not in STATI_APERTI:
+    se il claim l'ha già preso il chiamante (poll-on-read). Dopo il claim la
+    riga si RILEGGE e si decide solo su quella: il chiamante può averne una
+    copia vecchia (lotto del failsafe, follower, lettura) e un altro poller
+    può averla già riconciliata o chiusa. Con openapi non configurato, o per
+    le richieste dell'altro ambiente openapi, non si fa nulla (`_avanzabile`)."""
+    if not _avanzabile(riga, openapi):
         return
     try:
         if not gia_reclamata and not await _claim(primary, riga["id"]):
             return
+        attuale = await _leggi_riga(primary, riga["id"])
+        if attuale is None or attuale.get("stato") not in STATI_APERTI:
+            return
+        riga = attuale
         stato = riga["stato"]
         if stato == "in_invio":
             if _eta(riga) <= STALE_INVIO:
@@ -929,16 +1005,37 @@ def _tracce(voci: list[dict], riga: dict) -> list[str | None]:
     return trovate
 
 
-async def _id_gia_usati(primary, ids: list[str]) -> set[str]:
+async def _id_gia_usati(primary, ids: list[str], escludi: str) -> set[str]:
+    """Id del provider già attribuiti ad ALTRE righe. La riga `escludi` (quella
+    che si sta riconciliando) non conta: se nel frattempo ha preso lei l'id,
+    contarlo «già usato» la farebbe sembrare mai partita."""
     if not ids:
         return set()
     resp = (
         await primary.table("company_bilancio_richieste")
         .select("provider_request_id")
         .in_("provider_request_id", ids)
+        .neq("id", str(escludi))
         .execute()
     )
     return {str(r["provider_request_id"]) for r in (resp.data or [])}
+
+
+async def _ancora_senza_invio(primary, riga: dict) -> bool:
+    """Rilettura subito prima di chiudere una riga `esito_ignoto`: se la
+    lista del provider è stata lenta, il claim può essere scaduto e un altro
+    poller può averla riconciliata nel frattempo. Si chiude solo se è ancora
+    `esito_ignoto` e senza id del provider."""
+    attuale = await _leggi_riga(primary, riga["id"])
+    if (
+        attuale is not None
+        and attuale.get("stato") == "esito_ignoto"
+        and not attuale.get("provider_request_id")
+    ):
+        return True
+    logger.info("bilancio ufficiale: richiesta %s cambiata durante la riconciliazione: nessuna "
+                "chiusura", riga["id"])
+    return False
 
 
 async def _eventi_post(primary, riga: dict) -> list[dict] | None:
@@ -1029,7 +1126,8 @@ async def _riconcilia(primary, openapi, riga: dict) -> dict | None:
         candidati = _compatibili(voci, riga)
         tracce = _tracce(voci, riga)
         usati = await _id_gia_usati(
-            primary, sorted({pid for _nata, pid in candidati} | {p for p in tracce if p})
+            primary, sorted({pid for _nata, pid in candidati} | {p for p in tracce if p}),
+            escludi=riga["id"],
         )
         liberi = [(nata, pid) for nata, pid in candidati if pid not in usati]
         if liberi:
@@ -1051,7 +1149,8 @@ async def _riconcilia(primary, openapi, riga: dict) -> dict | None:
         dubbie = [p for p in tracce if p is None or p not in usati]
         if completa and not dubbie and eta > RICONCILIAZIONE_DOPO:
             # Dimostrato: nessuna richiesta al provider può essere questa.
-            await _chiudi_con_codice(primary, riga, "errore", "non_inviata", notifica=True)
+            if await _ancora_senza_invio(primary, riga):
+                await _chiudi_con_codice(primary, riga, "errore", "non_inviata", notifica=True)
             return None
         if dubbie and eta > RICONCILIAZIONE_DOPO:
             logger.warning(
@@ -1060,7 +1159,7 @@ async def _riconcilia(primary, openapi, riga: dict) -> dict | None:
                 riga["id"], len(dubbie),
             )
 
-    if eta > STALE_ESITO_IGNOTO:
+    if eta > STALE_ESITO_IGNOTO and await _ancora_senza_invio(primary, riga):
         await _chiudi_con_codice(primary, riga, "errore", "esito_ignoto_scaduto", notifica=True)
     return None
 
@@ -1308,8 +1407,9 @@ async def _segui(primary, openapi, richiesta_id: str) -> None:
 
 async def _poll_on_read(primary, openapi, riga: dict) -> None:
     """Alla lettura: SOLO claim + `_spawn(avanza)`. Mai il completamento
-    dentro la GET; best-effort."""
-    if riga.get("stato") not in STATI_APERTI:
+    dentro la GET; best-effort. Niente claim per ciò che `avanza` non
+    toccherebbe (openapi non configurato, altro ambiente openapi)."""
+    if not _avanzabile(riga, openapi):
         return
     if await _claim(primary, riga["id"]):
         _spawn(avanza(primary, openapi, riga, gia_reclamata=True))
@@ -1339,7 +1439,9 @@ async def _richiedibile(
 
 async def lista(primary, openapi, active) -> BilanciUfficialiOut:
     """Bilanci ufficiali dell'azienda attiva: addon, unità del titolare, anni
-    già acquisiti e le ultime richieste (le aperte avanzano in background)."""
+    già posseduti (`anni_acquisiti`: la stessa regola della guardia di
+    `richiedi`, anche per le richieste oltre le ultime 20) e le ultime
+    richieste (le aperte avanzano in background)."""
     addon = await _addon_attivo(primary)
     quantita = await _quantita(primary, active.owner_id, addon["id"]) if addon else 0
     if not active.company_id:
@@ -1362,7 +1464,7 @@ async def lista(primary, openapi, active) -> BilanciUfficialiOut:
         motivo_non_richiedibile=motivo,
         addon=_addon_breve(addon),
         quantita=quantita,
-        anni_acquisiti=await _anni_acquisiti(primary, company_id),
+        anni_acquisiti=sorted((await _anni_posseduti(primary, company_id))[0]),
         richieste=[_richiesta_out(r, str(r["id"]) in con_pdf) for r in righe],
     )
 

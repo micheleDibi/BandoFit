@@ -1156,6 +1156,121 @@ class TestConfermaBilanci:
         assert set(registrazioni(primary)) == {"it_full"}
 
 
+def stato_storico_ok(**over) -> dict:
+    """`company_financials_stato` con lo storico già recuperato per PIVA_BIL."""
+    return {
+        "company_profile_id": COMPANY_BIL["id"], "advanced_esito": "ok",
+        "advanced_motivo": None, "advanced_tentato_at": TENTATO_AT,
+        "advanced_fetched_at": TENTATO_AT, "advanced_raw": it_advanced_dato(),
+        "advanced_piva": PIVA_BIL, "advanced_sandbox": False, "advanced_fetch_count": 1,
+        "mapping_versione": MAPPING_BILANCI_VERSIONE, **over,
+    }
+
+
+class TestStoricoGiaRecuperato:
+    """Storico IT-advanced già recuperato per la stessa P.IVA: l'anteprima di
+    un nuovo import lo riusa gratis (nessuna chiamata, nessuna riga nel
+    registro consumi) e lo mostra come recuperato; la conferma non lo
+    riscrive."""
+
+    async def test_anteprima_riusa_lo_storico_senza_chiamata(self):
+        primary = FakePrimary(selects={
+            "company_profiles": [COMPANY_BIL], "company_financials_stato": [stato_storico_ok()],
+        })
+        openapi = fake_openapi(result=it_full_bilanci(), advanced=it_advanced_dato())
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+
+        assert openapi.calls == {"it_full": [PIVA_BIL], "it_advanced": []}
+        assert eventi(primary, "IT-advanced") == []
+        assert len(eventi(primary, "IT-full")) == 1
+        [draft] = primary.ops_for("company_import_drafts", "upsert")
+        assert (draft["advanced_esito"], draft["advanced_motivo"]) == ("ok", None)
+        assert draft["advanced_raw"] == it_advanced_dato()
+        assert draft["advanced_tentato_at"] is None  # nessun cooldown: non si è pagato
+        # la UI vede lo storico come recuperato, non «non richiesto»
+        assert preview.bilanci.model_dump() == {
+            "stato": "disponibili", "motivo": None, "anni": [2017, 2018, 2019, 2020, 2021, 2022],
+        }
+        assert upsert_stato(primary) == []
+
+    @pytest.mark.parametrize(
+        "over",
+        [
+            {"advanced_piva": ALTRA_PIVA},
+            {"advanced_sandbox": True},
+            {"advanced_esito": "non_disponibili", "advanced_motivo": "nessun_bilancio",
+             "advanced_raw": None},
+            {"advanced_raw": {**it_advanced_dato(), "vatCode": ALTRA_PIVA, "taxCode": ALTRA_PIVA}},
+        ],
+        ids=["altra_piva", "altro_ambiente", "esito_non_ok", "raw_di_altra_impresa"],
+    )
+    async def test_storico_non_riusabile_si_chiama(self, over):
+        primary = FakePrimary(selects={
+            "company_profiles": [COMPANY_BIL],
+            "company_financials_stato": [stato_storico_ok(**over)],
+        })
+        openapi = fake_openapi(result=it_full_bilanci(), advanced=it_advanced_dato())
+        await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        assert len(openapi.calls["it_advanced"]) == 1
+        [draft] = primary.ops_for("company_import_drafts", "upsert")
+        assert draft["advanced_tentato_at"]
+
+    async def test_stato_illeggibile_nessuna_chiamata(self, monkeypatch):
+        from app.services import bilanci_service
+
+        async def guasto(*_a, **_k):
+            raise APIError({"message": "x", "code": "08006", "hint": None, "details": None})
+
+        monkeypatch.setattr(bilanci_service, "storico_salvato", guasto)
+        primary = FakePrimary(selects={"company_profiles": [COMPANY_BIL]})
+        openapi = fake_openapi(result=it_full_bilanci(), advanced=it_advanced_dato())
+        preview = await openapi_service.preview_import(primary, None, openapi, _active(), PIVA_BIL)
+        assert openapi.calls["it_advanced"] == []
+        assert eventi(primary, "IT-advanced") == []
+        [draft] = primary.ops_for("company_import_drafts", "upsert")
+        assert (draft["advanced_esito"], draft["advanced_motivo"]) == ("saltato", "errore_provider")
+        assert draft["advanced_tentato_at"] is None
+        assert preview.bilanci.anni == [2021]  # l'import IT-full resta valido
+
+    async def test_conferma_non_riscrive_lo_storico(self):
+        anteprima = FakePrimary(selects={
+            "company_profiles": [COMPANY_BIL], "company_financials_stato": [stato_storico_ok()],
+        })
+        openapi = fake_openapi(result=it_full_bilanci(), advanced=it_advanced_dato())
+        await openapi_service.preview_import(anteprima, None, openapi, _active(), PIVA_BIL)
+        [draft] = anteprima.ops_for("company_import_drafts", "upsert")
+
+        primary = FakePrimary(selects={
+            "company_profiles": [COMPANY_BIL],
+            "company_import_drafts": [draft],
+            "company_financials_stato": [stato_storico_ok()],
+        })
+        await openapi_service.confirm_import(primary, None, _active(), PIVA_BIL)
+        # solo l'esercizio di IT-full; le righe dello storico ci sono già
+        fonti = registrazioni(primary)
+        assert set(fonti) == {"it_full"} and fonti["it_full"]["p_sostituisci"] is False
+        # nessun recupero fittizio nello stato, né la versione del mapping
+        assert upsert_stato(primary) == []
+        assert primary.ops_for("api_usage_events", "insert") == []
+        assert primary.ops_for("company_import_drafts", "delete")
+
+    async def test_conferma_it_full_fallito_versione_azzerata(self):
+        draft = draft_row(
+            PIVA_BIL, payload=it_full_bilanci(),
+            esito="ok", motivo=None, raw=it_advanced_dato(), tentato_at=None,
+        )
+        primary = FakePrimary(selects={
+            "company_profiles": [COMPANY_BIL], "company_import_drafts": [draft],
+        })
+        primary.rpc_errors["fn_bilanci_registra_fonte"] = APIError(
+            {"message": "x", "code": "P0001", "hint": None, "details": "righe_non_valide"}
+        )
+        await openapi_service.confirm_import(primary, None, _active(), PIVA_BIL)
+        assert upsert_stato(primary) == [
+            {"company_profile_id": COMPANY_BIL["id"], "mapping_versione": 0}
+        ]
+
+
 class TestStoricoSpento:
     """BILANCI_STORICO_ATTIVO=false: l'anteprima non chiama MAI IT-advanced
     (esito None = «non richiesto», come un draft precedente alla 0032) e la

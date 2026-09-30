@@ -428,17 +428,39 @@ async def carica_visibilita_membri(primary, owner_ids: list[str]) -> dict[str, s
     return visibilita
 
 
+# max-rows di PostgREST (1000): la suppression list si legge a keyset su `id`
+# fino a una pagina vuota (una pagina corta non basta: il tetto configurato
+# potrebbe essere più basso) e la RPC delle email verificate (setof) si
+# chiama a blocchi di id.
+_PAGINA_SOPPRESSI = 1000
+_BLOCCO_VERIFICA = 100
+
+
 async def filtra_recapitabili(primary, destinatari: list[dict]) -> list[dict]:
     """Solo email VERIFICATE (auth.users, via RPC batch) e non in
-    suppression list (confronto case-insensitive)."""
+    suppression list (confronto case-insensitive). Entrambe le liste si
+    leggono per intero, oltre le 1000 righe."""
     if not destinatari:
         return []
-    resp = await primary.rpc(
-        "fn_email_verificate", {"p_user_ids": [d["id"] for d in destinatari]}
-    ).execute()
-    verificati = {str(v) for v in (resp.data or [])}
-    soppressi_resp = await primary.table("email_suppressions").select("email").execute()
-    soppressi = {r["email"].lower() for r in soppressi_resp.data or []}
+    ids = [d["id"] for d in destinatari]
+    verificati: set[str] = set()
+    for inizio in range(0, len(ids), _BLOCCO_VERIFICA):
+        resp = await primary.rpc(
+            "fn_email_verificate", {"p_user_ids": ids[inizio : inizio + _BLOCCO_VERIFICA]}
+        ).execute()
+        verificati.update(str(v) for v in (resp.data or []))
+    soppressi: set[str] = set()
+    ultimo = None
+    while True:
+        query = primary.table("email_suppressions").select("id,email")
+        if ultimo is not None:
+            query = query.gt("id", ultimo)
+        resp = await query.order("id").limit(_PAGINA_SOPPRESSI).execute()
+        righe = resp.data or []
+        if not righe:
+            break
+        soppressi.update(r["email"].lower() for r in righe)
+        ultimo = righe[-1]["id"]
     return [
         d
         for d in destinatari

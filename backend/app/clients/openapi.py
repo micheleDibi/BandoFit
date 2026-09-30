@@ -41,6 +41,7 @@ import asyncio
 import json as _json
 import logging
 import time
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -115,20 +116,39 @@ _HOST_PRODOTTI = frozenset(
 )
 
 
+def url_per_log(url) -> str:
+    """L'URL per i log: schema, host, porta e path. Via la query, il frammento
+    e le eventuali credenziali prima dell'host: i log non contengono query
+    string. Vale anche per un path relativo («/api/v1/x?y» → «/api/v1/x»)."""
+    try:
+        parti = urlsplit(str(url))
+    except ValueError:
+        return "<url non leggibile>"
+    host = parti.netloc.rpartition("@")[2]
+    return urlunsplit((parti.scheme, host, parti.path, "", ""))
+
+
 class _MascheraUrlHttpx(logging.Filter):
     """httpx scrive a INFO ogni richiesta con l'URL COMPLETO («HTTP Request:
     GET https://company.openapi.com/IT-advanced/<P.IVA> …») e main.py porta
-    il root logger a INFO: senza questo filtro P.IVA e codici fiscali dei
-    path openapi finirebbero in chiaro nei log del container. Maschera solo
-    l'ultimo segmento degli URL dei prodotti openapi; il resto passa intatto."""
+    il root logger a INFO. Per TUTTI gli host l'URL si riduce a schema, host
+    e path (`url_per_log`): i log non contengono query string. Per i prodotti
+    openapi si maschera anche l'ultimo segmento: P.IVA e codici fiscali dei
+    path non devono finire in chiaro nei log del container. Metodo ed esito
+    della riga restano intatti."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
-        if isinstance(args, tuple) and len(args) >= 2:
-            url = args[1]
-            if getattr(url, "host", None) in _HOST_PRODOTTI:
-                record.args = (args[0], _mask_url(str(url)), *args[2:])
+        if isinstance(args, tuple):
+            record.args = tuple(self._pulisci(arg) for arg in args)
         return True
+
+    @staticmethod
+    def _pulisci(arg):
+        if not (isinstance(arg, httpx.URL) or (isinstance(arg, str) and "://" in arg)):
+            return arg
+        pulito = url_per_log(arg)
+        return _mask_url(pulito) if urlsplit(pulito).hostname in _HOST_PRODOTTI else pulito
 
 
 _FILTRO_LOG_HTTPX = _MascheraUrlHttpx()

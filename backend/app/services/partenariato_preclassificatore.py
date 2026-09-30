@@ -20,6 +20,7 @@ distretti o ambiti, RTI/mandataria come gestore di uno strumento finanziario.
 """
 
 import re
+from bisect import bisect_left
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -377,20 +378,49 @@ def _estratto(testo: str, inizio: int, fine: int) -> str:
     return testo[a:b].strip()[:MAX_ESTRATTO]
 
 
-def _escluso(pattern: _Pattern, testo: str, inizio: int, fine: int) -> bool:
-    if pattern.escludi:
-        a = max(0, inizio - _CONTESTO)
-        finestra = testo[a : fine + _CONTESTO]
-        s, e = inizio - a, fine - a
-        for regex in pattern.escludi:
-            for m in regex.finditer(finestra):
-                if m.start() < e and m.end() > s:
-                    return True
-    if pattern.escludi_contesto:
-        finestra = testo[max(0, inizio - _CONTESTO) : fine + _CONTESTO]
-        if any(regex.search(finestra) for regex in pattern.escludi_contesto):
-            return True
-    return False
+class _Esclusioni:
+    """Corrispondenze delle regex di esclusione in UNA sezione, cercate una
+    volta per regex (alla prima richiesta) invece che in una finestra per
+    ogni corrispondenza del pattern: il costo resta lineare nel testo anche
+    con decine di migliaia di corrispondenze. Le corrispondenze di `finditer`
+    non si sovrappongono, quindi inizi e fini sono crescenti. Stesso esito
+    della ricerca a finestre, salvo ai confini della finestra (parole tagliate
+    a metà, esclusioni che vanno oltre i `_CONTESTO` caratteri): lì vale il
+    testo intero."""
+
+    def __init__(self, testo: str) -> None:
+        self._testo = testo
+        self._per_regex: dict[re.Pattern, tuple[list[int], list[int]]] = {}
+
+    def _intervalli(self, regex: re.Pattern) -> tuple[list[int], list[int]]:
+        intervalli = self._per_regex.get(regex)
+        if intervalli is None:
+            inizi: list[int] = []
+            fini: list[int] = []
+            for m in regex.finditer(self._testo):
+                inizi.append(m.start())
+                fini.append(m.end())
+            intervalli = self._per_regex[regex] = (inizi, fini)
+        return intervalli
+
+    def sovrapposta(self, regex: re.Pattern, inizio: int, fine: int) -> bool:
+        """Una corrispondenza di `regex` si sovrappone a [inizio, fine)."""
+        inizi, fini = self._intervalli(regex)
+        k = bisect_left(inizi, fine)
+        return k > 0 and fini[k - 1] > inizio
+
+    def dentro(self, regex: re.Pattern, da: int, a: int) -> bool:
+        """Una corrispondenza di `regex` sta tutta dentro [da, a)."""
+        inizi, fini = self._intervalli(regex)
+        k = bisect_left(inizi, da)
+        return k < len(inizi) and fini[k] <= a
+
+
+def _escluso(pattern: _Pattern, esclusioni: _Esclusioni, inizio: int, fine: int) -> bool:
+    if any(esclusioni.sovrapposta(regex, inizio, fine) for regex in pattern.escludi):
+        return True
+    da, a = max(0, inizio - _CONTESTO), fine + _CONTESTO
+    return any(esclusioni.dentro(regex, da, a) for regex in pattern.escludi_contesto)
 
 
 def preclassifica(sezioni: dict[str, str]) -> Preclassificazione:
@@ -407,12 +437,13 @@ def preclassifica(sezioni: dict[str, str]) -> Preclassificazione:
             continue
         testo = _prepara(grezzo)
         minuscolo = testo.lower()
+        esclusioni = _Esclusioni(testo)
         trovati: list[tuple[int, int, _Pattern]] = []
         for pattern in PATTERN:
             if not any(radice in minuscolo for radice in pattern.inneschi):
                 continue
             for m in pattern.regex.finditer(testo):
-                if _escluso(pattern, testo, m.start(), m.end()):
+                if _escluso(pattern, esclusioni, m.start(), m.end()):
                     continue
                 trovati.append((m.start(), m.end(), pattern))
         if not trovati:

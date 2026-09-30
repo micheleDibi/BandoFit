@@ -28,6 +28,7 @@ Il modello NON entra in nessuno dei due.
 import hashlib
 import json
 import re
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from typing import get_args
 
@@ -83,12 +84,51 @@ _FINTO_BLOCCO = re.compile(
 # LIMITATI: il testo dei PDF e l'output del modello sono input non fidati, e su
 # una «parola» di migliaia di caratteri senza spazi la regex di link_policy
 # costa un tempo quadratico, sull'event loop.
+_MAX_ETICHETTA = 63
 _MENZIONE = re.compile(
-    r"(?:https?:/+|//)?(?:[\w-]{1,63}\.){0,10}(?:"
+    r"(?:https?:/+|//)?(?:[\w-]{1," + str(_MAX_ETICHETTA) + r"}\.){0,10}(?:"
     + "|".join(re.escape(host) for host in BLOCKED_LINK_HOSTS)
     + r")(?:[/?#][^\s]*)?",
     re.IGNORECASE,
 )
+# Le sole posizioni da cui `_MENZIONE` può iniziare la corrispondenza più a
+# sinistra (oltre a quella da cui riprende la scansione): inizio di una parola
+# ([\w-]), schema, «//», dominio escluso e, nelle parole più lunghe di
+# un'etichetta, la posizione da cui il resto della parola ha la lunghezza
+# massima di un'etichetta. Da una posizione interna a una parola che non è
+# tra queste, una corrispondenza inizierebbe già un carattere prima.
+_INIZI_MENZIONE = re.compile(
+    r"(?<![\w-])(?=[\w-])|(?=https?:/|//|(?:"
+    + "|".join(re.escape(host) for host in BLOCKED_LINK_HOSTS)
+    + r"))",
+    re.IGNORECASE,
+)
+_PAROLA_OLTRE_ETICHETTA = re.compile(r"[\w-]{" + str(_MAX_ETICHETTA + 1) + ",}")
+
+
+def _senza_menzioni(testo: str) -> str:
+    """Lo stesso risultato di `_MENZIONE.sub("", testo)`, provando la regex
+    solo dalle posizioni in `_INIZI_MENZIONE`: tempo lineare anche su input
+    patologici."""
+    inizi = {m.start() for m in _INIZI_MENZIONE.finditer(testo)}
+    inizi.update(m.end() - _MAX_ETICHETTA for m in _PAROLA_OLTRE_ETICHETTA.finditer(testo))
+    ordinati = sorted(inizi)
+    pezzi: list[str] = []
+    pos = 0
+    k = 0
+    while True:
+        trovata = _MENZIONE.match(testo, pos)
+        if trovata is None:
+            k = bisect_right(ordinati, pos, k)
+            while k < len(ordinati) and trovata is None:
+                trovata = _MENZIONE.match(testo, ordinati[k])
+                k += 1
+            if trovata is None:
+                break
+        pezzi.append(testo[pos : trovata.start()])
+        pos = trovata.end()
+    pezzi.append(testo[pos:])
+    return "".join(pezzi)
 
 
 def scrub_menzioni(nodo):
@@ -99,7 +139,7 @@ def scrub_menzioni(nodo):
         minuscolo = nodo.lower()
         if not any(host in minuscolo for host in BLOCKED_LINK_HOSTS):
             return nodo
-        return _MENZIONE.sub("", nodo)
+        return _senza_menzioni(nodo)
     if isinstance(nodo, list):
         return [scrub_menzioni(voce) for voce in nodo]
     if isinstance(nodo, dict):

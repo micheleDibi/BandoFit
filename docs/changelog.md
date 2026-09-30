@@ -2,6 +2,17 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-09-30 — Preparazione all'accensione di rimappatura, bilanci e partenariati ⚠️ migration 0044
+
+Correzioni che rendono sicuro accendere in produzione, una alla volta, la rimappatura dei bandi fusi, lo storico dei bilanci con il bilancio ufficiale e il modulo partenariati. Procedura in `docs/deploy.md`, «Accensione delle funzioni».
+- **Interruttori nel compose**: `docker-compose.yml` passa al backend `BILANCI_STORICO_ATTIVO`, `RIMAPPATURA_FUSI_MODALITA`, `RIMAPPATURA_FUSI_INTERVALLO_MINUTI`, `PARTENARIATI_ATTIVO` e i tre budget AI del modulo, con i default spenti di `config.py`: da ora si accendono e spengono solo dal `.env` del server con `docker compose up -d backend`. Un intervallo della rimappatura non valido non blocca più l'avvio (vale 60 minuti, con un log ERROR); il riassunto del passo va a WARNING se ci sono errori o coppie scartate.
+- **Log**: le righe di log delle richieste HTTP del backend (richieste verso i servizi esterni, errori di rete, log di accesso di uvicorn) non contengono query string né credenziali; il container frontend non scrive log di accesso.
+- **Rimappatura dei fusi**: nuova migration 0044, `fn_ripristina_rimappatura`, per annullare dall'audit la rimappatura di un doppione separato dal catalogo (prova di default, idempotente, righe cambiate o in conflitto lasciate intatte e contate).
+- **Bilancio ufficiale**: un passo periodico (ogni 10 minuti, solo a storico acceso) fa avanzare le richieste aperte fino a completamento, rimborso o scadenza anche dopo un riavvio, senza doppi addebiti né rimborsi e solo per l'ambiente openapi in uso. «Ultimo disponibile» e un anno già posseduto sono rifiutati (409) prima di consumare l'unità; la card non propone più l'opzione in quei casi.
+- **Storico dei bilanci**: nell'anteprima dell'import lo storico già recuperato per la stessa P.IVA si riusa senza nuova chiamata né spesa e si mostra come recuperato.
+- **Partenariati e alert**: la lista degli indirizzi soppressi e la verifica delle email si leggono per intero anche oltre 1000 righe (nessuna email a un indirizzo soppresso); pre-classificatore delle regole e pulizia dei domini esclusi con tempo lineare (stesso risultato di prima per la pulizia dei domini; per il pre-classificatore stesso esito salvo i casi al bordo della vecchia finestra di contesto, ora valutati sull'esclusione effettiva); nella scoperta una call su un bando fuso resta proposta.
+- **Azioni manuali**: applicare la 0044 dopo la 0043; configurare i log di nginx sul server senza query string; ricostruire il frontend.
+
 ## 2026-09-30 — Catalogo bandi: fase (c) del contratto DB bandi ⚠️ migration 0043
 
 Il backend legge il catalogo solo dalla vista pubblica `bando_pubblico` (bandi pubblicati e non fusi) e dalla tabella dei link `bando_link`; nessuna lettura resta sulla tabella `bando` né sul predicato `stato_processing`. È il passo c1: le colonne deprecate `link_candidatura`, `link_bando` e `allegati` si leggono ancora, ma solo come ripieghi del pulsante e degli allegati (costante `COLONNE_RIPIEGO_51`), da togliere nel passo c2 quando il catalogo avrà le righe sostitutive.

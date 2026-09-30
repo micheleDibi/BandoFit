@@ -3,12 +3,16 @@ spec in italiano e in inglese, falsi positivi noti del catalogo, livelli,
 forma dei segnali e prestazioni."""
 
 import json
+import random
+import re
 import time
 
 import pytest
 
+from app.services import partenariato_preclassificatore as pc
 from app.services.partenariato_preclassificatore import (
     MAX_ESTRATTO,
+    PATTERN,
     Preclassificazione,
     preclassifica,
 )
@@ -20,6 +24,72 @@ def _pattern(testo: str) -> set[tuple[str, str]]:
 
 def _livello(testo: str) -> str:
     return preclassifica({"S1": testo}).livello
+
+
+# Input patologici (unità ripetute fino alla dimensione del test).
+_PATOLOGICI = [
+    "ATS ", "A.T.S. ", "consorzio ", "partenariato ", "accordo di partenariato ",
+    "aggregazioni ", "capofila ", "comune ", "quota ", "almeno 2 ", "RTI gestore ",
+    "a" * 200_000, "1." * 1_000, "quota almeno " + "x" * 3_000 + " ",
+    "nessun partner " + "x" * 3_000 + " ", "ciascun partner " + "1" * 3_000 + " ",
+]
+
+
+def _vocabolario() -> list[str]:
+    """Frammenti letterali delle regex del modulo (pattern ed esclusioni)."""
+    parole: set[str] = set()
+    for pattern in PATTERN:
+        for regex in (pattern.regex, *pattern.escludi, *pattern.escludi_contesto):
+            pulito = re.sub(r"\\[a-zA-Z]|\(\?[:=!<]*|[()\[\]{}?*+|^$\\]", " ", regex.pattern)
+            parole.update(p for p in pulito.split() if not p.isdigit())
+    return sorted(parole)
+
+
+_VOCABOLARIO = _vocabolario()
+# Falsi amici noti (le esclusioni) e le formule che li contengono.
+_FRASI = [
+    "consorzio di tutela", "consorzi di bonifica", "consorzio per lo sviluppo industriale",
+    "consorzio universitario", "consorzio di garanzia collettiva dei fidi", "consorzio",
+    "ATS (Agenzia di Tutela della Salute)", "tutela della salute - ATS", "ATS della Brianza",
+    "ATS", "A.T.S.", "ATI", "RTI", "R.T.I.", "soggetto gestore", "strumenti finanziari",
+    "partenariato pubblico-privato", "PPP", "in partenariato", "partenariato",
+    "accordo di partenariato 2021", "nell'ambito dell'accordo di partenariato",
+    "accordo di partenariato", "comune capofila", "comuni del distretto capofila",
+    "capofila del piano di zona", "ente capofila dell'ambito", "capofila del partenariato",
+    "capofila", "aggregazione sociale", "centro di aggregazione", "aggregazione dei dati",
+    "aggregazioni", "mandatario", "public-private partnership", "partnership",
+    "raggruppamento temporaneo", "associazione temporanea di imprese",
+]
+_SEPARATORI = [" ", " ", " ", ", ", ". ", "; ", "-", "'", " % ", " 12 ", " 1,5 ", " (", ") "]
+
+
+def _testo_generato(seme: int, lunghezza: int, *, lunghi: bool = False) -> str:
+    rnd = random.Random(seme)
+    pezzi: list[str] = []
+    totale = 0
+    while totale < lunghezza:
+        if lunghi and rnd.random() < 0.02:
+            parola = rnd.choice(["x", "1", ".", "a.", "-"]) * rnd.randint(200, 3_000)
+        elif rnd.random() < 0.3:
+            parola = rnd.choice(_FRASI)
+        else:
+            parola = rnd.choice(_VOCABOLARIO)
+        pezzo = parola + rnd.choice(_SEPARATORI)
+        pezzi.append(pezzo)
+        totale += len(pezzo)
+    return "".join(pezzi)[:lunghezza]
+
+
+def _escluso_a_finestre(pattern, testo: str, inizio: int, fine: int) -> bool:
+    """Riferimento: le esclusioni cercate in una finestra attorno a ogni
+    corrispondenza (la versione a costo corrispondenze × finestra)."""
+    da = max(0, inizio - pc._CONTESTO)
+    finestra = testo[da : fine + pc._CONTESTO]
+    s, e = inizio - da, fine - da
+    for regex in pattern.escludi:
+        if any(m.start() < e and m.end() > s for m in regex.finditer(finestra)):
+            return True
+    return any(regex.search(finestra) for regex in pattern.escludi_contesto)
 
 
 # ------------------------------------------------------------ positivi
@@ -271,9 +341,85 @@ class TestPrestazioni:
         )
         sezioni = {f"D1-p{i}": paragrafo * 9 for i in range(1, 201)}
         assert sum(len(t) for t in sezioni.values()) >= 400_000
-        inizio = time.perf_counter()
+        inizio = time.process_time()
         esito = preclassifica(sezioni)
-        durata = time.perf_counter() - inizio
+        durata = time.process_time() - inizio
         assert esito.livello == "forte"
         # Obiettivo di progetto < 200 ms; margine per macchine lente in CI.
         assert durata < 1.0
+
+    # Tempo di CPU del processo (`process_time`), non del muro: il carico di
+    # altri processi non conta. Tipicamente sotto 0,2 s: il limite ha un
+    # margine di almeno 5 volte.
+    @pytest.mark.parametrize("unita", _PATOLOGICI, ids=lambda _: "patologico")
+    def test_input_patologici_200_kb_una_sezione(self, unita):
+        testo = (unita * (200_000 // len(unita) + 1))[:200_000]
+        inizio = time.process_time()
+        preclassifica({"D1-p1": testo})
+        assert time.process_time() - inizio < 1.0
+
+    @pytest.mark.parametrize("unita", _PATOLOGICI, ids=lambda _: "patologico")
+    def test_input_patologici_200_kb_in_molte_pagine(self, unita):
+        testo = (unita * (200_000 // len(unita) + 1))[:200_000]
+        sezioni = {f"D1-p{i + 1}": testo[j : j + 2_000] for i, j in
+                   enumerate(range(0, len(testo), 2_000))}
+        inizio = time.process_time()
+        preclassifica(sezioni)
+        assert time.process_time() - inizio < 1.0
+
+    @pytest.mark.parametrize("seme", range(3))
+    def test_testi_generati_200_kb(self, seme):
+        testo = _testo_generato(seme, 200_000, lunghi=seme == 2)
+        inizio = time.process_time()
+        preclassifica({"D1-p1": testo})
+        assert time.process_time() - inizio < 1.0
+
+
+class TestEsclusioniUnaVoltaPerSezione:
+    """Le esclusioni si cercano una volta per sezione: stesso esito della
+    ricerca in una finestra attorno a ogni corrispondenza, salvo ai confini
+    della finestra, dove vale il testo intero."""
+
+    @pytest.mark.parametrize(
+        ("testo", "attesi"),
+        [
+            ("la digestione " + "x" * 87 + " un RTI tra imprese", {"sigla_ati_rti"}),
+            ("un RTI tra imprese " + "y" * 79 + " gestorex fine", {"sigla_ati_rti"}),
+            ("il comune " + "w" * 120 + " capofila del progetto", set()),
+        ],
+    )
+    def test_ai_confini_della_finestra_vale_il_testo_intero(self, testo, attesi):
+        assert {s.pattern for s in preclassifica({"S1": testo}).segnali} == attesi
+
+    def test_stesso_esito_della_ricerca_a_finestre_sui_testi_generati(self, monkeypatch):
+        testi = [_testo_generato(seme, 4_000, lunghi=seme % 3 == 0) for seme in range(60)]
+        attesi = [preclassifica({"D1-p1": t, "S1": t[:1_500]}) for t in testi]
+        esiti: list[bool] = []
+
+        def a_finestre(pattern, esclusioni, inizio, fine):
+            esiti.append(_escluso_a_finestre(pattern, esclusioni._testo, inizio, fine))
+            return esiti[-1]
+
+        monkeypatch.setattr(pc, "_escluso", a_finestre)
+        assert [preclassifica({"D1-p1": t, "S1": t[:1_500]}) for t in testi] == attesi
+        # il confronto non è banale: segnali, corrispondenze escluse e no
+        assert sum(len(e.segnali) for e in attesi) > 500
+        assert esiti.count(True) > 1_000 and esiti.count(False) > 1_000
+
+    @pytest.mark.parametrize(
+        "testo",
+        [
+            "Il consorzio di tutela del vino e un consorzio di imprese.",
+            "La ATS (Agenzia di Tutela della Salute) e le ATS costituite dai partner.",
+            "Il Comune capofila del distretto e il soggetto capofila del partenariato.",
+            "Il RTI è il soggetto gestore del fondo. " + "parola " * 40 + "Ammesse le RTI.",
+        ],
+    )
+    def test_casi_noti_come_prima(self, testo, monkeypatch):
+        atteso = preclassifica({"S1": testo})
+        monkeypatch.setattr(
+            pc, "_escluso",
+            lambda pattern, esclusioni, inizio, fine: _escluso_a_finestre(
+                pattern, esclusioni._testo, inizio, fine),
+        )
+        assert preclassifica({"S1": testo}) == atteso

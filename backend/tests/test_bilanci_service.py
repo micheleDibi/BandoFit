@@ -797,6 +797,67 @@ class TestStoricoGiaRecuperato:
         await bilanci_service.recupera_bilanci(db, fake_openapi(), _active())
         assert db.stato()["advanced_piva"] == PIVA
 
+    async def test_storico_salvato_riusabile(self):
+        db = self._db_con_storico()
+        esito = await bilanci_service.storico_salvato(db, COMPANY, PIVA, sandbox=False)
+        assert (esito.esito, esito.motivo, esito.tentato_at) == ("ok", None, None)
+        assert esito.raw == it_advanced_dato() and esito.riusato is True
+
+    @pytest.mark.parametrize(
+        ("over", "sandbox"),
+        [
+            ({}, True),
+            ({"advanced_piva": "00000000000"}, False),
+            ({"advanced_esito": "timeout", "advanced_raw": None}, False),
+            ({"advanced_raw": {**it_advanced_dato(), "vatCode": "0", "taxCode": "0"}}, False),
+        ],
+        ids=["altro_ambiente", "altra_piva", "esito_non_ok", "raw_di_altra_impresa"],
+    )
+    async def test_storico_salvato_non_riusabile(self, over, sandbox):
+        db = db_base(company_financials_stato=[{**self._stato_ok(), **over}])
+        assert await bilanci_service.storico_salvato(db, COMPANY, PIVA, sandbox=sandbox) is None
+        assert await bilanci_service.storico_salvato(db_base(), COMPANY, PIVA, sandbox=False) is None
+
+    async def test_riusato_solo_ok_senza_tentativo(self):
+        esito = bilanci_service.EsitoAdvanced
+        assert esito("ok", None, raw={}).riusato is True
+        assert esito("ok", None, raw={}, tentato_at=_iso(0)).riusato is False
+        assert esito.saltato("tempo_insufficiente").riusato is False
+        assert esito(None, None).riusato is False
+
+    async def test_reimport_con_storico_riusato_non_tocca_nulla(self):
+        """La conferma di un'anteprima che ha riusato lo storico: stato
+        (contatore, date, raw) e righe `it_advanced` intatti; solo `it_full`."""
+        db = self._db_con_storico()
+        prima = dict(db.stato())
+        righe_prima = {k: v for k, v in db.fonti.items() if k[2] == "it_advanced"}
+        riusato = await bilanci_service.storico_salvato(db, COMPANY, PIVA, sandbox=False)
+        await bilanci_service.persisti_import(
+            db, COMPANY, piva=PIVA, payload=it_full_bilanci(), advanced=riusato, sandbox=False
+        )
+        assert db.stato() == prima
+        assert {k: v for k, v in db.fonti.items() if k[2] == "it_advanced"} == righe_prima
+        fonti = [p["p_fonte"] for n, p in db.rpcs if n == "fn_bilanci_registra_fonte"]
+        assert fonti == ["it_full"]
+        out = await bilanci_service.get_bilanci(db, _active())
+        assert out.storico_esito == "ok" and out.motivo is None
+        assert [e.anno for e in out.esercizi] == [2017, 2018, 2019, 2020, 2021, 2022]
+
+    async def test_reimport_riusato_con_mapping_vecchio_rimappa_gratis(self):
+        """Versione del mapping vecchia: la conferma non la alza (le righe
+        dello storico non sono state rifatte), la rimappatura pigra sì."""
+        db = self._db_con_storico()
+        db.tabelle["company_financials_stato"][0]["mapping_versione"] = 0
+        riusato = await bilanci_service.storico_salvato(db, COMPANY, PIVA, sandbox=False)
+        await bilanci_service.persisti_import(
+            db, COMPANY, piva=PIVA, payload=it_full_bilanci(), advanced=riusato, sandbox=False
+        )
+        assert db.stato()["mapping_versione"] == 0
+        await bilanci_service.get_bilanci(db, _active())
+        fonti = [p["p_fonte"] for n, p in db.rpcs if n == "fn_bilanci_registra_fonte"]
+        assert fonti == ["it_full", "it_full", "it_advanced"]
+        assert db.stato()["mapping_versione"] == bilanci_mapping.MAPPING_BILANCI_VERSIONE
+
 
 class TestChiamaItAdvanced:
     async def test_mint_lento_non_e_un_esito_incerto(self):

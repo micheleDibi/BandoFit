@@ -252,6 +252,10 @@ class FakeQuery:
         self.filters.append(("gte", column, value))
         return self
 
+    def gt(self, column, value):
+        self.filters.append(("gt", column, value))
+        return self
+
     def in_(self, column, values):
         self.filters.append(("in", column, list(values)))
         return self
@@ -279,6 +283,10 @@ class FakeQuery:
             if self._table not in self._owner.selects:
                 raise AssertionError(f"tabella inattesa: {self._table}")
             righe = self._owner.selects[self._table]
+            for filtro in self.filters:
+                if filtro[0] == "gt":  # keyset: solo le righe dopo l'ultima chiave letta
+                    righe = [r for r in righe if r.get(filtro[1]) is not None
+                             and r[filtro[1]] > filtro[2]]
             totale = len(righe)
             if self._range is not None:
                 inizio, fine = self._range
@@ -444,7 +452,7 @@ class TestDestinatari:
 class TestRecapitabili:
     async def test_verifica_email_e_suppression(self):
         primary = FakeClient(
-            selects={"email_suppressions": [{"email": "Sospeso@Test.it"}]}
+            selects={"email_suppressions": [{"id": 1, "email": "Sospeso@Test.it"}]}
         )
         primary.rpc_results["fn_email_verificate"] = [OWNER, FIGLIO]
         destinatari = [
@@ -454,6 +462,49 @@ class TestRecapitabili:
         ]
         out = await svc.filtra_recapitabili(primary, destinatari)
         assert [d["id"] for d in out] == [OWNER]
+
+    async def test_suppression_list_oltre_le_1000_righe(self):
+        # Due pagine a keyset: l'indirizzo soppresso sta nella seconda.
+        primary = FakeClient(selects={"email_suppressions": []})
+        primary.select_queues["email_suppressions"] = [
+            [{"id": i, "email": f"altro{i}@test.it"} for i in range(1, 1001)],
+            [{"id": 1001, "email": "Sospeso@Test.it"}],
+        ]
+        primary.rpc_results["fn_email_verificate"] = [OWNER, FIGLIO]
+        destinatari = [
+            {"id": OWNER, "email": "own@test.it"},
+            {"id": FIGLIO, "email": "sospeso@test.it"},
+        ]
+        out = await svc.filtra_recapitabili(primary, destinatari)
+        assert [d["id"] for d in out] == [OWNER]
+        letture = [op for op in primary.ops if op[0] == "email_suppressions"]
+        assert len(letture) == 3  # l'ultima, vuota, chiude la lettura
+        assert ("gt", "id", 1000) in letture[1][3]
+        assert ("gt", "id", 1001) in letture[2][3]
+
+    async def test_suppression_list_con_un_max_rows_piu_basso(self):
+        # Una pagina corta non chiude la lettura: solo una pagina vuota.
+        righe = [{"id": i, "email": f"altro{i}@test.it"} for i in range(1, 1200)]
+        primary = FakeClient(selects={"email_suppressions": [
+            *righe, {"id": 1200, "email": "Sospeso@Test.it"}]})
+        primary.max_rows = 500
+        primary.rpc_results["fn_email_verificate"] = [OWNER, FIGLIO]
+        destinatari = [
+            {"id": OWNER, "email": "own@test.it"},
+            {"id": FIGLIO, "email": "sospeso@test.it"},
+        ]
+        out = await svc.filtra_recapitabili(primary, destinatari)
+        assert [d["id"] for d in out] == [OWNER]
+
+    async def test_verifica_a_blocchi(self):
+        primary = FakeClient(selects={"email_suppressions": []})
+        destinatari = [{"id": f"u{i}", "email": f"u{i}@test.it"} for i in range(250)]
+        primary.rpc_results["fn_email_verificate"] = [d["id"] for d in destinatari]
+        out = await svc.filtra_recapitabili(primary, destinatari)
+        assert len(out) == 250
+        blocchi = [p["p_user_ids"] for fn, p in primary.rpc_calls if fn == "fn_email_verificate"]
+        assert [len(b) for b in blocchi] == [100, 100, 50]
+        assert sum(blocchi, []) == [d["id"] for d in destinatari]
 
 
 class TestClaimLedger:

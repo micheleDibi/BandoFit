@@ -24,8 +24,10 @@ def stub_settings(monkeypatch):
         monkeypatch.setenv(chiave, valore)
     monkeypatch.delenv("RIMAPPATURA_FUSI_MODALITA", raising=False)
     monkeypatch.delenv("RIMAPPATURA_FUSI_INTERVALLO_MINUTI", raising=False)
-    from app.core.config import get_settings
+    from app.core.config import Settings, get_settings
 
+    # Il .env locale di chi sviluppa non deve poter falsare i casi «assente».
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -80,10 +82,31 @@ class TestModalita:
         assert await cs.esegui_passo(object(), object()) is None
         assert passi == []
 
-    @pytest.mark.parametrize(("minuti", "secondi"), [(60, 3600), (15, 900), (1, 300), (0, 300)])
+    @pytest.mark.parametrize(("minuti", "secondi"),
+                             [(60, 3600), (15, 900), (5, 300), (4, 3600), (0, 3600), ("x", 3600)])
     def test_intervallo_con_minimo(self, monkeypatch, minuti, secondi):
+        # Sotto il minimo o non intero vale il default (60), non il minimo.
         imposta(monkeypatch, RIMAPPATURA_FUSI_INTERVALLO_MINUTI=minuti)
         assert cs.intervallo_secondi() == secondi
+
+    @pytest.mark.parametrize(("errori", "scartate", "livello"),
+                             [(0, 0, logging.INFO), (2, 0, logging.WARNING),
+                              (0, 1, logging.WARNING), (1, 3, logging.WARNING)])
+    async def test_riassunto_a_warning_con_errori_o_scartate(
+        self, monkeypatch, caplog, errori, scartate, livello
+    ):
+        imposta(monkeypatch, RIMAPPATURA_FUSI_MODALITA="prova")
+
+        async def passo(primary, secondary, *, prova):
+            return {"modalita": "prova", "in_uso": 3, "fusi": 1, "scartate": scartate,
+                    "errori": errori, "totali": {}, "coppie": []}
+
+        monkeypatch.setattr(rimappatura_fusi, "passo", passo)
+        with caplog.at_level(logging.INFO, logger="bandofit.catalogo_scheduler"):
+            await cs.esegui_passo(object(), object())
+        righe = [r for r in caplog.records if r.name == "bandofit.catalogo_scheduler"]
+        assert [r.levelno for r in righe] == [livello]
+        assert "rimappatura fusi (prova)" in righe[0].getMessage()
 
 
 class TestLoop:

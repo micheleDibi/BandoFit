@@ -423,11 +423,13 @@ async def _esito_advanced_anteprima(
     """Decide se chiamare IT-advanced dopo un IT-full riuscito e coerente.
     Non si paga quando è inutile: società di persone (non depositano bilanci;
     solo il codice di PRIMO livello, 'SP' nel dettaglio è la SpA), P.IVA
-    diversa da quella già sull'azienda, tempo insufficiente per restare nella
-    catena dei timeout. Con lo storico spento (`bilanci_storico_attivo`)
-    niente chiamata: esito None, come un draft precedente alla 0032 («non
-    richiesto»), senza tentativo né consumo. Non solleva mai: l'esito finisce
-    nel draft."""
+    diversa da quella già sull'azienda, storico già recuperato per la stessa
+    P.IVA (si riusa gratis: esito ok senza tentativo, vedi
+    `bilanci_service.storico_salvato`; se lo stato non si legge, niente
+    chiamata), tempo insufficiente per restare nella catena dei timeout. Con
+    lo storico spento (`bilanci_storico_attivo`) niente chiamata: esito None,
+    come un draft precedente alla 0032 («non richiesto»), senza tentativo né
+    consumo. Non solleva mai: l'esito finisce nel draft."""
     from app.services import bilanci_service  # import locale: evita cicli
 
     if forma_giuridica_codice(payload) == "SP":
@@ -437,6 +439,21 @@ async def _esito_advanced_anteprima(
     piva_profilo = (company_row or {}).get("partita_iva")
     if piva_profilo and piva_profilo != piva:
         return bilanci_service.EsitoAdvanced.saltato("piva_diversa")
+    if company_row is not None:
+        try:
+            salvato = await bilanci_service.storico_salvato(
+                primary, company_row["id"], piva, sandbox=openapi.sandbox
+            )
+        except Exception as exc:
+            # Senza sapere se lo storico c'è già, non si rischia di ripagarlo:
+            # lo si potrà recuperare dalla pagina Azienda.
+            logger.warning(
+                "anteprima: stato dei bilanci non letto (%s), IT-advanced saltato",
+                type(exc).__name__,
+            )
+            return bilanci_service.EsitoAdvanced.saltato("errore_provider")
+        if salvato is not None:
+            return salvato
     if time.monotonic() - avvio > PREVIEW_AVVIO_ADVANCED_MAX_SECONDS:
         logger.warning("anteprima: IT-advanced saltato, tempo insufficiente dopo IT-full")
         return bilanci_service.EsitoAdvanced.saltato("tempo_insufficiente")

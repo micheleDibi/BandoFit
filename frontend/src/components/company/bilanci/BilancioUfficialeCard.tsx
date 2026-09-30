@@ -163,9 +163,10 @@ export function BilancioUfficialeCard({ className }: { className?: string }) {
     !attesaInventario &&
     (quantita === 0 || (esauritoAlle !== null && inventario.dataUpdatedAt <= esauritoAlle));
   const aperta = richieste.some((r) => richiestaAperta(r.stato));
-  // Esercizi già posseduti: registrati da un XBRL (dal server) oppure
-  // consegnati da una richiesta conclusa, anche senza numeri leggibili (lo
-  // stesso documento tornerebbe identico, a pagamento).
+  // Esercizi già posseduti: registrati da un XBRL oppure consegnati da una
+  // richiesta conclusa, anche senza numeri leggibili (lo stesso documento
+  // tornerebbe identico, a pagamento). Il server li dà tutti, anche quelli
+  // oltre le ultime richieste in lista; qui si aggiungono quelli della lista.
   const anniAcquisiti = [
     ...new Set([
       ...(data?.anni_acquisiti ?? []),
@@ -177,10 +178,19 @@ export function BilancioUfficialeCard({ className }: { className?: string }) {
   ];
   const annoCorrente = Number(todayItalyIso().slice(0, 4));
   const opzioniAnno = anniRichiedibili(anniAcquisiti, annoCorrente);
-  // «Ultimo disponibile» riporterebbe l'ultimo esercizio chiuso: se c'è già
-  // (il server risponde bilancio_gia_presente) l'opzione non si propone e la
-  // scelta parte dall'esercizio più recente che manca.
-  const ultimoPosseduto = anniAcquisiti.includes(annoCorrente - 1);
+  // «Ultimo disponibile» può riportare l'ultimo esercizio chiuso o, a inizio
+  // anno, quello di due anni fa: se l'azienda ne ha già uno (il server
+  // risponde bilancio_gia_presente) l'opzione non si propone e la scelta
+  // parte dall'esercizio più recente che manca. Una richiesta conclusa senza
+  // anno (né chiesto né letto) vale, come sul server, l'esercizio chiuso
+  // prima della richiesta.
+  const ignotoRecente = richieste.some(
+    (r) =>
+      r.stato === "completata" &&
+      annoRichiesta(r) === null &&
+      Number(r.created_at.slice(0, 4)) - 1 >= annoCorrente - 2,
+  );
+  const ultimoPosseduto = ignotoRecente || anniAcquisiti.some((a) => a >= annoCorrente - 2);
   // Un anno appena acquisito sparisce dal menu: la scelta torna al default.
   const annoScelto =
     anno !== "" && opzioniAnno.includes(Number(anno))

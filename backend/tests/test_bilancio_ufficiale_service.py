@@ -122,6 +122,7 @@ class FakeQuery:
         self._payload = None
         self._kwargs: dict = {}
         self._eq: dict = {}
+        self._neq: dict = {}
         self._in: dict = {}
         self._order: tuple | None = None
         self._limit: int | None = None
@@ -146,6 +147,10 @@ class FakeQuery:
         self._eq[column] = str(value)
         return self
 
+    def neq(self, column, value):
+        self._neq[column] = str(value)
+        return self
+
     def in_(self, column, values):
         self._in[column] = [str(v) for v in values]
         return self
@@ -168,6 +173,8 @@ class FakeQuery:
 
     def _match(self, row: dict) -> bool:
         if any(str(self._valore(row, c)) != v for c, v in self._eq.items()):
+            return False
+        if any(str(self._valore(row, c)) == v for c, v in self._neq.items()):
             return False
         return all(str(self._valore(row, c)) in vs for c, vs in self._in.items())
 
@@ -713,21 +720,76 @@ class TestPreCheck:
         await svc.richiedi(db, openapi, _active(), USER, None)
         assert "fn_openapi_prenota_operazione" not in db.rpc_names()
 
-    async def test_ultimo_disponibile_gia_posseduto_409(self):
-        ultimo = svc._adesso().astimezone(svc._FUSO_ITALIA).year - 1
-        fonti = [{"company_profile_id": COMPANY, "anno": ultimo, "fonte": "xbrl",
+    @pytest.mark.parametrize("anni_fa", [0, 1, 2], ids=["corrente", "ultimo_chiuso", "due_fa"])
+    async def test_ultimo_disponibile_gia_posseduto_409(self, anni_fa):
+        """Il provider può restituire l'ultimo esercizio chiuso o, a inizio
+        anno, quello di due anni fa: se l'azienda ne ha già uno, niente
+        «ultimo disponibile»."""
+        anno = svc._adesso().astimezone(svc._FUSO_ITALIA).year - anni_fa
+        fonti = [{"company_profile_id": COMPANY, "anno": anno, "fonte": "xbrl",
                   "ruolo": "corrente"}]
         db, openapi = db_base(company_financials_fonti=fonti), FakeOpenapi()
         with pytest.raises(AppError) as exc:
             await svc.richiedi(db, openapi, _active(), USER, None)
         assert (exc.value.status_code, exc.value.code) == (409, "bilancio_gia_presente")
-        assert str(ultimo) in exc.value.message
+        assert str(anno) in exc.value.message
+        assert "Scegli l'esercizio" in exc.value.message
         self.nessuna_spesa(db, openapi)
-        # con solo un esercizio più vecchio «ultimo disponibile» resta possibile
-        fonti[0]["anno"] = ultimo - 1
-        db2 = db_base(company_financials_fonti=fonti)
+
+    async def test_ultimo_disponibile_con_esercizi_piu_vecchi(self):
+        vecchio = svc._adesso().astimezone(svc._FUSO_ITALIA).year - 3
+        fonti = [{"company_profile_id": COMPANY, "anno": vecchio, "fonte": "xbrl",
+                  "ruolo": "corrente"}]
+        db = db_base(company_financials_fonti=fonti)
+        out = await svc.richiedi(db, FakeOpenapi(), _active(), USER, None)
+        assert out.stato == "in_lavorazione"
+
+    async def test_ultimo_disponibile_consegnato_senza_numeri_409(self):
+        """Una richiesta completata senza numeri registrati (consolidato):
+        il documento c'è, con l'anno letto dall'XBRL."""
+        anno = svc._adesso().astimezone(svc._FUSO_ITALIA).year - 2
+        fatta = nuova_richiesta("completata", minuti_fa=60 * 24 * 30, anno_bilancio=anno,
+                                xbrl_esito="consolidato")
+        db, openapi = db_base(company_bilancio_richieste=[fatta]), FakeOpenapi()
+        with pytest.raises(AppError) as exc:
+            await svc.richiedi(db, openapi, _active(), USER, None)
+        assert (exc.value.code, str(anno) in exc.value.message) == ("bilancio_gia_presente", True)
+        self.nessuna_spesa(db, openapi)
+
+    async def test_ultimo_disponibile_consegnato_ad_anno_ignoto(self):
+        """Completata senza anno (né richiesto né letto): vale come
+        l'esercizio più recente che poteva consegnare, l'anno della richiesta − 1."""
+        fatta = nuova_richiesta("completata", minuti_fa=60, xbrl_esito="assente")
+        db, openapi = db_base(company_bilancio_richieste=[fatta]), FakeOpenapi()
+        with pytest.raises(AppError) as exc:
+            await svc.richiedi(db, openapi, _active(), USER, None)
+        assert exc.value.code == "bilancio_gia_presente"
+        assert "bilancio ufficiale recente" in exc.value.message
+        self.nessuna_spesa(db, openapi)
+        # con un anno esplicito si procede
+        out = await svc.richiedi(db, FakeOpenapi(), _active(), USER, 2019)
+        assert out.anno_richiesto == 2019
+        # una richiesta così di oltre due anni fa non blocca
+        vecchia = nuova_richiesta("completata", minuti_fa=60 * 24 * 365 * 3, xbrl_esito="assente")
+        db2 = db_base(company_bilancio_richieste=[vecchia])
         out = await svc.richiedi(db2, FakeOpenapi(), _active(), USER, None)
         assert out.stato == "in_lavorazione"
+
+    async def test_anno_esplicito_gia_consegnato_409(self):
+        """Anno già consegnato da una richiesta completata (anche senza numeri
+        leggibili): lo stesso documento tornerebbe identico, a pagamento."""
+        fatta = nuova_richiesta("completata", minuti_fa=60 * 24 * 30, anno_richiesto=2023,
+                                xbrl_esito="firmato_non_leggibile")
+        chiusa = nuova_richiesta("errore", minuti_fa=60 * 24 * 30, anno_richiesto=2022,
+                                 errore_codice="scaduta")
+        db, openapi = db_base(company_bilancio_richieste=[fatta, chiusa]), FakeOpenapi()
+        with pytest.raises(AppError) as exc:
+            await svc.richiedi(db, openapi, _active(), USER, 2023)
+        assert (exc.value.status_code, exc.value.code) == (409, "bilancio_gia_presente")
+        self.nessuna_spesa(db, openapi)
+        # una richiesta chiusa senza documento non conta
+        out = await svc.richiedi(db, FakeOpenapi(), _active(), USER, 2022)
+        assert out.anno_richiesto == 2022
 
     async def test_anno_gia_acquisito_409(self):
         fonti = [
@@ -1238,6 +1300,129 @@ class TestRiconciliazione:
         assert db.eventi("bilancio-ottico-stato")[0]["outcome"] == "error"
 
 
+class TestCopiaVecchia:
+    """Il chiamante di `avanza` (lotto del failsafe, follower, lettura) può
+    avere una copia vecchia della riga: una richiesta già riconciliata con il
+    provider non deve mai sembrare «mai partita». Tre difese: rilettura dopo
+    il claim, id del provider della riga stessa non conteggiato come già
+    usato, rilettura subito prima della chiusura."""
+
+    @staticmethod
+    def scenario(minuti_fa: float = 40) -> tuple[FakeDB, FakeOpenapi, dict]:
+        """Riga già `in_lavorazione` con l'id P del provider; copia vecchia
+        `esito_ignoto` senza id; lista completa che contiene P."""
+        riga = nuova_richiesta("in_lavorazione", minuti_fa=minuti_fa, provider_request_id="P")
+        db, openapi = db_con(riga), FakeOpenapi()
+        openapi.lista = [TestRiconciliazione.voce(minuti_fa, id="P")]
+        copia = {**riga, "stato": "esito_ignoto", "provider_request_id": None,
+                 "inviata_at": None}
+        return db, openapi, copia
+
+    @staticmethod
+    def id_della_riga_come_usato(monkeypatch) -> None:
+        """Toglie la seconda difesa: l'id della riga stessa torna «già usato»."""
+        originale = svc._id_gia_usati
+
+        async def senza_esclusione(primary, ids, escludi):
+            return await originale(primary, ids, escludi="nessuna")
+
+        monkeypatch.setattr(svc, "_id_gia_usati", senza_esclusione)
+
+    @staticmethod
+    def senza_rilettura_finale(monkeypatch) -> None:
+        """Toglie la terza difesa (rilettura prima della chiusura)."""
+        async def sempre(primary, riga):
+            return True
+
+        monkeypatch.setattr(svc, "_ancora_senza_invio", sempre)
+
+    @staticmethod
+    def intatta(db: FakeDB, copia: dict) -> None:
+        riga = db.richiesta(copia["id"])
+        assert (riga["stato"], riga["provider_request_id"]) == ("in_lavorazione", "P")
+        assert riga["rimborsata_at"] is None and riga["errore_codice"] is None
+        assert db.ledger("refund") == [] and db.chiusure() == []
+        assert db.inventario()["quantita"] == 1
+
+    async def test_senza_difese_la_richiesta_pagata_verrebbe_rimborsata(self, monkeypatch):
+        """Controllo dello scenario: senza le tre difese la riga pagata si
+        chiude `non_inviata` con rimborso."""
+        db, openapi, copia = self.scenario()
+        self.id_della_riga_come_usato(monkeypatch)
+        self.senza_rilettura_finale(monkeypatch)
+        await svc._riconcilia(db, openapi, copia)
+        assert db.richiesta(copia["id"])["errore_codice"] == "non_inviata"
+        assert len(db.ledger("refund")) == 1
+
+    async def test_copia_vecchia_nessuna_chiusura(self):
+        db, openapi, copia = self.scenario()
+        await svc.avanza(db, openapi, copia)
+        self.intatta(db, copia)
+        # si è deciso sulla riga riletta: stato del provider della richiesta P
+        assert ("stato", "P") in openapi.chiamate and "lista" not in openapi.nomi()
+
+    async def test_solo_la_rilettura_dopo_il_claim(self, monkeypatch):
+        db, openapi, copia = self.scenario()
+        self.id_della_riga_come_usato(monkeypatch)
+        self.senza_rilettura_finale(monkeypatch)
+        await svc.avanza(db, openapi, copia)
+        self.intatta(db, copia)
+
+    async def test_solo_l_id_della_riga_escluso(self, monkeypatch):
+        db, openapi, copia = self.scenario()
+        self.senza_rilettura_finale(monkeypatch)
+        assert await svc._riconcilia(db, openapi, copia) is None
+        self.intatta(db, copia)
+
+    async def test_solo_la_rilettura_prima_della_chiusura(self, monkeypatch):
+        db, openapi, copia = self.scenario()
+        self.id_della_riga_come_usato(monkeypatch)
+        assert await svc._riconcilia(db, openapi, copia) is None
+        self.intatta(db, copia)
+
+    async def test_rilettura_prima_della_scadenza_senza_rimborso(self, monkeypatch):
+        """Anche la chiusura `esito_ignoto_scaduto` (lista irraggiungibile,
+        oltre 24 ore) rilegge la riga prima di chiudere."""
+        db, openapi, copia = self.scenario(minuti_fa=60 * 25)
+        openapi.lista = OpenapiTimeoutError()
+        await svc._riconcilia(db, openapi, copia)
+        self.intatta(db, copia)
+
+    async def test_riga_chiusa_nel_frattempo_nessuna_azione(self):
+        riga = nuova_richiesta("completata", minuti_fa=40, provider_request_id="P")
+        db, openapi = db_con(riga), FakeOpenapi()
+        await svc.avanza(db, openapi, {**riga, "stato": "in_lavorazione"})
+        assert openapi.chiamate == [] and db.chiusure() == []
+
+
+class TestAltroAmbiente:
+    """Richieste nate nell'altro ambiente openapi (dopo un cambio di
+    OPENAPI_ENV): nessuna via le interroga o le chiude."""
+
+    async def test_avanza_non_le_tocca(self):
+        riga = nuova_richiesta("esito_ignoto", minuti_fa=60 * 25, sandbox=True)
+        db, openapi = db_con(riga), FakeOpenapi(sandbox=False)
+        openapi.lista = []
+        await svc.avanza(db, openapi, dict(riga))
+        assert db.rpcs == [] and openapi.chiamate == []
+        assert db.richiesta(riga["id"])["stato"] == "esito_ignoto"
+
+    async def test_avanza_nello_stesso_ambiente(self):
+        riga = nuova_richiesta("esito_ignoto", minuti_fa=31, sandbox=True)
+        db, openapi = db_con(riga), FakeOpenapi(sandbox=True)
+        openapi.lista = []
+        await svc.avanza(db, openapi, dict(riga))
+        assert db.richiesta(riga["id"])["errore_codice"] == "non_inviata"
+
+    async def test_lettura_senza_claim(self, spawned):
+        riga = nuova_richiesta("in_lavorazione", sandbox=True)
+        db, openapi = db_con(riga), FakeOpenapi(sandbox=False)
+        out = await svc.lista(db, openapi, _active())
+        await svc.dettaglio(db, openapi, _active(), riga["id"])
+        assert out.richieste[0].stato == "in_lavorazione"
+        assert "fn_bilancio_richiesta_claim_poll" not in db.rpc_names() and spawned == []
+
+
 class TestLavorazione:
     async def test_annullata_rimborso(self, notifiche):
         riga = nuova_richiesta("in_lavorazione")
@@ -1284,16 +1469,21 @@ class TestLavorazione:
         await svc.avanza(db, openapi, dict(vecchia))
         assert db.richiesta(vecchia["id"])["errore_codice"] == "scaduta"
 
-    async def test_senza_openapi_solo_failsafe(self):
-        fresca = nuova_richiesta("in_lavorazione")
-        db, openapi = db_con(fresca), FakeOpenapi(enabled=False)
-        await svc.avanza(db, openapi, dict(fresca))
-        assert db.richiesta(fresca["id"])["stato"] == "in_lavorazione"
-        vecchia = nuova_richiesta("in_lavorazione", minuti_fa=24 * 60 + 1)
-        db = db_con(vecchia)
-        await svc.avanza(db, openapi, dict(vecchia))
-        assert db.richiesta(vecchia["id"])["errore_codice"] == "scaduta"
-        assert openapi.chiamate == []
+    @pytest.mark.parametrize(
+        ("stato", "minuti_fa"),
+        [("in_lavorazione", 24 * 60 + 1), ("esito_ignoto", 24 * 60 + 1), ("in_invio", 30)],
+    )
+    async def test_senza_openapi_nessuna_chiusura(self, stato, minuti_fa, spawned):
+        """Senza provider non si chiude nulla a tempo: una richiesta forse
+        pronta e già pagata non diventa «scaduta» senza averlo sentito. Né
+        `avanza` né la lettura (niente claim) la toccano."""
+        riga = nuova_richiesta(stato, minuti_fa=minuti_fa)
+        db, openapi = db_con(riga), FakeOpenapi(enabled=False)
+        await svc.avanza(db, openapi, dict(riga))
+        await svc.lista(db, openapi, _active())
+        await svc.dettaglio(db, openapi, _active(), riga["id"])
+        assert db.richiesta(riga["id"])["stato"] == stato
+        assert db.rpcs == [] and spawned == [] and openapi.chiamate == []
 
 
 class TestCompletamento:
@@ -1576,6 +1766,24 @@ class TestLista:
         assert secondo.messaggio == "Il Registro Imprese non ha questo bilancio."
         testo = out.model_dump_json()
         assert PROVIDER_ID not in testo and PIVA not in testo and "contenuto" not in testo
+
+    async def test_anni_acquisiti_sono_i_posseduti(self):
+        """Stessa regola della guardia di `richiedi`: XBRL registrati più gli
+        anni consegnati dalle completate, anche oltre le ultime 20 richieste
+        (il frontend non propone anni che il server rifiuterebbe)."""
+        vecchia = nuova_richiesta("completata", minuti_fa=60 * 24 * 400, anno_richiesto=2020,
+                                  xbrl_esito="firmato_non_leggibile")
+        recenti = [nuova_richiesta("errore", minuti_fa=60 * 24 * g, errore_codice="scaduta")
+                   for g in range(1, 21)]
+        db = db_base(
+            company_bilancio_richieste=[vecchia, *recenti],
+            company_financials_fonti=[
+                {"company_profile_id": COMPANY, "anno": 2022, "fonte": "xbrl", "ruolo": "corrente"},
+            ],
+        )
+        out = await svc.lista(db, FakeOpenapi(), _active())
+        assert vecchia["id"] not in [r.id for r in out.richieste]
+        assert out.anni_acquisiti == [2020, 2022]
         # la lista non legge mai il contenuto dei documenti
         colonne_doc = [c for tab, c in db.selects if tab == "company_bilancio_documenti"]
         assert colonne_doc and all("contenuto" not in c for c in colonne_doc)

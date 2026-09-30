@@ -15,7 +15,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.services import email_service, partenariato_indice
+from app.services import (
+    bando_alert_service,
+    email_service,
+    partenariato_candidature_service,
+    partenariato_indice,
+)
 from app.services import partenariati_scheduler as sched
 from app.services import partenariato_notifiche as pn
 from app.services.partenariato_accesso import pseudonimo
@@ -404,6 +409,44 @@ async def test_digest_solo_email_verificate_e_non_soppresse(posta):
     assert posta == [] and riepilogo["inviate"] == 0
     # nessuno le ha ricevute: restano da includere
     assert not any(r["digest_incluso_at"] for r in db.tabelle["partner_notifiche_proattive"])
+
+
+def _soppressi_oltre_le_1000_righe(email: str) -> list[dict]:
+    """1500 indirizzi soppressi e poi `email`, oltre il max-rows di PostgREST."""
+    return [{"id": i, "email": f"altro{i}@example.test"} for i in range(1, 1501)] + [
+        {"id": 1501, "email": email.upper()}]
+
+
+async def test_digest_nessuna_email_a_un_soppresso_oltre_le_1000_righe(posta):
+    db, _ = await _con_notifiche()
+    db.max_righe = 1000
+    db.tabelle["email_suppressions"] = _soppressi_oltre_le_1000_righe(EMAIL["Y"])
+    riepilogo = await pn.esegui_digest(db, pn.lunedi())
+    assert [m["to"] for m in posta] == [EMAIL["T"]] and riepilogo["inviate"] == 1
+
+
+async def test_email_di_evento_nessuna_email_a_un_soppresso_oltre_le_1000_righe():
+    db, _ = await scenario_guida()
+    db.max_righe = 1000
+    db.tabelle["email_suppressions"] = _soppressi_oltre_le_1000_righe(EMAIL["Y"])
+    inviate: list[str] = []
+
+    async def invia(to_email, token, azienda):
+        inviate.append(to_email)
+        return True
+
+    destinatari = [{"id": g.OWNER["Y"], "email": EMAIL["Y"]},
+                   {"id": g.OWNER["T"], "email": EMAIL["T"]}]
+    assert await partenariato_candidature_service.email_evento(
+        db, g.COMPANY["Y"], destinatari, invia) == 1
+    assert inviate == [EMAIL["T"]]
+
+
+async def test_recapitabili_oltre_le_1000_email_verificate():
+    db = FakePrimary()
+    db.max_righe = 1000
+    destinatari = [{"id": f"u{i}", "email": f"u{i}@example.test"} for i in range(1_200)]
+    assert len(await bando_alert_service.filtra_recapitabili(db, destinatari)) == 1_200
 
 
 async def test_digest_rispetta_l_opt_out_e_l_opt_in(posta):

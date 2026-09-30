@@ -91,7 +91,8 @@ class EsitoAdvanced:
     `esito`: ok | non_disponibili | errore | timeout | saltato | mismatch;
     None = mai richiesto (draft precedente alla 0032). `raw` = data[0], solo
     con esito ok. `tentato_at` (ISO) = quando è partita la chiamata a
-    pagamento: base del cooldown; None se la chiamata non è partita."""
+    pagamento: base del cooldown; None se la chiamata non è partita (anche
+    con esito ok: lo storico già salvato riusato gratis, vedi `riusato`)."""
 
     esito: str | None
     motivo: str | None
@@ -101,6 +102,13 @@ class EsitoAdvanced:
     @classmethod
     def saltato(cls, motivo: str) -> "EsitoAdvanced":
         return cls(esito="saltato", motivo=motivo)
+
+    @property
+    def riusato(self) -> bool:
+        """Esito ok SENZA chiamata: lo storico già salvato per la stessa
+        P.IVA, riusato nell'anteprima (`storico_salvato`). Ogni ok di una
+        chiamata vera ha `tentato_at`; nel draft vale la stessa regola."""
+        return self.esito == "ok" and self.tentato_at is None
 
 
 def _adesso() -> datetime:
@@ -332,10 +340,18 @@ async def persisti_import(
     Ordine: stato IT-advanced (se c'è un esito), fonte `it_full` SENZA
     sostituire (gli anni di patrimonio netto degli import precedenti restano),
     fonte `it_advanced` sostituendo lo storico (se ok), infine la versione
-    del mapping — aggiornata solo se tutto è riuscito."""
+    del mapping — aggiornata solo se tutto è riuscito.
+
+    Storico `riusato` (già salvato, nessuna chiamata): stato e righe
+    `it_advanced` ci sono già e restano come sono (niente recupero fittizio
+    nello stato; un raw più nuovo arrivato nel frattempo non viene
+    sovrascritto). Solo `it_full`; la versione del mapping resta quella
+    delle righe già registrate (se è vecchia, la rimappatura pigra rifà
+    tutto gratis) e va a 0 se `it_full` fallisce."""
     try:
         tutto_ok = True
-        if advanced is not None and advanced.esito is not None:
+        riusato = advanced is not None and advanced.riusato
+        if advanced is not None and advanced.esito is not None and not riusato:
             try:
                 stato = await _fetch_stato(primary, company_id)
                 await _scrivi_stato(
@@ -349,15 +365,21 @@ async def persisti_import(
             primary, company_id, "it_full", da_it_full(payload), "import", sostituisci=False
         ):
             tutto_ok = False
-        if advanced is not None and advanced.esito == "ok" and isinstance(advanced.raw, dict):
+        if (
+            advanced is not None and advanced.esito == "ok" and isinstance(advanced.raw, dict)
+            and not riusato
+        ):
             if not await _registra_best_effort(
                 primary, company_id, "it_advanced", da_it_advanced(advanced.raw), "import",
                 sostituisci=True,
             ):
                 tutto_ok = False
-        await _imposta_versione(
-            primary, company_id, MAPPING_BILANCI_VERSIONE if tutto_ok else 0
-        )
+        if not riusato:
+            await _imposta_versione(
+                primary, company_id, MAPPING_BILANCI_VERSIONE if tutto_ok else 0
+            )
+        elif not tutto_ok:
+            await _imposta_versione(primary, company_id, 0)
     except Exception:
         logger.exception("bilanci: persistenza all'import non riuscita")
 
@@ -385,6 +407,34 @@ async def _fetch_advanced_raw(primary, company_id: str) -> dict | None:
     )
     raw = resp.data[0].get("advanced_raw") if resp.data else None
     return raw if isinstance(raw, dict) else None
+
+
+async def storico_salvato(
+    primary, company_id: str, piva: str, *, sandbox: bool
+) -> EsitoAdvanced | None:
+    """Lo storico IT-advanced già recuperato per QUESTA azienda e QUESTA
+    P.IVA, come esito dell'anteprima dell'import: nessuna chiamata, nessuna
+    spesa (`riusato`). None se non si può riusare: mai recuperato o esito
+    non ok, P.IVA diversa, ambiente (sandbox/produzione) diverso, raw
+    assente o di un'altra impresa. Un errore di lettura sale al chiamante."""
+    resp = (
+        await primary.table("company_financials_stato")
+        .select("advanced_esito,advanced_piva,advanced_sandbox,advanced_raw")
+        .eq("company_profile_id", str(company_id))
+        .limit(1)
+        .execute()
+    )
+    stato = resp.data[0] if resp.data else {}
+    raw = stato.get("advanced_raw")
+    if (
+        stato.get("advanced_esito") != "ok"
+        or stato.get("advanced_piva") != piva
+        or bool(stato.get("advanced_sandbox")) != bool(sandbox)
+        or not isinstance(raw, dict)
+        or piva not in ids_advanced(raw)
+    ):
+        return None
+    return EsitoAdvanced("ok", None, raw=raw)
 
 
 async def _fetch_righe(primary, company_id: str) -> list[dict]:

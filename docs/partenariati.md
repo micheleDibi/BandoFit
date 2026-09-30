@@ -90,8 +90,8 @@ Il dump locale è del 3 luglio e precede la v1.1: non va usato per queste stime.
   - `Settings.partenariati_attivo=False` (env `PARTENARIATI_ATTIVO`).
   - Dependency `require_partenariati_attivo` che risponde **404** (pattern nuovo): a livello di router per i router nuovi, **a livello di rotta** per le aggiunte a router esistenti (`/bandi`, `/me`, `/progettista`), così le rotte esistenti non cambiano.
   - Verso il frontend: `MeOut.funzioni = {partenariati: bool}`. Con il flag spento, menu e card (Partenariato in BandoDetail, profilo partner in Azienda, passo di consenso nell'import) non si rendono.
-  - WP1 e WP2 vanno senza il flag del modulo, ma le loro chiamate a pagamento stanno dietro un interruttore proprio, `BILANCI_STORICO_ATTIVO` (`Settings.bilanci_storico_attivo=False`, `MeOut.funzioni.bilanci_storico`), **spento finché G1 non è chiuso**: niente storico IT-advanced (né nell'anteprima né in «Recupera i bilanci») e niente bilancio ufficiale, con le rotte relative in 404 (dipendenza `require_bilanci_storico_attivo` sulla singola rotta). L'import IT-full, la quota giornaliera, il legame della P.IVA e `GET /me/company/bilanci` restano attivi. Motivo: le risposte reali di IT-advanced e del bilancio ottico non sono ancora verificate in sandbox.
-  - In produzione il flag si accende solo con una riga in `docker-compose.yml`, che aggiungi tu.
+  - WP1 e WP2 vanno senza il flag del modulo, ma le loro chiamate a pagamento stanno dietro un interruttore proprio, `BILANCI_STORICO_ATTIVO` (`Settings.bilanci_storico_attivo=False`, `MeOut.funzioni.bilanci_storico`), **spento di default**: niente storico IT-advanced (né nell'anteprima né in «Recupera i bilanci») e niente bilancio ufficiale, con le rotte relative in 404 (dipendenza `require_bilanci_storico_attivo` sulla singola rotta). L'import IT-full, la quota giornaliera, il legame della P.IVA e `GET /me/company/bilanci` restano attivi. L'accensione non presuppone la verifica in sandbox G1: le risposte reali di IT-advanced e del bilancio ottico restano da confermare con le prove su un'azienda propria (procedura in `docs/deploy.md`, «Accensione delle funzioni»); G1 resta consigliata. A storico acceso parte anche il failsafe del bilancio ufficiale (B10).
+  - In produzione `docker-compose.yml` passa già al container `PARTENARIATI_ATTIVO` e `BILANCI_STORICO_ATTIVO`, con i default spenti: si accendono dal `.env` del server, con la procedura «Accensione delle funzioni» di `docs/deploy.md`.
 - **T2. Nomi unici.**
   - Scheduler `services/partenariati_scheduler.py` + tabella `partenariati_runs` (claim per giorno) + `partenariati_scheduler_attivo`/`partenariati_ora_esecuzione="05:30"`. Nasce in WP3; ogni WP aggiunge passi isolati.
   - Errori in `services/partenariato_errori.py`: `RPC_ERRORS: dict[detail, (status, code, messaggio)]` → `AppError`. I code sono specifici, perché il frontend ci ramifica sopra.
@@ -141,6 +141,7 @@ Il dump locale è del 3 luglio e precede la v1.1: non va usato per queste stime.
   - draft riusato;
   - società di persone (SP);
   - P.IVA ≠ `company_profiles.partita_iva` già impostata;
+  - storico già recuperato per la stessa P.IVA (esito `ok` nello stato, stesso ambiente sandbox o produzione): si riusa gratis, senza chiamata né riga nel registro consumi. Il draft lo porta con esito `ok` e senza `tentato_at`, quindi l'anteprima lo mostra come recuperato e il cooldown di «Recupera» non parte. La conferma non riscrive né lo stato né le righe `it_advanced`. Se lo stato non si legge non si chiama (`saltato`, `errore_provider`);
   - meno di 25 s rimasti (budget 250 s).
 
   Nuova catena dei tempi: server ≤ 277 s < frontend 290 s < TTL del lock 330 s. IT-advanced **non blocca** l'import: in caso di problemi lo stato bilanci diventa `non_disponibili` con motivo, e c'è la CTA «Recupera i bilanci», un endpoint dedicato con validazione locale, cooldown persistente, lock (TTL 120 s) e registro consumi.
@@ -172,6 +173,10 @@ Il dump locale è del 3 luglio e precede la v1.1: non va usato per queste stime.
   - Tetti fail-closed in RPC: 30 richieste al giorno sulla piattaforma e 5 per owner.
   - Pre-check gratuito sulla forma giuridica (IT-full, oppure `/impresa` per AL o forma ignota).
   - POST inline, poi un follower in-process (60 s per 20 minuti, poi ogni 5 minuti) più poll-on-read con claim a DB; transizioni condizionate, con un solo vincitore.
+  - `avanza` decide solo sulla riga riletta dopo il claim: il chiamante (follower, lettura, failsafe) può averne una copia vecchia. Nella riconciliazione l'id del provider della riga stessa non conta come «già usato», e prima di chiudere una riga `esito_ignoto` (rimborso «mai partita» o scadenza) la si rilegge ancora: si chiude solo se è ancora `esito_ignoto` senza id del provider. Così una richiesta già riconciliata e pagata non sembra mai «mai partita».
+  - Richieste dell'altro ambiente openapi (colonna `sandbox`, dopo un cambio di `OPENAPI_ENV`): nessuna via le interroga o le chiude, perché il provider non le conosce e le chiuderebbe o rimborserebbe a torto. Restano aperte finché non si torna al loro ambiente, oppure si chiudono a mano. Lo stesso con openapi non configurato: né il failsafe, né il follower, né le letture le fanno avanzare o le chiudono a tempo (niente claim). Restano aperte finché il provider non torna configurato, così nessuna si chiude senza averlo sentito.
+  - Failsafe `services/bilancio_ufficiale_scheduler.py`: task in-process avviato nel lifespan solo a storico acceso. Ogni 10 minuti fa avanzare fino a 100 richieste aperte, dalla più vecchia, con lo stesso `avanza` (claim compreso). Così completamento, rimborso e scadenza arrivano anche dopo un riavvio (che perde il follower) e senza che nessuno riapra la pagina. Esamina solo le richieste dell'ambiente openapi in uso; quelle dell'altro si contano nel log. Con openapi non configurato non parte (un WARNING): senza sentire il provider chiuderebbe come scadute richieste forse pronte e già pagate. Non solleva mai; nei log solo conteggi, id e codici.
+  - «Ultimo disponibile» (anno assente): l'esercizio che il provider restituirà non si conosce prima di pagare. Se l'azienda possiede già un bilancio ufficiale da anno corrente − 2 in poi, la richiesta è rifiutata con 409 `bilancio_gia_presente`, senza spesa, e si chiede un anno esplicito. Posseduti: gli anni della fonte `xbrl` più l'anno (letto o richiesto) delle richieste `completata`, anche senza numeri leggibili; una completata ad anno ignoto vale come anno della richiesta − 1. Un anno esplicito già posseduto è rifiutato allo stesso modo. Il frontend non propone «Ultimo disponibile» negli stessi casi, tranne l'anno ignoto, per cui resta il 409.
   - Mai retry su una POST.
   - Gli errori di parsing chiudono come `completata` con `xbrl_esito`, conservando il PDF; si ritentano solo gli errori infrastrutturali.
   - Rimborso: Q5. Destino del PDF: Q4.
@@ -465,7 +470,7 @@ Per ogni endpoint il formato di `docs/api.md` (Body, → risposta, Errori con i 
 
 ## 7. Macchine a stati (sintesi)
 
-- **Esito IT-advanced**: `ok | non_disponibili(nessun_bilancio) | errore | timeout(esito_incerto) | saltato(forma_senza_bilancio | tempo_insufficiente | piva_diversa) | mismatch`. Stato derivato dei bilanci: `mai_richiesti → disponibili | non_disponibili`.
+- **Esito IT-advanced**: `ok | non_disponibili(nessun_bilancio) | errore | timeout(esito_incerto) | saltato(forma_senza_bilancio | tempo_insufficiente | piva_diversa | errore_provider) | mismatch`; `ok` senza `tentato_at` = storico già salvato, riusato nell'anteprima senza chiamata. Stato derivato dei bilanci: `mai_richiesti → disponibili | non_disponibili`.
 - **Richiesta di bilancio ufficiale**:
   - `in_invio → in_lavorazione | non_disponibile[R] | errore[R] | esito_ignoto`;
   - `esito_ignoto → in_lavorazione` (riconciliazione con la lista) oppure `errore[R, se non è mai arrivata]`;
@@ -538,7 +543,7 @@ Il **caso peggiore** è limitato dai tetti fail-closed: WP3 $5 al giorno + altri
 | Deadlock tra RPC | Ordine di lock globale (owner → call → candidatura, profilo → inventario), testato con due connessioni |
 | Proxy più corto della catena dei tempi | T7 + Q23 |
 | Cold start (pochi opt-in) | «Per te» visibile anche senza opt-in, stati vuoti con CTA, digest solo con contenuto |
-| Testi legali non ancora rivisti | Segnaposto marcati «BOZZA»; il flag resta spento in produzione finché il legale non li approva (G4) |
+| Testi legali non ancora rivisti | Segnaposto marcati «BOZZA»; revisione del legale consigliata prima di accendere il flag (G4). Il flag si accende dal `.env` con la procedura «Accensione delle funzioni» di `docs/deploy.md` |
 
 ---
 
@@ -587,7 +592,7 @@ Il **caso peggiore** è limitato dai tetti fail-closed: WP3 $5 al giorno + altri
 ## 11. Sequenza, commit, migration e gate
 
 1. **WP0** — commit `docs/partenariati.md` (questo piano + appendice A) + indice in `docs/README.md` + fixture del campione (solo id) + script sandbox (`backend/scripts/verifica_sandbox_openapi.py`, legge le chiavi dalle variabili d'ambiente e salva fixture anonimizzate).
-2. **WP1** → ⚠️ 0032. **WP2** → ⚠️ 0033. Vanno senza il flag del modulo; storico IT-advanced e bilancio ufficiale restano spenti dietro `BILANCI_STORICO_ATTIVO` fino a G1 (§2.1 T1).
+2. **WP1** → ⚠️ 0032. **WP2** → ⚠️ 0033. Vanno senza il flag del modulo; storico IT-advanced e bilancio ufficiale restano spenti dietro `BILANCI_STORICO_ATTIVO` (§2.1 T1), già nel compose con default spento: si accende dal `.env` con la procedura «Accensione delle funzioni» di `docs/deploy.md`, e G1 resta consigliata prima.
 3. **WP3** → ⚠️ 0034. **WP4** → ⚠️ 0035. **WP5** → ⚠️ 0036, 0037. **WP6** → ⚠️ 0038. **WP7** → ⚠️ 0039. **WP8** → ⚠️ 0040. **WP9** → ⚠️ 0041. **WP10** → ⚠️ 0042.
 
 Regole di commit:
@@ -598,10 +603,10 @@ Regole di commit:
 Branch `feat/partenariati` da `main`: la spec qui prevale sul `claude/<…>` del CLAUDE.md globale.
 
 Gate (non bloccano lo sviluppo, ma il rilascio sì):
-- **G1** sandbox openapi: le tue azioni in §14, poi lanci lo script. Serve a sostituire le fixture sintetiche e a confermare i codici CEE; senza G1 il fix del mapping resta «verificato solo su OAS» e `BILANCI_STORICO_ATTIVO` resta spento.
+- **G1** sandbox openapi: le tue azioni in §14, poi lanci lo script. Serve a sostituire le fixture sintetiche e a confermare i codici CEE; senza G1 il fix del mapping resta «verificato solo su OAS». G1 è consigliata prima di accendere `BILANCI_STORICO_ATTIVO`.
 - **G2** migration nello SQL Editor prima di ogni deploy.
 - **G3** credito Anthropic, poi `partenariato_valutazione --reale --locale --tetto-cents 800 --conferma --out <file fuori dal repo>` (modalità locale: nessuna scrittura su DB reali; tetto sulla somma delle esecuzioni).
-- **G4** testi legali (informativa, Termini/DSA, disclaimer) prima di accendere il flag in produzione.
+- **G4** testi legali (informativa, Termini/DSA, disclaimer): revisione consigliata prima di accendere il flag in produzione.
 
 Durante l'esecuzione mi fermo solo per ambiguità che cambiano comportamento o costo e che non sono coperte da §13.
 
@@ -663,8 +668,8 @@ Durante l'esecuzione mi fermo solo per ambiguità che cambiano comportamento o c
    - esporta nella shell `OPENAPI_SANDBOX_EMAIL` e `OPENAPI_SANDBOX_API_KEY`;
    - lancia `! backend/.venv/bin/python backend/scripts/verifica_sandbox_openapi.py`.
 2. **Prima del deploy di WP1/WP2**: attiva le stesse API anche in **produzione** (senza, falliscono solo i nuovi prodotti, grazie ai token separati); poi le migration 0032 e 0033 dallo SQL Editor.
-3. **Dopo G1**: la riga `BILANCI_STORICO_ATTIVO` nell'`environment` del backend in `docker-compose.yml` (accende storico e bilancio ufficiale); dopo il deploy, prezzo e attivazione dell'addon `bilancio-ufficiale` in AdminAddon (ha senso solo a storico acceso).
-4. Per il modulo partenariati: le migration 0034–0042 in ordine, **prima del deploy e anche a modulo spento**, perché il backend legge colonne della 0036, 0041 e 0042 qualunque sia il flag (con la 0032 e la 0033 del punto 2: tutte dalla 0032 alla 0042, in ordine); la riga `PARTENARIATI_ATTIVO: ${PARTENARIATI_ATTIVO:-false}` in `docker-compose.yml` quando vorrai accendere il flag. Dopo la 0036, in AdminPiani, i limiti di partenariato dei piani diversi da Gratuito, Smart, Pro e Advisor (per esempio `tailored`): partono da 0, cioè senza call né candidature; dopo la 0042 lo stesso per «Bozze di documenti al mese».
+3. **Storico e bilancio ufficiale**: `BILANCI_STORICO_ATTIVO` è già nel compose, con default spento. Si accende dal `.env` con la procedura «Accensione delle funzioni» di `docs/deploy.md`, con G1 consigliata prima. Dopo l'accensione, prezzo e attivazione dell'addon `bilancio-ufficiale` in AdminAddon (ha senso solo a storico acceso).
+4. Per il modulo partenariati: le migration 0034–0042 in ordine, **prima del deploy e anche a modulo spento**, perché il backend legge colonne della 0036, 0041 e 0042 qualunque sia il flag (con la 0032 e la 0033 del punto 2: tutte dalla 0032 alla 0042, in ordine). `PARTENARIATI_ATTIVO` è già nel compose con default spento: il modulo si accende dal `.env` con la procedura «Accensione delle funzioni» di `docs/deploy.md`. Dopo la 0036, in AdminPiani (i campi compaiono a modulo acceso), i limiti di partenariato dei piani diversi da Gratuito, Smart, Pro e Advisor (per esempio `tailored`): partono da 0, cioè senza call né candidature; dopo la 0042 lo stesso per «Bozze di documenti al mese».
 5. Revisione legale di informativa, Termini/DSA e disclaimer (G4); un canale di segnalazione per chi non è utente.
 6. Credito Anthropic per la valutazione reale (G3).
 7. Dati che mi servono: `proxy_read_timeout` di nginx/NPM e piano Cloudflare; valore «Max rows» del DB primario (Supabase → Settings → API).
@@ -704,7 +709,7 @@ Durante l'esecuzione mi fermo solo per ambiguità che cambiano comportamento o c
   - la lista delle richieste del provider vale come «nessuna richiesta» solo con 404 **e** codice 270; ogni risposta dubbia è un errore e una lista paginata non prova mai un'assenza;
   - la riconciliazione cerca prima l'id annotato nel registro consumi, poi la lista; il rimborso «mai inviata» richiede che nessuna voce della stessa P.IVA non attribuita sia nata dopo la richiesta;
   - failsafe della lavorazione: 72 ore se l'ultimo tentativo è fallito per un guasto, 24 ore negli altri casi; ogni chiusura senza rimborso si logga a livello ERROR;
-  - «ultimo disponibile» rifiutato (409) se l'ultimo esercizio chiuso è già posseduto;
+  - «ultimo disponibile» rifiutato (409) se l'azienda possiede già un bilancio ufficiale da anno corrente − 2 in poi (all'inizio solo l'ultimo esercizio chiuso; regola estesa in seguito, vedi B10);
   - la verifica `/impresa` (forme diverse dalle società di capitali) passa dal tetto giornaliero condiviso con l'import;
   - PDF conservato: esclusi i nomi con «verbale»/«assemblea», poi il primo con «bilancio» nel nome, altrimenti il più grande;
   - notifica «Bilancio ufficiale non utilizzabile» quando mancano sia PDF sia numeri;
@@ -874,6 +879,7 @@ Durante l'esecuzione mi fermo solo per ambiguità che cambiano comportamento o c
   - **bandi fusi**: un id assente da `bando_pubblico` ma presente in `bando_fusione` è un doppione fuso, non un bando sparito.
     - Lo scheduler (`chiusura_call`) non marca la sua call con `bando_mancante_dal` e non la chiude per `bando_non_disponibile`, nemmeno con una marca di 7 giorni o più messa prima. Vale lo stesso per il controllo in lettura del dettaglio.
     - Se `bando_fusione` non si legge, nessun bando assente è valutabile: un errore non vale «non fuso».
+    - L'indice di scoperta (`partenariato_indice`, bacheca, suggeriti e notifiche proattive) controlla su `bando_fusione` gli id assenti dalla vista. La call su un doppione resta proposta con lo stato e la scadenza del suo snapshot, come la call «congelata» dello scheduler, e lo stato va in cache per 10 minuti come gli altri. Se `bando_fusione` non si legge vale lo snapshot, senza cache, e la ricarica successiva riprova. Solo un id assente e non fuso fa uscire la call dalla scoperta;
     - Creazione e pubblicazione su un doppione restano bloccate: `409 bando_non_disponibile` con il messaggio «Il bando è stato unito a un altro bando: per ora la call non si può pubblicare.». Stesso testo nel motivo di blocco della bozza. Il messaggio non invita a ricreare la call sul master (una seconda call attiva della stessa azienda sul master è una collisione che la rimappatura non risolve) e non promette lo spostamento, che non avviene a rimappatura spenta né in collisione;
   - **rimappatura dei fusi** (`services/rimappatura_fusi.py`, `services/catalogo_scheduler.py`; spenta di default, procedura in docs/deploy.md): le call attive su un doppione passano al master e perdono `bando_mancante_dal`.
     - Una call in collisione con un'altra call attiva della stessa azienda sul master non si tocca: si conta come `in_collisione` e ricompare a ogni passo.
@@ -884,13 +890,17 @@ Durante l'esecuzione mi fermo solo per ambiguità che cambiano comportamento o c
     - A parità di URL vince la riga di `bando_link`; un'etichetta vuota prende il `label` del jsonb.
     - Motivo: molte righe che sostituiscono il jsonb non sono ancora leggibili.
     - Cambia il `catalogo_hash`: alla prossima estrazione i documenti si riacquisiscono, ma nessuna estrazione riparte da sola.
+- **Correzioni per l'accensione** (2026-09-30):
+  - **disiscritti e email verificate oltre 1000 righe**: `filtra_recapitabili`, da cui passano digest, email di evento e statement di moderazione (e gli alert sui bandi), legge la suppression list per intero, a keyset su `id`, e verifica le email a blocchi di 100 utenti. Oltre il max-rows di PostgREST (1000 righe) un indirizzo soppresso non riceve email e un utente verificato non viene scartato;
+  - **tempo lineare sui testi dei documenti**: il pre-classificatore e la pulizia dei domini esclusi (`scrub_menzioni`) lavorano in tempo lineare anche su input patologici. Il pre-classificatore dà lo stesso esito di prima, salvo ai confini della vecchia finestra di ricerca delle esclusioni; la pulizia dà lo stesso risultato della regex;
+  - **bandi fusi nell'indice di scoperta**: vedi «bandi fusi» sopra.
 - **Modulo completo (WP0-WP10)**. Resta per l'accensione in produzione:
-  - **G1** sandbox openapi (§14): fixture reali al posto di quelle sintetiche e codici CEE ancora da verificare. Fino ad allora storico IT-advanced e bilancio ufficiale (WP1-WP2) sono in produzione ma spenti dietro `BILANCI_STORICO_ATTIVO` (§2.1 T1): chiuso G1 si accende la variabile nell'`environment` del backend e, dopo il deploy, si fissano prezzo e attivazione dell'addon `bilancio-ufficiale`;
+  - **G1** sandbox openapi (§14): fixture reali al posto di quelle sintetiche e codici CEE ancora da verificare. Fino ad allora storico IT-advanced e bilancio ufficiale (WP1-WP2) sono in produzione ma spenti dietro `BILANCI_STORICO_ATTIVO` (§2.1 T1), già nel compose con default spento. G1 è consigliata prima dell'accensione, che si fa dal `.env` con la procedura «Accensione delle funzioni» di `docs/deploy.md`; dopo, prezzo e attivazione dell'addon `bilancio-ufficiale`;
   - **G2** tutte le migration dalla 0032 alla 0042, in ordine dallo SQL Editor del primario, **prima** del deploy e qualunque sia il flag: il backend legge colonne della 0036, 0041 e 0042 anche a modulo spento;
   - **G4** revisione legale di informative, Termini d'uso e DSA, statement of reasons e disclaimer (anche quello delle bozze dei documenti e le istruzioni di stesura dei tre documenti), poi la loro versione nel codice;
   - **qualità dell'estrazione WP3** (§16 WP3): con il prompt v3 le quote verificate hanno precisione 1,00 su entrambi i campioni, ma la `modalita` è corretta nel 68% (campione 1) e nel 61% (campione 2, selezionato dalle fonti ufficiali), sotto l'obiettivo del 90%, perché vale solo con una citazione da un documento ufficiale: il prossimo intervento va deciso;
   - in AdminPiani il limite delle bozze dei piani su misura (partono da 0); consigliato dimensionare il budget giornaliero «altri» (condiviso da bozza del profilo, proposte della call e bozze dei documenti, ciascuno con il suo tetto giornaliero per titolare) sul numero di clienti attivi;
-  - la riga `PARTENARIATI_ATTIVO` nell'`environment` del backend in `docker-compose.yml`.
+  - l'accensione: `docker-compose.yml` passa già `PARTENARIATI_ATTIVO` e i tre budget giornalieri al backend (default spenti); si impostano nel `.env` con la procedura «Accensione delle funzioni» di `docs/deploy.md` (variabili, AdminPiani, tetto di spesa nella console Anthropic, controlli, spegnimento).
 
 ---
 

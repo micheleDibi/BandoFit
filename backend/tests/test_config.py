@@ -6,6 +6,7 @@ costruiscono con `_env_file=None` perché un .env presente accanto al backend
 altrimenti fornirebbe i valori che il test vuole assenti.
 """
 
+import logging
 import traceback
 
 import pytest
@@ -175,3 +176,46 @@ def test_la_configurazione_valida_non_solleva(_env_con_segreti):
     _env_con_segreti.setenv("ENV", "production")
     get_settings.cache_clear()
     assert get_settings().rate_limit_pepper == "SENTINELLA-PEPPER"
+
+
+# --- rimappatura_fusi_intervallo_minuti: tollerante, mai bloccante ------------
+
+
+def _errori_config(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records
+            if r.name == "bandofit.config" and r.levelno == logging.ERROR]
+
+
+@pytest.mark.parametrize("valore", ["abc", "4", "0", "-1", "7.5", "", "  ", 4, True, None])
+def test_intervallo_rimappatura_non_valido_vale_60_con_errore(caplog, valore):
+    with caplog.at_level(logging.ERROR, logger="bandofit.config"):
+        settings = _costruisci(rimappatura_fusi_intervallo_minuti=valore)
+    assert settings.rimappatura_fusi_intervallo_minuti == 60
+    assert len(_errori_config(caplog)) == 1
+    assert "RIMAPPATURA_FUSI_INTERVALLO_MINUTI non valido" in _errori_config(caplog)[0]
+
+
+@pytest.mark.parametrize(("valore", "atteso"), [("15", 15), (" 5 ", 5), (5, 5), (120, 120)])
+def test_intervallo_rimappatura_valido_senza_errori(caplog, valore, atteso):
+    with caplog.at_level(logging.ERROR, logger="bandofit.config"):
+        settings = _costruisci(rimappatura_fusi_intervallo_minuti=valore)
+    assert settings.rimappatura_fusi_intervallo_minuti == atteso
+    assert _errori_config(caplog) == []
+
+
+def test_intervallo_rimappatura_di_default_60(monkeypatch, caplog):
+    monkeypatch.delenv("RIMAPPATURA_FUSI_INTERVALLO_MINUTI", raising=False)
+    with caplog.at_level(logging.ERROR, logger="bandofit.config"):
+        assert _costruisci().rimappatura_fusi_intervallo_minuti == 60
+    assert _errori_config(caplog) == []
+
+
+def test_intervallo_rimappatura_non_valido_nel_env_non_blocca_l_avvio(monkeypatch, caplog):
+    for chiave, valore in _OBBLIGATORIE.items():
+        monkeypatch.setenv(chiave.upper(), valore)
+    monkeypatch.setenv("RIMAPPATURA_FUSI_INTERVALLO_MINUTI", "ogni ora")
+    get_settings.cache_clear()
+    with caplog.at_level(logging.ERROR, logger="bandofit.config"):
+        settings = get_settings()
+    assert settings.rimappatura_fusi_intervallo_minuti == 60
+    assert len(_errori_config(caplog)) == 1

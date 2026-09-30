@@ -585,7 +585,7 @@ class TestLogSenzaIdentificativi:
         # il resto della riga (metodo, esito) resta leggibile
         assert any(m.startswith("HTTP Request: GET") and "200 OK" in m for m in messaggi)
 
-    def test_url_di_altri_servizi_intatti(self):
+    def test_url_di_altri_servizi_path_intatto_senza_query(self):
         import logging
 
         from app.clients.openapi import _FILTRO_LOG_HTTPX
@@ -597,7 +597,25 @@ class TestLogSenzaIdentificativi:
             None,
         )
         assert _FILTRO_LOG_HTTPX.filter(record) is True
-        assert "rest/v1/x?id=eq.1" in record.getMessage()
+        assert record.getMessage() == (
+            'HTTP Request: GET https://dummy.supabase.co/rest/v1/x "HTTP/1.1 200 OK"'
+        )
+
+    def test_url_openapi_con_query_mascherato_e_senza_query(self):
+        import logging
+
+        from app.clients.openapi import _FILTRO_LOG_HTTPX
+
+        record = logging.LogRecord(
+            "httpx", logging.INFO, __file__, 1, 'HTTP Request: %s %s "%s %d %s"',
+            ("GET", httpx.URL("https://company.openapi.com/IT-advanced/09876543217?x=1"),
+             "HTTP/1.1", 200, "OK"),
+            None,
+        )
+        assert _FILTRO_LOG_HTTPX.filter(record) is True
+        messaggio = record.getMessage()
+        assert "company.openapi.com/IT-advanced/*** " in messaggio
+        assert "09876543217" not in messaggio and "?" not in messaggio
 
 
 # ------------------------------------------------------------ bilancio ottico

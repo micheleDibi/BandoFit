@@ -6,7 +6,8 @@ Stesso stampo degli altri scheduler: un task asyncio avviato nel lifespan,
 SOLO con `rimappatura_fusi_modalita` diversa da `spenta` (default).
 - `prova`: il passo conta senza scrivere e il riassunto del report va nel log;
 - `attiva`: il passo scrive (e il riassunto va comunque nel log).
-Il primo passo parte all'avvio, poi uno ogni
+Il riassunto va a WARNING se il passo ha errori o coppie scartate, altrimenti
+a INFO. Il primo passo parte all'avvio, poi uno ogni
 `rimappatura_fusi_intervallo_minuti` (minimo 5). Nessun claim a DB: il passo
 è idempotente e le scritture si serializzano nella RPC. Il loop non muore
 mai in silenzio: un errore imprevisto si scrive nel log e si riprova al giro
@@ -16,13 +17,13 @@ dopo.
 import asyncio
 import logging
 
-from app.core.config import get_settings
+from app.core.config import INTERVALLO_RIMAPPATURA_MINIMO, get_settings
 from app.services import rimappatura_fusi
 
 logger = logging.getLogger("bandofit.catalogo_scheduler")
 
 MODALITA = ("spenta", "prova", "attiva")
-INTERVALLO_MINIMO_MINUTI = 5
+INTERVALLO_MINIMO_MINUTI = INTERVALLO_RIMAPPATURA_MINIMO
 
 
 def modalita_rimappatura() -> str | None:
@@ -43,7 +44,11 @@ async def esegui_passo(primary, secondary) -> dict | None:
     if modalita not in ("prova", "attiva"):
         return None
     report = await rimappatura_fusi.passo(primary, secondary, prova=modalita == "prova")
-    logger.info("rimappatura fusi (%s): %s", modalita, rimappatura_fusi.riassunto(report))
+    anomalo = (report.get("errori") or 0) > 0 or (report.get("scartate") or 0) > 0
+    logger.log(
+        logging.WARNING if anomalo else logging.INFO,
+        "rimappatura fusi (%s): %s", modalita, rimappatura_fusi.riassunto(report),
+    )
     return report
 
 

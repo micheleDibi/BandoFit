@@ -6,6 +6,7 @@ delle estrazioni)."""
 
 import hashlib
 import json
+import random
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ import pytest
 from app.services import partenariato_prompts as pp
 from app.services.ai_check_prompts import build_bando_input, serializza_sezioni
 from app.services.bandi_service import normalize_contenuto
+from app.services.link_policy import BLOCKED_LINK_HOSTS
 from app.services.partenariato_prompts import (
     PARTENARIATO_PROMPT_VERSION,
     SCHEMA_VERSION,
@@ -311,10 +313,39 @@ class TestInput:
             for n in range(1, 10)
         ]
         documenti = seleziona_pagine([doc(1, pagine)], max_caratteri=200_000)
-        inizio = time.perf_counter()
+        inizio = time.process_time()
         _, sezioni, _ = build_partenariato_input({"titolo": "T"}, None, documenti)
-        assert time.perf_counter() - inizio < 1.0
+        assert time.process_time() - inizio < 1.0
         assert all("obiettivoeuropa" not in v for v in sezioni.values())
+
+
+# Input patologici («HOST» = un dominio escluso).
+_MENZIONI_PATOLOGICHE = [
+    "a" * 63 + ".", "a" * 62 + ".", "a" * 64 + ".", "a.", ("a" * 63 + ".") * 9 + "xHOST ",
+    ("a" * 32 + ".") * 20 + "HOST ", "HOST", "http:" + "/" * 1_000, "http", "//", "a" * 1_000,
+]
+
+
+def _stringa_casuale(rnd: random.Random, host: str) -> str:
+    pezzi: list[str] = []
+    for _ in range(rnd.randint(1, 40)):
+        caso = rnd.random()
+        if caso < 0.25:
+            pezzi.append(rnd.choice("abZ09_-") * rnd.randint(1, 70))
+        elif caso < 0.4:
+            pezzi.append(".")
+        elif caso < 0.5:
+            pezzi.append(rnd.choice([host, host.upper(), host[: rnd.randint(1, len(host))],
+                                     host[rnd.randint(0, len(host) - 1):]]))
+        elif caso < 0.6:
+            pezzi.append(rnd.choice(["http:", "https:", "HTTP:", "//", "/", "?", "#", ":"]))
+        elif caso < 0.7:
+            pezzi.append(rnd.choice([" ", "\n", "\t"]))
+        elif caso < 0.8:
+            pezzi.append("/" * rnd.randint(1, 5))
+        else:
+            pezzi.append(rnd.choice(["x", "é", "ß", "-", "a.b", "e'"]))
+    return "".join(pezzi)
 
 
 class TestScrubMenzioni:
@@ -350,10 +381,33 @@ class TestScrubMenzioni:
     def test_lineare_su_stringhe_ostili(self, testo):
         import time
 
-        inizio = time.perf_counter()
+        inizio = time.process_time()
         pulito = pp.scrub_menzioni(testo)
-        assert time.perf_counter() - inizio < 0.5
+        assert time.process_time() - inizio < 0.5
         assert "obiettivoeuropa.com" not in pulito
+
+    @pytest.mark.parametrize("host", sorted(BLOCKED_LINK_HOSTS))
+    def test_stesso_risultato_della_regex_su_stringhe_casuali(self, host):
+        rnd = random.Random(7)
+        for _ in range(5_000):
+            testo = _stringa_casuale(rnd, host)
+            assert pp._senza_menzioni(testo) == pp._MENZIONE.sub("", testo), testo
+
+    # Tempo di CPU del processo (`process_time`): il carico di altri processi
+    # non conta. Tipicamente sotto 0,1 s.
+    @pytest.mark.parametrize("unita", _MENZIONI_PATOLOGICHE, ids=lambda _: "patologico")
+    def test_input_patologici_200_kb(self, unita):
+        import time
+
+        host = sorted(BLOCKED_LINK_HOSTS)[0]
+        unita = unita.replace("HOST", host)
+        testo = (unita * (200_000 // len(unita) + 1))[:200_000] + " " + host
+        inizio = time.process_time()
+        pulito = pp.scrub_menzioni(testo)
+        assert time.process_time() - inizio < 1.0
+        assert host not in pulito.lower()
+        corto = testo[:5_000] + " " + host
+        assert pp.scrub_menzioni(corto) == pp._MENZIONE.sub("", corto)
 
     def test_intervalli(self):
         assert intervalli([1, 2, 3, 4, 7]) == "1-4, 7"

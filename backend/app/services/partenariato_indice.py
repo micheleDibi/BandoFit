@@ -29,7 +29,10 @@ e `in_` a blocchi di 100 id:
 6. esposizioni degli ultimi 7 giorni: notifiche proattive e, dal WP7, inviti
    ricevuti;
 7. stato LIVE dei bandi dal secondario (cache di 10 minuti): una call su un
-   bando non aperto (o sparito dal catalogo) non entra nell'indice;
+   bando non aperto (o sparito dal catalogo) non entra nell'indice. Un id
+   assente da `bando_pubblico` si controlla su `bando_fusione`: per un
+   doppione fuso, o se `bando_fusione` non si legge, vale lo snapshot della
+   call (un fuso o un errore non valgono «sparito»);
 8. (WP7) candidature e inviti ATTIVI (`inviata` o `accettata`) in una sola
    lettura: gli inviti in attesa non scaduti e quelli accettati aprono le call
    solo su invito all'azienda invitata («Per te», `IndiceMatching.inviti`);
@@ -297,39 +300,61 @@ def risolvi_pseudonimo(indice: Indice, call_id: Any, valore: Any) -> str | None:
 
 # ------------------------------------------------------- stato dei bandi
 
-# bando_id → (istante della lettura, stato; None = assente dal catalogo)
+# bando_id → (istante della lettura, stato; None = assente dal catalogo,
+# `_SNAPSHOT` = doppione fuso)
 _STATI_BANDI: dict[int, tuple[float, Any]] = {}
+# Stato «vale lo snapshot della call»: bando fuso in un master (assente da
+# `bando_pubblico` ma in `bando_fusione`, come la call «congelata» dello
+# scheduler) o assenza non verificabile (`bando_fusione` non leggibile).
+_SNAPSHOT = object()
 
 
 async def _stati_bandi(secondary, ids: Iterable[int], cont: _Contatore) -> dict[int, Any] | None:
     """Stato LIVE dei bandi (`bando_pubblico`) con cache di 10 minuti. None
     se il catalogo non si legge: il chiamante ripiega sullo snapshot della
-    call (un errore non è un'assenza)."""
+    call (un errore non è un'assenza). Gli id assenti si controllano su
+    `bando_fusione`: un doppione fuso vale `_SNAPSHOT`, non «sparito»; se
+    `bando_fusione` non si legge, gli assenti valgono `_SNAPSHOT` senza
+    entrare in cache (si riprova alla ricarica dopo)."""
     ora = time.monotonic()
     unici = sorted({int(i) for i in ids})
     da_leggere = [
         i for i in unici
         if i not in _STATI_BANDI or ora - _STATI_BANDI[i][0] >= STATO_BANDI_TTL_SECONDI
     ]
+    non_verificati: set[int] = set()
     if da_leggere:
         try:
             cont.n += -(-len(da_leggere) // bando_fonti_service.BLOCCO_STATI)
-            letti = await bando_fonti_service.leggi_stato_bandi(secondary, da_leggere)
+            letti: dict[int, Any] = await bando_fonti_service.leggi_stato_bandi(
+                secondary, da_leggere)
         except Exception as exc:  # noqa: BLE001 — ripiego sullo snapshot
             logger.warning("partenariati: stato dei bandi non leggibile per l'indice (%s)",
                            getattr(exc, "code", None) or type(exc).__name__)
             return None
+        assenti = [i for i in da_leggere if i not in letti]
+        if assenti:
+            try:
+                cont.n += -(-len(assenti) // bando_fonti_service.BLOCCO_FUSIONI)
+                fusi = await bando_fonti_service.leggi_fusioni(secondary, assenti)
+            except Exception as exc:  # noqa: BLE001 — un errore non vale «sparito»
+                logger.warning("partenariati: bando_fusione non leggibile per l'indice (%s)",
+                               getattr(exc, "code", None) or type(exc).__name__)
+                non_verificati = set(assenti)
+            else:
+                letti.update({i: _SNAPSHOT for i in fusi})
         for i in da_leggere:
-            _STATI_BANDI[i] = (ora, letti.get(i))
-    return {i: _STATI_BANDI[i][1] for i in unici}
+            if i not in non_verificati:
+                _STATI_BANDI[i] = (ora, letti.get(i))
+    return {i: _SNAPSHOT if i in non_verificati else _STATI_BANDI[i][1] for i in unici}
 
 
 def _bando_aperto(call: Mapping, stati: Mapping[int, Any] | None) -> tuple[bool, Any]:
     """(la call resta nell'indice, scadenza del bando da usare)."""
-    if stati is None:
+    stato = None if stati is None else stati.get(int(call["bando_id"]))
+    if stati is None or stato is _SNAPSHOT:
         effettivo = str(call.get("bando_stato_effettivo") or "").strip().lower()
         return effettivo in STATI_BANDO_APERTI, call.get("bando_scadenza")
-    stato = stati.get(int(call["bando_id"]))
     if stato is None:  # sparito dal catalogo: non si propone
         return False, None
     effettivo = str(getattr(stato, "stato_effettivo", None) or "").strip().lower()

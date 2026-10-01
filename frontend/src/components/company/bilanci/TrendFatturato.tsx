@@ -30,7 +30,7 @@ export function TrendFatturato({ esercizi }: { esercizi: EsercizioBilancio[] }) 
                 quella dell'ultimo anno, le altre sono nella tabella. */}
             <span
               className={cn(
-                "tabular whitespace-nowrap text-[11px] font-medium text-slate-600",
+                "whitespace-nowrap text-caption text-ink-2 tabular-nums",
                 !ultimo && "hidden sm:block",
               )}
             >
@@ -38,14 +38,11 @@ export function TrendFatturato({ esercizi }: { esercizi: EsercizioBilancio[] }) 
             </span>
             <div className="flex h-28 w-full items-end justify-center">
               <div
-                className={cn(
-                  "w-full max-w-12 rounded-t-md",
-                  ultimo ? "bg-brand-500" : "bg-brand-200",
-                )}
+                className={cn("w-full max-w-12 rounded-t-mark", ultimo ? "bg-accent" : "bg-accent-soft")}
                 style={{ height: `${altezza}%` }}
               />
             </div>
-            <span className="tabular text-xs text-slate-500">{p.anno}</span>
+            <span className="text-caption text-ink-3 tabular-nums">{p.anno}</span>
           </div>
         );
       })}

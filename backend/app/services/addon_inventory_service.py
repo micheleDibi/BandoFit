@@ -138,7 +138,7 @@ async def grant(primary, admin_id: str, user_id: str, data: AdminGrantAddonIn) -
             tipo="addon_grant",
             titolo="Ti è stato accreditato un add-on",
             corpo=f"Hai ricevuto {data.quantita}× {nome}. Lo trovi nella tua area abbonamento.",
-            url="/app/abbonamento",
+            url="/app/abbonamento?tab=addon",
             dedup_key=f"addon-grant:{esito.get('purchase_id')}",
         )
     except Exception:

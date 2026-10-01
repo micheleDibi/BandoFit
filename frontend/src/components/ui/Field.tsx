@@ -19,6 +19,11 @@ export const inputClasses =
 
 const errorClasses = "border-danger focus:border-danger focus-visible:outline-danger";
 
+/** `aria-describedby` del chiamante (un aiuto esterno) unito all'id dell'errore. */
+function descrittoDa(esterno: string | undefined, errorId: string, error?: string) {
+  return [esterno, error ? errorId : undefined].filter(Boolean).join(" ") || undefined;
+}
+
 interface FieldWrapperProps {
   label: string;
   required?: boolean;
@@ -66,7 +71,7 @@ export interface TextFieldProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(
-  ({ label, error, helper, required, id, className, ...props }, ref) => {
+  ({ label, error, helper, required, id, className, "aria-describedby": describedBy, ...props }, ref) => {
     const autoId = useId();
     const fieldId = id ?? autoId;
     const errorId = `${fieldId}-errore`;
@@ -84,9 +89,9 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(
           id={fieldId}
           required={required}
           aria-invalid={!!error}
-          aria-describedby={error ? errorId : undefined}
           className={cn(inputClasses, error && errorClasses, className)}
           {...props}
+          aria-describedby={descrittoDa(describedBy, errorId, error)}
         />
       </FieldWrapper>
     );
@@ -101,7 +106,7 @@ export interface TextareaFieldProps extends TextareaHTMLAttributes<HTMLTextAreaE
 }
 
 export const TextareaField = forwardRef<HTMLTextAreaElement, TextareaFieldProps>(
-  ({ label, error, helper, required, id, className, ...props }, ref) => {
+  ({ label, error, helper, required, id, className, "aria-describedby": describedBy, ...props }, ref) => {
     const autoId = useId();
     const fieldId = id ?? autoId;
     const errorId = `${fieldId}-errore`;
@@ -119,7 +124,6 @@ export const TextareaField = forwardRef<HTMLTextAreaElement, TextareaFieldProps>
           id={fieldId}
           required={required}
           aria-invalid={!!error}
-          aria-describedby={error ? errorId : undefined}
           className={cn(
             inputClasses,
             "h-auto min-h-20 resize-y py-2",
@@ -127,6 +131,7 @@ export const TextareaField = forwardRef<HTMLTextAreaElement, TextareaFieldProps>
             className,
           )}
           {...props}
+          aria-describedby={descrittoDa(describedBy, errorId, error)}
         />
       </FieldWrapper>
     );
@@ -141,7 +146,10 @@ export interface SelectFieldProps extends SelectHTMLAttributes<HTMLSelectElement
 }
 
 export const SelectField = forwardRef<HTMLSelectElement, SelectFieldProps>(
-  ({ label, error, helper, required, id, className, children, ...props }, ref) => {
+  (
+    { label, error, helper, required, id, className, children, "aria-describedby": describedBy, ...props },
+    ref,
+  ) => {
     const autoId = useId();
     const fieldId = id ?? autoId;
     const errorId = `${fieldId}-errore`;
@@ -159,9 +167,9 @@ export const SelectField = forwardRef<HTMLSelectElement, SelectFieldProps>(
           id={fieldId}
           required={required}
           aria-invalid={!!error}
-          aria-describedby={error ? errorId : undefined}
           className={cn(inputClasses, "cursor-pointer", error && errorClasses, className)}
           {...props}
+          aria-describedby={descrittoDa(describedBy, errorId, error)}
         >
           {children}
         </select>

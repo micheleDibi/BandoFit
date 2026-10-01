@@ -1,11 +1,14 @@
-import { AlertTriangle, CheckCircle2, Loader2, Sparkles } from "lucide-react";
+import { Check, TriangleAlert } from "lucide-react";
 import { useId, type ReactNode } from "react";
 import { jobInCorsoRecente } from "../../hooks/useCallPartenariato";
 import { CALL_COPY } from "../../lib/copy";
 import type { JobAiCall } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
+import { Panel } from "../ui/Panel";
+import { Spinner } from "../ui/Spinner";
 
-/** Riquadro di un job AI della call (posizioni o testi): descrizione, avvio e
+/** Blocco di un job AI della call (posizioni o testi): descrizione, avvio e
  *  stato in `aria-live` (in corso, pronta, errore). La proposta la mostra il
  *  chiamante sotto (`children`), e non si salva mai da sola. */
 export function JobAiStato({
@@ -40,24 +43,24 @@ export function JobAiStato({
   let stato: ReactNode = null;
   if (inCorso && recente) {
     stato = (
-      <span className="inline-flex items-center gap-1.5 text-brand-800">
-        <Loader2 className="size-4 animate-spin" aria-hidden />
+      <span className="inline-flex items-center gap-2 text-ink-2">
+        <Spinner size="sm" />
         {CALL_COPY.aiInCorso}
       </span>
     );
   } else if (inCorso) {
-    stato = <span className="text-amber-800">{CALL_COPY.aiLunga}</span>;
+    stato = <span className="text-warning-ink">{CALL_COPY.aiLunga}</span>;
   } else if (pronta) {
     stato = (
-      <span className="inline-flex items-center gap-1.5 text-emerald-800">
-        <CheckCircle2 className="size-4" aria-hidden />
+      <span className="inline-flex items-center gap-2 text-fit-ink">
+        <Check className="size-4" aria-hidden />
         La proposta è pronta: guardala qui sotto.
       </span>
     );
   } else if (job.stato === "errore") {
     stato = (
-      <span className="inline-flex items-start gap-1.5 text-red-700">
-        <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+      <span className="inline-flex items-start gap-2 text-danger">
+        <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
         <span>
           {CALL_COPY.aiErrore}
           {job.errore ? ` ${job.errore}` : ""}
@@ -67,12 +70,11 @@ export function JobAiStato({
   }
 
   return (
-    <div className="rounded-lg border border-dashed border-brand-200 bg-brand-50/40 px-4 py-3">
+    <Panel>
       <div className="flex flex-wrap items-start gap-3">
-        <Sparkles className="mt-0.5 size-4 shrink-0 text-brand-500" aria-hidden />
-        <div className="min-w-0 flex-1 text-sm text-slate-700">
+        <div className="min-w-0 flex-1 text-body text-ink-2">
           <p>{descrizione}</p>
-          <p className="mt-0.5 text-xs text-slate-500">{CALL_COPY.aiNota}</p>
+          <p className="text-small text-ink-3">{CALL_COPY.aiNota}</p>
         </div>
         <Button
           variant="secondary"
@@ -86,20 +88,16 @@ export function JobAiStato({
         </Button>
       </div>
       {disabilitato && motivoDisabilitato && (
-        <p id={idMotivo} className="mt-2 text-xs text-slate-500">
+        <p id={idMotivo} className="text-small text-ink-3">
           {motivoDisabilitato}
         </p>
       )}
       {/* Sempre montato: lo stato del job va annunciato quando cambia. */}
-      <div role="status" aria-live="polite" className="mt-2 text-sm empty:mt-0">
+      <div role="status" aria-live="polite" className="text-body">
         {stato}
       </div>
-      {erroreAvvio && (
-        <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-          {erroreAvvio}
-        </p>
-      )}
+      {erroreAvvio && <Alert tono="errore">{erroreAvvio}</Alert>}
       {children}
-    </div>
+    </Panel>
   );
 }

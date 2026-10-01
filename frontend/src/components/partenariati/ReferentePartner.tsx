@@ -1,6 +1,4 @@
-import { UserCheck, UserRound } from "lucide-react";
 import { useId, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   useInformativaPartner,
   useReferentePartner,
@@ -9,24 +7,29 @@ import {
 import { apiErrorCode, apiErrorMessage } from "../../lib/api";
 import { PARTNER_COPY } from "../../lib/copy";
 import type { PartnerProfile } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
-import { Dialog } from "../ui/Dialog";
+import { Checkbox } from "../ui/Checkbox";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { SelectField } from "../ui/Field";
+import { Panel } from "../ui/Panel";
 import { Skeleton } from "../ui/states";
+import { TextLink } from "../ui/TextLink";
 import { TestoInformativa } from "./ConsensoPartnerDialog";
 
+/** Esiti: la regione `status` è sempre montata (l'esito va annunciato anche se
+ *  il blocco che l'ha causato sparisce); l'errore è un `Alert` a sé. */
 function Esito({ testo, errore }: { testo: string | null; errore: string | null }) {
   return (
     <>
       <div role="status" aria-live="polite">
-        {testo && <p className="mt-3 text-sm text-emerald-700">{testo}</p>}
+        {testo && (
+          <Alert tono="ok" ruolo="none">
+            {testo}
+          </Alert>
+        )}
       </div>
-      {errore && (
-        <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-          {errore}
-        </p>
-      )}
+      {errore && <Alert tono="errore">{errore}</Alert>}
     </>
   );
 }
@@ -84,23 +87,19 @@ export function ReferentePartner({ profilo }: { profilo: PartnerProfile }) {
   };
 
   return (
-    <Card className="p-5">
-      <h3 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
-        <UserRound className="size-4 text-brand-500" aria-hidden />
-        {PARTNER_COPY.referenteTitolo}
-      </h3>
-      <p className="mt-0.5 text-sm text-slate-500">{PARTNER_COPY.referenteDescrizione}</p>
+    <Panel titolo={PARTNER_COPY.referenteTitolo}>
+      <p className="text-small text-ink-3">{PARTNER_COPY.referenteDescrizione}</p>
 
-      <p className="mt-3 text-sm text-slate-700">
-        {PARTNER_COPY.referenteAttuale(nomeAttuale)}
-      </p>
-      {attuale.proposto && (
-        <p className="mt-1 text-sm text-amber-700">
-          {PARTNER_COPY.referenteInAttesa(attuale.proposto.nome ?? "la persona scelta")}
-        </p>
-      )}
+      <div className="flex flex-col gap-1">
+        <p className="text-body text-ink">{PARTNER_COPY.referenteAttuale(nomeAttuale)}</p>
+        {attuale.proposto && (
+          <p className="text-body text-warning-ink">
+            {PARTNER_COPY.referenteInAttesa(attuale.proposto.nome ?? "la persona scelta")}
+          </p>
+        )}
+      </div>
 
-      <div className="mt-3 flex flex-wrap items-end gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         {possibili.length > 0 ? (
           <>
             <div className="w-full max-w-xs">
@@ -127,11 +126,9 @@ export function ReferentePartner({ profilo }: { profilo: PartnerProfile }) {
             </Button>
           </>
         ) : (
-          <p className="text-sm text-slate-500">
+          <p className="text-body text-ink-2">
             {PARTNER_COPY.referenteNessunMembro}{" "}
-            <Link to="/app/collegati" className="font-medium text-brand-600 hover:text-brand-700">
-              Account collegati →
-            </Link>
+            <TextLink to="/app/collegati">Account collegati</TextLink>
           </p>
         )}
         {attuale.proposto && (
@@ -150,7 +147,7 @@ export function ReferentePartner({ profilo }: { profilo: PartnerProfile }) {
         )}
       </div>
       <Esito testo={esito} errore={errore} />
-    </Card>
+    </Panel>
   );
 }
 
@@ -191,104 +188,88 @@ export function ReferenteMembro({ profilo }: { profilo: PartnerProfile }) {
   };
 
   return (
-    <Card className="border-brand-200 bg-brand-50/40 p-5">
+    <div className="flex flex-col gap-3">
       {proposto ? (
-        <>
-          <h3 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
-            <UserCheck className="size-4 text-brand-500" aria-hidden />
-            {PARTNER_COPY.referenteProposto}
-          </h3>
-          <div
-            id={`${idBase}-informativa`}
-            role="region"
-            aria-label={PARTNER_COPY.referenteInformativa}
-            tabIndex={0}
-            className="mt-3 max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white px-4 py-3 text-[13px] leading-relaxed text-slate-700 focus-visible:outline-2 focus-visible:outline-brand-500"
-          >
-            {informativa.isPending ? (
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-2/3" />
-                <Skeleton className="h-4 w-full" />
-              </div>
-            ) : informativa.data ? (
-              <TestoInformativa testo={informativa.data.referente_testo} />
-            ) : (
-              <p className="text-red-700">
-                {apiErrorMessage(informativa.error, PARTNER_COPY.informativaNonCaricata)}
-              </p>
-            )}
-          </div>
-          <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm font-medium text-slate-800">
-            <input
-              type="checkbox"
-              className="mt-0.5 size-4 shrink-0 cursor-pointer accent-brand-500"
+        // Un `Panel`, non un `Alert`: l'avviso è una regione `status` e
+        // annuncerebbe tutta l'informativa quando arriva.
+        <Panel titolo={PARTNER_COPY.referenteProposto}>
+          <div className="flex flex-col gap-3">
+            <div
+              id={`${idBase}-informativa`}
+              role="region"
+              aria-label={PARTNER_COPY.referenteInformativa}
+              tabIndex={0}
+              className="max-h-52 overflow-y-auto rounded-control border border-line bg-sheet px-4 py-3 text-small text-ink-2 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {informativa.isPending ? (
+                <div className="flex flex-col gap-2">
+                  <Skeleton className="h-4 w-2/3" />
+                  <Skeleton className="h-4 w-full" />
+                </div>
+              ) : informativa.data ? (
+                <TestoInformativa testo={informativa.data.referente_testo} />
+              ) : (
+                <p className="text-danger">
+                  {apiErrorMessage(informativa.error, PARTNER_COPY.informativaNonCaricata)}
+                </p>
+              )}
+            </div>
+            <Checkbox
+              label={PARTNER_COPY.referenteCheckbox}
               checked={letta}
               onChange={(e) => setLetta(e.target.checked)}
               aria-describedby={`${idBase}-informativa`}
               disabled={!informativa.data}
             />
-            {PARTNER_COPY.referenteCheckbox}
-          </label>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button
-              onClick={() =>
-                void rispondi("accetta", "Hai accettato: ora sei il referente per i partenariati.")
-              }
-              disabled={!letta || !informativa.data || risposta.isPending}
-              loading={risposta.isPending && letta}
-            >
-              {PARTNER_COPY.referenteAccetta}
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => void rispondi("rifiuta", "Hai rifiutato la proposta.")}
-              disabled={risposta.isPending}
-            >
-              {PARTNER_COPY.referenteRifiuta}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  void rispondi("accetta", "Hai accettato: ora sei il referente per i partenariati.")
+                }
+                disabled={!letta || !informativa.data || risposta.isPending}
+                loading={risposta.isPending && letta}
+              >
+                {PARTNER_COPY.referenteAccetta}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => void rispondi("rifiuta", "Hai rifiutato la proposta.")}
+                disabled={risposta.isPending}
+              >
+                {PARTNER_COPY.referenteRifiuta}
+              </Button>
+            </div>
           </div>
-        </>
+        </Panel>
       ) : referenteAttivo ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="inline-flex items-center gap-2 text-sm font-medium text-slate-800">
-            <UserCheck className="size-4 text-brand-500" aria-hidden />
-            {PARTNER_COPY.referenteSeiTu}
-          </p>
-          <Button variant="secondary" size="sm" onClick={() => setConferma(true)}>
-            {PARTNER_COPY.referenteRinuncia}
-          </Button>
-        </div>
+        <Alert
+          tono="info"
+          azione={
+            <Button variant="secondary" size="sm" onClick={() => setConferma(true)}>
+              {PARTNER_COPY.referenteRinuncia}
+            </Button>
+          }
+        >
+          {PARTNER_COPY.referenteSeiTu}
+        </Alert>
       ) : null}
       <Esito testo={esito} errore={errore} />
 
-      <Dialog
+      <ConfirmDialog
         open={conferma}
-        onClose={() => setConferma(false)}
-        title={PARTNER_COPY.referenteRinunciaTitolo}
-        dismissible={!risposta.isPending}
-        footer={
-          <>
-            <Button
-              variant="ghost"
-              onClick={() => setConferma(false)}
-              disabled={risposta.isPending}
-            >
-              {PARTNER_COPY.annulla}
-            </Button>
-            <Button
-              variant="danger"
-              loading={risposta.isPending}
-              onClick={() =>
-                void rispondi("revoca", "Hai rinunciato: il referente torna il titolare.")
-              }
-            >
-              {PARTNER_COPY.referenteRinuncia}
-            </Button>
-          </>
+        titolo={PARTNER_COPY.referenteRinunciaTitolo}
+        conferma={PARTNER_COPY.referenteRinuncia}
+        annulla={PARTNER_COPY.annulla}
+        distruttiva
+        inCorso={risposta.isPending}
+        onConferma={() =>
+          void rispondi("revoca", "Hai rinunciato: il referente torna il titolare.")
         }
+        onAnnulla={() => setConferma(false)}
       >
         <p>{PARTNER_COPY.referenteRinunciaTesto}</p>
-      </Dialog>
-    </Card>
+      </ConfirmDialog>
+    </div>
   );
 }

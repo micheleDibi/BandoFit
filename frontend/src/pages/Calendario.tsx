@@ -5,11 +5,19 @@ import { AddItemChooser } from "../components/calendar/AddItemChooser";
 import { AppuntamentoDialog } from "../components/calendar/AppuntamentoDialog";
 import { DayEventsDialog } from "../components/calendar/DayEventsDialog";
 import { EventDialog, type DialogState } from "../components/calendar/EventDialog";
-import { itemDay, itemSortKey, type CalendarItem } from "../components/calendar/items";
+import {
+  itemDay,
+  itemSortKey,
+  ruoloClasses,
+  type CalendarItem,
+  type RuoloCalendario,
+} from "../components/calendar/items";
 import { MonthGrid } from "../components/calendar/MonthGrid";
 import { SlotDialog, type SlotDialogState } from "../components/calendar/SlotDialog";
 import { Button } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
+import { IconButton } from "../components/ui/IconButton";
+import { Page } from "../components/ui/Page";
+import { PageHeader } from "../components/ui/PageHeader";
 import { ErrorState, Skeleton } from "../components/ui/states";
 import { useCalendarEvents } from "../hooks/useCalendar";
 import { useMe } from "../hooks/useMe";
@@ -20,7 +28,7 @@ import { formatMonthYear, todayItalyIso } from "../lib/format";
 import { hasAreaProgettista } from "../lib/roles";
 import type { AppuntamentoProgettista } from "../types";
 
-/** "YYYY-MM" valido → {anno, mese}; altrimenti il mese di oggi (Roma). */
+/** Da "YYYY-MM" valido a {anno, mese}; altrimenti il mese di oggi (Roma). */
 function parseMonthParam(raw: string | null): { anno: number; mese: number } {
   const match = raw?.match(/^(\d{4})-(\d{2})$/);
   if (match) {
@@ -34,6 +42,20 @@ function parseMonthParam(raw: string | null): { anno: number; mese: number } {
 
 function monthParam(anno: number, mese: number): string {
   return `${anno}-${String(mese).padStart(2, "0")}`;
+}
+
+/** Legenda in parole: lo stesso campione di colore dei chip della griglia. */
+function Legenda({ voci }: { voci: Array<{ ruolo: RuoloCalendario; label: string }> }) {
+  return (
+    <ul aria-label="Legenda" className="flex flex-wrap items-center gap-x-4 gap-y-1">
+      {voci.map((v) => (
+        <li key={v.ruolo} className="inline-flex items-center gap-1.5 text-small text-ink-2">
+          <span aria-hidden className={`size-3 shrink-0 rounded-mark ${ruoloClasses(v.ruolo)}`} />
+          {v.label}
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 export default function Calendario() {
@@ -141,91 +163,80 @@ export default function Calendario() {
     }
   };
 
+  const legenda: Array<{ ruolo: RuoloCalendario; label: string }> = [
+    { ruolo: "personale", label: "Personali" },
+    { ruolo: "bando", label: "Scadenze bandi" },
+    ...(isProgettista
+      ? [
+          { ruolo: "slot" as const, label: "Disponibilità" },
+          { ruolo: "appuntamento" as const, label: "Appuntamenti" },
+        ]
+      : []),
+  ];
+
   return (
-    <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
-            Calendario
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {isProgettista
-              ? "Clicca su un giorno per aggiungere un evento o una disponibilità, su una voce per gestirla."
-              : "Clicca su un giorno per aggiungere un evento, su un evento per modificarlo."}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="size-2 rounded-full bg-brand-500" aria-hidden />
-            Personali
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="size-2 rounded-full bg-amber-500" aria-hidden />
-            Scadenze bandi
-          </span>
-          {isProgettista && (
-            <>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="size-2 rounded-full bg-emerald-500" aria-hidden />
-                Disponibilità
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="size-2 rounded-full bg-violet-500" aria-hidden />
-                Appuntamenti
-              </span>
-            </>
-          )}
-        </div>
-      </div>
+    <Page variante="elenco">
+      <PageHeader
+        titolo="Calendario"
+        descrizione={
+          isProgettista
+            ? "Clicca su un giorno per aggiungere un evento o una disponibilità, su una voce per gestirla."
+            : "Clicca su un giorno per aggiungere un evento, su un evento per modificarlo."
+        }
+      />
 
       {isPending ? (
-        <Skeleton className="mt-5 h-[34rem] w-full" />
+        <Skeleton className="h-[34rem] w-full" />
       ) : isError ? (
-        <div className="mt-5">
-          <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
-        </div>
+        <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
       ) : (
-        <Card className="mt-5 overflow-hidden p-0">
-          {/* Toolbar: mese + navigazione */}
-          <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-4 py-3 sm:px-5">
-            <h2 className="min-w-44 font-display text-lg font-bold capitalize text-slate-900">
-              {formatMonthYear(anno, mese)}
-            </h2>
-            <button
-              type="button"
-              onClick={() => shiftMonth(-1)}
-              aria-label="Mese precedente"
-              className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500"
-            >
-              <ChevronLeft className="size-4" aria-hidden />
-            </button>
-            <button
-              type="button"
-              onClick={() => shiftMonth(1)}
-              aria-label="Mese successivo"
-              className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500"
-            >
-              <ChevronRight className="size-4" aria-hidden />
-            </button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => goToMonth(Number(todayIso.slice(0, 4)), Number(todayIso.slice(5, 7)))}
-            >
-              Oggi
-            </Button>
+        <div className="flex flex-col gap-4">
+          {/* Barra: mese, navigazione e legenda */}
+          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+            <div className="flex items-center gap-2">
+              <h2 className="min-w-44 text-title-section capitalize text-ink" aria-live="polite">
+                {formatMonthYear(anno, mese)}
+              </h2>
+              <IconButton
+                label="Mese precedente"
+                icon={<ChevronLeft />}
+                size="sm"
+                variant="secondary"
+                onClick={() => shiftMonth(-1)}
+              />
+              <IconButton
+                label="Mese successivo"
+                icon={<ChevronRight />}
+                size="sm"
+                variant="secondary"
+                onClick={() => shiftMonth(1)}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  goToMonth(Number(todayIso.slice(0, 4)), Number(todayIso.slice(5, 7)))
+                }
+              >
+                Oggi
+              </Button>
+            </div>
+            <Legenda voci={legenda} />
           </div>
 
-          <MonthGrid
-            anno={anno}
-            mese={mese}
-            itemsByDay={itemsByDay}
-            todayIso={todayIso}
-            onDayClick={handleDayClick}
-            onOpenItem={handleOpenItem}
-            onShowDay={setDayListFor}
-          />
-        </Card>
+          <div className="overflow-hidden rounded-panel border border-line">
+            <MonthGrid
+              anno={anno}
+              mese={mese}
+              itemsByDay={itemsByDay}
+              todayIso={todayIso}
+              onDayClick={handleDayClick}
+              onOpenItem={handleOpenItem}
+              onShowDay={setDayListFor}
+            />
+          </div>
+        </div>
       )}
 
       <DayEventsDialog
@@ -260,6 +271,6 @@ export default function Calendario() {
         appuntamento={appuntamentoFor}
         onClose={() => setAppuntamentoFor(null)}
       />
-    </div>
+    </Page>
   );
 }

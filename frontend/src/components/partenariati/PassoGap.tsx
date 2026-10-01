@@ -1,15 +1,4 @@
-import {
-  AlertTriangle,
-  CheckCircle2,
-  HelpCircle,
-  Loader2,
-  MinusCircle,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Trash2,
-  XCircle,
-} from "lucide-react";
+import { Plus } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useAiChecksForBando, useRequestAiCheck } from "../../hooks/useAiCheck";
 import {
@@ -30,12 +19,17 @@ import type {
   GapCall,
   RequisitoCall,
 } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Badge } from "../ui/Badge";
-import { Button, LinkButton } from "../ui/Button";
-import { Card } from "../ui/Card";
-import { Dialog } from "../ui/Dialog";
-import { TextField } from "../ui/Field";
+import { Button } from "../ui/Button";
+import { Checkbox } from "../ui/Checkbox";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { SelectField, TextField } from "../ui/Field";
+import { Section, SectionHeader } from "../ui/SectionHeader";
+import { Spinner } from "../ui/Spinner";
+import { Status, type TonoStatus } from "../ui/Status";
 import { Skeleton } from "../ui/states";
+import { TextLink } from "../ui/TextLink";
 import { BarraPasso } from "./CallStepper";
 import {
   budgetNellaFascia,
@@ -66,27 +60,19 @@ const nuovaChiave = () => `r${++contatore}`;
 const locali = (requisiti: RequisitoCall[]): RequisitoLocale[] =>
   requisiti.map((r) => ({ ...r, chiave: r.id ?? nuovaChiave(), modificato: false }));
 
-const ICONE: Record<EsitoCoperturaCall, { icona: typeof CheckCircle2; classe: string }> = {
-  coperto: { icona: CheckCircle2, classe: "text-emerald-700 bg-emerald-50 ring-emerald-200" },
-  non_coperto: { icona: XCircle, classe: "text-red-700 bg-red-50 ring-red-200" },
-  dato_mancante: { icona: HelpCircle, classe: "text-amber-800 bg-amber-50 ring-amber-200" },
-  incerto: { icona: AlertTriangle, classe: "text-amber-800 bg-amber-50 ring-amber-200" },
-  non_valutabile: { icona: MinusCircle, classe: "text-slate-600 bg-slate-100 ring-slate-200" },
+const TONI_COPERTURA: Record<EsitoCoperturaCall, TonoStatus> = {
+  coperto: "aperto",
+  non_coperto: "chiuso",
+  dato_mancante: "in-apertura",
+  incerto: "in-apertura",
+  non_valutabile: "neutro",
 };
 
-/** La tua copertura di un requisito: icona E testo (mai il solo colore). */
+/** La tua copertura di un requisito, in parole con il punto di `Status` (mai
+ *  il solo colore). Stesse props di prima: lo usa anche l'area progettista. */
 export function CoperturaBadge({ esito }: { esito: EsitoCoperturaCall }) {
-  const { icona: Icona, classe } = ICONE[esito] ?? ICONE.non_valutabile;
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset",
-        classe,
-      )}
-    >
-      <Icona className="size-3.5" aria-hidden />
-      {CALL_COPY.esitiCopertura[esito] ?? esito}
-    </span>
+    <Status tono={TONI_COPERTURA[esito] ?? "neutro"}>{CALL_COPY.esitiCopertura[esito] ?? esito}</Status>
   );
 }
 
@@ -128,7 +114,7 @@ function RequisitoEditor({
     });
   };
   return (
-    <div className="mt-3 space-y-4 rounded-lg border border-brand-200 bg-brand-50/30 p-4">
+    <div className="mt-4 flex flex-col gap-6 rounded-panel bg-desk p-5">
       <TestoLungo
         etichetta="Il requisito, in parole"
         aiuto="Visibile alle altre aziende se lo cerchi: niente contatti né dati che fanno riconoscere l'azienda."
@@ -149,32 +135,28 @@ function RequisitoEditor({
           { valore: "ogni_membro", etichetta: CALL_COPY.ambiti.ogni_membro, nota: "Ogni azienda del partenariato lo deve avere." },
         ]}
       />
-      <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-        <input
-          type="checkbox"
-          className="mt-0.5 size-4 shrink-0 cursor-pointer accent-brand-500"
-          checked={cercato}
-          onChange={(e) => setCercato(e.target.checked)}
-        />
-        <span>
-          Lo cerco nei partner
-          <span className="block text-xs text-slate-500">
-            I requisiti che cerchi compaiono nella call e guidano i suggerimenti.
-          </span>
-        </span>
-      </label>
+      <Checkbox
+        label="Lo cerco nei partner"
+        descrizione="I requisiti che cerchi compaiono nella call e guidano i suggerimenti."
+        checked={cercato}
+        onChange={(e) => setCercato(e.target.checked)}
+      />
       {errori.length > 0 && (
-        <ul className="list-disc rounded-lg bg-red-50 py-2 pl-8 pr-3 text-sm text-red-700" role="alert">
-          {errori.map((e) => (
-            <li key={e}>{e}</li>
-          ))}
-        </ul>
+        <Alert tono="errore">
+          <ul className="list-disc pl-5">
+            {errori.map((e) => (
+              <li key={e}>{e}</li>
+            ))}
+          </ul>
+        </Alert>
       )}
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onAnnulla}>
           Annulla
         </Button>
-        <Button onClick={fatto}>Fatto</Button>
+        <Button variant="secondary" onClick={fatto}>
+          Conferma il requisito
+        </Button>
       </div>
     </div>
   );
@@ -189,18 +171,16 @@ function Riepilogo({ requisiti }: { requisiti: RequisitoLocale[] }) {
     ["Non li copri", conta("non_coperto")],
     ["Da verificare", conta("dato_mancante") + conta("incerto")],
     ["Da valutare a mano", conta("non_valutabile")],
+    ["Cerchi nei partner", cercati],
   ];
   return (
-    <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-600">
+    <p className="flex flex-wrap gap-x-5 gap-y-1 text-small text-ink-2 tabular-nums">
       {voci.map(([t, n]) => (
         <span key={t}>
-          {t}: <span className="font-semibold text-slate-900 tabular">{n}</span>
+          {t}: <span className="font-semibold text-ink">{n}</span>
         </span>
       ))}
-      <span>
-        Cerchi nei partner: <span className="font-semibold text-brand-700 tabular">{cercati}</span>
-      </span>
-    </div>
+    </p>
   );
 }
 
@@ -227,8 +207,8 @@ function BoxAiCheck({
   let azione: ReactNode = null;
   if (ultimo?.status === "pending") {
     testo = (
-      <span className="inline-flex items-center gap-1.5">
-        <Loader2 className="size-4 animate-spin" aria-hidden />
+      <span className="inline-flex items-center gap-2">
+        <Spinner size="sm" />
         AI-check in corso: di solito servono 1-2 minuti. Poi ricalcola i requisiti.
       </span>
     );
@@ -261,9 +241,7 @@ function BoxAiCheck({
     );
     azione =
       rimanenti === 0 ? (
-        <LinkButton to="/app/abbonamento" variant="secondary" size="sm">
-          {CALL_COPY.vediPiani}
-        </LinkButton>
+        <TextLink to="/app/abbonamento">{CALL_COPY.vediPiani}</TextLink>
       ) : puoLanciare ? (
         <Button variant="secondary" size="sm" onClick={() => setConferma(true)}>
           Lancia l'AI-check
@@ -272,44 +250,30 @@ function BoxAiCheck({
   }
 
   return (
-    <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-      <p className="min-w-0 flex-1 text-sm text-slate-700" role="status" aria-live="polite">
-        {testo}
-      </p>
-      {azione}
-      {lancia.isError && (
-        <p className="w-full text-sm text-red-700" role="alert">
-          {apiErrorMessage(lancia.error)}
-        </p>
-      )}
-      <Dialog
+    <div className="flex flex-col gap-2">
+      <div aria-live="polite">
+        <Alert tono="info" azione={azione}>
+          {testo}
+        </Alert>
+      </div>
+      {lancia.isError && <Alert tono="errore">{apiErrorMessage(lancia.error)}</Alert>}
+      <ConfirmDialog
         open={conferma}
-        onClose={() => setConferma(false)}
-        title="Lanciare un AI-check?"
-        dismissible={!lancia.isPending}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setConferma(false)} disabled={lancia.isPending}>
-              Annulla
-            </Button>
-            <Button
-              loading={lancia.isPending}
-              onClick={() =>
-                lancia.mutate(undefined, {
-                  onSettled: () => setConferma(false),
-                })
-              }
-            >
-              Lancia l'AI-check
-            </Button>
-          </>
+        titolo="Lanciare un AI-check?"
+        conferma="Lancia l'AI-check"
+        inCorso={lancia.isPending}
+        onConferma={() =>
+          lancia.mutate(undefined, {
+            onSettled: () => setConferma(false),
+          })
         }
+        onAnnulla={() => setConferma(false)}
       >
         <p>
           Consuma 1 AI-check del tuo piano{rimanenti !== null ? ` (te ne restano ${rimanenti})` : ""}.
           Quando è pronto, torna qui e ricalcola i requisiti.
         </p>
-      </Dialog>
+      </ConfirmDialog>
     </div>
   );
 }
@@ -443,33 +407,26 @@ export function PassoGap({ call, onAvanti, onIndietro, onDirty }: PassoProps) {
   const fasciaProposta = letturaBudget.ok && letturaBudget.valore ? fasciaDi(letturaBudget.valore) : null;
 
   return (
-    <div className="space-y-4">
-      <Card className="space-y-4 p-5">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-800">Budget del progetto e tua quota</h3>
-          <p className="text-xs text-slate-500">
-            Servono a valutare i requisiti economici. Alle altre aziende mostriamo solo la fascia.
-          </p>
-        </div>
+    <div className="flex flex-col gap-8">
+      <Section>
+        <SectionHeader titolo="Budget del progetto e tua quota" livello={3} />
+        <p className="text-body text-ink-2">
+          Servono a valutare i requisiti economici. Alle altre aziende mostriamo solo la fascia.
+        </p>
         <div className="grid gap-4 md:grid-cols-3">
-          <div className="space-y-1.5">
-            <label htmlFor={idFascia} className="block text-sm font-medium text-slate-700">
-              Fascia del budget (pubblica)
-            </label>
-            <select
-              id={idFascia}
-              value={fascia}
-              onChange={(e) => setFascia(e.target.value as BudgetFasciaCall | "")}
-              className="h-10 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-brand-500 focus:outline-2 focus:outline-offset-0 focus:outline-brand-500/30"
-            >
-              <option value="">Non indicata</option>
-              {FASCE_BUDGET.map((f) => (
-                <option key={f} value={f}>
-                  {CALL_COPY.fasceBudget[f]}
-                </option>
-              ))}
-            </select>
-          </div>
+          <SelectField
+            id={idFascia}
+            label="Fascia del budget (pubblica)"
+            value={fascia}
+            onChange={(e) => setFascia(e.target.value as BudgetFasciaCall | "")}
+          >
+            <option value="">Non indicata</option>
+            {FASCE_BUDGET.map((f) => (
+              <option key={f} value={f}>
+                {CALL_COPY.fasceBudget[f]}
+              </option>
+            ))}
+          </SelectField>
           <TextField
             label="Budget esatto (riservato)"
             inputMode="decimal"
@@ -482,7 +439,7 @@ export function PassoGap({ call, onAvanti, onIndietro, onDirty }: PassoProps) {
             error={letturaBudget.ok ? undefined : letturaBudget.errore}
             helper={
               letturaBudget.ok && letturaBudget.valore
-                ? `${formatEur(letturaBudget.valore)} — lo vedi solo tu`
+                ? `${formatEur(letturaBudget.valore)}, lo vedi solo tu`
                 : "Facoltativo: lo vedi solo tu"
             }
           />
@@ -496,22 +453,22 @@ export function PassoGap({ call, onAvanti, onIndietro, onDirty }: PassoProps) {
             helper="La parte del progetto che fai tu"
           />
         </div>
-      </Card>
+      </Section>
 
-      <Card className="space-y-4 p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-800">Requisiti del bando e cosa cerchi</h3>
-            <p className="max-w-2xl text-xs text-slate-500">
-              Li ricaviamo da regole confermate, requisiti del bando e AI-check, e controlliamo quali
-              copri già tu. Scegli quelli che cerchi nei partner: la copertura la vedi solo tu.
-            </p>
-          </div>
-          <Button variant="secondary" size="sm" onClick={chiediRicalcolo} loading={genera.isPending}>
-            <RefreshCw className="size-4" aria-hidden />
-            {requisiti.length ? "Ricalcola dal bando" : "Ricava i requisiti dal bando"}
-          </Button>
-        </div>
+      <Section>
+        <SectionHeader
+          titolo="Requisiti del bando e cosa cerchi"
+          livello={3}
+          azione={
+            <Button variant="secondary" size="sm" onClick={chiediRicalcolo} loading={genera.isPending}>
+              {requisiti.length ? "Ricalcola dal bando" : "Ricava i requisiti dal bando"}
+            </Button>
+          }
+        />
+        <p className="text-body text-ink-2">
+          Li ricaviamo da regole confermate, requisiti del bando e AI-check, e controlliamo quali
+          copri già tu. Scegli quelli che cerchi nei partner: la copertura la vedi solo tu.
+        </p>
 
         <BoxAiCheck
           slug={call.bando.slug}
@@ -522,43 +479,40 @@ export function PassoGap({ call, onAvanti, onIndietro, onDirty }: PassoProps) {
 
         <div aria-live="polite">
           {genera.isPending && requisiti.length === 0 ? (
-            <div className="space-y-2" aria-hidden>
+            <div className="flex flex-col gap-2" aria-hidden>
               <Skeleton className="h-16 w-full" />
               <Skeleton className="h-16 w-full" />
             </div>
           ) : genera.isError ? (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-              {apiErrorMessage(genera.error, "Non siamo riusciti a ricavare i requisiti.")}
-            </p>
+            <Alert tono="errore">{apiErrorMessage(genera.error, "Non siamo riusciti a ricavare i requisiti.")}</Alert>
           ) : generati ? (
-            <p className="text-sm text-emerald-700">Requisiti ricalcolati: controllali e salva.</p>
+            <Alert tono="ok">Requisiti ricalcolati: controllali e salva.</Alert>
           ) : null}
         </div>
 
         {requisiti.length > 0 && <Riepilogo requisiti={requisiti} />}
 
         {requisiti.length === 0 && !genera.isPending ? (
-          <p className="text-sm text-slate-500">
-            Nessun requisito ancora. Ricavali dal bando o aggiungili tu.
-          </p>
+          <p className="text-body text-ink-3">Nessun requisito ancora. Ricavali dal bando o aggiungili tu.</p>
         ) : (
-          <ul className="space-y-2">
+          <ul className="flex flex-col border-t border-line">
             {requisiti.map((r) => (
-              <li key={r.chiave} className="rounded-lg border border-slate-200 bg-white px-3.5 py-3">
+              <li key={r.chiave} className="border-b border-line py-4">
                 <div className="flex flex-wrap items-start gap-3">
                   {r.etichetta && (
-                    <Badge tone="brand" className="shrink-0 tabular">
+                    <Badge className="mt-0.5 shrink-0 tabular-nums">
                       <span className="sr-only">Requisito </span>
                       {r.etichetta}
                     </Badge>
                   )}
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <p className="text-sm font-medium text-slate-800">{r.testo || "Nuovo requisito"}</p>
-                    <p className="text-xs text-slate-500">
-                      {descriviCriterio(r.criterio, nomi)} · {CALL_COPY.ambiti[r.ambito]} ·{" "}
-                      {CALL_COPY.origini[r.origine]}
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <p className="font-medium text-ink">{r.testo || "Nuovo requisito"}</p>
+                    <p className="flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-3">
+                      <span>{descriviCriterio(r.criterio, nomi)}</span>
+                      <span>{CALL_COPY.ambiti[r.ambito]}</span>
+                      <span>{CALL_COPY.origini[r.origine]}</span>
                     </p>
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-ink-3">
                       {r.modificato || !r.copertura_creatore ? (
                         <span>La tua copertura si calcola quando salvi.</span>
                       ) : (
@@ -571,10 +525,11 @@ export function PassoGap({ call, onAvanti, onIndietro, onDirty }: PassoProps) {
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-1">
                     <Button
-                      variant={r.cercato ? "primary" : "secondary"}
+                      variant="secondary"
                       size="sm"
                       aria-pressed={r.cercato}
                       aria-label={`Cercalo nei partner: requisito ${r.etichetta ?? r.testo}`}
+                      className={cn(r.cercato && "border-accent bg-accent-soft text-accent-hover")}
                       onClick={() => cambiaRequisito(r.chiave, (x) => ({ ...x, cercato: !x.cercato }))}
                     >
                       {r.cercato ? "Lo cerchi" : "Cercalo"}
@@ -585,7 +540,7 @@ export function PassoGap({ call, onAvanti, onIndietro, onDirty }: PassoProps) {
                       onClick={() => setModifica({ chiave: r.chiave, nuovo: false })}
                       aria-label={`Modifica il requisito ${r.etichetta ?? r.testo}`}
                     >
-                      <Pencil className="size-4" aria-hidden />
+                      Modifica
                     </Button>
                     <Button
                       variant="ghost"
@@ -593,7 +548,7 @@ export function PassoGap({ call, onAvanti, onIndietro, onDirty }: PassoProps) {
                       onClick={() => rimuovi(r.chiave)}
                       aria-label={`Rimuovi il requisito ${r.etichetta ?? r.testo}`}
                     >
-                      <Trash2 className="size-4" aria-hidden />
+                      Rimuovi
                     </Button>
                   </div>
                 </div>
@@ -614,22 +569,26 @@ export function PassoGap({ call, onAvanti, onIndietro, onDirty }: PassoProps) {
             ))}
           </ul>
         )}
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={aggiungi}
-          disabled={!!modifica || requisiti.length >= LIMITI_CALL.requisitiMax}
-        >
-          <Plus className="size-4" aria-hidden />
-          Aggiungi un requisito
-        </Button>
+        <div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={aggiungi}
+            disabled={!!modifica || requisiti.length >= LIMITI_CALL.requisitiMax}
+          >
+            <Plus className="size-4" aria-hidden />
+            Aggiungi un requisito
+          </Button>
+        </div>
 
         {errori.length > 0 && (
-          <ul className="list-disc rounded-lg bg-red-50 py-2 pl-8 pr-3 text-sm text-red-700" role="alert">
-            {errori.map((e) => (
-              <li key={e}>{e}</li>
-            ))}
-          </ul>
+          <Alert tono="errore">
+            <ul className="list-disc pl-5">
+              {errori.map((e) => (
+                <li key={e}>{e}</li>
+              ))}
+            </ul>
+          </Alert>
         )}
         <BarraPasso
           onIndietro={onIndietro}
@@ -637,20 +596,14 @@ export function PassoGap({ call, onAvanti, onIndietro, onDirty }: PassoProps) {
           inCorso={aggiorna.isPending || salvaRequisiti.isPending}
           errore={erroreServer}
         />
-      </Card>
+      </Section>
 
-      <Dialog
+      <ConfirmDialog
         open={confermaRicalcolo}
-        onClose={() => setConfermaRicalcolo(false)}
-        title="Ricalcolare i requisiti?"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setConfermaRicalcolo(false)}>
-              Annulla
-            </Button>
-            <Button onClick={() => void ricalcola()}>Ricalcola</Button>
-          </>
-        }
+        titolo="Ricalcolare i requisiti?"
+        conferma="Ricalcola"
+        onConferma={() => void ricalcola()}
+        onAnnulla={() => setConfermaRicalcolo(false)}
       >
         <p>
           Ricaviamo di nuovo i requisiti dal bando. Quelli già salvati che il bando ripropone restano
@@ -658,7 +611,7 @@ export function PassoGap({ call, onAvanti, onIndietro, onDirty }: PassoProps) {
           bando vengono tolti, anche dalle posizioni che li coprivano. Le modifiche non ancora salvate
           si perdono. Nulla cambia finché non salvi.
         </p>
-      </Dialog>
+      </ConfirmDialog>
     </div>
   );
 }

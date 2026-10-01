@@ -64,6 +64,15 @@
      dove è diverso da 400, così `text-body`/`text-small`/`text-prose` non azzerano
      un grassetto ereditato; `font-*` esplicito vince comunque. Gli stili in Sora
      (`title-*`, `figure*`, `due-day`) sono completati dalle `@utility` più sotto. */
+  /* `title-hero`: solo l'h1 dell'hero della landing, 32/40 sotto `sm` e 40/48 da
+     `sm` (la @utility più sotto). Fuori dal namespace `--text-*` di proposito: lì
+     Tailwind genererebbe una seconda `text-title-hero` a taglia fissa, emessa dopo
+     la @utility, che annullerebbe il passaggio di taglia. */
+  --title-hero-size: 40px;
+  --title-hero-line-height: 48px;
+  --title-hero-size-mobile: 32px;
+  --title-hero-line-height-mobile: 40px;
+  --title-hero-letter-spacing: -0.02em;
   --text-title-bando: 28px;
   --text-title-bando--line-height: 36px;
   --text-title-bando--letter-spacing: -0.015em;
@@ -101,21 +110,34 @@
   --text-caption--line-height: 16px;
   --text-caption--font-weight: 500;
 
+  /* Larghezza del testo lungo (descrizione del bando, report): righe sotto gli
+     80 caratteri. Utility `max-w-lettura`; le altre larghezze le dà `Page`. */
+  --container-lettura: 42.5rem;
+
   /* Raggi */
   --radius-mark: 4px; /* etichette, caselle di spunta */
   --radius-control: 8px; /* pulsanti, campi, filtri, avvisi */
   --radius-panel: 12px; /* pannelli, card, menu, finestre */
   --radius-pill: 999px; /* solo avatar, contatori, filtri attivi, barre */
 
-  /* Ombre: `overlay` è l'unica del design system (menu, finestre, notifiche a comparsa);
-     `card*` restano finché le pagine vecchie le usano. */
+  /* Ombra: `overlay` è l'unica del design system (menu, finestre, notifiche a comparsa). */
   --shadow-overlay: 0 12px 32px -8px rgb(33 43 80 / 0.28), 0 2px 6px rgb(33 43 80 / 0.08);
-  --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.05), 0 1px 3px 0 rgb(15 23 42 / 0.06);
-  --shadow-card-hover: 0 4px 6px -1px rgb(15 23 42 / 0.07), 0 10px 15px -3px rgb(15 23 42 / 0.08);
 }
 
 /* Sora solo tramite questi stili: la utility aggiunge la famiglia (e le cifre
    tabellari, dove la cifra è il contenuto) ai token `--text-*` del tema. */
+@utility text-title-hero {
+  font-family: var(--font-display);
+  font-size: var(--title-hero-size-mobile);
+  line-height: var(--title-hero-line-height-mobile);
+  letter-spacing: var(--title-hero-letter-spacing);
+  font-weight: 600;
+  text-wrap: balance;
+  @media (width >= 40rem) {
+    font-size: var(--title-hero-size);
+    line-height: var(--title-hero-line-height);
+  }
+}
 @utility text-title-bando {
   font-family: var(--font-display);
   font-size: var(--text-title-bando);
@@ -165,21 +187,31 @@ html {
 }
 
 body {
-  @apply bg-sheet font-sans text-body text-ink antialiased;
+  /* `leading-normal` dopo `text-body`: l'interlinea fissa di 22px non deve
+     ereditarsi dai titoli che non impostano la propria. */
+  @apply bg-sheet font-sans text-body leading-normal text-ink antialiased;
   text-rendering: optimizeLegibility;
 }
 
-h1,
-h2,
-h3,
-h4 {
-  @apply font-display;
-}
-
 @layer base {
+  /* Nel layer base, così una utility (`font-sans`) sul singolo titolo vince. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display;
+  }
+
   /* Anello del focus uguale ovunque; un componente può ridefinirlo con le sue utility. */
   :focus-visible {
     @apply outline-2 outline-offset-2 outline-accent;
+  }
+
+  /* Tratto delle icone 1,75 ovunque: lucide mette la classe `lucide` su ogni SVG e
+     l'attributo `stroke-width="2"`, che il CSS sovrascrive; nel layer base, così
+     una utility `stroke-*` sulla singola icona vince comunque. */
+  .lucide {
+    stroke-width: 1.75;
   }
 }
 

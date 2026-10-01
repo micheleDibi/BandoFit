@@ -27,6 +27,8 @@ export function useTab<T extends string>(
 
   const setTab = useCallback(
     (id: T) => {
+      // Stessa scheda: niente `replace` dell'URL (e niente `page` tolto per nulla).
+      if (id === tab) return;
       setParams(
         (prev) => {
           const next = new URLSearchParams(prev);
@@ -38,7 +40,7 @@ export function useTab<T extends string>(
         { replace: true },
       );
     },
-    [setParams, alias],
+    [setParams, alias, tab],
   );
 
   return { tab, setTab };

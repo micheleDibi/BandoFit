@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
+from app.core import config
 from app.core.errors import BadRequestError, ConflictError, NotFoundError
 from app.schemas.payment import CheckoutIn, CheckoutTargetIn
 from app.services import notification_service, payment_service
@@ -396,6 +397,24 @@ class TestElaboraOrdine:
         fn, params = primary.rpc_calls[0]
         assert fn == "fn_complete_purchase"
         assert params == {"p_purchase_id": "p1", "p_revolut_payment_id": "pay-9"}
+
+    async def test_ricevuta_apre_la_scheda_acquisti(self, monkeypatch):
+        inviate = []
+
+        async def ricevuta(email, descrizione, totale_cents, url):
+            inviate.append((email, url))
+            return True
+
+        monkeypatch.setattr(payment_service.email_service, "send_ricevuta_pagamento_email",
+                            ricevuta)
+        # `_invia_ricevuta` importa `get_settings` al momento della chiamata.
+        monkeypatch.setattr(config, "get_settings",
+                            lambda: SimpleNamespace(frontend_url="https://app.test.it/"))
+        primary = FakePrimary({"profiles": [{"id": USER, "email": "u@x.it"}]})
+        await payment_service._invia_ricevuta(primary, {
+            "id": "p1", "user_id": USER, "descrizione": "Pro", "totale_cents": 100})
+        assert len(inviate) == 1 and inviate[0][0] == "u@x.it"
+        assert inviate[0][1] == "https://app.test.it/app/abbonamento?tab=acquisti"
 
     async def test_side_effect_che_esplode_non_propaga(self, monkeypatch):
         # Il pagamento è già applicato dalla RPC: una ricevuta/fattura che

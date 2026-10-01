@@ -36,9 +36,10 @@ export function ConfirmDialog({
   // Il `close` nativo arriva anche quando è il genitore a mettere `open=false`
   // (dopo «Annulla» o dopo la conferma): in quel caso `open` è già falso e non
   // si richiama `onAnnulla`. Con `open` ancora vero la chiusura viene
-  // dall'utente (Esc, velo, X) ed è un annullamento.
+  // dall'utente (Esc, velo, X) ed è un annullamento; con la richiesta in volo
+  // non si annulla (la finestra non è chiudibile: `dismissible` è falso).
   const chiusuraDaUtente = () => {
-    if (open) onAnnulla();
+    if (open && !inCorso) onAnnulla();
   };
   return (
     <Dialog

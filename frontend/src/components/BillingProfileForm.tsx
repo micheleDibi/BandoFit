@@ -229,7 +229,7 @@ export function BillingProfileForm({ profile, onSaved }: BillingProfileFormProps
 
       {/* Tipo di soggetto: decide i campi mostrati e le regole di validazione */}
       <fieldset>
-        <legend className="text-sm font-medium text-slate-700">A chi va intestata la fattura?</legend>
+        <legend className="text-small font-medium text-ink">A chi va intestata la fattura?</legend>
         <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
           {TIPI.map((t) => {
             const active = tipo === t.value;
@@ -240,17 +240,15 @@ export function BillingProfileForm({ profile, onSaved }: BillingProfileFormProps
                 aria-pressed={active}
                 onClick={() => setTipo(t.value)}
                 className={cn(
-                  "cursor-pointer rounded-lg border px-3 py-2.5 text-left transition-colors duration-150",
-                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500",
+                  "cursor-pointer rounded-control border px-3 py-2.5 text-left transition-colors duration-150",
+                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
                   active
-                    ? "border-brand-500 bg-brand-50 ring-1 ring-inset ring-brand-500"
-                    : "border-slate-300 bg-white hover:border-brand-400",
+                    ? "border-accent bg-accent-soft ring-1 ring-inset ring-accent"
+                    : "border-line-control bg-sheet hover:bg-desk",
                 )}
               >
-                <span className={cn("block text-sm font-medium", active ? "text-brand-700" : "text-slate-700")}>
-                  {t.label}
-                </span>
-                <span className="mt-0.5 block text-xs text-slate-500">{t.hint}</span>
+                <span className="block text-body font-medium text-ink">{t.label}</span>
+                <span className="block text-small text-ink-3">{t.hint}</span>
               </button>
             );
           })}
@@ -273,7 +271,7 @@ export function BillingProfileForm({ profile, onSaved }: BillingProfileFormProps
         </SelectField>
 
         {mostraVies && (
-          <p className="rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-700 sm:col-span-2">
+          <p className="rounded-control bg-accent-soft px-3 py-2 text-small text-accent-hover sm:col-span-2">
             Al salvataggio verifichiamo la partita IVA nel VIES: se risulta valida, la
             fattura è emessa in reverse charge, senza IVA. Se il VIES non risponde, i
             dati vengono salvati comunque e agli acquisti si applica l'IVA al 25%.
@@ -407,13 +405,13 @@ export function BillingProfileForm({ profile, onSaved }: BillingProfileFormProps
             Salva i dati
           </Button>
           {save.isPending && mostraVies && (
-            <span className="text-sm text-slate-500" role="status">
+            <span className="text-small text-ink-3" role="status">
               Verifica della partita IVA nel VIES in corso…
             </span>
           )}
           {savedFlash && (
             <span
-              className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600"
+              className="inline-flex items-center gap-1.5 text-small font-medium text-fit-ink"
               role="status"
             >
               <BadgeCheck className="size-4" aria-hidden />
@@ -424,7 +422,7 @@ export function BillingProfileForm({ profile, onSaved }: BillingProfileFormProps
               tipo/paese corrente prevede ancora il VIES: coerente con gli
               avvisi ambra/neutro sotto, che sono gated su mostraVies) */}
           {!savedFlash && mostraVies && viesSalvato === true && (
-            <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600">
+            <span className="inline-flex items-center gap-1.5 text-small font-medium text-fit-ink">
               <ShieldCheck className="size-4" aria-hidden />
               P.IVA verificata nel VIES il {formatDate(profile!.vies_checked_at)}
             </span>
@@ -432,7 +430,7 @@ export function BillingProfileForm({ profile, onSaved }: BillingProfileFormProps
         </div>
 
         {/* Etichetta del venditore (per entrambi i tipi): chi eroga i servizi */}
-        <p className="text-xs text-slate-400 sm:col-span-2">
+        <p className="text-small text-ink-3 sm:col-span-2">
           I servizi a pagamento sono erogati da: ADVENTUS CONSULTING j.d.o.o. Sede: Ulica
           1. svibnja - Via Primo Maggio 4, Umag / Umago, Croazia. OIB (IVA croato):
           95855486565
@@ -440,20 +438,20 @@ export function BillingProfileForm({ profile, onSaved }: BillingProfileFormProps
 
         {/* Avvisi sull'esito VIES negativo/mancante: agli acquisti sarà 25% */}
         {!savedFlash && mostraVies && viesSalvato === false && (
-          <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 sm:col-span-2" role="status">
+          <p className="rounded-control border border-warning-line bg-warning-soft px-3 py-2 text-small text-ink sm:col-span-2" role="status">
             La partita IVA non risulta valida nel VIES: agli acquisti si applica l'IVA al
             25%. Controlla la partita IVA e salva di nuovo per ripetere la verifica.
           </p>
         )}
         {!savedFlash && mostraVies && viesSalvato === null && (
-          <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600 sm:col-span-2" role="status">
+          <p className="rounded-control bg-sunken px-3 py-2 text-small text-ink-2 sm:col-span-2" role="status">
             Verifica VIES non riuscita: i dati sono salvati, ma senza esito positivo agli
             acquisti si applica l'IVA al 25%. Salva di nuovo per ritentare la verifica.
           </p>
         )}
 
         {save.isError && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 sm:col-span-2" role="alert">
+          <p className="rounded-control border border-danger-line bg-danger-soft px-3 py-2 text-small text-danger sm:col-span-2" role="alert">
             {apiErrorMessage(save.error)}
           </p>
         )}

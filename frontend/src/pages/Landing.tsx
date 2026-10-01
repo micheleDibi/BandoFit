@@ -1,5 +1,4 @@
 import {
-  ArrowRight,
   Building2,
   CalendarDays,
   Check,
@@ -11,22 +10,51 @@ import {
   SlidersHorizontal,
   Sparkles,
   Target,
+  type LucideIcon,
 } from "lucide-react";
-import { Link, Navigate } from "react-router-dom";
-import { Faq, type FaqItem } from "../components/landing/Faq";
-import { FeatureCard } from "../components/landing/FeatureCard";
-import { HeroShowcase } from "../components/landing/HeroShowcase";
-import { SectionHeading } from "../components/landing/SectionHeading";
+import { Navigate } from "react-router-dom";
+import { RigheEsempio } from "../components/landing/RigheEsempio";
+import { Contenitore, Sezione } from "../components/landing/Sezione";
 import { Logo } from "../components/layout/Logo";
 import { PlanCard } from "../components/shared/PlanCard";
 import { PoweredBy } from "../components/shared/PoweredBy";
+import { Accordion } from "../components/ui/Accordion";
 import { LinkButton } from "../components/ui/Button";
-import { Skeleton } from "../components/ui/states";
+import { Facts } from "../components/ui/Facts";
+import { Panel } from "../components/ui/Panel";
+import { ErrorState, Skeleton } from "../components/ui/states";
+import { TextLink } from "../components/ui/TextLink";
 import { useAuth } from "../hooks/useAuth";
 import { usePlans } from "../hooks/usePlans";
 import { LANDING_COPY } from "../lib/copy";
 
-const FEATURES = [
+interface Voce {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+}
+
+const PROBLEMI: Voce[] = [
+  {
+    icon: Search,
+    title: "Sparsi ovunque",
+    description: "Un unico catalogo al posto di decine di siti da controllare a mano.",
+  },
+  {
+    icon: FileText,
+    title: "Requisiti oscuri",
+    description: "Schede chiare e l'AI-check che spiega, citando il bando, se puoi partecipare.",
+  },
+  {
+    icon: CalendarDays,
+    title: "Scadenze che sfuggono",
+    description: "Salvi i bandi e porti le scadenze nel calendario, sempre a portata d'occhio.",
+  },
+];
+
+const AI_CHECK_PUNTI = ["Esito di ammissibilità", "Punteggio 0–100", "Citazioni verificabili"];
+
+const FEATURES: Voce[] = [
   {
     icon: Search,
     title: "Tutti i bandi in un posto solo",
@@ -61,35 +89,31 @@ const FEATURES = [
 
 const STEPS = [
   {
-    icon: Building2,
     title: "Crea la tua azienda",
     description: "Registrati e importa il dossier dal Registro Imprese partendo dalla partita IVA.",
   },
   {
-    icon: Search,
     title: "Esplora i bandi",
     description: "Cerca e filtra nel catalogo, o lascia che «Bandi per te» faccia una prima selezione.",
   },
   {
-    icon: Sparkles,
-    title: "Verifica la compatibilità",
-    description: "Lancia l'AI-check e leggi ammissibilità, punteggio e requisiti, punto per punto.",
+    title: "Lancia l'AI-check",
+    description: "Leggi ammissibilità, punteggio e requisiti, punto per punto.",
   },
   {
-    icon: CalendarDays,
     title: "Segui le scadenze",
     description: "Salva i bandi promettenti e tieni le loro scadenze sotto controllo nel calendario.",
   },
 ];
 
 const STATS = [
-  { value: LANDING_COPY.bandiValore, label: LANDING_COPY.bandiEtichetta },
-  { value: "UE → locale", label: "Copertura su quattro livelli" },
-  { value: "0–100", label: "Punteggio AI-check con citazioni" },
-  { value: "Registro Imprese", label: "Dati aziendali certificati" },
+  { valore: LANDING_COPY.bandiValore, etichetta: LANDING_COPY.bandiEtichetta },
+  { valore: "4 livelli", etichetta: "Copertura: europea, nazionale, regionale e locale" },
+  { valore: "0–100", etichetta: "Punteggio AI-check con citazioni" },
+  { valore: "Registro Imprese", etichetta: "Dati aziendali certificati" },
 ];
 
-const REASONS = [
+const REASONS: Voce[] = [
   {
     icon: ShieldCheck,
     title: "Verdetti verificabili",
@@ -116,7 +140,7 @@ const REASONS = [
   },
 ];
 
-const FAQS: FaqItem[] = [
+const FAQS = [
   {
     q: "Che cos'è BandoFit?",
     a: "Una piattaforma che raccoglie bandi e finanziamenti pubblici — europei, nazionali, regionali e locali — e ti aiuta a trovare quelli giusti per la tua azienda, con ricerca, filtri e un'analisi di compatibilità.",
@@ -143,6 +167,13 @@ const FAQS: FaqItem[] = [
   },
 ];
 
+/** Il PNG del logo orizzontale ha un margine trasparente del 25% sopra e sotto e
+ *  del 14% ai lati: a 64px d'altezza il marchio visibile è alto 32px, e i
+ *  margini negativi riportano il riquadro sul segno. Nella testata sotto `sm`
+ *  48px (marchio 24px), così logo e pulsanti stanno in 390px. */
+const LOGO_TESTATA = "-mx-4.5 -my-3 h-12 sm:-mx-6 sm:-my-4 sm:h-16";
+const LOGO_PIEDE = "-mx-6 -my-4 h-16";
+
 const NAV_LINKS = [
   { href: "#funzionalita", label: "Funzionalità" },
   { href: "#come-funziona", label: "Come funziona" },
@@ -150,253 +181,197 @@ const NAV_LINKS = [
   { href: "#faq", label: "FAQ" },
 ];
 
+/** Una voce a filetto (niente card): icona, titolo, testo. */
+function VoceFiletto({ icon: Icon, title, description }: Voce) {
+  return (
+    <div className="flex flex-col gap-2 border-t border-line pt-5">
+      <Icon className="size-5 text-accent" strokeWidth={1.75} aria-hidden />
+      <h3 className="font-sans text-row-title text-ink">{title}</h3>
+      <p className="text-body text-ink-2">{description}</p>
+    </div>
+  );
+}
+
 export default function Landing() {
   const { session } = useAuth();
-  const { data: plans, isPending: plansLoading, isError: plansError } = usePlans();
+  const {
+    data: plans,
+    isPending: plansLoading,
+    isError: plansError,
+    refetch: refetchPlans,
+  } = usePlans();
 
-  if (session) return <Navigate to="/app/bandi" replace />;
+  if (session) return <Navigate to="/app" replace />;
 
   return (
-    // overflow-x-clip: il bagliore decorativo dell'hero sporge oltre il
-    // viewport su mobile; lo si contiene senza creare uno scroll-container
-    // (l'header sticky resta ancorato al viewport).
-    <div className="min-h-dvh overflow-x-clip bg-white">
-      {/* Topbar */}
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
-          <Logo />
+    <div className="min-h-dvh bg-sheet">
+      {/* Testata: l'unico pulsante pieno della prima schermata è quello dell'hero. */}
+      <header className="sticky top-0 z-40 border-b border-line bg-sheet">
+        <Contenitore className="flex h-16 items-center justify-between gap-4">
+          <Logo className={LOGO_TESTATA} />
           <nav className="hidden items-center gap-1 lg:flex" aria-label="Sezioni della pagina">
             {NAV_LINKS.map((link) => (
               <a
                 key={link.href}
                 href={link.href}
-                className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
+                className="rounded-control px-3 py-2 text-body font-medium text-ink-2 transition-colors hover:bg-sunken hover:text-ink"
               >
                 {link.label}
               </a>
             ))}
           </nav>
           <div className="flex items-center gap-2">
-            <LinkButton to="/login" variant="ghost">
+            <LinkButton to="/login" variant="ghost" size="sm">
               Accedi
             </LinkButton>
-            <LinkButton to="/registrati">Registrati</LinkButton>
+            <LinkButton to="/registrati" variant="secondary" size="sm">
+              Registrati
+            </LinkButton>
           </div>
-        </div>
+        </Contenitore>
       </header>
 
-      {/* Hero */}
-      <section className="bg-gradient-to-b from-brand-950 via-brand-900 to-brand-700 text-white">
-        <div className="mx-auto grid max-w-7xl items-center gap-14 px-4 py-16 sm:px-6 sm:py-24 lg:grid-cols-2 lg:gap-10 lg:py-28">
-          <div className="max-w-2xl">
-            <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-brand-100 ring-1 ring-inset ring-white/20">
-              <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden />
-              {LANDING_COPY.bandiClaim}
-            </span>
-            <h1 className="mt-5 font-display text-4xl font-bold leading-tight tracking-tight sm:text-5xl">
-              Il radar sui bandi,
-              <br />
-              su misura per la tua impresa.
-            </h1>
-            <p className="mt-5 max-w-xl text-lg leading-relaxed text-brand-100">
-              BandoFit raccoglie bandi europei, nazionali, regionali e locali e ti dice quali
-              fanno per te — con filtri per impresa, schede chiare e un'analisi di compatibilità
-              che cita il testo ufficiale.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <LinkButton
-                to="/registrati"
-                size="lg"
-                className="bg-white text-brand-700 hover:bg-brand-50 active:bg-brand-100"
-              >
-                Inizia gratis
-                <ArrowRight className="size-4" aria-hidden />
-              </LinkButton>
-              <LinkButton
-                to="/login"
-                size="lg"
-                variant="secondary"
-                className="border-white/30 bg-transparent text-white hover:border-white hover:bg-white/10 hover:text-white"
-              >
-                Ho già un account
-              </LinkButton>
-            </div>
-            <ul className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-sm text-brand-100">
-              <li className="inline-flex items-center gap-1.5">
-                <Check className="size-4 text-emerald-400" aria-hidden />
-                Bandi UE, nazionali, regionali e locali
-              </li>
-              <li className="inline-flex items-center gap-1.5">
-                <Check className="size-4 text-emerald-400" aria-hidden />
-                Dati dal Registro Imprese
-              </li>
-            </ul>
-          </div>
-          <div className="mb-14 lg:mb-0">
-            <HeroShowcase />
-          </div>
-        </div>
-      </section>
-
-      {/* Problema → soluzione */}
-      <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20">
-        <SectionHeading
-          eyebrow="Il problema"
-          title="I bandi giusti esistono. Trovarli è il difficile."
-          subtitle="Sono pubblicati su decine di portali diversi, con requisiti scritti in burocratese e scadenze facili da perdere. BandoFit li raccoglie, li rende leggibili e ti dice quali fanno per la tua azienda."
-        />
-        <div className="mt-10 grid gap-6 sm:grid-cols-3">
-          {[
-            {
-              icon: Search,
-              title: "Sparsi ovunque",
-              description: "Un unico catalogo al posto di decine di siti da controllare a mano.",
-            },
-            {
-              icon: FileText,
-              title: "Requisiti oscuri",
-              description: "Schede chiare e l'AI-check che spiega, citando il bando, se puoi partecipare.",
-            },
-            {
-              icon: CalendarDays,
-              title: "Scadenze che sfuggono",
-              description: "Salvi i bandi e porti le scadenze nel calendario, sempre a portata d'occhio.",
-            },
-          ].map((item) => (
-            <div key={item.title} className="rounded-xl border border-slate-200 bg-white p-6 shadow-card">
-              <div className="inline-flex rounded-lg bg-brand-50 p-2.5 text-brand-600">
-                <item.icon className="size-5" aria-hidden />
+      <main>
+        {/* Hero */}
+        <section aria-labelledby="hero-titolo">
+          <Contenitore className="grid items-center gap-12 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16 lg:py-24">
+            <div className="flex flex-col items-start gap-6">
+              <h1 id="hero-titolo" className="text-title-hero text-ink">
+                Il radar sui bandi,
+                <br />
+                su misura per la tua impresa.
+              </h1>
+              <p className="max-w-lettura text-prose text-ink-2">
+                BandoFit raccoglie bandi europei, nazionali, regionali e locali e ti dice quali
+                fanno per te — con filtri per impresa, schede chiare e un'analisi di compatibilità
+                che cita il testo ufficiale.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <LinkButton to="/registrati" size="lg">
+                  Inizia gratis
+                </LinkButton>
+                <LinkButton to="/login" size="lg" variant="secondary">
+                  Ho già un account
+                </LinkButton>
               </div>
-              <h3 className="mt-4 font-display text-base font-semibold text-slate-900">{item.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-slate-600">{item.description}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Funzionalità */}
-      <section id="funzionalita" className="scroll-mt-20 bg-surface">
-        <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20">
-          <SectionHeading
-            eyebrow="Funzionalità"
-            title="Tutto quello che serve per candidarti con criterio"
-            subtitle="Dalla ricerca all'analisi di compatibilità: gli strumenti per passare dai «tanti bandi» ai «bandi giusti per te»."
-          />
-          <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            <FeatureCard
-              icon={Sparkles}
-              title="AI-check di compatibilità"
-              description="Scopri se la tua azienda è ammissibile e quanto è compatibile con un punteggio da 0 a 100. Ogni requisito è verificato e motivato con la citazione esatta presa dal bando: un verdetto che puoi controllare, non un voto calato dall'alto."
-              featured
-            >
-              <div className="flex flex-wrap gap-2">
-                {["Esito di ammissibilità", "Punteggio 0–100", "Citazioni verificabili"].map((chip) => (
-                  <span
-                    key={chip}
-                    className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200"
-                  >
-                    <Check className="size-3" aria-hidden />
-                    {chip}
-                  </span>
+              <ul className="flex flex-col gap-2 text-body text-ink-2">
+                {[
+                  LANDING_COPY.bandiClaim,
+                  "Bandi UE, nazionali, regionali e locali",
+                  "Dati dal Registro Imprese",
+                ].map((punto) => (
+                  <li key={punto} className="flex items-start gap-2">
+                    <Check className="mt-0.75 size-4 shrink-0 text-accent" aria-hidden />
+                    {punto}
+                  </li>
                 ))}
-              </div>
-            </FeatureCard>
-            {FEATURES.map((feature) => (
-              <FeatureCard
-                key={feature.title}
-                icon={feature.icon}
-                title={feature.title}
-                description={feature.description}
-              />
+              </ul>
+            </div>
+            <Panel aria-label="Esempio" className="gap-4 p-6 sm:p-8">
+              <p className="text-small text-ink-3">
+                Esempio: scadenza, valore e compatibilità di ogni bando, in una riga.
+              </p>
+              <RigheEsempio />
+            </Panel>
+          </Contenitore>
+        </section>
+
+        <Sezione
+          fondo="desk"
+          titolo="I bandi giusti esistono. Trovarli è il difficile."
+          sottotitolo="Sono pubblicati su decine di portali diversi, con requisiti scritti in burocratese e scadenze facili da perdere. BandoFit li raccoglie, li rende leggibili e ti dice quali fanno per la tua azienda."
+        >
+          <div className="grid gap-8 sm:grid-cols-3 sm:gap-6">
+            {PROBLEMI.map((voce) => (
+              <VoceFiletto key={voce.title} {...voce} />
             ))}
           </div>
-        </div>
-      </section>
+        </Sezione>
 
-      {/* Come funziona */}
-      <section id="come-funziona" className="scroll-mt-20">
-        <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20">
-          <SectionHeading
-            eyebrow="Come funziona"
-            title="Dai dati al bando giusto, in quattro passi"
-          />
-          <ol className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <Sezione
+          id="funzionalita"
+          titolo="Tutto quello che serve per candidarti con criterio"
+          sottotitolo="Dalla ricerca all'analisi di compatibilità: gli strumenti per passare dai «tanti bandi» ai «bandi giusti per te»."
+        >
+          <Panel
+            aria-label="AI-check"
+            className="grid gap-6 p-6 sm:p-8 lg:grid-cols-2 lg:gap-12"
+          >
+            <div className="flex flex-col gap-2">
+              <Sparkles className="size-5 text-accent" strokeWidth={1.75} aria-hidden />
+              <h3 className="text-title-section text-ink">AI-check</h3>
+              <p className="text-body text-ink-2">
+                Scopri se la tua azienda è ammissibile e quanto è compatibile con un punteggio da 0
+                a 100. Ogni requisito è verificato e motivato con la citazione esatta presa dal
+                bando: un verdetto che puoi controllare, non un voto calato dall'alto.
+              </p>
+            </div>
+            <ul className="flex flex-col gap-3 self-center">
+              {AI_CHECK_PUNTI.map((punto) => (
+                <li key={punto} className="flex items-start gap-2 text-title-group text-ink">
+                  <Check className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
+                  {punto}
+                </li>
+              ))}
+            </ul>
+          </Panel>
+          <div className="grid gap-8 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
+            {FEATURES.map((voce) => (
+              <VoceFiletto key={voce.title} {...voce} />
+            ))}
+          </div>
+        </Sezione>
+
+        <Sezione
+          id="come-funziona"
+          fondo="desk"
+          titolo="Dai dati al bando giusto, in quattro passi"
+        >
+          <ol className="grid gap-8 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
             {STEPS.map((step, i) => (
-              <li
-                key={step.title}
-                className="relative rounded-xl border border-slate-200 bg-white p-6 shadow-card"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="tabular inline-flex size-8 items-center justify-center rounded-full bg-brand-500 font-display text-sm font-bold text-white">
-                    {i + 1}
-                  </span>
-                  <step.icon className="size-5 text-brand-600" aria-hidden />
-                </div>
-                <h3 className="mt-4 font-display text-base font-semibold text-slate-900">
-                  {step.title}
-                </h3>
-                <p className="mt-2 text-sm leading-relaxed text-slate-600">{step.description}</p>
+              <li key={step.title} className="flex flex-col gap-2">
+                <span className="mb-3 h-1 rounded-pill bg-accent" aria-hidden />
+                <span className="text-figure-sm text-accent">{i + 1}</span>
+                <h3 className="font-sans text-row-title text-ink">{step.title}</h3>
+                <p className="text-body text-ink-2">{step.description}</p>
               </li>
             ))}
           </ol>
-        </div>
-      </section>
+        </Sezione>
 
-      {/* Perché sceglierci + numeri reali */}
-      <section className="bg-surface">
-        <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20">
-          <SectionHeading
-            eyebrow="Perché BandoFit"
-            title="Uno strumento serio, non l'ennesima lista di bandi"
-          />
-          <div className="mt-10 grid gap-6 sm:grid-cols-2">
-            {REASONS.map((reason) => (
-              <div key={reason.title} className="flex gap-4 rounded-xl border border-slate-200 bg-white p-6 shadow-card">
-                <div className="inline-flex h-fit rounded-lg bg-brand-50 p-2.5 text-brand-600">
-                  <reason.icon className="size-5" aria-hidden />
-                </div>
-                <div>
-                  <h3 className="font-display text-base font-semibold text-slate-900">{reason.title}</h3>
-                  <p className="mt-1 text-sm leading-relaxed text-slate-600">{reason.description}</p>
-                </div>
-              </div>
+        <Sezione titolo="Uno strumento serio, non l'ennesima lista di bandi">
+          <div className="grid gap-8 sm:grid-cols-2 sm:gap-6">
+            {REASONS.map((voce) => (
+              <VoceFiletto key={voce.title} {...voce} />
             ))}
           </div>
-          <dl className="mt-8 grid gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-card sm:grid-cols-2 lg:grid-cols-4">
-            {STATS.map((stat) => (
-              <div key={stat.label} className="text-center">
-                <dt className="font-display text-2xl font-bold text-brand-600">{stat.value}</dt>
-                <dd className="mt-1 text-sm text-slate-600">{stat.label}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-      </section>
+          <Facts items={STATS} />
+        </Sezione>
 
-      {/* Piani */}
-      <section id="piani" className="scroll-mt-20">
-        <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20">
-          <SectionHeading
-            eyebrow="Piani"
-            title="Un piano per ogni esigenza"
-            subtitle="Parti gratis ed esplora il catalogo. Passa a un piano superiore quando vuoi più analisi AI-check e più funzioni."
-          />
+        <Sezione
+          id="piani"
+          fondo="desk"
+          titolo="Un piano per ogni esigenza"
+          sottotitolo="Parti gratis ed esplora il catalogo. Passa a un piano superiore quando vuoi più analisi AI-check e più funzioni."
+        >
           {plansLoading ? (
-            <div className="mt-10 grid gap-6 pt-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
               {Array.from({ length: 4 }).map((_, i) => (
                 <Skeleton key={i} className="h-72 w-full" />
               ))}
             </div>
           ) : plansError ? (
-            <p className="mt-10 text-center text-sm text-slate-500">
-              Impossibile caricare i piani in questo momento.{" "}
-              <Link to="/registrati" className="font-medium text-brand-600 hover:underline">
-                Registrati
-              </Link>{" "}
-              per iniziare.
-            </p>
+            <div className="flex flex-col items-start gap-2">
+              <ErrorState
+                title="Impossibile caricare i piani in questo momento."
+                onRetry={() => refetchPlans()}
+              />
+              <p className="text-body text-ink-2">
+                Puoi comunque <TextLink to="/registrati">registrarti</TextLink> per iniziare.
+              </p>
+            </div>
           ) : (
-            <div className="mt-10 grid gap-6 pt-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
               {(plans ?? []).map((plan) => (
                 <PlanCard
                   key={plan.id}
@@ -425,95 +400,92 @@ export default function Landing() {
               ))}
             </div>
           )}
-        </div>
-      </section>
+        </Sezione>
 
-      {/* FAQ */}
-      <section id="faq" className="scroll-mt-20 bg-surface">
-        <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20">
-          <SectionHeading eyebrow="FAQ" title="Domande frequenti" />
-          <Faq items={FAQS} />
-        </div>
-      </section>
+        <Sezione id="faq" titolo="Domande frequenti">
+          <Accordion
+            className="max-w-lettura"
+            items={FAQS.map((faq, i) => ({
+              id: `faq-${i + 1}`,
+              titolo: faq.q,
+              children: <p>{faq.a}</p>,
+            }))}
+          />
+        </Sezione>
 
-      {/* CTA finale */}
-      <section className="bg-gradient-to-br from-brand-800 to-brand-600 text-white">
-        <div className="mx-auto max-w-7xl px-4 py-16 text-center sm:px-6 sm:py-20">
-          <h2 className="font-display text-3xl font-bold tracking-tight">
-            Pronto a trovare i bandi giusti per la tua azienda?
-          </h2>
-          <p className="mx-auto mt-3 max-w-xl text-brand-100">
-            Crea il tuo account gratuito ed esplora subito il catalogo. Nessuna carta richiesta.
-          </p>
-          <div className="mt-8 flex flex-wrap justify-center gap-3">
-            <LinkButton
-              to="/registrati"
-              size="lg"
-              className="bg-white text-brand-700 hover:bg-brand-50 active:bg-brand-100"
-            >
-              Inizia gratis
-              <ArrowRight className="size-4" aria-hidden />
-            </LinkButton>
-            <LinkButton
-              to="/login"
-              size="lg"
-              variant="secondary"
-              className="border-white/30 bg-transparent text-white hover:border-white hover:bg-white/10 hover:text-white"
-            >
-              Accedi
-            </LinkButton>
-          </div>
-        </div>
-      </section>
+        {/* Invito finale: sul piano, senza gradiente. */}
+        <section aria-labelledby="invito-titolo" className="border-t border-line bg-desk">
+          <Contenitore className="flex flex-col items-start gap-4 py-16 sm:py-20">
+            <h2 id="invito-titolo" className="text-title-page text-ink">
+              Pronto a trovare i bandi giusti per la tua azienda?
+            </h2>
+            <p className="max-w-lettura text-prose text-ink-2">
+              Crea il tuo account gratuito ed esplora subito il catalogo. Nessuna carta richiesta.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-3">
+              <LinkButton to="/registrati" size="lg">
+                Inizia gratis
+              </LinkButton>
+              <LinkButton to="/login" size="lg" variant="secondary">
+                Accedi
+              </LinkButton>
+            </div>
+          </Contenitore>
+        </section>
+      </main>
 
-      {/* Footer */}
-      <footer className="border-t border-slate-200 bg-white">
-        <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6">
+      <footer className="border-t border-line">
+        <Contenitore className="py-12">
           <div className="flex flex-col gap-10 sm:flex-row sm:justify-between">
-            <div className="max-w-sm">
-              <Logo className="h-10" />
-              <p className="mt-4 text-sm text-slate-500">
+            <div className="flex max-w-lettura flex-col gap-4">
+              <Logo className={LOGO_PIEDE} />
+              <p className="text-body text-ink-2">
                 La piattaforma per trovare i bandi giusti per la tua azienda: europei, nazionali,
                 regionali e locali.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-10 sm:gap-16">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Prodotto</p>
-                <ul className="mt-3 space-y-2 text-sm">
+              <nav aria-labelledby="piede-prodotto" className="flex flex-col gap-3">
+                <h2 id="piede-prodotto" className="font-sans text-title-group text-ink">
+                  Prodotto
+                </h2>
+                <ul className="flex flex-col gap-2">
                   {NAV_LINKS.map((link) => (
                     <li key={link.href}>
-                      <a href={link.href} className="text-slate-600 hover:text-brand-600">
+                      <TextLink href={link.href} className="text-ink-2 hover:text-ink">
                         {link.label}
-                      </a>
+                      </TextLink>
                     </li>
                   ))}
                 </ul>
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Account</p>
-                <ul className="mt-3 space-y-2 text-sm">
+              </nav>
+              <nav aria-labelledby="piede-account" className="flex flex-col gap-3">
+                <h2 id="piede-account" className="font-sans text-title-group text-ink">
+                  Account
+                </h2>
+                <ul className="flex flex-col gap-2">
                   <li>
-                    <Link to="/login" className="text-slate-600 hover:text-brand-600">
+                    <TextLink to="/login" className="text-ink-2 hover:text-ink">
                       Accedi
-                    </Link>
+                    </TextLink>
                   </li>
                   <li>
-                    <Link to="/registrati" className="text-slate-600 hover:text-brand-600">
+                    <TextLink to="/registrati" className="text-ink-2 hover:text-ink">
                       Registrati
-                    </Link>
+                    </TextLink>
                   </li>
                 </ul>
-              </div>
+              </nav>
             </div>
           </div>
-          <div className="mt-10 flex flex-col items-center justify-between gap-4 border-t border-slate-100 pt-6 sm:flex-row">
-            <p className="text-sm text-slate-500">
+          {/* `PoweredBy` anche se il logo lo dice già: è l'unico link a edunews24.it. */}
+          <div className="mt-10 flex flex-col items-start justify-between gap-4 border-t border-line pt-6 sm:flex-row sm:items-center">
+            <p className="text-small text-ink-3">
               © {new Date().getFullYear()} BandoFit — La piattaforma per trovare i bandi giusti.
             </p>
             <PoweredBy />
           </div>
-        </div>
+        </Contenitore>
       </footer>
     </div>
   );

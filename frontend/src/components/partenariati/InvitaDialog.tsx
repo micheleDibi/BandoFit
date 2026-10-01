@@ -1,10 +1,10 @@
-import { EyeOff } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { useInvita } from "../../hooks/useCandidature";
 import { apiErrorMessage } from "../../lib/api";
 import { CANDIDATURE_COPY, PARTNER_COPY } from "../../lib/copy";
 import { formatDate } from "../../lib/format";
 import type { Candidatura, PartnerSuggerito, PosizioneCall } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { SelectField, TextareaField } from "../ui/Field";
@@ -55,7 +55,7 @@ export function InvitaDialog({
   const classe = profilo.classe_dimensionale
     ? (CLASSI_DIMENSIONALI[profilo.classe_dimensionale] ?? profilo.classe_dimensionale)
     : null;
-  const dove = [classe, profilo.regione_sede].filter(Boolean).join(" · ");
+  const dove = [classe, profilo.regione_sede].filter(Boolean) as string[];
   const nome = profilo.denominazione ?? PARTNER_COPY.aziendaAnonima;
 
   const conferma = () => {
@@ -83,40 +83,43 @@ export function InvitaDialog({
       title="Invita questa azienda"
       footer={
         inviato ? (
-          <Button onClick={onClose}>Chiudi</Button>
+          <Button type="button" onClick={onClose}>
+            Chiudi
+          </Button>
         ) : (
           <>
-            <Button variant="ghost" onClick={onClose} disabled={invita.isPending}>
+            <Button type="button" variant="secondary" onClick={onClose} disabled={invita.isPending}>
               Annulla
             </Button>
-            <Button onClick={conferma} loading={invita.isPending}>
+            <Button type="button" onClick={conferma} loading={invita.isPending}>
               Invia l'invito
             </Button>
           </>
         )
       }
     >
-      <div className="space-y-4">
-        <div className="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2.5">
-          <EyeOff className="mt-0.5 size-4 shrink-0 text-slate-400" aria-hidden />
-          <div className="min-w-0 text-sm">
-            <p className="font-medium text-slate-900">{nome}</p>
-            {dove && <p className="text-xs text-slate-500">{dove}</p>}
-            <p className="text-xs text-slate-400">
-              Riferimento per questa call: <span className="font-mono tracking-wide">{pseudonimo}</span>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-0.5">
+          <p className="font-medium text-ink">{nome}</p>
+          {dove.length > 0 && (
+            <p className="flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-2">
+              {dove.map((d) => (
+                <span key={d}>{d}</span>
+              ))}
             </p>
-          </div>
+          )}
+          <p className="text-small text-ink-3">Riferimento per questa call: {pseudonimo}</p>
         </div>
 
-        <div role="status" aria-live="polite">
+        <div aria-live="polite">
           {inviato && (
-            <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+            <Alert tono="ok">
               Invito inviato. L'azienda lo trova tra le sue candidature
               {inviato.scade_at ? ` e può rispondere fino al ${formatDate(inviato.scade_at)}` : ""}.
               {inviato.inviti
                 ? ` Inviti in attesa di risposta su questa call: ${inviato.inviti.attivi} su ${inviato.inviti.massimo}.`
                 : ""}
-            </p>
+            </Alert>
           )}
         </div>
 
@@ -141,7 +144,7 @@ export function InvitaDialog({
                 ))}
               </SelectField>
             )}
-            <div>
+            <div className="flex flex-col gap-1">
               <TextareaField
                 label="Messaggio (facoltativo)"
                 rows={4}
@@ -150,19 +153,15 @@ export function InvitaDialog({
                 onChange={(e) => setMessaggio(e.target.value)}
                 aria-describedby={`${id}-aiuto ${id}-contatore`}
               />
-              <p id={`${id}-aiuto`} className="mt-1 text-xs text-slate-500">
+              <p id={`${id}-aiuto`} className="text-small text-ink-3">
                 {CANDIDATURE_COPY.notaContatti}
               </p>
-              <p id={`${id}-contatore`} className="mt-1 text-right text-xs text-slate-400 tabular">
+              <p id={`${id}-contatore`} className="text-right text-small text-ink-3 tabular-nums">
                 {messaggio.length.toLocaleString("it-IT")} caratteri su{" "}
                 {MESSAGGIO_INVITO_MAX.toLocaleString("it-IT")}
               </p>
             </div>
-            {invita.isError && (
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-                {apiErrorMessage(invita.error)}
-              </p>
-            )}
+            {invita.isError && <Alert tono="errore">{apiErrorMessage(invita.error)}</Alert>}
           </>
         )}
       </div>

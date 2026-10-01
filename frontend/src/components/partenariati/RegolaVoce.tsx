@@ -1,14 +1,15 @@
-import { AlertTriangle, CheckCircle2, ChevronDown, ExternalLink } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import type { ReactNode } from "react";
 import type { CitazioneRegola, FontePartenariato, VoceRegola } from "../../types";
-import { Badge } from "../ui/Badge";
+import { Status } from "../ui/Status";
+import { TextLink } from "../ui/TextLink";
 
 // «D1-p3», «[D1-P3]», «D1 p3»: documento 1, pagina 3.
 const SEZIONE_DOCUMENTO = /^\[?\s*D\s*(\d+)\s*[-\s]?\s*p\s*(\d+)\s*\]?$/i;
 // «META», «S2»: la scheda del bando nel catalogo.
 const SEZIONE_SCHEDA = /^\[?\s*(META|S\d+)\s*\]?$/i;
 
-/** «Avviso pubblico — pag. 3» → «Avviso pubblico»: la pagina la diciamo a
+/** «Avviso pubblico — pag. 3» diventa «Avviso pubblico»: la pagina la diciamo a
  *  parte, una volta sola. */
 function senzaPagina(etichetta: string): string {
   return etichetta.replace(/\s*[—–-]\s*pag(?:ina|\.)?\s*\d+\s*$/i, "").trim();
@@ -69,65 +70,54 @@ export function RegolaVoce({
   const link = citazione ? linkDocumento(citazione.url_documento, intestazione?.pagina ?? null) : null;
 
   return (
-    <details className="group rounded-lg border border-slate-200 bg-white">
-      <summary className="flex cursor-pointer items-center gap-2.5 px-3.5 py-2.5 text-sm [&::-webkit-details-marker]:hidden">
+    <details className="group border-b border-line">
+      <summary className="flex cursor-pointer list-none items-center gap-3 rounded-mark py-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden">
+        <span className="min-w-0 flex-1 text-row-title text-ink">{titolo}</span>
         {daVerificare ? (
-          <AlertTriangle className="size-4 shrink-0 text-amber-500" aria-hidden />
-        ) : (
-          <CheckCircle2 className="size-4 shrink-0 text-emerald-500" aria-hidden />
-        )}
-        <span className="min-w-0 flex-1 font-medium text-slate-800">{titolo}</span>
-        {daVerificare ? (
-          <Badge tone="amber" className="shrink-0">
-            da verificare
-          </Badge>
+          <Status tono="in-apertura" className="shrink-0">
+            Da verificare
+          </Status>
         ) : (
           <span className="sr-only">Verificata sul testo del bando.</span>
         )}
         <ChevronDown
-          className="size-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180"
+          className="size-4 shrink-0 text-ink-3 transition-transform group-open:rotate-180"
           aria-hidden
         />
       </summary>
-      <div className="space-y-2.5 border-t border-slate-100 px-3.5 py-3 text-sm">
+      <div className="flex flex-col gap-3 pb-4 text-body text-ink-2">
         {children}
         {(voce.avvisi ?? []).length > 0 && (
           // Perché la voce è da verificare (valore incoerente, regione non
           // riconosciuta, passaggio troppo breve…): testo del server.
-          <ul className="list-disc space-y-0.5 pl-5 text-xs text-amber-700">
+          <ul className="list-disc pl-5 text-small text-warning-ink">
             {(voce.avvisi ?? []).map((avviso, i) => (
               <li key={i}>{avviso}</li>
             ))}
           </ul>
         )}
         {citazione && intestazione ? (
-          <div className="rounded-lg bg-slate-50 px-3 py-2">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+          <div className="flex flex-col gap-1 rounded-panel bg-desk p-4">
+            <p className="text-small font-medium text-ink-3">
               {intestazione.testo}
               {!citazione.verificata && (
-                <span className="ml-1.5 normal-case text-amber-600">
-                  (citazione non ritrovata alla lettera)
-                </span>
+                <span className="text-warning-ink"> (citazione non ritrovata alla lettera)</span>
               )}
             </p>
-            <p className="mt-1 whitespace-pre-line italic text-slate-600">«{citazione.testo}»</p>
+            <p className="whitespace-pre-line italic">«{citazione.testo}»</p>
             {link && (
-              <a
-                href={link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-brand-600 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-brand-500"
-              >
-                {intestazione.pagina
-                  ? `Apri il documento a pagina ${intestazione.pagina}`
-                  : "Apri il documento"}
-                <ExternalLink className="size-3.5" aria-hidden />
-                <span className="sr-only">(si apre in una nuova scheda)</span>
-              </a>
+              <p className="mt-1 text-small font-medium">
+                <TextLink href={link} esterno>
+                  {intestazione.pagina
+                    ? `Apri il documento a pagina ${intestazione.pagina}`
+                    : "Apri il documento"}
+                  <span className="sr-only"> (si apre in una nuova scheda)</span>
+                </TextLink>
+              </p>
             )}
           </div>
         ) : (
-          <p className="text-xs text-amber-600">
+          <p className="text-small text-warning-ink">
             Nessun passaggio del bando collegato a questa voce: controllala sul testo ufficiale.
           </p>
         )}

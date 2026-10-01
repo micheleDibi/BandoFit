@@ -8,8 +8,6 @@
 export interface Strength {
   label: "Debole" | "Media" | "Forte";
   segments: 1 | 2 | 3;
-  barClass: string;
-  textClass: string;
 }
 
 type CheckFn = (password: string, userInputs?: string[]) => { score: number };
@@ -40,10 +38,10 @@ export function loadZxcvbn(): Promise<CheckFn | null> {
 /** Mappa lo score zxcvbn (0-4) sui tre livelli mostrati. */
 export function strengthFromScore(score: number): Strength {
   if (score <= 1) {
-    return { label: "Debole", segments: 1, barClass: "bg-red-500", textClass: "text-red-600" };
+    return { label: "Debole", segments: 1 };
   }
   if (score === 2) {
-    return { label: "Media", segments: 2, barClass: "bg-amber-500", textClass: "text-amber-600" };
+    return { label: "Media", segments: 2 };
   }
-  return { label: "Forte", segments: 3, barClass: "bg-emerald-500", textClass: "text-emerald-600" };
+  return { label: "Forte", segments: 3 };
 }

@@ -1,4 +1,6 @@
 import type { ContenutoItem, ContenutoSection, ContenutoSegment } from "../../types";
+import { Accordion } from "../ui/Accordion";
+import { TextLink } from "../ui/TextLink";
 
 /** Rende un segmento di testo (text/bold/link) come elementi React puri:
  *  il contenuto arriva come JSON strutturato, mai come HTML. */
@@ -7,18 +9,13 @@ function Segment({ segment }: { segment: ContenutoSegment }) {
   // Nei dati reali l'URL dei link vive in `url` (in `href` nelle versioni più vecchie).
   const grezzo = segment.href ?? segment.url;
   const link = typeof grezzo === "string" ? grezzo.trim() : "";
-  if (segment.kind === "bold") return <strong className="font-semibold text-slate-900">{text}</strong>;
+  if (segment.kind === "bold") return <strong className="font-semibold text-ink">{text}</strong>;
   // Si rende come link solo un indirizzo http(s): il resto resta testo semplice.
   if (segment.kind === "link" && /^https?:\/\//i.test(link)) {
     return (
-      <a
-        href={link}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="font-medium text-brand-600 underline underline-offset-2 hover:text-brand-700"
-      >
+      <TextLink href={link} esterno>
         {text}
-      </a>
+      </TextLink>
     );
   }
   return <>{text}</>;
@@ -47,10 +44,10 @@ function ListSection({ section, ordered }: { section: ContenutoSection; ordered:
   const Tag = ordered ? "ol" : "ul";
   return (
     <Tag
-      className={`mt-3 space-y-1.5 pl-6 text-slate-600 ${ordered ? "list-decimal" : "list-disc"}`}
+      className={`flex flex-col gap-1.5 pl-5 text-prose text-ink ${ordered ? "list-decimal" : "list-disc"}`}
     >
       {items.map((item, i) => (
-        <li key={i} className="leading-relaxed">
+        <li key={i}>
           <ItemContent item={item} />
         </li>
       ))}
@@ -58,19 +55,21 @@ function ListSection({ section, ordered }: { section: ContenutoSection; ordered:
   );
 }
 
-function FaqSection({ section }: { section: ContenutoSection }) {
+/** Domande e risposte come sezioni richiudibili (`Accordion`). */
+function FaqSection({ section, indice }: { section: ContenutoSection; indice: number }) {
   const items = (section.items ?? []).filter(
     (item): item is ContenutoItem => typeof item !== "string" && !!item.q,
   );
   if (!items.length) return null;
   return (
-    <div className="mt-4 space-y-3">
-      {items.map((item, i) => {
+    <Accordion
+      items={items.map((item, i) => {
         const answer = item.a;
-        return (
-          <div key={i} className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-            <p className="font-medium text-slate-900">{item.q}</p>
-            <p className="mt-1.5 leading-relaxed text-slate-600">
+        return {
+          id: `faq-${indice}-${i}`,
+          titolo: item.q,
+          children: (
+            <p className="text-prose text-ink-2">
               {typeof answer === "string" ? (
                 answer
               ) : answer?.segments?.length ? (
@@ -79,24 +78,24 @@ function FaqSection({ section }: { section: ContenutoSection }) {
                 answer?.text ?? ""
               )}
             </p>
-          </div>
-        );
+          ),
+        };
       })}
-    </div>
+    />
   );
 }
 
-function Section({ section }: { section: ContenutoSection }) {
+function Section({ section, indice }: { section: ContenutoSection; indice: number }) {
   switch (section.type) {
     case "h2":
       return (
-        <h2 className="mt-8 font-display text-xl font-semibold text-slate-900 first:mt-0">
+        <h2 className="pt-3 text-title-section text-ink">
           {section.text ?? <Segments segments={section.segments} />}
         </h2>
       );
     case "h3":
       return (
-        <h3 className="mt-6 font-display text-lg font-semibold text-slate-900">
+        <h3 className="pt-1 text-row-title text-ink">
           {section.text ?? <Segments segments={section.segments} />}
         </h3>
       );
@@ -108,7 +107,7 @@ function Section({ section }: { section: ContenutoSection }) {
     case "numbered_list":
       return <ListSection section={section} ordered />;
     case "faq":
-      return <FaqSection section={section} />;
+      return <FaqSection section={section} indice={indice} />;
     case "paragraph":
     default: {
       const content = section.segments?.length ? (
@@ -117,17 +116,19 @@ function Section({ section }: { section: ContenutoSection }) {
         section.text
       );
       if (!content) return null;
-      return <p className="mt-3 leading-relaxed text-slate-600 first:mt-0">{content}</p>;
+      return <p className="text-prose text-ink">{content}</p>;
     }
   }
 }
 
+/** Il testo lungo del bando: titoli di sezione, paragrafi in `prose`, elenchi
+ *  e domande frequenti, con gap 16 (righe sotto gli 80 caratteri a 680px). */
 export function ContenutoRenderer({ sections }: { sections?: ContenutoSection[] }) {
   if (!sections?.length) return null;
   return (
-    <div>
+    <div className="flex flex-col gap-4">
       {sections.map((section, i) => (
-        <Section key={i} section={section} />
+        <Section key={i} section={section} indice={i} />
       ))}
     </div>
   );

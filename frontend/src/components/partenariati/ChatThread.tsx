@@ -5,6 +5,7 @@ import { CHAT_COPY } from "../../lib/copy";
 import { formatDateTime } from "../../lib/format";
 import type { Messaggio } from "../../types";
 import { Button } from "../ui/Button";
+import { InlineError } from "../ui/InlineError";
 import { BottoneSegnalaMessaggio, SegnalaMessaggio } from "./SegnalaMessaggio";
 
 /** Distanza dal fondo sotto cui si considera «in fondo» (px): lì un
@@ -31,30 +32,37 @@ function Bolla({
   return (
     <>
       {conSeparatore && (
-        <div ref={separatoreRef} className="flex items-center gap-3 py-1" role="separator" aria-label={CHAT_COPY.nuoviMessaggi}>
-          <span className="h-px flex-1 bg-brand-200" aria-hidden />
-          <span className="text-xs font-semibold uppercase tracking-wide text-brand-700">
-            {CHAT_COPY.nuoviMessaggi}
-          </span>
-          <span className="h-px flex-1 bg-brand-200" aria-hidden />
+        <div
+          ref={separatoreRef}
+          className="flex items-center gap-3 py-1"
+          role="separator"
+          aria-label={CHAT_COPY.nuoviMessaggi}
+        >
+          <span className="h-px flex-1 bg-accent-line" aria-hidden />
+          <span className="text-caption text-accent-hover">{CHAT_COPY.nuoviMessaggi}</span>
+          <span className="h-px flex-1 bg-accent-line" aria-hidden />
         </div>
       )}
-      <div className={cn("flex max-w-[85%] flex-col gap-1", messaggio.propria ? "ml-auto items-end" : "mr-auto items-start")}>
-        <p className="text-xs text-slate-500">
-          <span className="font-medium text-slate-700">{autore}</span>
-          <span aria-hidden> · </span>
+      <div
+        className={cn(
+          "flex max-w-[85%] flex-col gap-1",
+          messaggio.propria ? "ml-auto items-end" : "mr-auto items-start",
+        )}
+      >
+        <p className="flex flex-wrap gap-x-2 text-small text-ink-3">
+          <span className="font-medium text-ink-2">{autore}</span>
           <span className="sr-only">, </span>
           {messaggio.created_at && <time dateTime={messaggio.created_at}>{quando}</time>}
         </p>
         {messaggio.nascosto || messaggio.testo === null ? (
-          <p className="rounded-2xl border border-dashed border-slate-300 px-3.5 py-2 text-sm italic text-slate-500">
+          <p className="rounded-panel border border-dashed border-line-control px-3.5 py-2 text-body italic text-ink-3">
             {CHAT_COPY.oscurato}
           </p>
         ) : (
           <p
             className={cn(
-              "whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-sm leading-relaxed",
-              messaggio.propria ? "bg-brand-500 text-white" : "bg-slate-100 text-slate-800",
+              "whitespace-pre-wrap break-words rounded-panel px-3.5 py-2 text-body",
+              messaggio.propria ? "bg-accent text-on-accent" : "bg-sunken text-ink",
             )}
           >
             {messaggio.testo}
@@ -165,7 +173,7 @@ export function ChatThread({
           const el = e.currentTarget;
           inFondo.current = el.scrollHeight - el.scrollTop - el.clientHeight < SOGLIA_FONDO_PX;
         }}
-        className="relative max-h-[60vh] min-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white p-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 sm:p-4"
+        className="relative max-h-[60vh] min-h-48 overflow-y-auto rounded-panel border border-line bg-sheet p-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:p-4"
       >
         {haPrecedenti && (
           <div className="mb-3 flex flex-col items-center gap-1">
@@ -173,20 +181,20 @@ export function ChatThread({
               <ChevronUp className="size-4" aria-hidden />
               Messaggi precedenti
             </Button>
-            {errorePrecedenti && (
-              <p className="text-xs text-red-700" role="alert">
-                {errorePrecedenti}
-              </p>
-            )}
+            {errorePrecedenti && <InlineError>{errorePrecedenti}</InlineError>}
           </div>
         )}
-        {storico.length > 0 && <div className="mb-3 space-y-3">{storico.map(bolla)}</div>}
-        <div role="log" aria-live="polite" aria-relevant="additions" aria-label="Nuovi messaggi della conversazione" className="space-y-3">
+        {storico.length > 0 && <div className="mb-3 flex flex-col gap-3">{storico.map(bolla)}</div>}
+        <div
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+          aria-label="Nuovi messaggi della conversazione"
+          className="flex flex-col gap-3"
+        >
           {recenti.map(bolla)}
         </div>
-        {messaggi.length === 0 && (
-          <p className="py-8 text-center text-sm text-slate-500">{CHAT_COPY.vuota}</p>
-        )}
+        {messaggi.length === 0 && <p className="py-8 text-body text-ink-3">{CHAT_COPY.vuota}</p>}
       </div>
       <SegnalaMessaggio messaggioId={segnalato} onClose={() => setSegnalato(null)} />
     </section>

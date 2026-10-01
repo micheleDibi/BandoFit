@@ -4,6 +4,7 @@ import {
   itemChipLabel,
   itemDotClass,
   itemKey,
+  itemKindLabel,
   type CalendarItem,
 } from "./items";
 import { cn } from "../../lib/cn";
@@ -48,12 +49,9 @@ export function MonthGrid({
 
   return (
     <div>
-      <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50/80" aria-hidden>
+      <div className="grid grid-cols-7 border-b border-line bg-desk" aria-hidden>
         {WEEKDAYS.map((label) => (
-          <div
-            key={label}
-            className="px-2 py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400"
-          >
+          <div key={label} className="px-2 py-2 text-center text-caption text-ink-3">
             {label}
           </div>
         ))}
@@ -73,10 +71,10 @@ export function MonthGrid({
               key={iso}
               className={cn(
                 "group relative flex min-h-20 flex-col gap-1 p-1.5 sm:min-h-24 sm:p-2",
-                "border-slate-100",
+                "border-line",
                 !lastRow && "border-b",
                 col < 6 && "border-r",
-                inMonth ? "bg-white" : "bg-slate-50/60",
+                inMonth ? "bg-sheet" : "bg-desk",
               )}
             >
               {/* Bottone di sfondo: click sul giorno. Il conteggio parla di
@@ -89,25 +87,26 @@ export function MonthGrid({
                     ? ` — ${items.length} ${items.length === 1 ? "evento" : "eventi"}`
                     : " — aggiungi un evento"
                 }`}
+                aria-current={isToday ? "date" : undefined}
                 className={cn(
-                  "absolute inset-0 cursor-pointer transition-colors hover:bg-slate-900/[0.03]",
-                  "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-500",
+                  "absolute inset-0 cursor-pointer transition-colors hover:bg-ink/3",
+                  "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
                 )}
               />
 
               <div className="pointer-events-none relative z-10 flex items-start justify-between">
                 <span
                   className={cn(
-                    "inline-flex size-6 items-center justify-center rounded-full text-[13px]",
-                    inMonth ? "font-medium text-slate-700" : "text-slate-300",
-                    isToday && "bg-brand-500 font-semibold text-white",
+                    "inline-flex size-6 items-center justify-center rounded-pill text-small tabular-nums",
+                    inMonth ? "font-medium text-ink" : "text-ink-3",
+                    isToday && "bg-accent font-semibold text-on-accent",
                   )}
                 >
                   {day.getDate()}
                 </span>
-                {/* Hint di creazione: appare al passaggio del mouse */}
+                {/* Segno di creazione: appare al passaggio del mouse */}
                 <Plus
-                  className="mr-0.5 mt-1 size-3.5 text-brand-400 opacity-0 transition-opacity group-hover:opacity-100"
+                  className="mr-0.5 mt-1 size-4 text-accent opacity-0 transition-opacity group-hover:opacity-100"
                   aria-hidden
                 />
               </div>
@@ -117,17 +116,20 @@ export function MonthGrid({
                   {/* ≥sm: chip cliccabili (fratelli del bottone di sfondo) */}
                   <div className="relative z-10 hidden flex-col gap-1 sm:flex">
                     {items.slice(0, MAX_CHIPS).map((item) => (
+                      // Niente Tooltip: ripeterebbe il nome del chip come descrizione
+                      // (letto due volte). Il testo intero è nel nome accessibile e
+                      // nell'elenco del giorno.
                       <button
                         key={itemKey(item)}
                         type="button"
                         onClick={() => onOpenItem(item)}
-                        title={itemChipLabel(item)}
                         className={cn(
-                          "cursor-pointer truncate rounded px-1.5 py-0.5 text-left text-xs leading-snug transition-colors",
-                          "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand-500",
+                          "cursor-pointer truncate rounded-mark px-1.5 py-0.5 text-left text-caption transition-colors",
+                          "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent",
                           itemChipClasses(item),
                         )}
                       >
+                        <span className="sr-only">{itemKindLabel(item)}: </span>
                         {itemChipLabel(item)}
                       </button>
                     ))}
@@ -135,7 +137,7 @@ export function MonthGrid({
                       <button
                         type="button"
                         onClick={() => onShowDay(iso)}
-                        className="cursor-pointer rounded px-1.5 py-0.5 text-left text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand-500"
+                        className="cursor-pointer rounded-mark px-1.5 py-0.5 text-left text-caption text-ink-2 transition-colors hover:bg-sunken hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
                       >
                         +{items.length - MAX_CHIPS} altri
                       </button>
@@ -146,7 +148,7 @@ export function MonthGrid({
                     {items.slice(0, 4).map((item) => (
                       <span
                         key={itemKey(item)}
-                        className={cn("size-1.5 rounded-full", itemDotClass(item))}
+                        className={cn("size-2 rounded-pill", itemDotClass(item))}
                       />
                     ))}
                   </span>

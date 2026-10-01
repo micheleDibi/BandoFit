@@ -1,14 +1,17 @@
-import { Clock, Flag, Gavel, Handshake, Scale } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { TestoLungo } from "../components/partenariati/CampiCall";
 import {
   codiceSegnalazione,
   StatoSegnalazioneBadge,
 } from "../components/partenariati/StatoSegnalazioneBadge";
+import { Alert } from "../components/ui/Alert";
 import { Button, LinkButton } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
-import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
+import { Facts } from "../components/ui/Facts";
+import { Page } from "../components/ui/Page";
+import { PageHeader } from "../components/ui/PageHeader";
+import { Section, SectionHeader } from "../components/ui/SectionHeader";
+import { ErrorState, Skeleton } from "../components/ui/states";
 import { useAziendaDaLink } from "../hooks/useAziendaDaLink";
 import { useRicorsoSegnalazione, useSegnalazione } from "../hooks/useSegnalazioni";
 import { apiErrorCode, apiErrorMessage } from "../lib/api";
@@ -16,27 +19,16 @@ import { CALL_COPY, MODERAZIONE_COPY } from "../lib/copy";
 import { formatDate, formatDateTime } from "../lib/format";
 import type { SegnalazioneEsito } from "../types";
 
-function Voce({ titolo, children }: { titolo: string; children: ReactNode }) {
-  return (
-    <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">{titolo}</dt>
-      <dd className="mt-1 text-sm text-slate-700">{children}</dd>
-    </div>
-  );
-}
-
 /** La decisione motivata: per chi ha segnalato l'esito; per l'azienda autrice
  *  anche la motivazione formale (statement of reasons) con le vie di ricorso.
  *  Mai l'identità di chi ha segnalato. */
 function Decisione({ s }: { s: SegnalazioneEsito }) {
   if (!s.decisione) {
     return (
-      <Card className="p-5">
-        <p className="inline-flex items-start gap-2 text-sm text-slate-700">
-          <Clock className="mt-0.5 size-4 shrink-0 text-slate-400" aria-hidden />
-          {MODERAZIONE_COPY.inAttesa}
-        </p>
-      </Card>
+      <Section>
+        <SectionHeader titolo="Decisione" />
+        <p className="text-body text-ink-2">{MODERAZIONE_COPY.inAttesa}</p>
+      </Section>
     );
   }
   // Per l'azienda autrice una restrizione nata dal ricorso accolto di chi
@@ -55,32 +47,25 @@ function Decisione({ s }: { s: SegnalazioneEsito }) {
       ? MODERAZIONE_COPY.decisioniAutore[decisione]
       : MODERAZIONE_COPY.decisioniSegnalante[decisione];
   return (
-    <Card className="p-5">
-      <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
-        <Gavel className="size-4 text-brand-500" aria-hidden />
-        Decisione{data ? ` del ${formatDate(data)}` : ""}
-      </h2>
-      <p className="mt-2 text-sm text-slate-800">{testo}</p>
-      {dalRicorso && (
-        <p className="mt-2 text-sm text-slate-600">{MODERAZIONE_COPY.decisioneDalRicorso}</p>
-      )}
+    <Section>
+      <SectionHeader titolo={`Decisione${data ? ` del ${formatDate(data)}` : ""}`} />
+      <p className="text-body text-ink">{testo}</p>
+      {dalRicorso && <p className="text-body text-ink-2">{MODERAZIONE_COPY.decisioneDalRicorso}</p>}
       {perche && (
-        <div className="mt-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Perché</p>
-          <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{perche}</p>
+        <div className="flex flex-col gap-1">
+          <p className="text-small font-medium text-ink-3">Perché</p>
+          <p className="whitespace-pre-line text-body text-ink-2">{perche}</p>
         </div>
       )}
       {s.sor_testo && (
-        <details className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-          <summary className="cursor-pointer text-sm font-medium text-slate-800">
+        <details className="group">
+          <summary className="inline-flex cursor-pointer items-center gap-1 rounded-mark text-small font-medium text-accent-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
             {MODERAZIONE_COPY.sorTitolo}
           </summary>
-          <p className="mt-2 whitespace-pre-line text-[13px] leading-relaxed text-slate-700">
-            {s.sor_testo}
-          </p>
+          <p className="mt-2 whitespace-pre-line text-body text-ink-2">{s.sor_testo}</p>
         </details>
       )}
-    </Card>
+    </Section>
   );
 }
 
@@ -116,48 +101,37 @@ function Ricorso({ s }: { s: SegnalazioneEsito }) {
   if (s.ricorso) {
     const r = s.ricorso;
     corpo = (
-      <div className="space-y-3">
-        <p className="text-sm text-slate-700">
+      <div className="flex flex-col gap-3">
+        <p className="text-body text-ink">
           {r.da === s.ruolo ? "Hai presentato un ricorso" : "È stato presentato un ricorso"}
           {r.at ? ` il ${formatDate(r.at)}` : ""}.
         </p>
-        {r.testo && (
-          <p className="whitespace-pre-line rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
-            {r.testo}
-          </p>
-        )}
+        {r.testo && <p className="whitespace-pre-line text-body text-ink-2">{r.testo}</p>}
         {r.esito ? (
-          <div>
-            <p className="text-sm font-medium text-slate-900">
+          <div className="flex flex-col gap-1">
+            <p className="font-medium text-ink">
               {MODERAZIONE_COPY.esitiRicorso[r.esito]}
               {r.deciso_at ? ` il ${formatDate(r.deciso_at)}` : ""}
             </p>
-            <p className="mt-1 text-sm text-slate-700">
-              {MODERAZIONE_COPY.esitiRicorsoSpiegazione[r.esito]}
-            </p>
-            {r.motivazione && (
-              <p className="mt-2 whitespace-pre-line text-sm text-slate-700">{r.motivazione}</p>
-            )}
+            <p className="text-body text-ink-2">{MODERAZIONE_COPY.esitiRicorsoSpiegazione[r.esito]}</p>
+            {r.motivazione && <p className="whitespace-pre-line text-body text-ink-2">{r.motivazione}</p>}
           </div>
         ) : (
-          <p className="inline-flex items-start gap-2 text-sm text-slate-700">
-            <Clock className="mt-0.5 size-4 shrink-0 text-slate-400" aria-hidden />
-            {MODERAZIONE_COPY.ricorsoInAttesa}
-          </p>
+          <p className="text-body text-ink-2">{MODERAZIONE_COPY.ricorsoInAttesa}</p>
         )}
       </div>
     );
   } else if (s.ricorso_possibile && !s.editable) {
     corpo = (
-      <p className="text-sm text-slate-600">
+      <p className="text-body text-ink-2">
         Il ricorso lo presenta il titolare dell'azienda
         {s.ricorso_entro ? `, entro il ${formatDate(s.ricorso_entro)}` : ""}.
       </p>
     );
   } else if (s.ricorso_possibile) {
     corpo = (
-      <div className="space-y-3">
-        <p className="text-sm text-slate-700">
+      <div className="flex flex-col gap-4">
+        <p className="text-body text-ink-2">
           {MODERAZIONE_COPY.ricorsoSpiegazione}
           {s.ricorso_entro ? ` Puoi presentarlo fino al ${formatDate(s.ricorso_entro)}.` : ""}
         </p>
@@ -171,14 +145,16 @@ function Ricorso({ s }: { s: SegnalazioneEsito }) {
           required
           errore={errore ?? undefined}
         />
-        <Button onClick={() => void invia()} loading={ricorso.isPending}>
-          Invia il ricorso
-        </Button>
+        <div>
+          <Button onClick={() => void invia()} loading={ricorso.isPending}>
+            Invia il ricorso
+          </Button>
+        </div>
       </div>
     );
   } else {
     corpo = (
-      <p className="text-sm text-slate-600">
+      <p className="text-body text-ink-2">
         Il ricorso interno non è disponibile per questa decisione: si presenta una sola volta,
         entro 6 mesi, contro una decisione che ti riguarda.
       </p>
@@ -186,23 +162,14 @@ function Ricorso({ s }: { s: SegnalazioneEsito }) {
   }
 
   return (
-    <Card className="p-5">
-      <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
-        <Scale className="size-4 text-brand-500" aria-hidden />
-        {MODERAZIONE_COPY.ricorsoTitolo}
-      </h2>
+    <Section>
+      <SectionHeader titolo={MODERAZIONE_COPY.ricorsoTitolo} />
       {/* Sempre montata: la conferma dell'invio va annunciata anche se il
           modulo sparisce. */}
-      <div role="status" aria-live="polite">
-        {annuncio && (
-          <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-            {annuncio}
-          </p>
-        )}
-      </div>
-      <div className="mt-3">{corpo}</div>
-      <p className="mt-4 text-xs text-slate-500">{MODERAZIONE_COPY.vieEsterne}</p>
-    </Card>
+      <div aria-live="polite">{annuncio && <Alert tono="ok">{annuncio}</Alert>}</div>
+      {corpo}
+      <p className="text-small text-ink-3">{MODERAZIONE_COPY.vieEsterne}</p>
+    </Section>
   );
 }
 
@@ -215,91 +182,83 @@ export default function SegnalazionePartenariato() {
   const { avviso } = useAziendaDaLink();
   const segnalazione = useSegnalazione(id);
 
-  let corpo: ReactNode;
+  const avvisoAzienda = avviso ? <Alert tono="attenzione">{avviso}</Alert> : null;
+
   if (segnalazione.isPending) {
-    corpo = (
-      <div className="space-y-4" aria-hidden>
-        <Skeleton className="h-10 w-2/3" />
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-40 w-full" />
-      </div>
-    );
-  } else if (segnalazione.isError) {
-    corpo =
-      apiErrorCode(segnalazione.error) === "not_found" ? (
-        <EmptyState
-          title="Segnalazione non trovata"
-          description="Non esiste oppure non riguarda te o l'azienda che stai gestendo. Se gestisci più aziende, apri il link dalla notifica."
-          action={<LinkButton to="/app/partenariati">Partenariati</LinkButton>}
-        />
-      ) : (
-        <ErrorState
-          message={apiErrorMessage(segnalazione.error, "Impossibile caricare la segnalazione.")}
-          onRetry={() => void segnalazione.refetch()}
-        />
-      );
-  } else {
-    const s = segnalazione.data;
-    corpo = (
-      <div className="space-y-4">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <StatoSegnalazioneBadge stato={s.stato} />
-            <span className="font-mono text-xs text-slate-400">
-              <span className="sr-only">Codice </span>
-              {s.codice || codiceSegnalazione(s.id)}
-            </span>
-          </div>
-          <h1 className="mt-2 inline-flex items-center gap-2 font-display text-2xl font-bold tracking-tight text-slate-900">
-            <Flag className="size-6 text-slate-400" aria-hidden />
-            {s.ruolo === "autore" ? "Segnalazione su un contenuto della tua azienda" : "La tua segnalazione"}
-          </h1>
+    return (
+      <Page variante="sezioni">
+        {avvisoAzienda}
+        <div className="flex flex-col gap-4" aria-hidden>
+          <Skeleton className="h-8 w-2/3" />
+          <Skeleton className="h-32 w-full" />
+          <Skeleton className="h-40 w-full" />
         </div>
-
-        <Card className="p-5">
-          <dl className="grid gap-4 sm:grid-cols-3">
-            <Voce titolo="Contenuto">{MODERAZIONE_COPY.oggetti[s.oggetto_tipo] ?? s.oggetto_tipo}</Voce>
-            <Voce titolo="Motivo">{CALL_COPY.segnalaMotivi[s.motivo] ?? s.motivo}</Voce>
-            <Voce titolo="Ricevuta il">{formatDateTime(s.created_at)}</Voce>
-          </dl>
-          {s.descrizione && (
-            <div className="mt-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Cosa hai scritto
-              </p>
-              <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{s.descrizione}</p>
+      </Page>
+    );
+  }
+  if (segnalazione.isError) {
+    return (
+      <Page variante="sezioni">
+        {avvisoAzienda}
+        {apiErrorCode(segnalazione.error) === "not_found" ? (
+          <>
+            <ErrorState
+              title="Segnalazione non trovata"
+              message="Non esiste oppure non riguarda te o l'azienda che stai gestendo. Se gestisci più aziende, apri il link dalla notifica."
+            />
+            <div>
+              <LinkButton to="/app/partenariati" variant="secondary">
+                Partenariati
+              </LinkButton>
             </div>
-          )}
-          {s.ruolo === "autore" && (
-            <p className="mt-4 text-xs text-slate-500">
-              Per tutelare chi segnala, non ti diciamo chi è stato.
-            </p>
-          )}
-        </Card>
-
-        <Decisione s={s} />
-        <Ricorso s={s} />
-      </div>
+          </>
+        ) : (
+          <ErrorState
+            message={apiErrorMessage(segnalazione.error, "Impossibile caricare la segnalazione.")}
+            onRetry={() => void segnalazione.refetch()}
+          />
+        )}
+      </Page>
     );
   }
 
+  const s = segnalazione.data;
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
-      <p className="text-sm text-slate-500">
-        <Link
-          to="/app/partenariati"
-          className="inline-flex items-center gap-1.5 font-medium text-brand-600 hover:text-brand-700"
-        >
-          <Handshake className="size-4" aria-hidden />
-          Partenariati
-        </Link>
-      </p>
-      {avviso && (
-        <p role="status" className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {avviso}
-        </p>
+    <Page variante="sezioni">
+      <PageHeader
+        indietro={{ label: "Partenariati", to: "/app/partenariati" }}
+        sopra={
+          <>
+            <StatoSegnalazioneBadge stato={s.stato} />
+            <span className="text-small text-ink-3 tabular-nums">
+              <span className="sr-only">Codice </span>
+              {s.codice || codiceSegnalazione(s.id)}
+            </span>
+          </>
+        }
+        titolo={s.ruolo === "autore" ? "Segnalazione su un contenuto della tua azienda" : "La tua segnalazione"}
+      />
+      {avvisoAzienda}
+
+      <Facts
+        items={[
+          { etichetta: "Contenuto", valore: MODERAZIONE_COPY.oggetti[s.oggetto_tipo] ?? s.oggetto_tipo },
+          { etichetta: "Motivo", valore: CALL_COPY.segnalaMotivi[s.motivo] ?? s.motivo },
+          { etichetta: "Ricevuta il", valore: formatDateTime(s.created_at) },
+        ]}
+      />
+      {s.descrizione && (
+        <Section>
+          <SectionHeader titolo="Cosa hai scritto" />
+          <p className="whitespace-pre-line text-body text-ink-2">{s.descrizione}</p>
+        </Section>
       )}
-      {corpo}
-    </div>
+      {s.ruolo === "autore" && (
+        <p className="text-small text-ink-3">Per tutelare chi segnala, non ti diciamo chi è stato.</p>
+      )}
+
+      <Decisione s={s} />
+      <Ricorso s={s} />
+    </Page>
   );
 }

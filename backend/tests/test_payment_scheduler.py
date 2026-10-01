@@ -238,6 +238,20 @@ class TestPreavvisi:
         assert any(t == "user_subscriptions" and "renewal_notice_sent_at" in p
                    for t, p, _ in primary.updates)
 
+    async def test_promemoria_apre_la_scheda_pagamento(self, monkeypatch):
+        # Il link del promemoria porta alla scheda «Pagamento e fatturazione».
+        cta = []
+
+        async def promemoria(*_a, cta_url, **_k):
+            cta.append(cta_url)
+            return True
+
+        monkeypatch.setattr(email_service, "send_promemoria_rinnovo_email", promemoria)
+        sub = _sub("u1", scadenza=(OGGI + timedelta(days=5)).isoformat())
+        primary = FakePrimary(_base_righe([sub]))
+        assert await payment_scheduler.passo_preavvisi(primary, OGGI) == 1
+        assert len(cta) == 1 and cta[0].endswith("/app/abbonamento?tab=pagamento")
+
     async def test_giorno_saltato_recuperato(self, _email_stub):
         # scadenza a +2 (il giorno -7 è già passato): la finestra lo prende
         sub = _sub("u1", scadenza=(OGGI + timedelta(days=2)).isoformat())
@@ -348,6 +362,26 @@ class TestRetry:
         assert n == 1
         nuovo = [p for p in primary.righe["purchases"] if p.get("tentativo") == 2]
         assert nuovo and "send_pagamento_fallito_email" in _email_stub
+
+    async def test_retry_apre_la_scheda_pagamento(self, monkeypatch):
+        cta = []
+
+        async def fallito(*a, **_k):
+            cta.append(a[-1])  # cta_url è l'ultimo argomento posizionale
+            return True
+
+        monkeypatch.setattr(email_service, "send_pagamento_fallito_email", fallito)
+        ciclo = (OGGI - timedelta(days=3)).isoformat()
+        vecchio = (datetime.now(timezone.utc) - timedelta(days=11)).isoformat()
+        sub = _sub("u1", scadenza=ciclo, notice=vecchio,
+                   grace=(OGGI + timedelta(days=11)).isoformat())
+        righe = _base_righe([sub], purchases=[{
+            "id": "p1", "user_id": "u1", "kind": "rinnovo", "status": "fallito",
+            "ciclo_rinnovo": ciclo, "tentativo": 1,
+        }])
+        primary = FakePrimary(righe)
+        assert await payment_scheduler.passo_retry(primary, FakeRevolut(), OGGI) == 1
+        assert len(cta) == 1 and cta[0].endswith("/app/abbonamento?tab=pagamento")
 
     async def test_giorno_saltato_recupera_il_retry(self, _email_stub):
         # lo scheduler NON gira a ciclo+3: al giorno dopo la FINESTRA recupera

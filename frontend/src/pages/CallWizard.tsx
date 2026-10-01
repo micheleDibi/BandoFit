@@ -1,6 +1,5 @@
-import { Handshake } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
-import { Link, Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { CallStatoBadge } from "../components/partenariati/CallStatoBadge";
 import { CallStepper } from "../components/partenariati/CallStepper";
 import { callModificabile, NUMERO_PASSI, passoDa } from "../components/partenariati/callDati";
@@ -12,9 +11,13 @@ import { PassoPosizioni } from "../components/partenariati/PassoPosizioni";
 import { PassoPubblica } from "../components/partenariati/PassoPubblica";
 import { PassoRegole } from "../components/partenariati/PassoRegole";
 import { PassoTesti } from "../components/partenariati/PassoTesti";
-import { Button, LinkButton } from "../components/ui/Button";
-import { Dialog } from "../components/ui/Dialog";
+import { Alert } from "../components/ui/Alert";
+import { LinkButton } from "../components/ui/Button";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { Page } from "../components/ui/Page";
+import { PageHeader } from "../components/ui/PageHeader";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
+import { TextLink } from "../components/ui/TextLink";
 import { useAziendaDaLink } from "../hooks/useAziendaDaLink";
 import { isVistaCreatore, useCall } from "../hooks/useCallPartenariato";
 import { apiErrorCode, apiErrorMessage } from "../lib/api";
@@ -40,20 +43,26 @@ const DESCRIZIONI: Record<number, string> = {
   7: "Scadenza, visibilità e pubblicazione.",
 };
 
-function Intestazione({ titolo, sotto }: { titolo: string; sotto?: ReactNode }) {
+const RITORNO = { label: "Partenariati", to: "/app/partenariati?tab=mie" };
+
+/** Intestazione del passo: «Passo N di 7», il titolo (che riceve il focus al
+ *  cambio di passo) e la descrizione. */
+function TitoloPasso({
+  passo,
+  titoloRef,
+}: {
+  passo: number;
+  titoloRef?: React.RefObject<HTMLHeadingElement>;
+}) {
   return (
-    <div>
-      <p className="text-sm text-slate-500">
-        <Link to="/app/partenariati?vista=mie" className="font-medium text-brand-600 hover:text-brand-700">
-          Partenariati
-        </Link>{" "}
-        / Call
+    <div className="flex flex-col gap-1">
+      <p className="text-small text-ink-3">
+        Passo {passo} di {NUMERO_PASSI}
       </p>
-      <h1 className="mt-1 inline-flex items-center gap-2 font-display text-2xl font-bold tracking-tight text-slate-900">
-        <Handshake className="size-6 text-brand-500" aria-hidden />
-        {titolo}
-      </h1>
-      {sotto}
+      <h2 ref={titoloRef} tabIndex={-1} className="text-title-section text-ink outline-none">
+        {CALL_COPY.passi[passo - 1]}
+      </h2>
+      <p className="text-body text-ink-2">{DESCRIZIONI[passo]}</p>
     </div>
   );
 }
@@ -76,11 +85,7 @@ export default function CallWizard() {
 
   const call = isVistaCreatore(callQ.data) ? callQ.data : undefined;
   const passo = passoDa(params.get("passo"), call?.wizard_passo ?? 1);
-  const avvisoLink = avviso ? (
-    <p role="status" className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
-      {avviso}
-    </p>
-  ) : null;
+  const avvisoLink: ReactNode = avviso ? <Alert tono="attenzione">{avviso}</Alert> : null;
 
   // Focus sul titolo del passo quando cambia (non al primo caricamento).
   useEffect(() => {
@@ -123,16 +128,11 @@ export default function CallWizard() {
   // ---- Nuova call: solo il passo 1, senza id ----
   if (!id) {
     return (
-      <div className="mx-auto max-w-4xl space-y-5">
-        <Intestazione
-          titolo="Nuova call di partenariato"
-          sotto={<p className="mt-1 text-sm text-slate-500">{DESCRIZIONI[1]}</p>}
-        />
+      <Page variante="flusso">
+        <PageHeader indietro={RITORNO} titolo="Nuova call di partenariato" />
         {avvisoLink}
         <CallStepper passo={1} salvatiFinoA={1} abilitato={(n) => n === 1} onVai={() => undefined} />
-        <h2 className="font-display text-lg font-semibold text-slate-900">
-          Passo 1 di {NUMERO_PASSI}: {CALL_COPY.passi[0]}
-        </h2>
+        <TitoloPasso passo={1} />
         <PassoBandoNuova
           slug={params.get("bando")}
           onScegliBando={(slug) =>
@@ -144,36 +144,44 @@ export default function CallWizard() {
             })
           }
         />
-      </div>
+      </Page>
     );
   }
 
   if (callQ.isPending) {
     return (
-      <div className="mx-auto max-w-4xl space-y-4" aria-hidden>
-        <Skeleton className="h-10 w-2/3" />
-        <Skeleton className="h-8 w-full" />
-        <Skeleton className="h-96 w-full" />
-      </div>
+      <Page variante="flusso">
+        <div className="flex flex-col gap-4" aria-hidden>
+          <Skeleton className="h-8 w-2/3" />
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-96 w-full" />
+        </div>
+      </Page>
     );
   }
   if (callQ.isError) {
     return (
-      <div className="mx-auto max-w-4xl space-y-5">
+      <Page variante="flusso">
         {avvisoLink}
         {apiErrorCode(callQ.error) === "not_found" ? (
-          <EmptyState
-            title="Call non trovata"
-            description="Non esiste, oppure è di un'altra azienda: controlla l'azienda attiva."
-            action={<LinkButton to="/app/partenariati?vista=mie">Le tue call</LinkButton>}
-          />
+          <>
+            <ErrorState
+              title="Call non trovata"
+              message="Non esiste, oppure è di un'altra azienda: controlla l'azienda attiva."
+            />
+            <div>
+              <LinkButton to="/app/partenariati?tab=mie" variant="secondary">
+                Le tue call
+              </LinkButton>
+            </div>
+          </>
         ) : (
           <ErrorState
             message={apiErrorMessage(callQ.error, "Impossibile caricare la call.")}
             onRetry={() => void callQ.refetch()}
           />
         )}
-      </div>
+      </Page>
     );
   }
   // Non è la vista del creatore (dal WP6: la call di un'altra azienda).
@@ -188,8 +196,8 @@ export default function CallWizard() {
 
   if (!callModificabile(call)) {
     return (
-      <div className="mx-auto max-w-4xl space-y-5">
-        <Intestazione titolo={call.titolo || call.bando.titolo} />
+      <Page variante="flusso">
+        <PageHeader indietro={RITORNO} titolo={call.titolo || call.bando.titolo} />
         {avvisoLink}
         <EmptyState
           title={call.editable ? "Questa call non si può più modificare" : "Non puoi modificare questa call"}
@@ -198,9 +206,13 @@ export default function CallWizard() {
               ? `Stato: ${CALL_COPY.stati[call.stato] ?? call.stato}.`
               : CALL_COPY.soloTitolare
           }
-          action={<LinkButton to={`/app/partenariati/call/${call.id}?tab=panoramica`}>Vai alla call</LinkButton>}
+          action={
+            <LinkButton to={`/app/partenariati/call/${call.id}?tab=panoramica`} variant="secondary">
+              Vai alla call
+            </LinkButton>
+          }
         />
-      </div>
+      </Page>
     );
   }
 
@@ -208,27 +220,22 @@ export default function CallWizard() {
   const bozza = call.stato === "bozza";
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5">
-      <Intestazione
+    <Page variante="flusso">
+      <PageHeader
+        indietro={RITORNO}
         titolo={bozza ? "Crea la call di partenariato" : "Modifica la call"}
-        sotto={
-          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-sm text-slate-600">
+        descrizione={
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <CallStatoBadge stato={call.stato} />
             <span>
-              Per il bando{" "}
-              <Link to={`/app/bandi/${call.bando.slug}`} className="font-medium text-brand-600 hover:text-brand-700">
-                {call.bando.titolo}
-              </Link>
+              Per il bando <TextLink to={`/app/bandi/${call.bando.slug}`}>{call.bando.titolo}</TextLink>
             </span>
-            {!bozza && (
-              <Link
-                to={`/app/partenariati/call/${call.id}?tab=panoramica`}
-                className="font-medium text-brand-600 hover:text-brand-700"
-              >
-                Torna alla call
-              </Link>
-            )}
-          </div>
+          </span>
+        }
+        azioni={
+          !bozza ? (
+            <TextLink to={`/app/partenariati/call/${call.id}?tab=panoramica`}>Torna alla call</TextLink>
+          ) : undefined
         }
       />
       {avvisoLink}
@@ -240,16 +247,7 @@ export default function CallWizard() {
         abilitato={(n) => !bozza || n <= Math.max(call.wizard_passo, passo)}
         onVai={vai}
       />
-      <div>
-        <h2
-          ref={titoloPasso}
-          tabIndex={-1}
-          className="font-display text-lg font-semibold text-slate-900 focus:outline-none"
-        >
-          Passo {passo} di {NUMERO_PASSI}: {CALL_COPY.passi[passo - 1]}
-        </h2>
-        <p className="mt-0.5 text-sm text-slate-500">{DESCRIZIONI[passo]}</p>
-      </div>
+      <TitoloPasso passo={passo} titoloRef={titoloPasso} />
       <Passo
         // Un passo nuovo riparte dai dati salvati (niente stato ereditato).
         key={`${call.id}-${passo}`}
@@ -260,30 +258,21 @@ export default function CallWizard() {
         onVai={vai}
       />
 
-      <Dialog
+      <ConfirmDialog
         open={uscita !== null}
-        onClose={() => setUscita(null)}
-        title="Uscire dal passo senza salvare?"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setUscita(null)}>
-              Resta qui
-            </Button>
-            <Button
-              variant="danger"
-              onClick={() => {
-                const n = uscita;
-                setUscita(null);
-                if (n !== null) vaiSubito(n);
-              }}
-            >
-              Esci senza salvare
-            </Button>
-          </>
-        }
+        titolo="Uscire dal passo senza salvare?"
+        conferma="Esci senza salvare"
+        annulla="Resta qui"
+        distruttiva
+        onConferma={() => {
+          const n = uscita;
+          setUscita(null);
+          if (n !== null) vaiSubito(n);
+        }}
+        onAnnulla={() => setUscita(null)}
       >
         <p>Le modifiche di questo passo non sono ancora salvate: se esci le perdi.</p>
-      </Dialog>
-    </div>
+      </ConfirmDialog>
+    </Page>
   );
 }

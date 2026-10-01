@@ -1,13 +1,16 @@
-import { Link } from "react-router-dom";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useConsensoPartner, useInformativaPartner } from "../../hooks/usePartnerProfile";
 import { apiErrorCode, apiErrorMessage } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { PARTNER_COPY } from "../../lib/copy";
 import type { OrigineConsensoPartner, PartnerProfile } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
+import { Checkbox } from "../ui/Checkbox";
 import { Dialog } from "../ui/Dialog";
+import { RadioGroup } from "../ui/RadioGroup";
 import { Skeleton } from "../ui/states";
+import { TextLink } from "../ui/TextLink";
 import { ANCORA_IDENTITA } from "./IdentitaAziendaBox";
 
 // ---- Testo dell'informativa -----------------------------------------------
@@ -54,8 +57,8 @@ export function TestoInformativa({ testo }: { testo: string }) {
         <p
           key={`h${blocchi.length}`}
           className={cn(
-            "font-semibold text-slate-900",
-            livello === 1 ? "mt-3 text-sm first:mt-0" : "mt-3 text-[13px]",
+            "mt-3 font-semibold text-ink",
+            livello === 1 ? "text-body first:mt-0" : "text-small",
           )}
         >
           {titolo}
@@ -172,7 +175,7 @@ export function ConsensoPartnerDialog({
   let testo: ReactNode;
   if (informativa.isPending) {
     testo = (
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         <Skeleton className="h-4 w-2/3" />
         <Skeleton className="h-4 w-full" />
         <Skeleton className="h-4 w-5/6" />
@@ -181,7 +184,7 @@ export function ConsensoPartnerDialog({
   } else if (informativa.isError || !informativa.data) {
     testo = (
       <div>
-        <p className="text-sm text-red-700">
+        <p className="text-danger">
           {apiErrorMessage(informativa.error, PARTNER_COPY.informativaNonCaricata)}
         </p>
         <Button
@@ -199,14 +202,39 @@ export function ConsensoPartnerDialog({
     testo = <TestoInformativa testo={informativa.data.testo} />;
   }
 
+  // «Mostra il nome»: la nota, e sotto il motivo quando non si può scegliere
+  // (con il link alla verifica). Tutto nella descrizione dell'opzione, così
+  // il radio resta descritto da entrambi.
+  const descrizioneNome = (
+    <>
+      <span id={idNotaNome} className="block">
+        {PARTNER_COPY.sceltaNomeNota}
+      </span>
+      {!nominativoPossibile && identita.motivo_nominativo && (
+        <span id={idMotivoNome} className="mt-1 block text-ink-2">
+          {PARTNER_COPY.motiviNominativo[identita.motivo_nominativo] ??
+            PARTNER_COPY.motiviNominativo.identita_non_verificata_admin}
+          {identita.motivo_nominativo !== "non_disponibile" && (
+            <>
+              {" "}
+              {/* Il riquadro «Verifica dell'identità» sta nella pagina
+                  Azienda: si chiude il consenso e ci si va. */}
+              <TextLink to={`/app/azienda#${ANCORA_IDENTITA}`} onClick={onClose}>
+                {PARTNER_COPY.chiediVerifica}
+              </TextLink>
+            </>
+          )}
+        </span>
+      )}
+    </>
+  );
+
   const corpo = (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <p>{PARTNER_COPY.consensoIntro}</p>
 
       {!identita.verificata && identita.motivo && (
-        <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800" role="alert">
-          {PARTNER_COPY.motiviIdentita[identita.motivo]}
-        </p>
+        <Alert tono="attenzione">{PARTNER_COPY.motiviIdentita[identita.motivo]}</Alert>
       )}
 
       <div
@@ -215,127 +243,59 @@ export function ConsensoPartnerDialog({
         role="region"
         aria-label={PARTNER_COPY.consensoInformativa}
         tabIndex={0}
-        className="max-h-60 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-[13px] leading-relaxed text-slate-700 focus-visible:outline-2 focus-visible:outline-brand-500"
+        className="max-h-60 overflow-y-auto rounded-control bg-desk px-4 py-3 text-small text-ink-2 focus-visible:outline-2 focus-visible:outline-accent"
       >
         {testo}
       </div>
 
-      <label className="flex cursor-pointer items-start gap-2.5 text-sm font-medium text-slate-800">
-        <input
-          type="checkbox"
-          className="mt-0.5 size-4 shrink-0 cursor-pointer accent-brand-500"
-          checked={accetto}
-          onChange={(e) => setAccetto(e.target.checked)}
-          aria-describedby={idInformativa}
-          disabled={!informativa.data}
-        />
-        {PARTNER_COPY.consensoCheckbox}
-      </label>
+      {/* Mai preselezionata: `accetto` riparte da `false` a ogni apertura. */}
+      <Checkbox
+        label={PARTNER_COPY.consensoCheckbox}
+        checked={accetto}
+        onChange={(e) => setAccetto(e.target.checked)}
+        aria-describedby={idInformativa}
+        disabled={!informativa.data}
+      />
 
-      <fieldset>
-        <legend className="text-sm font-medium text-slate-800">
-          {PARTNER_COPY.sceltaNomeTitolo}
-        </legend>
-        <div className="mt-2 space-y-2">
-          <label
-            className={cn(
-              "flex items-start gap-2.5 rounded-lg border px-3 py-2.5",
-              nominativoPossibile
-                ? "cursor-pointer border-slate-200 hover:border-brand-300"
-                : "cursor-not-allowed border-slate-100 bg-slate-50",
-              scelta === "nome" && "border-brand-400 bg-brand-50/60",
-            )}
-          >
-            <input
-              type="radio"
-              name={`${idBase}-scelta`}
-              className="mt-0.5 size-4 shrink-0 cursor-pointer accent-brand-500 disabled:cursor-not-allowed"
-              checked={scelta === "nome"}
-              onChange={() => setScelta("nome")}
-              disabled={!nominativoPossibile}
-              aria-describedby={nominativoPossibile ? idNotaNome : `${idNotaNome} ${idMotivoNome}`}
-            />
-            <span>
-              <span
-                className={cn(
-                  "block text-sm font-medium",
-                  nominativoPossibile ? "text-slate-800" : "text-slate-400",
-                )}
-              >
+      {/* Scelta obbligatoria, senza preselezione (`scelta` parte da `null`). */}
+      <RadioGroup
+        nome={`${idBase}-scelta`}
+        legend={PARTNER_COPY.sceltaNomeTitolo}
+        valore={scelta}
+        onChange={(id) => setScelta(id as Scelta)}
+        opzioni={[
+          {
+            id: "nome",
+            label: (
+              <>
                 {PARTNER_COPY.sceltaNome}
                 {identita.denominazione_registro && nominativoPossibile && (
-                  <span className="font-normal text-slate-500">
-                    {" "}
-                    ({identita.denominazione_registro})
-                  </span>
+                  <span className="text-ink-3"> ({identita.denominazione_registro})</span>
                 )}
-              </span>
-              <span id={idNotaNome} className="block text-xs text-slate-500">
-                {PARTNER_COPY.sceltaNomeNota}
-              </span>
-            </span>
-          </label>
-          {!nominativoPossibile && identita.motivo_nominativo && (
-            <p id={idMotivoNome} className="px-1 text-xs text-slate-600">
-              {PARTNER_COPY.motiviNominativo[identita.motivo_nominativo] ??
-                PARTNER_COPY.motiviNominativo.identita_non_verificata_admin}
-              {identita.motivo_nominativo !== "non_disponibile" && (
-                <>
-                  {" "}
-                  {/* Il riquadro «Verifica dell'identità» sta nella pagina
-                      Azienda: si chiude il consenso e ci si va. */}
-                  <Link
-                    to={`/app/azienda#${ANCORA_IDENTITA}`}
-                    onClick={onClose}
-                    className="font-medium text-brand-600 hover:text-brand-700"
-                  >
-                    {PARTNER_COPY.chiediVerifica} →
-                  </Link>
-                </>
-              )}
-            </p>
-          )}
-          <label
-            className={cn(
-              "flex cursor-pointer items-start gap-2.5 rounded-lg border border-slate-200 px-3 py-2.5 hover:border-brand-300",
-              scelta === "anonima" && "border-brand-400 bg-brand-50/60",
-            )}
-          >
-            <input
-              type="radio"
-              name={`${idBase}-scelta`}
-              className="mt-0.5 size-4 shrink-0 cursor-pointer accent-brand-500"
-              checked={scelta === "anonima"}
-              onChange={() => setScelta("anonima")}
-              aria-describedby={idNotaAnonima}
-            />
-            <span>
-              <span className="block text-sm font-medium text-slate-800">
-                {PARTNER_COPY.sceltaAnonima}
-              </span>
-              <span id={idNotaAnonima} className="block text-xs text-slate-500">
-                {PARTNER_COPY.sceltaAnonimaNota}
-              </span>
-            </span>
-          </label>
-        </div>
-      </fieldset>
+              </>
+            ),
+            descrizione: descrizioneNome,
+            disabled: !nominativoPossibile,
+          },
+          {
+            id: "anonima",
+            label: PARTNER_COPY.sceltaAnonima,
+            descrizione: <span id={idNotaAnonima}>{PARTNER_COPY.sceltaAnonimaNota}</span>,
+          },
+        ]}
+      />
 
       {errore && (
-        <p
-          id={idErrore}
-          className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"
-          role="alert"
-        >
-          {errore}
-        </p>
+        <div id={idErrore}>
+          <Alert tono="errore">{errore}</Alert>
+        </div>
       )}
     </div>
   );
 
   const bottoni = (
     <>
-      <Button variant="ghost" onClick={onClose} disabled={consenso.isPending}>
+      <Button variant="secondary" onClick={onClose} disabled={consenso.isPending}>
         {etichettaAnnulla ?? PARTNER_COPY.annulla}
       </Button>
       <Button
@@ -353,7 +313,7 @@ export function ConsensoPartnerDialog({
     return (
       <div>
         {corpo}
-        <div className="mt-5 flex justify-end gap-2">{bottoni}</div>
+        <div className="mt-5 flex flex-wrap justify-end gap-2">{bottoni}</div>
       </div>
     );
   }

@@ -5,8 +5,7 @@ import { loadZxcvbn, strengthFromScore, type Strength } from "../../lib/password
 type CheckFn = NonNullable<Awaited<ReturnType<typeof loadZxcvbn>>>;
 
 /** Colori dei tre livelli con i token del design system, per numero di
- *  segmenti. `Strength` porta ancora `barClass`/`textClass` con le classi
- *  vecchie (`lib/` non cambia in questa ondata): qui non si usano. */
+ *  segmenti: `Strength` dice solo livello ed etichetta, l'aspetto sta qui. */
 const livelli: Record<Strength["segments"], { barra: string; testo: string }> = {
   1: { barra: "bg-danger", testo: "text-danger" },
   2: { barra: "bg-warning-line", testo: "text-warning-ink" },
@@ -72,7 +71,8 @@ export function PasswordStrengthMeter({
             <span className={cn("font-medium", livello.testo)}>{strength.label}</span>
           </>
         ) : (
-          " "
+          // Spazio non separabile: uno spazio normale collassa e la riga perde l'altezza.
+          " "
         )}
       </p>
     </div>

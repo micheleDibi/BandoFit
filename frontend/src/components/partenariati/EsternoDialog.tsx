@@ -5,9 +5,12 @@ import { apiErrorMessage } from "../../lib/api";
 import { CONSORZIO_COPY } from "../../lib/copy";
 import { nomePaese, paesiOrdinati } from "../../lib/paesi";
 import type { MembroConsorzio, RuoloMembro, TipoSoggettoPartenariato } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
+import { Checkbox } from "../ui/Checkbox";
 import { Dialog } from "../ui/Dialog";
 import { SelectField, TextField } from "../ui/Field";
+import { InlineError } from "../ui/InlineError";
 import { Skeleton } from "../ui/states";
 import { leggiPercentuale, mostraDecimale, percentuale } from "./callDati";
 import { SceltaRadio } from "./CampiCall";
@@ -137,10 +140,10 @@ export function EsternoDialog({
       }
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={salva.isPending}>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={salva.isPending}>
             Annulla
           </Button>
-          <Button onClick={conferma} loading={salva.isPending}>
+          <Button type="button" onClick={conferma} loading={salva.isPending}>
             {membro ? "Salva" : "Aggiungi"}
           </Button>
         </>
@@ -148,20 +151,18 @@ export function EsternoDialog({
     >
       <form
         noValidate
-        className="space-y-4"
+        className="flex flex-col gap-4"
         onSubmit={(e) => {
           e.preventDefault();
           conferma();
         }}
       >
-        <p className="text-sm text-slate-600">
+        <p>
           Un ente o un'azienda che non usa la piattaforma, per esempio un partner di un altro paese.{" "}
           {CONSORZIO_COPY.notaEsterni}
         </p>
         {membro?.stato === "uscito" && (
-          <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
-            Questo membro era uscito: salvando torna nel consorzio, da confermare.
-          </p>
+          <Alert tono="info">Questo membro era uscito: salvando torna nel consorzio, da confermare.</Alert>
         )}
         <TextField
           label="Nome"
@@ -187,47 +188,37 @@ export function EsternoDialog({
           ))}
         </SelectField>
 
-        <fieldset aria-describedby={`${id}-tipi-aiuto`}>
-          <legend className="text-sm font-medium text-slate-700">
+        <fieldset aria-describedby={`${id}-tipi-aiuto`} className="flex flex-col gap-1.5">
+          <legend className="text-small font-medium text-ink">
             Tipo di soggetto
-            <span className="text-red-500" aria-hidden>
+            <span className="text-danger" aria-hidden>
               {" "}
               *
             </span>
           </legend>
-          <p id={`${id}-tipi-aiuto`} className="mt-0.5 text-xs text-slate-500">
+          <p id={`${id}-tipi-aiuto`} className="text-small text-ink-3">
             Da 1 a {LIMITI_ESTERNO.tipiMax}: servono a controllare la composizione chiesta dal bando.
             {tipi.length > 0 ? ` Ne hai scelti ${tipi.length}.` : ""}
           </p>
           {vocabolarioInArrivo ? (
-            <Skeleton className="mt-2 h-32 w-full" />
+            <Skeleton className="h-32 w-full" />
           ) : (
-            <div className="mt-2 max-h-52 space-y-1.5 overflow-y-auto rounded-lg border border-slate-200 px-3 py-2">
+            <div className="flex max-h-52 flex-col gap-2 overflow-y-auto rounded-control border border-line-control px-3 py-2">
               {(vocabolario?.tipi_soggetto ?? []).map((t) => {
                 const scelto = tipi.includes(t.codice);
                 return (
-                  <label
+                  <Checkbox
                     key={t.codice}
-                    className="flex cursor-pointer items-center gap-2 text-sm text-slate-700 has-[:disabled]:cursor-not-allowed has-[:disabled]:text-slate-400"
-                  >
-                    <input
-                      type="checkbox"
-                      className="size-4 shrink-0 cursor-pointer accent-brand-500 disabled:cursor-not-allowed"
-                      checked={scelto}
-                      disabled={!scelto && pieno}
-                      onChange={() => alternaTipo(t.codice)}
-                    />
-                    {t.etichetta}
-                  </label>
+                    label={t.etichetta}
+                    checked={scelto}
+                    disabled={!scelto && pieno}
+                    onChange={() => alternaTipo(t.codice)}
+                  />
                 );
               })}
             </div>
           )}
-          {errori.tipi && (
-            <p className="mt-1.5 text-sm text-red-600" role="alert">
-              {errori.tipi}
-            </p>
-          )}
+          {errori.tipi && <InlineError>{errori.tipi}</InlineError>}
         </fieldset>
 
         <SceltaRadio
@@ -261,11 +252,7 @@ export function EsternoDialog({
           error={errori.quota}
           helper="Facoltativa ora, serve per confermare il membro."
         />
-        {salva.isError && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-            {apiErrorMessage(salva.error)}
-          </p>
-        )}
+        {salva.isError && <Alert tono="errore">{apiErrorMessage(salva.error)}</Alert>}
       </form>
     </Dialog>
   );

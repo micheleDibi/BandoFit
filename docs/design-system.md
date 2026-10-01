@@ -47,7 +47,8 @@ Il colore non basta mai da solo: ogni stato ha una parola («Aperto», «tra 5 g
 
 | Stile | Utility | Font | Taglia | Uso |
 |---|---|---|---|---|
-| `title-bando` | `text-title-bando` | Sora 600 | 28/36, -0.015em | Solo il titolo del bando nella sua scheda |
+| `title-bando` | `text-title-bando` | Sora 600 | 28/36, -0.015em | Il titolo del bando nella sua scheda e la promessa del pannello laterale delle pagine di accesso |
+| `title-hero` | `text-title-hero` | Sora 600 | 32/40 sotto `sm`, 40/48 da `sm`, -0.02em | Solo il titolo dell'hero della landing. Le variabili sono `--title-hero-*`, fuori dal gruppo `--text-*`: lì Tailwind genererebbe una seconda `text-title-hero` a taglia fissa, che annullerebbe il passaggio di taglia |
 | `title-page` | `text-title-page` | Sora 600 | 24/32, -0.01em | Titolo di pagina, uno per schermata, uguale alla voce di menu |
 | `title-section` | `text-title-section` | Sora 600 | 18/26 | Titolo di sezione sopra un filetto |
 | `figure` | `text-figure` | Sora 600 | 28/32 | Cifra in evidenza, sempre tabellare |
@@ -60,7 +61,7 @@ Il colore non basta mai da solo: ogni stato ha una parola («Aperto», «tra 5 g
 | `small` | `text-small` | Inter 400 | 13/20 | Metadati, etichette dei campi e dei dati, aiuto |
 | `caption` | `text-caption` | Inter 500 | 12/16 | La taglia minima: tempo relativo, contatori, etichette di gruppo del menu |
 
-Sora solo tramite gli stili `title-*`, `figure*` e `due-day` (peso unico 600: si carica solo `@fontsource/sora/600.css`). Inter in tre pesi: 400 testo, 500 etichette e menu, 600 titoli di gruppo, titoli di riga, pulsanti. Niente taglie arbitrarie (`text-[11px]`), niente `uppercase`, niente `tracking-wide`. Cifre sempre tabellari (`tabular-nums`).
+Sora solo tramite gli stili `title-*` (compreso `title-hero`), `figure*` e `due-day` (peso unico 600: si carica solo `@fontsource/sora/600.css`). Inter in tre pesi: 400 testo, 500 etichette e menu, 600 titoli di gruppo, titoli di riga, pulsanti. Niente taglie arbitrarie (`text-[11px]`), niente `uppercase`, niente `tracking-wide`. Cifre sempre tabellari (`tabular-nums`).
 
 ### Raggi, ombre, spazi
 
@@ -72,18 +73,20 @@ Sora solo tramite gli stili `title-*`, `figure*` e `due-day` (peso unico 600: si
 | `radius-pill` | 999px | Solo avatar, contatori, filtri attivi, barre |
 | `shadow-overlay` | `0 12px 32px -8px rgb(33 43 80 / .28), 0 2px 6px rgb(33 43 80 / .08)` | L'unica ombra: menu, finestre, notifiche a comparsa |
 
-Spaziature dalla scala di Tailwind, con questi ruoli: 1 (4px) fra etichetta e valore; 2 (8px) fra icona e testo e fra pulsanti; 3 (12px) dentro i controlli; 4 (16px) fra gli elementi di una sezione; 6 (24px) fra colonne e sezioni; 8 (32px) sopra la pagina; 10 (40px) ai lati della pagina su desktop; 12 (48px) fra blocchi maggiori.
+Spaziature dalla scala di Tailwind, con questi ruoli: 1 (4px) fra etichetta e valore; 2 (8px) fra icona e testo e fra pulsanti; 3 (12px) dentro i controlli; 4 (16px) fra gli elementi di una sezione; 6 (24px) fra colonne e sezioni; 8 (32px) sopra la pagina; 10 (40px) ai lati della pagina su desktop; 12 (48px) fra blocchi maggiori e fra il contenuto e la colonna laterale di `Page variante="dettaglio"` (i 24px valgono per le colonne interne).
 
-Larghezze: barra laterale 248px; elenco 1112px; pagina a sezioni con schede 880px; flusso a passi 720px; colonna laterale 320px; testo lungo 680px. Le pagine non scrivono `max-w-*`: usano `Page` con la sua variante.
+Larghezze: barra laterale 248px; elenco 1112px; pagina a sezioni con schede 880px; flusso a passi 720px; colonna laterale 320px; testo lungo 680px. Le pagine non scrivono `max-w-*`: usano `Page` con la sua variante; per il testo lungo dentro una colonna c'è il token `max-w-lettura` (680px, `--container-lettura` in `index.css`). Fuori dalla cornice dell'app: le pagine di accesso usano `AuthLayout` (colonna del modulo da 560px con il modulo largo 380px, a destra il pannello su `desk`); la landing ha un contenitore centrato a 1112px (`components/landing/Sezione.tsx`), l'unico `max-w` scritto fuori da `Page`.
 
 ## Modelli di pagina
 
 | Modello | Componente | Dove |
 |---|---|---|
-| Elenco | `Page variante="elenco"` | Bandi, Bandi salvati, Partenariati, Notifiche, tabelle admin, Home |
-| Dettaglio con colonna laterale | `Page variante="dettaglio"` | Bando, call, consulenza, richiesta |
-| Sezioni con schede | `Page variante="sezioni"` | Dati azienda, Abbonamento, Preferenze, Profilo, Account collegati |
-| Flusso a passi | `Page variante="flusso"` | Nuova call, checkout |
+| Elenco | `Page variante="elenco"` | Bandi, Bandi salvati, AI-check, Partenariati, Notifiche, Calendario, Consulenze, Richieste di consulenza, Aziende gestite, Account collegati, Utenti e Pagamenti (admin) |
+| Dettaglio con colonna laterale | `Page variante="dettaglio"` | Home, bando, call, consulenza, richiesta di consulenza |
+| Sezioni con schede | `Page variante="sezioni"` | Dati azienda, Abbonamento, Preferenze, Profilo, Piani e Add-on (admin), conversazione e segnalazione dei partenariati, «Questa pagina non è disponibile» |
+| Flusso a passi | `Page variante="flusso"` | Nuova call, checkout ed esito del pagamento |
+
+Le pagine di dettaglio mostrano gli stati 404 e 410 in `Page variante="sezioni"`, senza colonna laterale. Landing e pagine di accesso stanno fuori dalla cornice e non usano `Page`.
 
 Ogni pagina comincia con `PageHeader` (ritorno, titolo, una riga di descrizione, azioni a destra). Lo stato delle schede sta nell'URL (`?tab=`, hook `useTab`).
 
@@ -94,16 +97,24 @@ Un solo posto per ogni cosa. Se una pagina ha bisogno di un pattern che non c'è
 | Componente | Sostituisce |
 |---|---|
 | `Button` (primary, secondary, ghost = testuale, danger; sm, md, lg; loading), `IconButton`, `TextLink` | i 4 stili di «X» e le 3 regole di sottolineatura |
-| `Field` (`TextField`, `TextareaField`, `SelectField`), `Select`, `SearchInput`, `Checkbox`, `RadioGroup`, `Switch`, `PasswordField` | input e select scritti a mano, le 4 copie del campo password |
+| `Field` (`TextField`, `TextareaField`, `SelectField`), `Select`, `SearchInput`, `Checkbox`, `RadioGroup`, `Switch`, `PasswordField`, `PasswordStrengthMeter` | input e select scritti a mano, le 4 copie del campo password |
 | `Filter`, `Segment`, `Chip`, `Badge` (etichetta neutra) | filtri della lista, chip dei filtri attivi, pill a mano |
-| `Tabs` (con `useTab`), `Stepper`, `Accordion` | `Schede` dei partenariati, la tablist a mano, i 18 `<details>` |
-| `PageHeader`, `Page`, `SectionHeader`, `BackLink` | le 26 h1 a mano e le larghezze diverse |
+| `Tabs` e `TabPanel` (con `useTab`), `Stepper`, `Accordion` | `Schede` dei partenariati, la tablist a mano, i 18 `<details>` |
+| `PageHeader`, `Page`, `SectionHeader` e `Section`, `BackLink` | le 26 h1 a mano e le larghezze diverse |
 | `Status`, `Due`, `Fit`, `Facts`, `DefinitionList`, `Table`, `BandoRow` | badge di stato, MetaTile/StatTile, le 7 tabelle con 3 testate |
 | `Alert`, `InlineError`, `EmptyState`, `ErrorState`, `Skeleton`, `Spinner`, `ProgressBar` | i ~90 avvisi e ~75 errori a mano, le barre con `style width` |
 | `Popover`, `Menu`, `Dialog`, `ConfirmDialog`, `Drawer`, `Toast` (`useToast`), `Tooltip` | i 5 dropdown, le 16 conferme rifatte, i flash con `setTimeout`, i `title=` |
 | `Card`, `Panel`, `Avatar`, `Pagination`, `Combobox`, `TagSelect`, `AuthLayout` | |
 
-Icone: `lucide-react`, 16 o 20px, tratto 1,75, nel colore del testo accanto. Un'icona accompagna una parola; un pulsante di sola icona ha sempre `aria-label`. `Sparkles` solo per l'AI-check. Mai emoji.
+`BandoRow` è l'unico della tabella che vive fuori da `ui/`, in `components/bandi/`: la riga del registro dei bandi.
+
+Props da conoscere, oltre a quelle ovvie:
+- `Stepper` `raggiunto`: indice dell'ultimo passo raggiunto (default il corrente). Con `onVai` sono cliccabili tutti i passi fino a quello, anche oltre il corrente: in un flusso salvato a passi (la bozza di una call) si torna avanti fin dove si era arrivati.
+- `Alert` `ruolo`: di default `status` per info e ok, `alert` per attenzione ed errore; `none` quando l'avviso sta dentro una regione `aria-live` già montata, che annuncia da sé (due regioni annidate rischiano il doppio annuncio).
+- `RadioGroup` `descrizione`: aiuto sotto la legenda del gruppo, collegato con `aria-describedby`; anche ogni opzione accetta una sua `descrizione`.
+- `PasswordStrengthMeter`: solo informativo, non blocca mai l'invio; va sotto un `PasswordField` con `autoComplete="new-password"`.
+
+Icone: `lucide-react`, 16 o 20px, tratto 1,75 (lo impone `index.css` con `.lucide { stroke-width: 1.75 }`, non serve passarlo all'icona), nel colore del testo accanto. Un'icona accompagna una parola; un pulsante di sola icona ha sempre `aria-label`. `Sparkles` solo per l'AI-check. Mai emoji.
 
 ## Mai e sempre
 

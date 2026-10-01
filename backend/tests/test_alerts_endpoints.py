@@ -132,7 +132,8 @@ class TestUnsubscribePubblico:
             )
         assert resp.status_code == 200
         assert "Avvisi disattivati" in resp.text
-        assert "https://app.test.it/app/preferenze" in resp.text
+        # Il link porta alla scheda «Avvisi email» delle Preferenze.
+        assert "https://app.test.it/app/preferenze?tab=avvisi" in resp.text
 
     async def test_get_non_muta(self):
         primary = FakePrimary()

@@ -1,14 +1,15 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { apiErrorMessage } from "../../../lib/api";
+import { cn } from "../../../lib/cn";
+import { Alert } from "../../ui/Alert";
 import { Button } from "../../ui/Button";
-import { Card } from "../../ui/Card";
 import { Dialog } from "../../ui/Dialog";
+import { SelectField } from "../../ui/Field";
 import { EmptyState, ErrorState, Skeleton } from "../../ui/states";
+import { Table } from "../../ui/Table";
 import { TestoLungo } from "../CampiCall";
 
 /** Pezzi comuni delle schede del pannello admin dei partenariati (WP9). */
-
-export const thClass = "px-4 py-3 font-medium";
 
 /** Filtro a tendina con etichetta visibile (niente solo `aria-label`). */
 export function Filtro<T extends string>({
@@ -23,20 +24,19 @@ export function Filtro<T extends string>({
   opzioni: Array<{ valore: T | ""; etichetta: string }>;
 }) {
   return (
-    <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
-      {etichetta}
-      <select
+    <div className="min-w-44">
+      <SelectField
+        label={etichetta}
         value={valore}
         onChange={(e) => onChange(e.target.value as T | "")}
-        className="h-10 w-full min-w-44 cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-normal text-slate-900 focus:border-brand-500 focus:outline-2 focus:outline-offset-0 focus:outline-brand-500/30"
       >
         {opzioni.map((o) => (
           <option key={o.valore || "tutti"} value={o.valore}>
             {o.etichetta}
           </option>
         ))}
-      </select>
-    </label>
+      </SelectField>
+    </div>
   );
 }
 
@@ -63,7 +63,7 @@ export function StatiLista({
 }) {
   if (isPending) {
     return (
-      <div className="space-y-3" aria-hidden>
+      <div className="flex flex-col gap-3" aria-hidden>
         {Array.from({ length: 4 }).map((_, i) => (
           <Skeleton key={i} className="h-16 w-full" />
         ))}
@@ -80,8 +80,11 @@ export function StatiLista({
 export function Annuncio({ testo }: { testo: string | null }) {
   return (
     <div role="status" aria-live="polite">
+      {/* La regione live è il contenitore: l'avviso non ne apre un'altra. */}
       {testo && (
-        <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{testo}</p>
+        <Alert tono="ok" ruolo="none">
+          {testo}
+        </Alert>
       )}
     </div>
   );
@@ -148,7 +151,7 @@ export function MotivazioneDialog({
       dismissible={!inCorso}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={inCorso}>
+          <Button variant="secondary" onClick={onClose} disabled={inCorso}>
             Annulla
           </Button>
           <Button variant={pericolosa ? "danger" : "primary"} loading={inCorso} onClick={conferma}>
@@ -157,8 +160,8 @@ export function MotivazioneDialog({
         </>
       }
     >
-      <div className="space-y-4">
-        {descrizione && <div className="text-sm text-slate-700">{descrizione}</div>}
+      <div className="flex flex-col gap-4">
+        {descrizione && <div className="text-ink">{descrizione}</div>}
         {children}
         <TestoLungo
           etichetta={etichetta}
@@ -170,17 +173,15 @@ export function MotivazioneDialog({
           required
           errore={erroreLocale ?? undefined}
         />
-        {errore && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-            {errore}
-          </p>
-        )}
+        {errore && <Alert tono="errore">{errore}</Alert>}
       </div>
     </Dialog>
   );
 }
 
-/** Tabella admin su Card, con scorrimento orizzontale sugli schermi stretti. */
+/** Tabella admin (`Table` di ui), con scorrimento orizzontale sugli schermi
+ *  stretti e i dati attenuati durante il cambio di pagina o filtro. Il nome
+ *  resta per i chiamanti: non è più su una Card. */
 export function TabellaCard({
   caption,
   attenuata,
@@ -191,19 +192,18 @@ export function TabellaCard({
   children: ReactNode;
 }) {
   return (
-    <Card className="overflow-hidden p-0">
-      <div className="overflow-x-auto">
-        <table
-          className={`w-full min-w-[760px] text-left text-sm ${attenuata ? "opacity-60 transition-opacity" : ""}`}
-          aria-busy={attenuata}
-        >
-          <caption className="sr-only">{caption}</caption>
-          {children}
-        </table>
-      </div>
-    </Card>
+    <Table
+      className={cn("min-w-[760px]", attenuata && "opacity-60 transition-opacity")}
+      aria-busy={attenuata}
+    >
+      <caption className="sr-only">{caption}</caption>
+      {children}
+    </Table>
   );
 }
+
+/** Intestazione di riga (`th scope="row"`) con l'aspetto di una cella. */
+export const thRigaClass = "border-b border-line px-3 py-3.5 text-left align-top font-normal";
 
 /** Numero in italiano (separatore delle migliaia, decimali se servono). */
 export function numero(valore: number | null | undefined, decimali = 0): string {

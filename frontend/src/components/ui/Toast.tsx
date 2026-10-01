@@ -65,6 +65,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <div
         role="status"
         aria-live="polite"
+        // Si annuncia solo la notifica aggiunta, non tutta la pila ogni volta.
+        aria-atomic="false"
         className="pointer-events-none fixed bottom-4 left-4 z-50 flex max-w-[calc(100vw-2rem)] flex-col items-start gap-2"
       >
         {toasts.map((t) => (
@@ -107,6 +109,8 @@ function ToastItem({
 
   return (
     <div
+      // Un errore va annunciato subito, senza aspettare che lo screen reader finisca.
+      role={tono === "errore" ? "alert" : undefined}
       onMouseEnter={() => setInPausa(true)}
       onMouseLeave={() => setInPausa(false)}
       className="pointer-events-auto inline-flex items-center gap-2.5 rounded-control bg-ink px-4 py-3 text-body font-medium text-on-accent shadow-overlay"

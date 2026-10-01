@@ -1,17 +1,40 @@
-import { Sparkles } from "lucide-react";
 import { useMemo } from "react";
 import { useCompanyFacets } from "../../hooks/useCompany";
 import { usePreferences } from "../../hooks/usePreferences";
 import { useBandiFilters, type FacetKey } from "../../hooks/useBandiFilters";
 import { buildBandiPerTePreset, presetHasValues } from "../../lib/bandiPreset";
-import { cn } from "../../lib/cn";
+import { Segment } from "../ui/Segment";
 
 const sameSet = (a: number[], b: number[]) =>
   a.length === b.length && [...a].sort((x, y) => x - y).join(",") === b.join(",");
 
-/** Preset «Bandi per te»: applica ai filtri l'unione dei valori REALI
- * dell'azienda e delle PREFERENZE personali dell'utente. */
-export function BandiPerTeButton() {
+/** «nessuna»: i filtri non sono né il preset né «Tutti» (faccette scelte a
+ *  mano): nessuna delle due opzioni risulta premuta. */
+type Scelta = "tutti" | "per-te" | "nessuna";
+
+const OPZIONI = [
+  { id: "tutti", label: "Tutti" },
+  { id: "per-te", label: "Adatti alla tua azienda" },
+] as const;
+
+/** Le faccette che il preset può impostare e che «Tutti» azzera. */
+const FACCETTE_DEL_PRESET: FacetKey[] = [
+  "regioni",
+  "settori",
+  "ateco",
+  "beneficiari",
+  "tipologie",
+  "modalita",
+  "programmi",
+];
+
+/** Segmento «Tutti / Adatti alla tua azienda» = il preset «Bandi per te»:
+ *  applica ai filtri l'unione dei valori REALI dell'azienda e delle
+ *  PREFERENZE personali dell'utente. «Tutti» toglie solo le faccette che il
+ *  preset imposta, ed è premuto solo quando sono tutte vuote; se i filtri non
+ *  coincidono con nessuno dei due, nessuna opzione è premuta (e «Tutti» li
+ *  azzera). Senza un preset (profilo vuoto) il segmento non compare. */
+export function BandiPerTeSegment({ className }: { className?: string }) {
   const { filters, update } = useBandiFilters();
   const { data: facets } = useCompanyFacets();
   const { data: preferences } = usePreferences();
@@ -31,35 +54,35 @@ export function BandiPerTeButton() {
     [filters, preset, hasPreset],
   );
 
+  const tutti = FACCETTE_DEL_PRESET.every((key) => filters[key].length === 0);
+
   if (!hasPreset) return null;
 
-  const handleClick = () => {
-    if (active) {
-      // secondo click: rimuove il preset (solo le faccette che imposta)
+  const scelta: Scelta = active ? "per-te" : tutti ? "tutti" : "nessuna";
+
+  const handleChange = (id: Scelta) => {
+    if (id === "per-te") {
+      if (!active) update(preset);
+    } else if (id === "tutti" && !tutti) {
       update({
-        regioni: [], settori: [], ateco: [], beneficiari: [],
-        tipologie: [], modalita: [], programmi: [],
+        regioni: [],
+        settori: [],
+        ateco: [],
+        beneficiari: [],
+        tipologie: [],
+        modalita: [],
+        programmi: [],
       });
-    } else {
-      update(preset);
     }
   };
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      aria-pressed={active}
-      title="Filtra con i dati della tua azienda e le tue preferenze"
-      className={cn(
-        "inline-flex h-11 cursor-pointer items-center gap-2 rounded-xl border px-4 text-sm font-medium shadow-card transition-colors focus-visible:outline-2 focus-visible:outline-brand-500",
-        active
-          ? "border-brand-500 bg-brand-500 text-white hover:bg-brand-600"
-          : "border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100",
-      )}
-    >
-      <Sparkles className="size-4" aria-hidden />
-      Bandi per te
-    </button>
+    <Segment<Scelta>
+      opzioni={OPZIONI}
+      valore={scelta}
+      onChange={handleChange}
+      ariaLabel="Quali bandi mostrare"
+      className={className}
+    />
   );
 }

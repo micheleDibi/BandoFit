@@ -185,7 +185,9 @@ async def passo_preavvisi(primary, oggi: date) -> int:
         piano = sub.get("subscription_plans") or {}
         importo = pricing.in_cents(Decimal(str(piano.get("prezzo_annuale") or "0")))
         importo += pricing.iva_per_soggetto(importo)[0]  # stima prudenziale al 25%
-        email, url = await _email_e_url(primary, sub["user_id"], "/app/abbonamento")
+        email, url = await _email_e_url(
+            primary, sub["user_id"], "/app/abbonamento?tab=pagamento"
+        )
         if email:
             await email_service.send_promemoria_rinnovo_email(
                 email, piano.get("nome") or "abbonamento", importo,
@@ -317,7 +319,7 @@ async def passo_retry(primary, revolut, oggi: date) -> int:
             piano_dest = await _piano_destinazione(primary, sub)
             if piano_dest and await _crea_rinnovo(primary, revolut, sub, piano_dest, tentativo):
                 email, url = await _email_e_url(
-                    primary, sub["user_id"], "/app/abbonamento"
+                    primary, sub["user_id"], "/app/abbonamento?tab=pagamento"
                 )
                 grazia = sub.get("grace_until") or ""
                 if email:

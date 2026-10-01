@@ -1,25 +1,23 @@
-import { CheckCircle2, Clock } from "lucide-react";
 import { MODERAZIONE_COPY } from "../../lib/copy";
 import type { StatoSegnalazione } from "../../types";
-import { Badge, type BadgeProps } from "../ui/Badge";
+import { Status, type TonoStatus } from "../ui/Status";
 
-const TONI_STATO: Record<StatoSegnalazione, BadgeProps["tone"]> = {
-  ricevuta: "slate",
-  in_esame: "amber",
-  decisa: "brand",
-  ricorso_presentato: "amber",
-  ricorso_deciso: "brand",
+const TONI_STATO: Record<StatoSegnalazione, TonoStatus> = {
+  ricevuta: "neutro",
+  in_esame: "in-apertura",
+  decisa: "chiuso",
+  ricorso_presentato: "in-apertura",
+  ricorso_deciso: "chiuso",
 };
 
-/** Stato di una segnalazione (DSA): icona E testo, mai il solo colore. */
+/** Stato di una segnalazione (DSA), in parole con il punto di `Status`, mai
+ *  il solo colore. Lo usa anche l'admin. */
 export function StatoSegnalazioneBadge({ stato }: { stato: StatoSegnalazione }) {
-  const decisa = stato === "decisa" || stato === "ricorso_deciso";
-  const Icona = decisa ? CheckCircle2 : Clock;
   return (
-    <Badge tone={TONI_STATO[stato] ?? "slate"}>
-      <Icona className="size-3.5" aria-hidden />
+    <Status tono={TONI_STATO[stato] ?? "neutro"}>
+      <span className="sr-only">Stato: </span>
       {MODERAZIONE_COPY.stati[stato] ?? stato}
-    </Badge>
+    </Status>
   );
 }
 

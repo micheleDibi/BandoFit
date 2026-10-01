@@ -1,17 +1,9 @@
-import {
-  Activity,
-  Building2,
-  Contact,
-  FileSpreadsheet,
-  Landmark,
-  MapPin,
-  Tags,
-  Users,
-} from "lucide-react";
-import { Badge } from "../../ui/Badge";
 import { formatDateNumeric, formatEur } from "../../../lib/format";
 import type { CompanyDossier, DossierPerson } from "../../../types";
-import { DossierGrid, DossierRow, DossierSection } from "./DossierSection";
+import { Accordion, type VoceAccordion } from "../../ui/Accordion";
+import { Badge } from "../../ui/Badge";
+import { TextLink } from "../../ui/TextLink";
+import { DossierGrid, DossierRow } from "./DossierSection";
 import { PeopleTable } from "./PeopleTable";
 
 const FLAG_LABELS: Record<string, string> = {
@@ -34,10 +26,10 @@ const CONTRATTI_LABELS: Record<string, string> = {
   apprendisti: "Apprendisti",
 };
 
-/** Rendering a sezioni del dossier certificato. Condiviso tra la pagina
- *  Azienda (il titolare vede il proprio) e l'area progettista (vista full
- *  post-assegnazione, con accesso registrato lato server).
- *  `linkBilanci`: solo dove la pagina ha la sezione `#bilanci` (Azienda). */
+/** Il dossier certificato a sezioni richiudibili (`Accordion`): aperte solo
+ *  le prime due. Condiviso tra la pagina Azienda (il titolare vede il proprio)
+ *  e l'area progettista (vista full post-assegnazione, con accesso registrato
+ *  lato server). `linkBilanci`: solo dove la pagina ha la scheda Bilanci. */
 export function DossierView({
   dossier,
   people,
@@ -68,9 +60,12 @@ export function DossierView({
       ? `Fatturato (${annoFatturato})`
       : "Fatturato";
 
-  return (
-    <div className="mt-4 space-y-4">
-      <DossierSection title="Anagrafica" icon={<Building2 className="size-4" aria-hidden />}>
+  const sezioni: VoceAccordion[] = [
+    {
+      id: "dossier-anagrafica",
+      titolo: "Anagrafica",
+      aperto: true,
+      children: (
         <DossierGrid>
           <DossierRow label="Denominazione" value={anagrafica.denominazione} />
           <DossierRow label="Partita IVA" value={anagrafica.partita_iva} />
@@ -83,18 +78,28 @@ export function DossierView({
           <DossierRow label="CCIAA" value={anagrafica.cciaa} />
           <DossierRow
             label="Data di costituzione"
-            value={anagrafica.data_costituzione ? formatDateNumeric(anagrafica.data_costituzione) : null}
+            value={
+              anagrafica.data_costituzione ? formatDateNumeric(anagrafica.data_costituzione) : null
+            }
           />
           <DossierRow
             label="Inizio attività"
-            value={anagrafica.data_inizio_attivita ? formatDateNumeric(anagrafica.data_inizio_attivita) : null}
+            value={
+              anagrafica.data_inizio_attivita
+                ? formatDateNumeric(anagrafica.data_inizio_attivita)
+                : null
+            }
           />
           <DossierRow label="Gruppo societario" value={anagrafica.gruppo_societario} />
           <DossierRow label="Capogruppo" value={anagrafica.capogruppo} />
         </DossierGrid>
-      </DossierSection>
-
-      <DossierSection title="Attività e ATECO" icon={<Activity className="size-4" aria-hidden />}>
+      ),
+    },
+    {
+      id: "dossier-attivita",
+      titolo: "Attività e ATECO",
+      aperto: true,
+      children: (
         <DossierGrid>
           <DossierRow
             label="ATECO principale"
@@ -119,62 +124,84 @@ export function DossierView({
           <DossierRow label="NACE" value={attivita.nace} />
           <DossierRow label="SAE" value={attivita.sae} />
         </DossierGrid>
-      </DossierSection>
+      ),
+    },
+    {
+      id: "dossier-sede",
+      titolo: "Sede e unità locali",
+      children: (
+        <div className="flex flex-col gap-4">
+          <DossierGrid>
+            <DossierRow
+              label="Sede legale"
+              value={
+                [sede.indirizzo, sede.cap, sede.comune, sede.provincia].filter(Boolean).join(", ") ||
+                null
+              }
+            />
+            <DossierRow label="Regione" value={sede.regione} />
+            <DossierRow label="Numero sedi" value={sede.numero_sedi} />
+          </DossierGrid>
+          {sede.unita_locali.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <p className="text-small text-ink-3">Tutte le sedi</p>
+              <ul className="flex flex-col">
+                {sede.unita_locali.map((unita, index) => (
+                  <li
+                    key={index}
+                    className="flex flex-wrap items-center gap-2 border-b border-line py-2 text-body last:border-b-0"
+                  >
+                    <span className="text-ink">
+                      {[unita.indirizzo, unita.cap, unita.comune, unita.provincia]
+                        .filter(Boolean)
+                        .join(", ")}
+                    </span>
+                    {unita.regione && <Badge>{unita.regione}</Badge>}
+                    {unita.tipo && <span className="text-small text-ink-3">{unita.tipo}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      id: "dossier-persone",
+      titolo: "Persone e cariche",
+      children: <PeopleTable people={people} />,
+    },
+  ];
 
-      <DossierSection title="Sede e unità locali" icon={<MapPin className="size-4" aria-hidden />}>
-        <DossierGrid>
-          <DossierRow
-            label="Sede legale"
-            value={[sede.indirizzo, sede.cap, sede.comune, sede.provincia]
-              .filter(Boolean)
-              .join(", ") || null}
-          />
-          <DossierRow label="Regione" value={sede.regione} />
-          <DossierRow label="Numero sedi" value={sede.numero_sedi} />
-        </DossierGrid>
-        {sede.unita_locali.length > 0 && (
-          <div className="mt-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Tutte le sedi
-            </p>
-            <ul className="mt-2 divide-y divide-slate-100">
-              {sede.unita_locali.map((unita, index) => (
-                <li key={index} className="flex flex-wrap items-center gap-2 py-2 text-sm">
-                  <span className="text-slate-800">
-                    {[unita.indirizzo, unita.cap, unita.comune, unita.provincia]
-                      .filter(Boolean)
-                      .join(", ")}
-                  </span>
-                  {unita.regione && <Badge tone="slate">{unita.regione}</Badge>}
-                  {unita.tipo && <span className="text-xs text-slate-400">{unita.tipo}</span>}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </DossierSection>
+  if (partecipazioni.length > 0) {
+    sezioni.push({
+      id: "dossier-partecipazioni",
+      titolo: "Partecipazioni",
+      children: (
+        <ul className="flex flex-col">
+          {partecipazioni.map((p, index) => (
+            <li
+              key={index}
+              className="flex flex-wrap items-center justify-between gap-2 border-b border-line py-2 text-body last:border-b-0"
+            >
+              <span className="font-medium text-ink">{p.denominazione ?? "—"}</span>
+              <span className="text-ink-2">
+                {[p.codice_fiscale ? `CF ${p.codice_fiscale}` : null, p.quota !== null ? `${p.quota}%` : null]
+                  .filter(Boolean)
+                  .join(", ")}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ),
+    });
+  }
 
-      <DossierSection title="Persone e cariche" icon={<Users className="size-4" aria-hidden />}>
-        <PeopleTable people={people} />
-      </DossierSection>
-
-      {partecipazioni.length > 0 && (
-        <DossierSection title="Partecipazioni" icon={<Landmark className="size-4" aria-hidden />}>
-          <ul className="divide-y divide-slate-100">
-            {partecipazioni.map((p, index) => (
-              <li key={index} className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0 text-sm">
-                <span className="font-medium text-slate-800">{p.denominazione ?? "—"}</span>
-                <span className="text-slate-500">
-                  {p.codice_fiscale && `CF ${p.codice_fiscale}`}
-                  {p.quota !== null && ` · ${p.quota}%`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </DossierSection>
-      )}
-
-      <DossierSection title="Dipendenti" icon={<Contact className="size-4" aria-hidden />}>
+  sezioni.push({
+    id: "dossier-dipendenti",
+    titolo: "Dipendenti",
+    children: (
+      <div className="flex flex-col gap-4">
         <DossierGrid>
           <DossierRow label="Numero dipendenti" value={dipendenti.numero} />
           <DossierRow label="Fascia" value={dipendenti.fascia} />
@@ -188,31 +215,35 @@ export function DossierView({
           />
         </DossierGrid>
         {contratti && Object.values(contratti).some((v) => v !== null) && (
-          <div className="mt-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Composizione (%)
-            </p>
-            <dl className="mt-2 grid gap-x-6 gap-y-2 sm:grid-cols-3 lg:grid-cols-4">
+          <div className="flex flex-col gap-1">
+            <p className="text-small text-ink-3">Composizione (%)</p>
+            <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-3 lg:grid-cols-4">
               {Object.entries(contratti)
                 .filter(([, v]) => v !== null)
                 .map(([key, value]) => (
                   <div key={key} className="flex items-baseline justify-between gap-2 sm:block">
-                    <dt className="text-xs text-slate-400">{CONTRATTI_LABELS[key] ?? key}</dt>
-                    <dd className="text-sm font-medium tabular-nums text-slate-800">{value}%</dd>
+                    <dt className="text-small text-ink-3">{CONTRATTI_LABELS[key] ?? key}</dt>
+                    <dd className="text-body font-medium text-ink tabular-nums">{value}%</dd>
                   </div>
                 ))}
             </dl>
           </div>
         )}
-      </DossierSection>
+      </div>
+    ),
+  });
 
-      {hasBilanci && (
-        <DossierSection title="Dati economici" icon={<FileSpreadsheet className="size-4" aria-hidden />}>
+  if (hasBilanci) {
+    sezioni.push({
+      id: "dossier-economici",
+      titolo: "Dati economici",
+      children: (
+        <div className="flex flex-col gap-3">
           {annoBilancio && (
-            <p className="mb-3 text-sm text-slate-500">
-              Esercizio <span className="tabular font-medium text-slate-700">{annoBilancio}</span>
+            <p className="text-body text-ink-2">
+              Esercizio <span className="font-medium text-ink tabular-nums">{annoBilancio}</span>
               {chiusuraBilancio && (
-                <span className="tabular"> · chiuso il {formatDateNumeric(chiusuraBilancio)}</span>
+                <span className="tabular-nums">, chiuso il {formatDateNumeric(chiusuraBilancio)}</span>
               )}
             </p>
           )}
@@ -234,43 +265,47 @@ export function DossierView({
               label="EBITDA"
               value={bilanci.ebitda !== null ? formatEur(bilanci.ebitda) : null}
             />
-            <DossierRow
-              label="Utile"
-              value={bilanci.utile !== null ? formatEur(bilanci.utile) : null}
-            />
+            <DossierRow label="Utile" value={bilanci.utile !== null ? formatEur(bilanci.utile) : null} />
           </DossierGrid>
           {linkBilanci && (
-            <a
-              href="#bilanci"
-              className="mt-4 inline-block rounded text-sm font-medium text-brand-600 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
-            >
-              Vedi tutti i bilanci ↓
-            </a>
+            <p className="text-small">
+              <TextLink to="?tab=bilanci#bilanci" className="font-medium">
+                Vedi tutti i bilanci
+              </TextLink>
+            </p>
           )}
-        </DossierSection>
-      )}
+        </div>
+      ),
+    });
+  }
 
-      <DossierSection title="Contatti" icon={<Contact className="size-4" aria-hidden />}>
-        <DossierGrid>
-          <DossierRow label="PEC" value={contatti.pec} />
-          <DossierRow label="Email" value={contatti.email} />
-          <DossierRow label="Telefono" value={contatti.telefono} />
-          <DossierRow label="Fax" value={contatti.fax} />
-          <DossierRow label="Sito web" value={contatti.sito_web} />
-        </DossierGrid>
-      </DossierSection>
+  sezioni.push({
+    id: "dossier-contatti",
+    titolo: "Contatti",
+    children: (
+      <DossierGrid>
+        <DossierRow label="PEC" value={contatti.pec} />
+        <DossierRow label="Email" value={contatti.email} />
+        <DossierRow label="Telefono" value={contatti.telefono} />
+        <DossierRow label="Fax" value={contatti.fax} />
+        <DossierRow label="Sito web" value={contatti.sito_web} />
+      </DossierGrid>
+    ),
+  });
 
-      {activeFlags.length > 0 && (
-        <DossierSection title="Attributi" icon={<Tags className="size-4" aria-hidden />}>
-          <div className="flex flex-wrap gap-2">
-            {activeFlags.map(([key]) => (
-              <Badge key={key} tone="brand">
-                {FLAG_LABELS[key] ?? key}
-              </Badge>
-            ))}
-          </div>
-        </DossierSection>
-      )}
-    </div>
-  );
+  if (activeFlags.length > 0) {
+    sezioni.push({
+      id: "dossier-attributi",
+      titolo: "Attributi",
+      children: (
+        <div className="flex flex-wrap gap-2">
+          {activeFlags.map(([key]) => (
+            <Badge key={key}>{FLAG_LABELS[key] ?? key}</Badge>
+          ))}
+        </div>
+      ),
+    });
+  }
+
+  return <Accordion items={sezioni} />;
 }

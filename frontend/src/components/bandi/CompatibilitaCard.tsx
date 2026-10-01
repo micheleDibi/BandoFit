@@ -1,24 +1,34 @@
-import { CircleCheck, CircleDashed, CircleX } from "lucide-react";
-import { Link } from "react-router-dom";
-import { cn } from "../../lib/cn";
-import { scoreColorClasses } from "../../lib/scoreColor";
+import { Check, Minus } from "lucide-react";
+import { useCompany } from "../../hooks/useCompany";
 import type { BandoDetail, CompatibilitaDimensione } from "../../types";
-import { Card } from "../ui/Card";
+import { TextLink } from "../ui/TextLink";
 
-/** In colonna laterale lo spazio è poco: oltre questa soglia le voci non in
- *  comune si riassumono in un «+N» (il title le elenca comunque). */
-const MAX_CHIP = 6;
+/** Oltre questa soglia le voci si riassumono in «e altri N». */
+const MAX_VOCI = 6;
 
 interface Voce {
   id: number;
   label: string;
-  title?: string;
 }
 
-/** Un requisito del bando. Le sue voci sono ALTERNATIVE: ne basta una in comune
- *  perché il requisito sia soddisfatto (un bando su quattro settori non chiede
- *  di operare in tutti e quattro). `dim` assente = requisito non valutabile,
- *  l'azienda non ha quel dato e non entra nel punteggio. */
+function elenco(voci: Voce[]): string {
+  const visibili = voci.slice(0, MAX_VOCI).map((v) => v.label).join(", ");
+  const resto = voci.length - MAX_VOCI;
+  return resto > 0 ? `${visibili} e altri ${resto}` : visibili;
+}
+
+type Esito = "ok" | "no" | "neutro";
+
+const PAROLA_ESITO: Record<Esito, string> = {
+  ok: "soddisfatto",
+  no: "non soddisfatto",
+  neutro: "non valutato",
+};
+
+/** Un requisito del bando, spiegato in una riga. Le sue voci sono ALTERNATIVE:
+ *  ne basta una in comune perché il requisito sia soddisfatto (un bando su
+ *  quattro settori non chiede di operare in tutti e quattro). `dim` assente =
+ *  requisito non valutabile: l'azienda non ha quel dato e non entra nel conto. */
 function Requisito({
   nome,
   voci,
@@ -32,145 +42,83 @@ function Requisito({
 }) {
   if (voci.length === 0) return null;
 
-  const inComune = new Set(dim?.matched_ids ?? []);
-  // Le voci in comune per prime: in una lista lunga sono l'unica cosa che si cerca.
-  const ordinate = [...voci].sort(
-    (a, b) => Number(inComune.has(b.id)) - Number(inComune.has(a.id)),
-  );
-  // Bando aperto a tutte le regioni: elencarle tutte e venti è rumore, basta
-  // dire dove l'azienda ha una sede e spiegarlo sotto.
-  const visibili = dim?.nazionale
-    ? ordinate.filter((v) => inComune.has(v.id))
-    : ordinate.slice(0, MAX_CHIP);
-  const restanti = dim?.nazionale ? [] : ordinate.slice(visibili.length);
+  const inComune = voci.filter((v) => dim?.matched_ids.includes(v.id));
+  let esito: Esito;
+  let spiegazione: string;
+  if (!valutabile) {
+    esito = "neutro";
+    spiegazione = `Il bando chiede: ${elenco(voci)}`;
+  } else if (!dim) {
+    esito = "neutro";
+    spiegazione = "Non valutato: manca il dato nella tua azienda";
+  } else if (dim.nazionale) {
+    esito = "ok";
+    spiegazione = "Il bando è aperto a tutte le regioni";
+  } else if (dim.soddisfatta) {
+    esito = "ok";
+    spiegazione = elenco(inComune);
+  } else {
+    esito = "no";
+    spiegazione = `Il bando chiede: ${elenco(voci)}`;
+  }
 
   return (
-    <li>
-      <div className="flex items-center gap-1.5">
-        {!valutabile ? null : !dim ? (
-          <CircleDashed className="size-3.5 shrink-0 text-slate-300" aria-hidden />
-        ) : dim.soddisfatta ? (
-          <CircleCheck className="size-3.5 shrink-0 text-emerald-600" aria-hidden />
-        ) : (
-          <CircleX className="size-3.5 shrink-0 text-rose-400" aria-hidden />
-        )}
-        <h3 className="text-xs font-medium uppercase tracking-wide text-slate-400">{nome}</h3>
-        {valutabile && !dim && (
-          <span
-            className="text-xs text-slate-400"
-            title="La tua azienda non ha questo dato: il requisito non entra nel punteggio."
-          >
-            non valutato
-          </span>
-        )}
-      </div>
-
-      <ul className="mt-1.5 flex flex-wrap gap-1">
-        {visibili.map((voce) => (
-          <li key={voce.id}>
-            <span
-              title={voce.title}
-              className={cn(
-                "inline-flex rounded-full px-2 py-0.5 text-xs ring-1 ring-inset",
-                inComune.has(voce.id)
-                  ? "bg-emerald-50 font-medium text-emerald-700 ring-emerald-200"
-                  : "bg-slate-100 text-slate-600 ring-slate-200",
-              )}
-            >
-              {voce.label}
-            </span>
-          </li>
-        ))}
-        {restanti.length > 0 && (
-          <li>
-            <span
-              title={restanti.map((v) => v.label).join(", ")}
-              className="inline-flex rounded-full px-2 py-0.5 text-xs text-slate-400"
-            >
-              +{restanti.length}
-            </span>
-          </li>
-        )}
-      </ul>
-
-      {dim?.nazionale && (
-        <p className="mt-1 text-xs text-slate-500">Il bando è aperto a tutte le regioni.</p>
+    <li className="flex items-start gap-2.5 border-b border-line py-2.5 last:border-b-0">
+      {esito === "ok" ? (
+        <Check className="mt-0.5 size-4 shrink-0 text-fit-ink" aria-hidden />
+      ) : (
+        <Minus className="mt-0.5 size-4 shrink-0 text-ink-3" aria-hidden />
       )}
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <p className="text-body font-semibold text-ink">
+          {nome}
+          {valutabile && <span className="sr-only">: {PAROLA_ESITO[esito]}</span>}
+        </p>
+        <p className="text-small text-ink-2">{spiegazione}</p>
+      </div>
     </li>
   );
 }
 
-/** Pre-check in colonna laterale: i requisiti di catalogo del bando (regioni,
- *  ATECO, settori, beneficiari) e quali la tua azienda soddisfa, tutte le sedi
- *  comprese. Non sostituisce l'AI-check, che legge il testo del bando. */
+/** Compatibilità nel pannello «Fa per te?»: i requisiti di catalogo del bando
+ *  (regione, settore, ATECO, beneficiari) e quali la tua azienda soddisfa,
+ *  tutte le sedi comprese. Il contatore (`Fit`) lo mette il pannello; qui le
+ *  righe spiegate. Non sostituisce l'AI-check, che legge il testo del bando. */
 export function CompatibilitaCard({ bando }: { bando: BandoDetail }) {
+  const { data: azienda } = useCompany();
   const compat = bando.compatibilita ?? null;
   const dims = compat?.dimensioni ?? undefined;
 
   const voci = {
     regioni: bando.regioni.map((r) => ({ id: r.id, label: r.nome })),
-    ateco: bando.codici_ateco.map((c) => ({
-      id: c.id,
-      label: c.codice,
-      title: c.descrizione ?? undefined,
-    })),
     settori: bando.settori.map((s) => ({ id: s.id, label: s.nome })),
+    ateco: bando.codici_ateco.map((c) => ({ id: c.id, label: c.codice })),
     beneficiari: bando.beneficiari.map((b) => ({ id: b.id, label: b.nome })),
   };
 
   // Il bando non dichiara alcun requisito di catalogo: niente da confrontare.
   if (Object.values(voci).every((v) => v.length === 0)) return null;
 
-  const colori = compat ? scoreColorClasses(compat.punteggio) : null;
+  const nomeAzienda = azienda?.company?.ragione_sociale;
 
   return (
-    <Card id="compatibilita" className="p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="font-display text-sm font-semibold text-slate-900">Compatibilità</h2>
-          <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
-            {compat
-              ? "Requisiti del bando soddisfatti dalla tua azienda, tutte le sedi comprese."
-              : "A chi si rivolge questo bando."}
-          </p>
-        </div>
-        {compat && colori && (
-          <p className="tabular shrink-0 font-display text-xl font-bold leading-none">
-            <span className={colori.text}>{compat.matched}</span>
-            <span className="text-slate-300">/{compat.totale}</span>
-          </p>
-        )}
-      </div>
-
-      {compat && colori && (
-        <div
-          className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100"
-          role="img"
-          aria-label={`Compatibilità ${compat.punteggio}%`}
-        >
-          <div
-            className={cn("h-full rounded-full transition-[width]", colori.bar)}
-            style={{ width: `${compat.punteggio}%` }}
-          />
-        </div>
-      )}
-
-      {!compat && (
-        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
-          <Link
-            to="/app/azienda"
-            className="font-medium underline underline-offset-2 hover:text-amber-900"
-          >
-            Importa la tua azienda
-          </Link>{" "}
-          da P.IVA per vedere quanto sei compatibile con questo bando.
+    <div id="compatibilita" className="flex flex-col gap-2">
+      {compat ? (
+        <p className="text-small text-ink-2">
+          Requisiti del bando soddisfatti {nomeAzienda ? `da ${nomeAzienda}` : "dalla tua azienda"},
+          tutte le sedi comprese.
+        </p>
+      ) : (
+        <p className="text-small text-ink-2">
+          A chi si rivolge questo bando.{" "}
+          <TextLink to="/app/azienda">Importa la tua azienda</TextLink> da P.IVA per vedere
+          quanto sei compatibile.
         </p>
       )}
-
-      <ul className="mt-4 space-y-3">
-        <Requisito nome="Regioni" voci={voci.regioni} dim={dims?.regioni} valutabile={!!compat} />
-        <Requisito nome="Codici ATECO" voci={voci.ateco} dim={dims?.ateco} valutabile={!!compat} />
-        <Requisito nome="Settori" voci={voci.settori} dim={dims?.settori} valutabile={!!compat} />
+      <ul className="flex flex-col">
+        <Requisito nome="Regione" voci={voci.regioni} dim={dims?.regioni} valutabile={!!compat} />
+        <Requisito nome="Settore" voci={voci.settori} dim={dims?.settori} valutabile={!!compat} />
+        <Requisito nome="Codice ATECO" voci={voci.ateco} dim={dims?.ateco} valutabile={!!compat} />
         <Requisito
           nome="Beneficiari"
           voci={voci.beneficiari}
@@ -178,6 +126,6 @@ export function CompatibilitaCard({ bando }: { bando: BandoDetail }) {
           valutabile={!!compat}
         />
       </ul>
-    </Card>
+    </div>
   );
 }

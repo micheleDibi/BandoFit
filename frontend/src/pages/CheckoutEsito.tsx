@@ -1,9 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
+import { Check, RefreshCw, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Button, LinkButton } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
+import { InlineError } from "../components/ui/InlineError";
+import { Page } from "../components/ui/Page";
+import { PageHeader } from "../components/ui/PageHeader";
+import { Spinner } from "../components/ui/Spinner";
 import { ErrorState, Skeleton } from "../components/ui/states";
 import { usePurchase, useSyncPurchase } from "../hooks/useCheckout";
 import { apiErrorMessage } from "../lib/api";
@@ -25,6 +28,12 @@ function retryUrl(purchase: Purchase): string | null {
     return `/app/checkout?piano=${purchase.oggetto_slug}`;
   return null; // cambio_admin: non è un flusso self-serve
 }
+
+const ACQUISTI = (
+  <LinkButton to="/app/abbonamento?tab=acquisti" variant="secondary">
+    Vedi gli acquisti
+  </LinkButton>
+);
 
 export default function CheckoutEsito() {
   const { purchaseId } = useParams<{ purchaseId: string }>();
@@ -59,14 +68,12 @@ export default function CheckoutEsito() {
   const renderStato = (p: Purchase) => {
     if (p.status === "pagato" || p.status === "gratuito") {
       return (
-        <Card className="flex flex-col items-center px-6 py-12 text-center">
-          <div className="rounded-full bg-emerald-50 p-3 text-emerald-600">
-            <CheckCircle2 className="size-8" aria-hidden />
-          </div>
-          <h2 className="mt-4 font-display text-xl font-bold text-slate-900">
+        <div className="flex max-w-lettura flex-col items-start gap-3">
+          <h2 className="flex items-center gap-2 text-title-section text-ink">
+            <Check className="size-5 shrink-0 text-fit-ink" aria-hidden />
             Pagamento riuscito, grazie!
           </h2>
-          <p className="mt-2 max-w-md text-sm text-slate-600">
+          <p className="text-body text-ink-2">
             {p.descrizione}
             {p.totale_cents > 0 && <> — totale {eurFromCents(p.totale_cents)}</>}.{" "}
             {p.kind === "addon"
@@ -75,51 +82,43 @@ export default function CheckoutEsito() {
                 ? "L'operazione è stata registrata."
                 : "Il nuovo piano è attivo da subito."}
           </p>
-          <div className="mt-6 flex flex-wrap justify-center gap-3">
+          <div className="flex flex-wrap gap-2 pt-1">
             {p.kind === "addon" ? (
-              <LinkButton to="/app/abbonamento">Vedi i tuoi add-on</LinkButton>
+              <LinkButton to="/app/abbonamento?tab=addon">Vedi i tuoi add-on</LinkButton>
             ) : (
               <LinkButton to="/app/abbonamento">Vai al tuo abbonamento</LinkButton>
             )}
-            <LinkButton to="/app/acquisti" variant="secondary">
-              I tuoi acquisti
-            </LinkButton>
+            {ACQUISTI}
           </div>
-        </Card>
+        </div>
       );
     }
 
     if (p.status === "in_attesa") {
       return (
-        <Card className="flex flex-col items-center px-6 py-12 text-center">
-          <div className="rounded-full bg-brand-50 p-3 text-brand-500">
-            <Loader2 className="size-8 animate-spin" aria-hidden />
-          </div>
-          <h2 className="mt-4 font-display text-xl font-bold text-slate-900">
+        <div className="flex max-w-lettura flex-col items-start gap-3">
+          <h2 className="flex items-center gap-2 text-title-section text-ink">
+            <Spinner size="md" />
             Stiamo confermando il pagamento
           </h2>
-          <p className="mt-2 max-w-md text-sm text-slate-600" role="status">
+          <p className="text-body text-ink-2" role="status">
             {pollScaduto
-              ? "La conferma del provider sta impiegando più del previsto. Puoi verificare ora oppure ricontrollare più tardi da «I tuoi acquisti»: se il pagamento è andato a buon fine non verrà perso."
+              ? "La conferma del provider sta impiegando più del previsto. Puoi verificare ora oppure ricontrollare più tardi dagli acquisti: se il pagamento è andato a buon fine non verrà perso."
               : "Attendiamo la conferma del provider di pagamento: di solito bastano pochi secondi, la pagina si aggiorna da sola."}
           </p>
-          <div className="mt-6 flex flex-wrap justify-center gap-3">
-            <Button onClick={() => purchaseId && sync.mutate(purchaseId)} loading={sync.isPending}>
+          <div className="flex flex-wrap gap-2 pt-1">
+            <Button
+              type="button"
+              onClick={() => purchaseId && sync.mutate(purchaseId)}
+              loading={sync.isPending}
+            >
               <RefreshCw className="size-4" aria-hidden />
               Verifica ora
             </Button>
-            {pollScaduto && (
-              <LinkButton to="/app/acquisti" variant="secondary">
-                I tuoi acquisti
-              </LinkButton>
-            )}
+            {pollScaduto && ACQUISTI}
           </div>
-          {sync.isError && (
-            <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-              {apiErrorMessage(sync.error)}
-            </p>
-          )}
-        </Card>
+          {sync.isError && <InlineError>{apiErrorMessage(sync.error)}</InlineError>}
+        </div>
       );
     }
 
@@ -131,45 +130,37 @@ export default function CheckoutEsito() {
     };
     const retry = retryUrl(p);
     return (
-      <Card className="flex flex-col items-center px-6 py-12 text-center">
-        <div className="rounded-full bg-amber-50 p-3 text-amber-600">
-          <AlertTriangle className="size-8" aria-hidden />
-        </div>
-        <h2 className="mt-4 font-display text-xl font-bold text-slate-900">
+      <div className="flex max-w-lettura flex-col items-start gap-3">
+        <h2 className="flex items-center gap-2 text-title-section text-ink">
+          <TriangleAlert className="size-5 shrink-0 text-warning-ink" aria-hidden />
           Pagamento non completato
         </h2>
-        <p className="mt-2 max-w-md text-sm text-slate-600">{messaggi[p.status]}</p>
+        <p className="text-body text-ink-2">{messaggi[p.status]}</p>
         {p.decline_reason && (
-          <p className="mt-1 text-xs text-slate-400">
-            Motivo segnalato dal provider: {p.decline_reason}
-          </p>
+          <p className="text-small text-ink-3">Motivo segnalato dal provider: {p.decline_reason}</p>
         )}
-        <div className="mt-6 flex flex-wrap justify-center gap-3">
+        <div className="flex flex-wrap gap-2 pt-1">
           {retry && <LinkButton to={retry}>Riprova l'acquisto</LinkButton>}
-          <LinkButton to="/app/acquisti" variant="secondary">
-            I tuoi acquisti
-          </LinkButton>
+          {ACQUISTI}
         </div>
-      </Card>
+      </div>
     );
   };
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
-        Esito del pagamento
-      </h1>
+    <Page variante="flusso">
+      <PageHeader titolo="Esito del pagamento" />
       {isPending ? (
-        <div className="mt-6">
-          <Skeleton className="h-64 w-full" />
-        </div>
+        <Skeleton className="h-40 w-full" />
       ) : isError || !purchase ? (
-        <div className="mt-6">
-          <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
-        </div>
+        <ErrorState
+          title="Non siamo riusciti a leggere l'esito del pagamento."
+          message={apiErrorMessage(error)}
+          onRetry={() => refetch()}
+        />
       ) : (
-        <div className="mt-6">{renderStato(purchase)}</div>
+        renderStato(purchase)
       )}
-    </div>
+    </Page>
   );
 }

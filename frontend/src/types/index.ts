@@ -115,7 +115,8 @@ export interface LinkScheda {
 /** Allegato della scheda, normalizzato dal backend (senza doppioni, già filtrato). */
 export interface AllegatoScheda {
   url: string;
-  etichetta: string | null;
+  /** Sempre valorizzata dal backend (Giro 1), che numera le etichette ripetute. */
+  etichetta: string;
   /** `atto`, `allegato` o un altro tipo del catalogo. */
   tipo: string | null;
   formato: string | null;

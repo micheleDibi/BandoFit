@@ -1,6 +1,6 @@
-import { AlertTriangle, Info } from "lucide-react";
 import { CALL_COPY } from "../../lib/copy";
 import type { RilievoCall } from "../../types";
+import { Alert } from "../ui/Alert";
 import { descriviRilievo } from "./callDati";
 
 /** Rilievi anti-contatti sui testi pubblici, con campo e tipo: i bloccanti
@@ -11,31 +11,23 @@ export function RilieviCall({ rilievi, titolo }: { rilievi: RilievoCall[]; titol
   const bloccanti = rilievi.filter((r) => r.bloccante);
   const avvisi = rilievi.filter((r) => !r.bloccante);
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       {bloccanti.length > 0 && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
-          <p className="inline-flex items-center gap-2 font-medium">
-            <AlertTriangle className="size-4 shrink-0" aria-hidden />
-            {titolo ?? "Da togliere prima di pubblicare"}
-          </p>
-          <ul className="mt-1.5 list-disc space-y-0.5 pl-5">
+        <Alert tono="errore" titolo={titolo ?? "Da togliere prima di pubblicare"}>
+          <ul className="list-disc pl-5">
             {bloccanti.map((r, i) => (
               <li key={`${r.campo}-${r.tipo}-${i}`}>
                 {descriviRilievo(r)}
-                {r.estratto && <span className="text-red-700"> («{r.estratto}»)</span>}
+                {r.estratto && <span className="text-ink-2"> («{r.estratto}»)</span>}
               </li>
             ))}
           </ul>
-          <p className="mt-1.5 text-xs">{CALL_COPY.rilieviNota}</p>
-        </div>
+          <p className="mt-1.5 text-small text-ink-3">{CALL_COPY.rilieviNota}</p>
+        </Alert>
       )}
       {avvisi.length > 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <p className="inline-flex items-center gap-2 font-medium">
-            <Info className="size-4 shrink-0" aria-hidden />
-            Potrebbero far riconoscere l'azienda
-          </p>
-          <ul className="mt-1.5 list-disc space-y-0.5 pl-5">
+        <Alert tono="attenzione" titolo="Potrebbero far riconoscere l'azienda">
+          <ul className="list-disc pl-5">
             {avvisi.map((r, i) => (
               <li key={`${r.campo}-${r.tipo}-${i}`}>
                 {descriviRilievo(r)}
@@ -43,8 +35,10 @@ export function RilieviCall({ rilievi, titolo }: { rilievi: RilievoCall[]; titol
               </li>
             ))}
           </ul>
-          <p className="mt-1.5 text-xs">Non bloccano la pubblicazione: valuta tu se toglierli.</p>
-        </div>
+          <p className="mt-1.5 text-small text-ink-3">
+            Non bloccano la pubblicazione: valuta tu se toglierli.
+          </p>
+        </Alert>
       )}
     </div>
   );

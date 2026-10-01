@@ -10,10 +10,11 @@ import { ADMIN_PARTENARIATI_COPY } from "../../../lib/copy";
 import { formatDate, todayItalyIso } from "../../../lib/format";
 import type { AccettazionePartenariati, CostiPartenariati, MetrichePartenariati } from "../../../types";
 import { Button } from "../../ui/Button";
-import { Card } from "../../ui/Card";
 import { TextField } from "../../ui/Field";
+import { InlineError } from "../../ui/InlineError";
 import { ErrorState, Skeleton } from "../../ui/states";
-import { importoCents, numero, thClass } from "./comuni";
+import { Table, Td, Th } from "../../ui/Table";
+import { importoCents, numero, thRigaClass } from "./comuni";
 
 /** Periodo predefinito: gli ultimi 90 giorni (giorni italiani). */
 const GIORNI_DEFAULT = 90;
@@ -66,23 +67,25 @@ function SceltaPeriodo({ periodo, onApplica }: { periodo: Periodo; onApplica: (p
         Aggiorna
       </Button>
       {errore && (
-        <p id={idErrore} className="w-full text-sm text-red-600" role="alert">
+        <InlineError id={idErrore} className="w-full">
           {errore}
-        </p>
+        </InlineError>
       )}
     </form>
   );
 }
 
+/** Una cifra della griglia: etichetta sopra, cifra in evidenza, nota sotto
+ *  (le note sono frasi intere: in `Facts`, accanto al valore, non ci stanno). */
 function Tessera({ titolo, valore, nota }: { titolo: string; valore: ReactNode; nota?: ReactNode }) {
   return (
-    <Card className="p-4">
-      <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">{titolo}</dt>
-      <dd className="mt-1">
-        <span className="font-display text-2xl font-bold tabular text-slate-900">{valore}</span>
-        {nota && <span className="mt-1 block text-xs text-slate-500">{nota}</span>}
+    <div className="flex flex-col gap-1">
+      <dt className="text-small text-ink-3">{titolo}</dt>
+      <dd className="flex flex-col gap-1">
+        <span className="text-figure text-ink tabular-nums">{valore}</span>
+        {nota && <span className="text-small text-ink-3">{nota}</span>}
       </dd>
-    </Card>
+    </div>
   );
 }
 
@@ -106,7 +109,7 @@ function Metriche({ m }: { m: MetrichePartenariati }) {
   const inv = tasso(m.accettazione?.invito);
   const ore = m.ore_mediane_prima_candidatura;
   return (
-    <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <dl className="grid gap-x-10 gap-y-6 border-y border-line py-5 sm:grid-cols-2 lg:grid-cols-3">
       <Tessera titolo="Call pubblicate" valore={numero(m.call_pubblicate)} />
       <Tessera
         titolo="Candidature per call"
@@ -153,66 +156,64 @@ const VALUTE: Record<string, string> = {
 function Costi({ c }: { c: CostiPartenariati }) {
   const valute = [...new Set([...c.totali.map((t) => t.valuta), ...c.voci.map((v) => v.valuta)])];
   if (valute.length === 0) {
-    return <p className="text-sm text-slate-500">Nessun costo del modulo nel periodo.</p>;
+    return <p className="text-body text-ink-2">Nessun costo del modulo nel periodo.</p>;
   }
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-8">
       {valute.map((valuta) => {
         const voci = c.voci.filter((v) => v.valuta === valuta);
         const totale = c.totali.find((t) => t.valuta === valuta);
         return (
-          <Card key={valuta} className="overflow-hidden p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-left text-sm">
-                <caption className="px-4 pt-4 text-left font-display text-base font-semibold text-slate-900">
-                  {VALUTE[valuta] ?? valuta}
-                </caption>
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50/70 text-xs uppercase tracking-wide text-slate-500">
-                    <th scope="col" className={thClass}>Fornitore</th>
-                    <th scope="col" className={thClass}>Servizio</th>
-                    <th scope="col" className={thClass}>Esito</th>
-                    <th scope="col" className={cn(thClass, "text-right")}>Chiamate</th>
-                    <th scope="col" className={cn(thClass, "text-right")}>Costo</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {voci.map((v) => (
-                    <tr key={`${v.provider}|${v.service}|${v.outcome}`} className="border-b border-slate-100">
-                      <td className="px-4 py-2.5 text-slate-700">
-                        {ADMIN_PARTENARIATI_COPY.providers[v.provider] ?? v.provider}
-                      </td>
-                      <th scope="row" className="px-4 py-2.5 text-left font-normal text-slate-800">
-                        {ADMIN_PARTENARIATI_COPY.servizi[v.service] ?? v.service}
-                      </th>
-                      <td className="px-4 py-2.5 text-slate-700">
-                        {ADMIN_PARTENARIATI_COPY.esiti[v.outcome] ?? v.outcome}
-                      </td>
-                      <td className="px-4 py-2.5 text-right tabular text-slate-700">{numero(v.eventi)}</td>
-                      <td className="px-4 py-2.5 text-right tabular font-medium text-slate-900">
-                        {importoCents(v.cost_cents, valuta)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                {totale && (
-                  <tfoot>
-                    <tr className="bg-slate-50/70">
-                      <th scope="row" colSpan={3} className="px-4 py-2.5 text-left font-semibold text-slate-900">
-                        Totale in {valuta === "EUR" ? "euro" : valuta === "USD" ? "dollari" : valuta}
-                      </th>
-                      <td className="px-4 py-2.5 text-right tabular font-semibold text-slate-900">
-                        {numero(totale.eventi)}
-                      </td>
-                      <td className="px-4 py-2.5 text-right tabular font-semibold text-slate-900">
-                        {importoCents(totale.cost_cents, valuta)}
-                      </td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-            </div>
-          </Card>
+          <Table key={valuta} className="min-w-[640px]">
+            <caption className="pb-3 text-left text-title-group text-ink">
+              {VALUTE[valuta] ?? valuta}
+            </caption>
+            <thead>
+              <tr>
+                <Th>Fornitore</Th>
+                <Th>Servizio</Th>
+                <Th>Esito</Th>
+                <Th numerica>Chiamate</Th>
+                <Th numerica>Costo</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {voci.map((v) => (
+                <tr key={`${v.provider}|${v.service}|${v.outcome}`}>
+                  <Td className="text-ink-2">
+                    {ADMIN_PARTENARIATI_COPY.providers[v.provider] ?? v.provider}
+                  </Td>
+                  <th scope="row" className={thRigaClass}>
+                    {ADMIN_PARTENARIATI_COPY.servizi[v.service] ?? v.service}
+                  </th>
+                  <Td className="text-ink-2">
+                    {ADMIN_PARTENARIATI_COPY.esiti[v.outcome] ?? v.outcome}
+                  </Td>
+                  <Td numerica className="text-ink-2">
+                    {numero(v.eventi)}
+                  </Td>
+                  <Td numerica className="font-medium">
+                    {importoCents(v.cost_cents, valuta)}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+            {totale && (
+              <tfoot>
+                <tr className="bg-desk">
+                  <th scope="row" colSpan={3} className={cn(thRigaClass, "font-semibold")}>
+                    Totale in {valuta === "EUR" ? "euro" : valuta === "USD" ? "dollari" : valuta}
+                  </th>
+                  <Td numerica className="font-semibold">
+                    {numero(totale.eventi)}
+                  </Td>
+                  <Td numerica className="font-semibold">
+                    {importoCents(totale.cost_cents, valuta)}
+                  </Td>
+                </tr>
+              </tfoot>
+            )}
+          </Table>
         );
       })}
     </div>
@@ -221,7 +222,7 @@ function Costi({ c }: { c: CostiPartenariati }) {
 
 function Intestazione({ periodo }: { periodo: Periodo }) {
   return (
-    <p className="text-sm text-slate-500">
+    <p className="text-body text-ink-2">
       Dal {formatDate(periodo.da)} al {formatDate(periodo.a)}, estremi compresi.
     </p>
   );
@@ -233,12 +234,12 @@ export function MetricheTab() {
   const [periodo, setPeriodo] = useState<Periodo>(periodoPredefinito);
   const q = useMetrichePartenariati(periodo, true);
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <SceltaPeriodo periodo={periodo} onApplica={setPeriodo} />
       <Intestazione periodo={periodo} />
-      <p className="text-xs text-slate-500">{ADMIN_PARTENARIATI_COPY.notaMetriche}</p>
+      <p className="text-small text-ink-3">{ADMIN_PARTENARIATI_COPY.notaMetriche}</p>
       {q.isPending ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-hidden>
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3" aria-hidden>
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-24 w-full" />
           ))}
@@ -260,10 +261,10 @@ export function CostiTab() {
   const [periodo, setPeriodo] = useState<Periodo>(periodoPredefinito);
   const q = useCostiPartenariati(periodo, true);
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <SceltaPeriodo periodo={periodo} onApplica={setPeriodo} />
       <Intestazione periodo={periodo} />
-      <p className="text-xs text-slate-500">{ADMIN_PARTENARIATI_COPY.notaValute}</p>
+      <p className="text-small text-ink-3">{ADMIN_PARTENARIATI_COPY.notaValute}</p>
       {q.isPending ? (
         <Skeleton className="h-48 w-full" />
       ) : q.isError ? (

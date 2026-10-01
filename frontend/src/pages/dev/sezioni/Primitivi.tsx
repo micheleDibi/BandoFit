@@ -9,12 +9,7 @@ import { SelectField, TextareaField, TextField } from "../../../components/ui/Fi
 import { Menu, MenuItem, MenuSeparator } from "../../../components/ui/Menu";
 import { Pagination } from "../../../components/ui/Pagination";
 import { TagSelect } from "../../../components/ui/TagSelect";
-import {
-  BandoCardSkeleton,
-  EmptyState,
-  ErrorState,
-  Skeleton,
-} from "../../../components/ui/states";
+import { EmptyState, ErrorState, Skeleton } from "../../../components/ui/states";
 
 /** Sezione della vetrina (solo in sviluppo): i primitivi esistenti rivisti con
  *  i token, ognuno nei suoi stati. Le props sono quelle di sempre. */
@@ -31,6 +26,23 @@ function Blocco({ titolo, nota, children }: { titolo: string; nota?: string; chi
     </section>
   );
 }
+
+/** La scala chiusa degli stili di testo (docs/design-system.md), dal più grande. */
+const STILI_DI_TESTO = [
+  { classe: "text-title-hero", nota: "Sora 600, 32/40 e 40/48 da sm: solo l'h1 della landing" },
+  { classe: "text-title-bando", nota: "Sora 600, 28/36: il titolo del bando e la promessa dell'accesso" },
+  { classe: "text-title-page", nota: "Sora 600, 24/32: titolo di pagina" },
+  { classe: "text-title-section", nota: "Sora 600, 18/26: titolo di sezione" },
+  { classe: "text-figure", nota: "Sora 600, 28/32: cifra in evidenza" },
+  { classe: "text-figure-sm", nota: "Sora 600, 18/24: valore nei fatti, importo nelle righe" },
+  { classe: "text-due-day", nota: "Sora 600, 26/28: il giorno della scadenza" },
+  { classe: "text-prose", nota: "Inter 400, 16/26: testo lungo" },
+  { classe: "text-row-title", nota: "Inter 600, 16/24: titolo di una riga" },
+  { classe: "text-body", nota: "Inter 400, 14/22: la taglia di base" },
+  { classe: "text-title-group", nota: "Inter 600, 14/20: titolo di gruppo, pulsanti" },
+  { classe: "text-small", nota: "Inter 400, 13/20: metadati, etichette, aiuto" },
+  { classe: "text-caption", nota: "Inter 500, 12/16: la taglia minima" },
+] as const;
 
 const REGIONI = [
   { id: 1, label: "Piemonte" },
@@ -49,6 +61,19 @@ export default function Primitivi() {
 
   return (
     <div className="flex flex-col gap-12">
+      <Blocco titolo="Stili di testo" nota="La scala chiusa: niente taglie arbitrarie.">
+        <dl className="flex flex-col divide-y divide-line">
+          {STILI_DI_TESTO.map((stile) => (
+            <div key={stile.classe} className="flex flex-col gap-1 py-3">
+              <dt className={`${stile.classe} text-ink`}>Contributi per la digitalizzazione</dt>
+              <dd className="text-small text-ink-3">
+                <code>{stile.classe}</code>: {stile.nota}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </Blocco>
+
       <Blocco titolo="Button" nota="Un solo pulsante pieno per schermata; ghost è il testuale.">
         <div className="flex flex-wrap items-center gap-2">
           <Button>Salva le modifiche</Button>
@@ -102,6 +127,10 @@ export default function Primitivi() {
           <Badge tone="emerald">Voucher</Badge>
           <Badge tone="amber">Credito d'imposta</Badge>
           <Badge tone="red">Micro impresa</Badge>
+        </div>
+        <div className="flex w-48 flex-col items-start gap-1">
+          <p className="text-small text-ink-3">Testo lungo in 192px: va a capo, minimo 24px.</p>
+          <Badge>Micro, piccole e medie imprese del settore agricolo</Badge>
         </div>
       </Blocco>
 
@@ -185,7 +214,6 @@ export default function Primitivi() {
             <Skeleton className="h-4 w-full" />
             <Skeleton className="h-4 w-1/2" />
           </div>
-          <BandoCardSkeleton />
           <EmptyState
             title="Non hai ancora salvato nessun bando."
             description="Sfoglia i bandi e usa il segnalibro per mettere da parte quelli che ti interessano: li ritrovi qui."

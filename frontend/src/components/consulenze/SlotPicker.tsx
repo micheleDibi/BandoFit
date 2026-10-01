@@ -1,3 +1,4 @@
+import { Check } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSlotDisponibili } from "../../hooks/useConsulenze";
 import { cn } from "../../lib/cn";
@@ -5,7 +6,9 @@ import { CONSULENZE_COPY } from "../../lib/copy";
 import { formatSlotGiorno, formatSlotOra } from "../../lib/format";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
+import { InlineError } from "../ui/InlineError";
 import { Skeleton } from "../ui/states";
+import { conIniziale } from "./formato";
 import type { Slot } from "../../types";
 
 /** Scelta di uno slot libero del progettista. Due usi:
@@ -66,10 +69,11 @@ export function SlotPicker({
       title={title}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={busy}>
             Annulla
           </Button>
           <Button
+            type="button"
             loading={busy}
             disabled={!allowSkip && !selected}
             onClick={() => onConfirm(selected)}
@@ -80,27 +84,25 @@ export function SlotPicker({
       }
     >
       {isPending ? (
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2" aria-hidden>
           <Skeleton className="h-9 w-full" />
           <Skeleton className="h-9 w-full" />
         </div>
       ) : gruppi.length === 0 ? (
-        <p className="text-sm text-slate-600">
+        <p className="text-body text-ink-2">
           Il progettista non ha slot liberi al momento.
           {allowSkip && " Puoi comunque procedere: l'appuntamento si prenota anche dopo."}
         </p>
       ) : (
         <fieldset>
-          <legend className="text-sm text-slate-600">
+          <legend className="text-body text-ink-2">
             Scegli un orario. {CONSULENZE_COPY.fusoOrario}
           </legend>
-          <div className="mt-3 max-h-72 space-y-4 overflow-y-auto pr-1">
+          <div className="mt-3 flex max-h-72 flex-col gap-4 overflow-y-auto pr-1">
             {gruppi.map((gruppo) => (
-              <div key={gruppo.giorno}>
-                <p className="text-xs font-semibold capitalize text-slate-500">
-                  {gruppo.giorno}
-                </p>
-                <div className="mt-1.5 flex flex-wrap gap-2">
+              <div key={gruppo.giorno} className="flex flex-col gap-2">
+                <p className="text-small font-medium text-ink-2">{conIniziale(gruppo.giorno)}</p>
+                <div className="flex flex-wrap gap-2">
                   {gruppo.slots.map((slot) => {
                     const attivo = selected === slot.id;
                     return (
@@ -110,12 +112,15 @@ export function SlotPicker({
                         aria-pressed={attivo}
                         onClick={() => setSelected(attivo ? null : slot.id)}
                         className={cn(
-                          "tabular cursor-pointer rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
+                          "inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-control border px-3 text-body font-medium tabular-nums transition-colors",
+                          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
                           attivo
-                            ? "border-brand-500 bg-brand-50 text-brand-700"
-                            : "border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:bg-slate-50",
+                            ? "border-accent bg-accent-soft text-ink"
+                            : "border-line-control bg-sheet text-ink hover:bg-sunken",
                         )}
                       >
+                        {/* Il segno non cromatico della scelta: non conta solo il colore. */}
+                        {attivo && <Check className="size-4 text-accent" aria-hidden />}
                         {formatSlotOra(slot.inizio)} – {formatSlotOra(slot.fine)}
                       </button>
                     );
@@ -126,11 +131,7 @@ export function SlotPicker({
           </div>
         </fieldset>
       )}
-      {error && (
-        <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-          {error}
-        </p>
-      )}
+      {error && <InlineError className="mt-3">{error}</InlineError>}
     </Dialog>
   );
 }

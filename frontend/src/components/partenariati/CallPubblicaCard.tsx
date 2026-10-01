@@ -1,26 +1,18 @@
-import { CalendarClock, EyeOff, Users } from "lucide-react";
-import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
 import { usePartenariatiVocabolario } from "../../hooks/usePartenariatiVocabolario";
+import { cn } from "../../lib/cn";
 import { CALL_COPY } from "../../lib/copy";
 import { formatDate } from "../../lib/format";
 import { nomePaese } from "../../lib/paesi";
 import type { CallPubblica, PosizionePubblicaCall } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Badge } from "../ui/Badge";
-import { Card } from "../ui/Card";
+import { Facts, type Fatto } from "../ui/Facts";
+import { Section, SectionHeader } from "../ui/SectionHeader";
+import { TextLink } from "../ui/TextLink";
 import { CLASSI_DIMENSIONALI } from "./AnteprimaPartnerCard";
 import { descriviCriterio, percentuale } from "./callDati";
 import { etichettaForma } from "./PartenariatoRegole";
 import { useNomiCall } from "./useNomiCall";
-
-function Voce({ titolo, children }: { titolo: string; children: ReactNode }) {
-  return (
-    <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">{titolo}</dt>
-      <dd className="mt-1 text-sm text-slate-700">{children}</dd>
-    </div>
-  );
-}
 
 function Posizione({ p }: { p: PosizionePubblicaCall }) {
   const nomi = useNomiCall();
@@ -38,28 +30,26 @@ function Posizione({ p }: { p: PosizionePubblicaCall }) {
   }
   if (p.requisiti.length) righe.push(["Copre i requisiti", p.requisiti.join(", ")]);
   return (
-    <li className="rounded-lg border border-slate-200 px-4 py-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="font-medium text-slate-900">{p.titolo}</p>
-        <Badge tone={p.ruolo === "capofila" ? "brand" : "slate"}>
-          {p.ruolo === "capofila" ? "Capofila" : "Partner"}
-        </Badge>
-        {p.numero > 1 && <Badge tone="slate">{p.numero} partner</Badge>}
+    <li className="flex flex-col gap-1 border-b border-line py-3">
+      <p className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="font-medium text-ink">{p.titolo}</span>
+        <span className="text-small text-ink-2">{p.ruolo === "capofila" ? "Capofila" : "Partner"}</span>
+        {p.numero > 1 && <span className="text-small text-ink-2">{p.numero} partner</span>}
         {p.quota_ipotizzata_pct && (
-          <Badge tone="slate">Quota {percentuale(p.quota_ipotizzata_pct)}</Badge>
+          <span className="text-small text-ink-2">Quota {percentuale(p.quota_ipotizzata_pct)}</span>
         )}
-      </div>
+      </p>
       {righe.length > 0 && (
-        <dl className="mt-2 space-y-1 text-sm">
+        <dl className="flex flex-col gap-0.5 text-small">
           {righe.map(([t, v]) => (
             <div key={t}>
-              <dt className="inline text-slate-500">{t}: </dt>
-              <dd className="inline text-slate-700">{v}</dd>
+              <dt className="inline text-ink-3">{t}: </dt>
+              <dd className="inline text-ink-2">{v}</dd>
             </div>
           ))}
         </dl>
       )}
-      {p.note && <p className="mt-2 whitespace-pre-line text-sm text-slate-600">{p.note}</p>}
+      {p.note && <p className="whitespace-pre-line text-small text-ink-2">{p.note}</p>}
     </li>
   );
 }
@@ -67,119 +57,105 @@ function Posizione({ p }: { p: PosizionePubblicaCall }) {
 /** La call come la vedono le altre aziende (proiezione a whitelist del server:
  *  il nome solo per una call con il nome di un'azienda verificata, niente
  *  budget esatto, niente dettagli riservati né coperture del creatore). I
- *  testi sono testo semplice, mai HTML né link. */
-export function CallPubblicaCard({ call, className }: { call: CallPubblica; className?: string }) {
+ *  testi sono testo semplice, mai HTML né link. Sezioni con titolo e filetto,
+ *  senza riquadro; `senzaTitolo` quando il titolo lo mette già l'intestazione
+ *  della pagina (nell'anteprima del wizard resta qui). */
+export function CallPubblicaCard({
+  call,
+  className,
+  senzaTitolo = false,
+}: {
+  call: CallPubblica;
+  className?: string;
+  senzaTitolo?: boolean;
+}) {
   const { data: vocabolario } = usePartenariatiVocabolario();
   const nomi = useNomiCall();
   const creatore = call.creatore;
   const classe = creatore.classe_dimensionale
     ? (CLASSI_DIMENSIONALI[creatore.classe_dimensionale] ?? creatore.classe_dimensionale)
     : null;
+  const chi = [classe, creatore.regione, creatore.ateco_sezione?.descrizione ?? null]
+    .filter(Boolean)
+    .join(", ");
 
-  // p-0: le sezioni interne hanno già i loro margini (Card ha p-5 di default).
+  const fatti: Fatto[] = [
+    { etichetta: "Chi propone", valore: creatore.denominazione || CALL_COPY.aziendaAnonima, nota: chi || undefined },
+    { etichetta: "Ruolo", valore: CALL_COPY.ruoliCreatoreBrevi[call.ruolo_creatore] },
+  ];
+  if (call.forma_aggregazione_prevista) {
+    fatti.push({ etichetta: "Forma prevista", valore: etichettaForma(call.forma_aggregazione_prevista, vocabolario) });
+  }
+  if (call.budget_fascia) {
+    fatti.push({ etichetta: "Budget", valore: CALL_COPY.fasceBudget[call.budget_fascia] });
+  }
+  if (call.scadenza_call) {
+    fatti.push({ etichetta: "Candidature fino al", valore: formatDate(call.scadenza_call) });
+  }
+
   return (
-    <Card className={className ? `p-0 ${className}` : "p-0"}>
-      <div className="border-b border-slate-100 px-5 py-4">
-        <div className="flex items-start gap-3">
-          <div className="rounded-lg bg-slate-100 p-2 text-slate-500">
-            {creatore.anonima ? (
-              <EyeOff className="size-5" aria-hidden />
-            ) : (
-              <Users className="size-5" aria-hidden />
-            )}
-          </div>
-          <div className="min-w-0">
-            <p className="font-display text-base font-semibold text-slate-900">
-              {creatore.denominazione || CALL_COPY.aziendaAnonima}
-            </p>
-            <p className="text-xs text-slate-500">
-              {[classe, creatore.regione, creatore.ateco_sezione
-                ? `${creatore.ateco_sezione.lettera} — ${creatore.ateco_sezione.descrizione}`
-                : null]
-                .filter(Boolean)
-                .join(" · ") || "—"}
-            </p>
-          </div>
+    <div className={cn("flex flex-col gap-6", className)}>
+      {!senzaTitolo && (
+        <div className="flex flex-col gap-1">
+          <h2 className="font-sans text-row-title text-ink">{call.titolo || "Call senza titolo"}</h2>
+          <p className="text-body text-ink-2">
+            Per il bando <TextLink to={`/app/bandi/${call.bando.slug}`}>{call.bando.titolo}</TextLink>
+          </p>
         </div>
-        <h3 className="mt-4 font-display text-lg font-bold tracking-tight text-slate-900">
-          {call.titolo || "Call senza titolo"}
-        </h3>
-        <p className="mt-1 text-sm text-slate-600">
-          Per il bando{" "}
-          <Link
-            to={`/app/bandi/${call.bando.slug}`}
-            className="font-medium text-brand-600 underline-offset-2 hover:underline"
-          >
-            {call.bando.titolo}
-          </Link>
-        </p>
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          <Badge tone="brand">{CALL_COPY.ruoliCreatoreBrevi[call.ruolo_creatore]}</Badge>
-          {call.forma_aggregazione_prevista && (
-            <Badge tone="slate">{etichettaForma(call.forma_aggregazione_prevista, vocabolario)}</Badge>
-          )}
-          {call.budget_fascia && (
-            <Badge tone="slate">Budget: {CALL_COPY.fasceBudget[call.budget_fascia]}</Badge>
-          )}
-          {call.scadenza_call && (
-            <Badge tone="amber">
-              <CalendarClock className="size-3" aria-hidden />
-              Candidature entro il {formatDate(call.scadenza_call)}
-            </Badge>
-          )}
-        </div>
-      </div>
+      )}
 
-      <dl className="space-y-4 px-5 py-4">
-        {call.descrizione_pubblica && (
-          <Voce titolo="Il progetto">
-            <span className="whitespace-pre-line">{call.descrizione_pubblica}</span>
-          </Voce>
+      <Facts items={fatti} />
+
+      {call.descrizione_pubblica && (
+        <Section>
+          <SectionHeader titolo="Il progetto" livello={3} />
+          <p className="max-w-[680px] whitespace-pre-line text-prose text-ink">{call.descrizione_pubblica}</p>
+        </Section>
+      )}
+      {call.profilo_partner_ideale && (
+        <Section>
+          <SectionHeader titolo="Il partner ideale" livello={3} />
+          <p className="max-w-[680px] whitespace-pre-line text-prose text-ink">{call.profilo_partner_ideale}</p>
+        </Section>
+      )}
+      <Section>
+        <SectionHeader titolo="Posizioni cercate" livello={3} />
+        {call.posizioni.length === 0 ? (
+          <p className="text-body text-ink-3">Nessuna posizione indicata.</p>
+        ) : (
+          <ul className="flex flex-col">
+            {call.posizioni.map((p) => (
+              <Posizione key={p.id} p={p} />
+            ))}
+          </ul>
         )}
-        {call.profilo_partner_ideale && (
-          <Voce titolo="Il partner ideale">
-            <span className="whitespace-pre-line">{call.profilo_partner_ideale}</span>
-          </Voce>
-        )}
-        <Voce titolo="Posizioni cercate">
-          {call.posizioni.length === 0 ? (
-            <span className="text-slate-500">Nessuna posizione indicata.</span>
-          ) : (
-            <ul className="space-y-2">
-              {call.posizioni.map((p) => (
-                <Posizione key={p.id} p={p} />
-              ))}
-            </ul>
-          )}
-        </Voce>
-        <Voce titolo="Requisiti cercati">
-          {call.requisiti.length === 0 ? (
-            <span className="text-slate-500">Nessun requisito indicato.</span>
-          ) : (
-            <ul className="space-y-1.5">
-              {call.requisiti.map((r) => (
-                <li key={r.etichetta} className="flex items-start gap-2">
-                  <Badge tone="brand" className="shrink-0 tabular">
-                    {r.etichetta}
-                  </Badge>
-                  <span>
-                    {r.testo}
-                    <span className="block text-xs text-slate-500">
-                      {descriviCriterio(r.criterio, nomi)} · {CALL_COPY.ambiti[r.ambito]}
-                    </span>
+      </Section>
+      <Section>
+        <SectionHeader titolo="Requisiti cercati" livello={3} />
+        {call.requisiti.length === 0 ? (
+          <p className="text-body text-ink-3">Nessun requisito indicato.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {call.requisiti.map((r) => (
+              <li key={r.etichetta} className="flex items-start gap-2 text-body text-ink">
+                <Badge className="mt-0.5 shrink-0 tabular-nums">{r.etichetta}</Badge>
+                <span>
+                  {r.testo}
+                  <span className="block text-small text-ink-3">
+                    {descriviCriterio(r.criterio, nomi)}, {CALL_COPY.ambiti[r.ambito]}
                   </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Voce>
-        {call.esclusivita && (
-          <Voce titolo="Esclusività">
-            Il bando ammette la partecipazione a un solo partenariato: chi entra in questo non può
-            partecipare ad altri sullo stesso bando.
-          </Voce>
+                </span>
+              </li>
+            ))}
+          </ul>
         )}
-      </dl>
-    </Card>
+      </Section>
+      {call.esclusivita && (
+        <Alert tono="info" titolo="Esclusività">
+          Il bando ammette la partecipazione a un solo partenariato: chi entra in questo non può
+          partecipare ad altri sullo stesso bando.
+        </Alert>
+      )}
+    </div>
   );
 }

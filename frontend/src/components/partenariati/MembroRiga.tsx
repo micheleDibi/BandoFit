@@ -1,4 +1,3 @@
-import { Building2, Check, CheckCircle2, Clock, Globe, LogOut, Pencil } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { useAggiornaMembro, useConfermaMembro, useEsciMembro } from "../../hooks/useConsorzio";
 import { apiErrorMessage } from "../../lib/api";
@@ -7,10 +6,13 @@ import { CONSORZIO_COPY } from "../../lib/copy";
 import { formatDate } from "../../lib/format";
 import { nomePaese } from "../../lib/paesi";
 import type { MembroConsorzio, PosizioneCall, RuoloMembro, StatoMembro } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Dialog } from "../ui/Dialog";
 import { SelectField, TextField } from "../ui/Field";
+import { Status, type TonoStatus } from "../ui/Status";
 import { CLASSI_DIMENSIONALI } from "./AnteprimaPartnerCard";
 import { leggiPercentuale, mostraDecimale, percentuale } from "./callDati";
 import { SceltaRadio } from "./CampiCall";
@@ -49,26 +51,19 @@ export const nomeMembro = (m: MembroConsorzio) => {
   return `${m.nome} ${riferimento.slice(0, 6).toUpperCase()}`;
 };
 
-const TONI_STATO: Record<StatoMembro, "amber" | "emerald" | "slate"> = {
-  proposto: "amber",
-  confermato: "emerald",
-  uscito: "slate",
-};
-const ICONE_STATO: Record<StatoMembro, typeof Check> = {
-  proposto: Clock,
-  confermato: CheckCircle2,
-  uscito: LogOut,
+const TONI_STATO: Record<StatoMembro, TonoStatus> = {
+  proposto: "in-apertura",
+  confermato: "aperto",
+  uscito: "chiuso",
 };
 
-/** Stato nel consorzio: icona **e** testo. */
+/** Stato nel consorzio, in parole con il punto di `Status`. */
 export function StatoMembroBadge({ stato }: { stato: StatoMembro }) {
-  const Icona = ICONE_STATO[stato] ?? Clock;
   return (
-    <Badge tone={TONI_STATO[stato] ?? "slate"}>
-      <Icona className="size-3.5" aria-hidden />
+    <Status tono={TONI_STATO[stato] ?? "neutro"}>
       <span className="sr-only">Stato: </span>
       {CONSORZIO_COPY.stati[stato] ?? stato}
-    </Badge>
+    </Status>
   );
 }
 
@@ -149,10 +144,10 @@ function MembroDialog({
       title={membro.creatore ? "La tua partecipazione" : `Modifica: ${nomeMembro(membro)}`}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={aggiorna.isPending}>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={aggiorna.isPending}>
             Annulla
           </Button>
-          <Button onClick={salva} loading={aggiorna.isPending}>
+          <Button type="button" onClick={salva} loading={aggiorna.isPending}>
             Salva
           </Button>
         </>
@@ -160,13 +155,13 @@ function MembroDialog({
     >
       <form
         noValidate
-        className="space-y-4"
+        className="flex flex-col gap-4"
         onSubmit={(e) => {
           e.preventDefault();
           salva();
         }}
       >
-        <p className="text-sm text-slate-600">
+        <p>
           {!membro.creatore
             ? "Se cambi ruolo, posizione o quota, l'azienda dovrà confermare di nuovo la sua partecipazione."
             : membro.stato === "confermato"
@@ -204,11 +199,7 @@ function MembroDialog({
           error={errore ?? undefined}
           helper="La parte del progetto (e del budget) che spetta a questo membro. Serve per confermare."
         />
-        {aggiorna.isError && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-            {apiErrorMessage(aggiorna.error)}
-          </p>
-        )}
+        {aggiorna.isError && <Alert tono="errore">{apiErrorMessage(aggiorna.error)}</Alert>}
       </form>
     </Dialog>
   );
@@ -246,42 +237,35 @@ function EsciDialog({
       },
     );
   return (
-    <Dialog
+    <ConfirmDialog
       open={open}
-      onClose={onClose}
-      dismissible={!esci.isPending}
-      title={tu ? "Uscire dal consorzio?" : `Togliere ${nomeMembro(membro)} dal consorzio?`}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={esci.isPending}>
-            Non ora
-          </Button>
-          <Button variant="danger" onClick={conferma} loading={esci.isPending}>
-            {tu ? "Esci dal consorzio" : "Togli dal consorzio"}
-          </Button>
-        </>
-      }
+      titolo={tu ? "Uscire dal consorzio?" : `Togliere ${nomeMembro(membro)} dal consorzio?`}
+      conferma={tu ? "Esci dal consorzio" : "Togli dal consorzio"}
+      annulla="Non ora"
+      distruttiva
+      inCorso={esci.isPending}
+      onConferma={conferma}
+      onAnnulla={onClose}
     >
-      <p>
-        {tu
-          ? "La tua azienda non farà più parte del consorzio di questa call."
-          : membro.esterno
-            ? "Il membro esterno esce dal consorzio: potrai riproporlo modificandolo."
-            : "L'azienda non farà più parte del consorzio di questa call."}
-      </p>
-      {esci.isError && (
-        <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-          {apiErrorMessage(esci.error)}
+      <div className="flex flex-col gap-3">
+        <p>
+          {tu
+            ? "La tua azienda non farà più parte del consorzio di questa call."
+            : membro.esterno
+              ? "Il membro esterno esce dal consorzio: potrai riproporlo modificandolo."
+              : "L'azienda non farà più parte del consorzio di questa call."}
         </p>
-      )}
-    </Dialog>
+        {esci.isError && <Alert tono="errore">{apiErrorMessage(esci.error)}</Alert>}
+      </div>
+    </ConfirmDialog>
   );
 }
 
-/** Un membro del consorzio (un `<li>`): nome (lo pseudonimo della call per le
- *  altre aziende, con i soli dati anonimi), ruolo, posizione, quota e stato;
- *  per gli esterni paese e tipi dichiarati. Le azioni sono quelle che il
- *  server ammette (`puo_modificare`, `puo_confermare`, `puo_uscire`). */
+/** Un membro del consorzio, come riga (un `<li>`): nome (lo pseudonimo della
+ *  call per le altre aziende, con i soli dati anonimi), ruolo, posizione,
+ *  quota e stato; per gli esterni paese e tipi dichiarati. Le azioni sono
+ *  quelle che il server ammette (`puo_modificare`, `puo_confermare`,
+ *  `puo_uscire`). */
 export function MembroRiga({
   membro,
   callId,
@@ -311,17 +295,12 @@ export function MembroRiga({
   const classe = profilo?.classe_dimensionale
     ? (CLASSI_DIMENSIONALI[profilo.classe_dimensionale] ?? profilo.classe_dimensionale)
     : null;
-  const dati = membro.esterno
-    ? [membro.paese ? nomePaese(membro.paese) : null].filter(Boolean)
-    : [
-        classe,
-        profilo?.regione_sede ?? null,
-        profilo?.ateco_sezione
-          ? `${profilo.ateco_sezione.lettera} — ${profilo.ateco_sezione.descrizione}`
-          : null,
-      ].filter(Boolean);
+  const dati = (
+    membro.esterno
+      ? [membro.paese ? nomePaese(membro.paese) : null]
+      : [classe, profilo?.regione_sede ?? null, profilo?.ateco_sezione?.descrizione ?? null]
+  ).filter(Boolean) as string[];
   const riferimento = !membro.sei_tu && membro.pseudonimo && membro.pseudonimo !== membro.nome;
-  const Icona = membro.esterno ? Globe : Building2;
   const azioneModifica = membro.esterno && uscito ? "Riproponi" : "Modifica";
 
   // Si conferma ciò che la pagina mostra: se nel frattempo è cambiato, il
@@ -345,86 +324,82 @@ export function MembroRiga({
     );
 
   return (
-    <li className={cn("rounded-lg border border-slate-200 px-3.5 py-3", uscito && "bg-slate-50")}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-1 items-start gap-2.5">
-          <Icona className="mt-0.5 size-4 shrink-0 text-slate-400" aria-hidden />
-          <div className="min-w-0">
-            <p className={cn("font-medium text-slate-900", uscito && "text-slate-500")}>
-              {membro.nome}
-            </p>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              {membro.sei_tu && <Badge tone="brand">{CONSORZIO_COPY.tuaAzienda}</Badge>}
-              {membro.creatore && <Badge tone="slate">Ha creato la call</Badge>}
-              {membro.esterno && <Badge tone="slate">{CONSORZIO_COPY.esterno}</Badge>}
-              <Badge tone={membro.ruolo === "capofila" ? "brand" : "slate"}>
-                <span className="sr-only">Ruolo: </span>
-                {CONSORZIO_COPY.ruoli[membro.ruolo] ?? membro.ruolo}
-              </Badge>
-              <StatoMembroBadge stato={membro.stato} />
-            </div>
-            {dati.length > 0 && <p className="mt-1 text-xs text-slate-500">{dati.join(" · ")}</p>}
-            {membro.esterno && membro.tipi_soggetto.length > 0 && (
-              <p className="mt-1 text-xs text-slate-500">
-                {membro.tipi_soggetto.map(nomi.tipo).join(", ")}{" "}
-                <span className="text-amber-700">({CONSORZIO_COPY.dichiarato})</span>
-              </p>
-            )}
-            {riferimento && (
-              <p className="mt-1 text-xs text-slate-400">
-                Riferimento per questa call:{" "}
-                <span className="font-mono tracking-wide">{membro.pseudonimo}</span>
-              </p>
-            )}
+    <li className="flex flex-col gap-3 border-b border-line py-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:gap-6">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <p className={cn("font-medium", uscito ? "text-ink-3" : "text-ink")}>{membro.nome}</p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-ink-2">
+            {membro.sei_tu && <Badge>{CONSORZIO_COPY.tuaAzienda}</Badge>}
+            {membro.creatore && <span>Ha creato la call</span>}
+            {membro.esterno && <Badge>{CONSORZIO_COPY.esterno}</Badge>}
+            <span>
+              <span className="sr-only">Ruolo: </span>
+              {CONSORZIO_COPY.ruoli[membro.ruolo] ?? membro.ruolo}
+            </span>
+            <StatoMembroBadge stato={membro.stato} />
           </div>
+          {dati.length > 0 && (
+            <p className="flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-2">
+              {dati.map((d) => (
+                <span key={d}>{d}</span>
+              ))}
+            </p>
+          )}
+          {membro.esterno && membro.tipi_soggetto.length > 0 && (
+            <p className="text-small text-ink-2">
+              {membro.tipi_soggetto.map(nomi.tipo).join(", ")}{" "}
+              <span className="text-ink-3">({CONSORZIO_COPY.dichiarato})</span>
+            </p>
+          )}
+          {riferimento && (
+            <p className="text-small text-ink-3">Riferimento per questa call: {membro.pseudonimo}</p>
+          )}
+          {membro.stato === "confermato" && membro.confermato_at && (
+            <p className="text-small text-ink-3">Confermato il {formatDate(membro.confermato_at)}.</p>
+          )}
         </div>
-        <dl className="grid shrink-0 grid-cols-2 gap-x-6 gap-y-1 text-sm sm:text-right">
+        <dl className="grid shrink-0 grid-cols-2 gap-x-6 gap-y-1 text-body md:w-64">
           <div>
-            <dt className="text-xs text-slate-400">Quota</dt>
-            <dd className="font-medium text-slate-800 tabular">
+            <dt className="text-small text-ink-3">Quota</dt>
+            <dd className="font-medium text-ink tabular-nums">
               {senzaQuota ? (
-                <span className="font-normal text-slate-500">{serveQuota ? "Da indicare" : "Non serve"}</span>
+                <span className="font-normal text-ink-3">{serveQuota ? "Da indicare" : "Non serve"}</span>
               ) : (
                 percentuale(membro.quota_percentuale)
               )}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-slate-400">Posizione</dt>
-            <dd className="max-w-44 truncate text-slate-700" title={membro.posizione?.titolo}>
-              {membro.posizione?.titolo ?? <span className="text-slate-500">Nessuna</span>}
+            <dt className="text-small text-ink-3">Posizione</dt>
+            <dd className="truncate text-ink" title={membro.posizione?.titolo}>
+              {membro.posizione?.titolo ?? <span className="text-ink-3">Nessuna</span>}
             </dd>
           </div>
         </dl>
       </div>
 
-      {membro.stato === "confermato" && membro.confermato_at && (
-        <p className="mt-2 text-xs text-slate-500">Confermato il {formatDate(membro.confermato_at)}.</p>
-      )}
-
       {(membro.puo_confermare || membro.puo_modificare || membro.puo_uscire) && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {membro.puo_confermare && (
             <Button
               size="sm"
+              variant="secondary"
               onClick={confermaMembro}
               loading={conferma.isPending}
               disabled={senzaQuota && serveQuota}
               aria-describedby={senzaQuota && serveQuota ? idNotaConferma : undefined}
               aria-label={membro.sei_tu ? "Conferma la partecipazione della tua azienda" : `Conferma ${nome}`}
             >
-              <Check className="size-4" aria-hidden />
               Conferma
             </Button>
           )}
           {membro.puo_modificare && (
             <Button
               size="sm"
-              variant="secondary"
+              variant="ghost"
               onClick={() => (membro.esterno ? onModificaEsterno(membro) : setModifica(true))}
               aria-label={membro.sei_tu ? `${azioneModifica} la tua partecipazione` : `${azioneModifica} ${nome}`}
             >
-              <Pencil className="size-4" aria-hidden />
               {azioneModifica}
             </Button>
           )}
@@ -432,16 +407,15 @@ export function MembroRiga({
             <Button
               size="sm"
               variant="ghost"
-              className="text-red-700 hover:bg-red-50 hover:text-red-800"
+              className="text-danger hover:bg-danger-soft"
               onClick={() => setEsci(true)}
               aria-label={membro.sei_tu ? undefined : `Togli dal consorzio: ${nome}`}
             >
-              <LogOut className="size-4" aria-hidden />
               {membro.sei_tu ? "Esci dal consorzio" : "Togli dal consorzio"}
             </Button>
           )}
           {membro.puo_confermare && senzaQuota && serveQuota && (
-            <p id={idNotaConferma} className="text-xs text-slate-500">
+            <p id={idNotaConferma} className="text-small text-ink-3">
               {membro.puo_modificare
                 ? "Per confermare serve una quota: indicala con «Modifica»."
                 : "Per confermare serve una quota: la indica chi ha creato la call."}
@@ -449,11 +423,7 @@ export function MembroRiga({
           )}
         </div>
       )}
-      {conferma.isError && (
-        <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-          {apiErrorMessage(conferma.error)}
-        </p>
-      )}
+      {conferma.isError && <Alert tono="errore">{apiErrorMessage(conferma.error)}</Alert>}
 
       {membro.puo_modificare && !membro.esterno && (
         <MembroDialog

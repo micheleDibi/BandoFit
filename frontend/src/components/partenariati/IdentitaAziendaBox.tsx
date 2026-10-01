@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { BadgeCheck, Clock, Download, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
+import { Download, ShieldCheck } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { useIdentitaAzienda, useRichiediIdentita } from "../../hooks/useIdentitaAzienda";
 import { PARTNER_PROFILE_ROOT } from "../../hooks/usePartnerProfile";
@@ -7,34 +7,29 @@ import { apiErrorCode, apiErrorMessage } from "../../lib/api";
 import { IDENTITA_COPY, PARTNER_COPY } from "../../lib/copy";
 import { formatDate } from "../../lib/format";
 import type { MotivoIdentitaPartner, StatoIdentitaAzienda } from "../../types";
-import { Badge, type BadgeProps } from "../ui/Badge";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";
+import { Panel } from "../ui/Panel";
 import { Skeleton } from "../ui/states";
+import { Status, type TonoStatus } from "../ui/Status";
 import { TestoLungo } from "./CampiCall";
 
 /** Ancora del riquadro (link di «Mostra il nome», del wizard e della chat). */
 export const ANCORA_IDENTITA = "identita";
 
-const STATO_UI: Record<
-  StatoIdentitaAzienda,
-  { tono: BadgeProps["tone"]; icona: typeof ShieldCheck }
-> = {
-  non_richiesta: { tono: "slate", icona: ShieldQuestion },
-  richiesta: { tono: "amber", icona: Clock },
-  verificata: { tono: "emerald", icona: BadgeCheck },
-  rifiutata: { tono: "red", icona: ShieldAlert },
+const TONO_STATO: Record<StatoIdentitaAzienda, TonoStatus> = {
+  non_richiesta: "neutro",
+  richiesta: "in-apertura",
+  verificata: "aperto",
+  rifiutata: "attenzione",
 };
 
-/** Badge dello stato della verifica: icona E testo, mai il solo colore. */
+/** Stato della verifica in parole (`Status`): punto e testo, mai il solo
+ *  colore. Il nome resta per chi lo importa (tabella dell'admin). */
 export function StatoIdentitaBadge({ stato }: { stato: StatoIdentitaAzienda }) {
-  const { tono, icona: Icona } = STATO_UI[stato] ?? STATO_UI.non_richiesta;
   return (
-    <Badge tone={tono}>
-      <Icona className="size-3.5" aria-hidden />
-      {IDENTITA_COPY.stati[stato] ?? stato}
-    </Badge>
+    <Status tono={TONO_STATO[stato] ?? "neutro"}>{IDENTITA_COPY.stati[stato] ?? stato}</Status>
   );
 }
 
@@ -91,21 +86,23 @@ export function IdentitaAziendaBox({
   let corpo;
   if (isPending) {
     corpo = (
-      <div className="mt-3 space-y-2" aria-hidden>
+      <div className="flex flex-col gap-2" aria-hidden>
         <Skeleton className="h-4 w-2/3" />
         <Skeleton className="h-9 w-40" />
       </div>
     );
   } else if (isError || !data) {
     corpo = (
-      <div className="mt-3">
-        <p className="text-sm text-red-700" role="alert">
-          {apiErrorMessage(error, "Impossibile caricare lo stato della verifica.")}
-        </p>
-        <Button variant="secondary" size="sm" className="mt-2" onClick={() => void refetch()}>
-          Riprova
-        </Button>
-      </div>
+      <Alert
+        tono="errore"
+        azione={
+          <Button variant="secondary" size="sm" onClick={() => void refetch()}>
+            Riprova
+          </Button>
+        }
+      >
+        {apiErrorMessage(error, "Impossibile caricare lo stato della verifica.")}
+      </Alert>
     );
   } else {
     const motivo = data.motivo_non_richiedibile;
@@ -114,7 +111,7 @@ export function IdentitaAziendaBox({
     const sospesa = data.stato === "verificata" && !data.verificata;
     corpo = (
       <>
-        <p className="mt-2 text-sm text-slate-700">
+        <p className="text-body text-ink-2">
           {IDENTITA_COPY.descrizioneStato[data.stato]}
           {data.stato === "verificata" && data.verificata_at
             ? ` Verificata il ${formatDate(data.verificata_at)}.`
@@ -124,27 +121,28 @@ export function IdentitaAziendaBox({
             : ""}
         </p>
         {data.stato !== "verificata" && (
-          <div className="mt-3">
-            <p className="text-sm font-medium text-slate-700">{IDENTITA_COPY.sbloccaTitolo}</p>
-            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-slate-600">
+          <div className="flex flex-col gap-1">
+            <p className="text-title-group text-ink">{IDENTITA_COPY.sbloccaTitolo}</p>
+            <ul className="flex list-disc flex-col gap-0.5 pl-5 text-body text-ink-2">
               {IDENTITA_COPY.sblocca.map((voce) => (
                 <li key={voce}>{voce}</li>
               ))}
             </ul>
-            <p className="mt-2 text-xs text-slate-500">{IDENTITA_COPY.spiegazione}</p>
+            <p className="mt-1 text-small text-ink-3">{IDENTITA_COPY.spiegazione}</p>
           </div>
         )}
         {sospesa && (
-          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="note">
+          <Alert tono="attenzione">
             {motivoRegistro
               ? PARTNER_COPY.motiviIdentita[motivoRegistro]
               : IDENTITA_COPY.registroNonCoerente}
-          </p>
+          </Alert>
         )}
         {data.puo_richiedere ? (
+          // Secondario: nella scheda il pulsante pieno è «Attiva la visibilità».
           <Button
-            className="mt-4"
-            variant={data.stato === "rifiutata" ? "secondary" : "primary"}
+            className="self-start"
+            variant="secondary"
             onClick={() => {
               setErrore(null);
               setAperto(true);
@@ -154,55 +152,43 @@ export function IdentitaAziendaBox({
             {data.stato === "rifiutata" ? IDENTITA_COPY.chiediDiNuovo : IDENTITA_COPY.chiedi}
           </Button>
         ) : motivo === "dati_registro" ? (
-          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            <p className="min-w-0 flex-1">
-              {motivoRegistro
-                ? PARTNER_COPY.motiviIdentita[motivoRegistro]
-                : IDENTITA_COPY.servonoDati}
-            </p>
-            {onImporta && (
-              <Button variant="secondary" size="sm" onClick={onImporta}>
-                <Download className="size-4" aria-hidden />
-                {PARTNER_COPY.importa}
-              </Button>
-            )}
-          </div>
+          <Alert
+            tono="attenzione"
+            azione={
+              onImporta ? (
+                <Button variant="secondary" size="sm" onClick={onImporta}>
+                  <Download className="size-4" aria-hidden />
+                  {PARTNER_COPY.importa}
+                </Button>
+              ) : undefined
+            }
+          >
+            {motivoRegistro
+              ? PARTNER_COPY.motiviIdentita[motivoRegistro]
+              : IDENTITA_COPY.servonoDati}
+          </Alert>
         ) : motivo === "solo_titolare" && data.stato !== "verificata" ? (
-          <p className="mt-3 text-xs text-slate-500">{IDENTITA_COPY.soloTitolare}</p>
+          <p className="text-small text-ink-3">{IDENTITA_COPY.soloTitolare}</p>
         ) : null}
-        {errore && !aperto && (
-          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-            {errore}
-          </p>
-        )}
+        {errore && !aperto && <Alert tono="errore">{errore}</Alert>}
       </>
     );
   }
 
   return (
-    <Card id={ANCORA_IDENTITA} className="scroll-mt-24 p-5">
-      <section aria-labelledby={idTitolo}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3
-            id={idTitolo}
-            className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900"
-          >
-            <ShieldCheck className="size-4 text-brand-500" aria-hidden />
-            {IDENTITA_COPY.titolo}
-          </h3>
-          {data && <StatoIdentitaBadge stato={data.stato} />}
-        </div>
-        {/* Sempre montata: l'esito della richiesta va annunciato anche se il
-            bottone che l'ha causato sparisce. */}
-        <div role="status" aria-live="polite">
-          {annuncio && (
-            <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-              {annuncio}
-            </p>
-          )}
-        </div>
-        {corpo}
-      </section>
+    <Panel
+      id={ANCORA_IDENTITA}
+      aria-labelledby={idTitolo}
+      className="scroll-mt-16"
+      titolo={<span id={idTitolo}>{IDENTITA_COPY.titolo}</span>}
+      azione={data ? <StatoIdentitaBadge stato={data.stato} /> : undefined}
+    >
+      {/* Sempre montata: l'esito della richiesta va annunciato anche se il
+          bottone che l'ha causato sparisce. */}
+      <div role="status" aria-live="polite">
+        {annuncio && <Alert tono="ok">{annuncio}</Alert>}
+      </div>
+      {corpo}
 
       <Dialog
         open={aperto}
@@ -211,7 +197,7 @@ export function IdentitaAziendaBox({
         title={IDENTITA_COPY.richiestaTitolo}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setAperto(false)} disabled={richiedi.isPending}>
+            <Button variant="secondary" onClick={() => setAperto(false)} disabled={richiedi.isPending}>
               {PARTNER_COPY.annulla}
             </Button>
             <Button loading={richiedi.isPending} onClick={() => void invia()}>
@@ -220,7 +206,7 @@ export function IdentitaAziendaBox({
           </>
         }
       >
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
           <p>{IDENTITA_COPY.spiegazione}</p>
           <TestoLungo
             etichetta={IDENTITA_COPY.notaEtichetta}
@@ -230,13 +216,9 @@ export function IdentitaAziendaBox({
             massimo={IDENTITA_COPY.notaMax}
             righe={3}
           />
-          {errore && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-              {errore}
-            </p>
-          )}
+          {errore && <Alert tono="errore">{errore}</Alert>}
         </div>
       </Dialog>
-    </Card>
+    </Panel>
   );
 }

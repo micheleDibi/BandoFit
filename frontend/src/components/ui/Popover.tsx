@@ -67,6 +67,32 @@ const FOCALIZZABILI =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), ' +
   'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/** Elementi raggiungibili con Tab: di un gruppo di radio conta solo quello scelto
+ *  (o il primo, se nessuno lo è), come fa il browser. */
+function tabbabili(pannello: HTMLElement): HTMLElement[] {
+  const tutti = Array.from(pannello.querySelectorAll<HTMLElement>(FOCALIZZABILI));
+  return tutti.filter((el) => {
+    if (!(el instanceof HTMLInputElement) || el.type !== "radio" || !el.name) return true;
+    const gruppo = tutti.filter(
+      (altro): altro is HTMLInputElement =>
+        altro instanceof HTMLInputElement && altro.type === "radio" && altro.name === el.name,
+    );
+    return el === (gruppo.find((r) => r.checked) ?? gruppo[0]);
+  });
+}
+
+/** Il focus è su un radio dello stesso gruppo di `riferimento`. */
+function stessoGruppoRadio(attivo: Element | null, riferimento: HTMLElement): boolean {
+  return (
+    attivo instanceof HTMLInputElement &&
+    riferimento instanceof HTMLInputElement &&
+    attivo.type === "radio" &&
+    riferimento.type === "radio" &&
+    attivo.name !== "" &&
+    attivo.name === riferimento.name
+  );
+}
+
 function uniscRef<T>(...refs: (Ref<T> | undefined)[]): RefCallback<T> {
   return (nodo) => {
     for (const ref of refs) {
@@ -90,10 +116,13 @@ function calcolaPosizione(
   const verticale: CSSProperties = sopra
     ? { bottom: window.innerHeight - trigger.top + DISTANZA, maxHeight: trigger.top - DISTANZA - MARGINE }
     : { top: trigger.bottom + DISTANZA, maxHeight: spazioSotto - DISTANZA - MARGINE };
-  const limite = Math.max(MARGINE, window.innerWidth - pannello.width - MARGINE);
+  // `clientWidth` esclude la barra di scorrimento verticale: con `innerWidth` il
+  // pannello allineato a destra ci finirebbe sotto.
+  const larghezzaFinestra = document.documentElement.clientWidth;
+  const limite = Math.max(MARGINE, larghezzaFinestra - pannello.width - MARGINE);
   const orizzontale: CSSProperties =
     align === "end"
-      ? { right: Math.min(window.innerWidth - trigger.right, limite) }
+      ? { right: Math.min(larghezzaFinestra - trigger.right, limite) }
       : { left: Math.min(trigger.left, limite) };
   return { position: "fixed", ...verticale, ...orizzontale };
 }
@@ -123,14 +152,31 @@ export function Popover({
     [controllato, onOpenChange],
   );
 
+  // Vero quando la chiusura parte da qui (Esc, clic fuori, `chiudi()`): il focus
+  // è già stato gestito e l'effetto sotto non deve intervenire.
+  const chiusuraInterna = useRef(false);
+
   const chiudi = useCallback(
     (riportaFocus?: boolean) => {
       const focusDentro = panelRef.current?.contains(document.activeElement) ?? false;
+      chiusuraInterna.current = true;
       imposta(false);
       if (riportaFocus ?? focusDentro) triggerRef.current?.focus();
     },
     [imposta],
   );
+
+  // Chiusura decisa dal genitore (`open` → false senza `chiudi`): il pannello si
+  // smonta e il focus cadrebbe sul body; torna al trigger.
+  const eraAperto = useRef(false);
+  useEffect(() => {
+    if (eraAperto.current && !aperto && !chiusuraInterna.current) {
+      const attivo = document.activeElement;
+      if (!attivo || attivo === document.body) triggerRef.current?.focus();
+    }
+    chiusuraInterna.current = false;
+    eraAperto.current = aperto;
+  }, [aperto]);
 
   // Posizione: calcolata prima del paint all'apertura, poi seguendo scroll e resize.
   const riposiziona = useCallback(() => {
@@ -156,7 +202,7 @@ export function Popover({
   // All'apertura il focus va al primo elemento del pannello (o al pannello stesso).
   useEffect(() => {
     if (!aperto) return;
-    const primo = panelRef.current?.querySelector<HTMLElement>(FOCALIZZABILI);
+    const primo = panelRef.current ? tabbabili(panelRef.current)[0] : undefined;
     (primo ?? panelRef.current)?.focus();
   }, [aperto]);
 
@@ -183,17 +229,22 @@ export function Popover({
     if (e.key !== "Tab") return;
     // Tab e Maiusc+Tab girano dentro il pannello: nel portal l'ordine naturale
     // porterebbe il focus a inizio o fine documento.
-    const elementi = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(FOCALIZZABILI) ?? []);
+    const elementi = panelRef.current ? tabbabili(panelRef.current) : [];
     if (elementi.length === 0) {
       e.preventDefault();
       return;
     }
     const primo = elementi[0];
     const ultimo = elementi[elementi.length - 1];
-    if (e.shiftKey && (document.activeElement === primo || document.activeElement === panelRef.current)) {
+    const attivo = document.activeElement;
+    // Un radio del gruppo del primo/ultimo elemento conta come quell'elemento.
+    const suPrimo =
+      attivo === primo || attivo === panelRef.current || stessoGruppoRadio(attivo, primo);
+    const suUltimo = attivo === ultimo || stessoGruppoRadio(attivo, ultimo);
+    if (e.shiftKey && suPrimo) {
       e.preventDefault();
       ultimo.focus();
-    } else if (!e.shiftKey && document.activeElement === ultimo) {
+    } else if (!e.shiftKey && suUltimo) {
       e.preventDefault();
       primo.focus();
     }

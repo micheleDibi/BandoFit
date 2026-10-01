@@ -49,7 +49,7 @@ export function ExportPdfButton({
         {srLabel && <span className="sr-only">{srLabel}</span>}
       </Button>
       {error && (
-        <span className="text-xs text-red-600" role="alert">
+        <span className="text-small text-danger" role="alert">
           {error}
         </span>
       )}

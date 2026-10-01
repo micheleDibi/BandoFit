@@ -2,8 +2,9 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// Solo GET, HEAD e OPTIONS passano dal proxy: la verifica visiva legge dati
-// veri e non può scrivere nulla sull'API di produzione.
+// Solo GET, HEAD e OPTIONS passano dal proxy: blocca i metodi di scrittura, non
+// gli effetti collaterali di alcune GET né le chiamate dirette a Supabase
+// (autenticazione). La verifica visiva legge dati veri dall'API di produzione.
 const METODI_SOLA_LETTURA = ["GET", "HEAD", "OPTIONS"];
 
 export default defineConfig({

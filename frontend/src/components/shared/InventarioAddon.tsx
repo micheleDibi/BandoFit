@@ -1,4 +1,4 @@
-import { BadgeCheck, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { useMyAddonLedger } from "../../hooks/useMyAddons";
 import { cn } from "../../lib/cn";
@@ -6,6 +6,8 @@ import { ADDON_MOVIMENTO_LABELS } from "../../lib/copy";
 import { formatDateTime } from "../../lib/format";
 import type { MyAddon } from "../../types";
 import { Badge } from "../ui/Badge";
+import { Button } from "../ui/Button";
+import { InlineError } from "../ui/InlineError";
 import { Skeleton } from "../ui/states";
 
 const deltaConSegno = (delta: number) => (delta > 0 ? `+${delta}` : `−${Math.abs(delta)}`);
@@ -15,11 +17,11 @@ const deltaConSegno = (delta: number) => (delta > 0 ? `+${delta}` : `−${Math.a
 const notaLeggibile = (tipo: string, note: string | null) =>
   tipo === "refund" && note?.startsWith("rimborso automatico")
     ? "Unità restituita automaticamente: la richiesta non è andata a buon fine"
-    : (note ?? undefined);
+    : (note ?? null);
 
-/** Inventario di un addon posseduto: badge «Hai N …» e storico movimenti a
- *  scomparsa. Il ledger (ultimi 20) si carica on-demand alla prima apertura,
- *  via useMyAddonLedger. Usato dal catalogo (Abbonamento) e da «I miei addon»
+/** Inventario di un addon posseduto: etichetta «Hai N …» e storico movimenti
+ *  a scomparsa. Il ledger (ultimi 20) si carica on-demand alla prima
+ *  apertura, via useMyAddonLedger. Usato dal catalogo e da «I tuoi add-on»
  *  (`mostraBadge={false}`: lì la quantità è già nell'intestazione). */
 export function InventarioAddon({
   posseduto,
@@ -36,63 +38,59 @@ export function InventarioAddon({
   } = useMyAddonLedger(aperto ? posseduto.addon_id : undefined);
 
   return (
-    <div className="mt-3 border-t border-slate-100 pt-3">
+    <div className="flex flex-col gap-2 border-t border-line pt-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         {mostraBadge ? (
-          <Badge tone="emerald">
-            <BadgeCheck className="size-3" aria-hidden />
+          <Badge>
             Hai {posseduto.quantita} {posseduto.nome}
           </Badge>
         ) : (
-          <span className="text-xs text-slate-400">Storico movimenti</span>
+          <span className="text-small text-ink-3">Storico dei movimenti</span>
         )}
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           aria-expanded={aperto}
           onClick={() => setAperto((v) => !v)}
-          className="inline-flex cursor-pointer items-center gap-0.5 text-xs font-medium text-brand-600 hover:text-brand-700"
         >
-          {aperto ? "Nascondi movimenti" : "Vedi movimenti"}
-          <ChevronDown
-            className={cn("size-3.5 transition-transform", aperto && "rotate-180")}
-            aria-hidden
-          />
-        </button>
+          {aperto ? "Nascondi i movimenti" : "Vedi i movimenti"}
+          <ChevronDown className={cn("size-4", aperto && "rotate-180")} aria-hidden />
+        </Button>
       </div>
       {aperto && (
-        <div className="mt-2">
+        <div>
           {isPending ? (
             <Skeleton className="h-16 w-full" />
           ) : isError ? (
-            <p className="text-xs text-red-600" role="alert">
-              Impossibile caricare i movimenti. Riapri per riprovare.
-            </p>
+            <InlineError>Non siamo riusciti a caricare i movimenti. Riapri per riprovare.</InlineError>
           ) : (movimenti?.length ?? 0) === 0 ? (
-            <p className="text-xs text-slate-400">Nessun movimento registrato.</p>
+            <p className="text-small text-ink-3">Nessun movimento registrato.</p>
           ) : (
-            <ul className="space-y-1.5">
-              {movimenti?.map((m, i) => (
-                <li
-                  key={i}
-                  title={notaLeggibile(m.tipo, m.note)}
-                  className="flex items-baseline justify-between gap-2 text-xs"
-                >
-                  <div className="min-w-0">
-                    <span className="font-medium text-slate-700">
-                      {ADDON_MOVIMENTO_LABELS[m.tipo]}
-                    </span>
-                    <span className="ml-1.5 text-slate-400">{formatDateTime(m.created_at)}</span>
-                  </div>
-                  <span
-                    className={cn(
-                      "shrink-0 font-semibold tabular-nums",
-                      m.delta > 0 ? "text-emerald-600" : "text-slate-500",
-                    )}
+            <ul className="flex flex-col">
+              {movimenti?.map((m, i) => {
+                const nota = notaLeggibile(m.tipo, m.note);
+                return (
+                  <li
+                    key={i}
+                    className="flex items-baseline justify-between gap-3 border-b border-line py-1.5 text-small last:border-b-0"
                   >
-                    {deltaConSegno(m.delta)}
-                  </span>
-                </li>
-              ))}
+                    <div className="min-w-0">
+                      <span className="font-medium text-ink">{ADDON_MOVIMENTO_LABELS[m.tipo]}</span>
+                      <span className="ml-2 text-ink-3">{formatDateTime(m.created_at)}</span>
+                      {nota && <span className="block text-ink-3">{nota}</span>}
+                    </div>
+                    <span
+                      className={cn(
+                        "shrink-0 font-semibold tabular-nums",
+                        m.delta > 0 ? "text-fit-ink" : "text-ink-2",
+                      )}
+                    >
+                      {deltaConSegno(m.delta)}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

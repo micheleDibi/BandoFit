@@ -1,10 +1,12 @@
 import { useState, type FormEvent, type ReactNode } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { Logo } from "../components/layout/Logo";
+import { useSearchParams } from "react-router-dom";
+import { AccessoLaterale } from "../components/landing/AccessoLaterale";
+import { Alert } from "../components/ui/Alert";
+import { AuthLayout } from "../components/ui/AuthLayout";
 import { Button } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
 import { Combobox } from "../components/ui/Combobox";
 import { TextField } from "../components/ui/Field";
+import { TextLink } from "../components/ui/TextLink";
 import { useJobPositions } from "../hooks/useJobPositions";
 import { usePlans } from "../hooks/usePlans";
 import { api, apiErrorMessage } from "../lib/api";
@@ -120,8 +122,9 @@ export default function Register() {
   // Modello: RecuperaPassword.
   const esitoRegistrazione = (): ReactNode => (
     <>
-      Ti abbiamo scritto a <strong className="text-slate-900">{form.email.trim()}</strong>: apri il
-      messaggio per completare la registrazione e scegliere la password. Controlla anche lo spam.
+      Ti abbiamo scritto a{" "}
+      <strong className="font-semibold text-ink">{form.email.trim()}</strong>: apri il messaggio
+      per completare la registrazione e scegliere la password. Controlla anche lo spam.
     </>
   );
 
@@ -158,157 +161,141 @@ export default function Register() {
   };
 
   return (
-    <div className="flex min-h-dvh flex-col items-center bg-surface px-4 py-10">
-      <Link to="/" className="mb-8 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-500">
-        <Logo variant="vertical" />
-      </Link>
+    <AuthLayout laterale={<AccessoLaterale />}>
+      <h1 className="text-title-page text-ink">Crea il tuo account</h1>
+      <p className="mt-1 text-body text-ink-2">Compila i tuoi dati: ci vuole un minuto.</p>
 
-      <Card className="w-full max-w-lg p-6 sm:p-8">
-        <h1 className="font-display text-xl font-bold text-slate-900">Crea il tuo account</h1>
-        <p className="mt-1 text-sm text-slate-500">Compila i tuoi dati: ci vuole un minuto.</p>
-
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
-          <div className="grid grid-cols-2 gap-3">
-            <TextField
-              label="Nome"
-              required
-              autoComplete="given-name"
-              value={form.nome}
-              onChange={set("nome")}
-              error={fieldErrors.nome}
-            />
-            <TextField
-              label="Cognome"
-              required
-              autoComplete="family-name"
-              value={form.cognome}
-              onChange={set("cognome")}
-              error={fieldErrors.cognome}
-            />
-          </div>
-          {/* Contatti: email e telefono affiancati (impilati su mobile). */}
-          <div className="grid gap-4 sm:grid-cols-2 sm:gap-3">
-            <TextField
-              label="Email"
-              type="email"
-              required
-              autoComplete="email"
-              value={form.email}
-              onChange={set("email")}
-              error={fieldErrors.email}
-              placeholder="nome@azienda.it"
-            />
-            <TextField
-              label="Telefono"
-              type="tel"
-              required
-              autoComplete="tel"
-              value={form.telefono}
-              onChange={set("telefono")}
-              error={fieldErrors.telefono}
-              placeholder="347 1234567"
-              helper={!fieldErrors.telefono ? "Prefisso +39 automatico" : undefined}
-            />
-          </div>
-          {/* Azienda: nome e posizione sono una coppia semantica. */}
-          <div className="grid gap-4 sm:grid-cols-2 sm:gap-3">
-            <TextField
-              label="Azienda"
-              autoComplete="organization"
-              value={form.azienda}
-              onChange={set("azienda")}
-              helper="Facoltativa"
-            />
-            <Combobox
-              label="Posizione in azienda"
-              required
-              options={(positions ?? []).map((p) => ({ id: p.id, label: p.nome }))}
-              value={positionId}
-              onChange={setPositionId}
-              placeholder="Cerca…"
-              disabled={!positions}
-              error={fieldErrors.posizione}
-            />
-          </div>
-          {positionsError && (
-            <p className="text-sm text-red-600" role="alert">
-              Impossibile caricare le posizioni.{" "}
-              <button
-                type="button"
-                onClick={() => refetchPositions()}
-                className="cursor-pointer font-medium underline underline-offset-2"
-              >
+      {/* Una colonna: il modulo di AuthLayout è largo 380px; solo nome e
+          cognome, corti, stanno affiancati. */}
+      <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4" noValidate>
+        <div className="grid grid-cols-2 gap-3">
+          <TextField
+            label="Nome"
+            required
+            autoComplete="given-name"
+            value={form.nome}
+            onChange={set("nome")}
+            error={fieldErrors.nome}
+          />
+          <TextField
+            label="Cognome"
+            required
+            autoComplete="family-name"
+            value={form.cognome}
+            onChange={set("cognome")}
+            error={fieldErrors.cognome}
+          />
+        </div>
+        <TextField
+          label="Email"
+          type="email"
+          required
+          autoComplete="email"
+          value={form.email}
+          onChange={set("email")}
+          error={fieldErrors.email}
+          placeholder="nome@azienda.it"
+        />
+        <TextField
+          label="Telefono"
+          type="tel"
+          required
+          autoComplete="tel"
+          value={form.telefono}
+          onChange={set("telefono")}
+          error={fieldErrors.telefono}
+          placeholder="347 1234567"
+          helper={!fieldErrors.telefono ? "Prefisso +39 automatico" : undefined}
+        />
+        <TextField
+          label="Azienda"
+          autoComplete="organization"
+          value={form.azienda}
+          onChange={set("azienda")}
+          helper="Facoltativa"
+        />
+        <Combobox
+          label="Posizione in azienda"
+          required
+          options={(positions ?? []).map((p) => ({ id: p.id, label: p.nome }))}
+          value={positionId}
+          onChange={setPositionId}
+          placeholder="Cerca…"
+          disabled={!positions}
+          error={fieldErrors.posizione}
+        />
+        {positionsError && (
+          <Alert
+            tono="errore"
+            azione={
+              <Button type="button" variant="ghost" size="sm" onClick={() => refetchPositions()}>
                 Riprova
-              </button>
-            </p>
-          )}
-          {selectedPosition?.slug === "altro" && (
-            <TextField
-              label="Specifica la posizione"
-              value={posizioneAltro}
-              onChange={(e) => setPosizioneAltro(e.target.value)}
-              helper="Facoltativa"
-              maxLength={100}
-            />
-          )}
-          <p className="text-xs text-slate-400">
-            La password la scegli tra un momento, aprendo l'email di conferma.
-          </p>
-
-          <Button type="submit" className="w-full" size="lg" loading={loading} disabled={!!info}>
-            Crea l'account
-          </Button>
-        </form>
-
-        {pianoAPagamento && pianoRichiestoObj && (
-          <p className="mt-4 rounded-lg bg-brand-50 px-4 py-3 text-sm text-brand-800" role="note">
-            Completerai l'acquisto di {pianoRichiestoObj.nome} dopo il primo accesso: parti da
-            Gratuito e lo attivi in un minuto.
-          </p>
+              </Button>
+            }
+          >
+            Impossibile caricare le posizioni.
+          </Alert>
         )}
-
-        {error && (
-          <p className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
-            {error}
-          </p>
+        {selectedPosition?.slug === "altro" && (
+          <TextField
+            label="Specifica la posizione"
+            value={posizioneAltro}
+            onChange={(e) => setPosizioneAltro(e.target.value)}
+            helper="Facoltativa"
+            maxLength={100}
+          />
         )}
-        {info && (
-          <div className="mt-4 rounded-lg bg-brand-50 px-4 py-3 text-sm text-brand-800" role="status">
-            {info}
-            {/* Le vie d'uscita: senza, chi sbaglia l'indirizzo o non riceve
-                nulla resta fermo qui — il submit è disabilitato finché c'è
-                un esito, e «Vai al login» non serve a chi un account non ce
-                l'ha ancora. */}
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 font-medium">
-              <button
-                type="button"
-                onClick={handleReinvia}
-                disabled={loading}
-                className="cursor-pointer underline underline-offset-2 disabled:opacity-50"
-              >
-                Non è arrivata? Reinvia
-              </button>
-              <button
-                type="button"
-                onClick={handleCorreggi}
-                className="cursor-pointer underline underline-offset-2"
-              >
-                Ho sbagliato indirizzo
-              </button>
-              <Link to="/login" className="underline underline-offset-2">
-                Vai al login
-              </Link>
-            </div>
-          </div>
-        )}
-
-        <p className="mt-6 text-center text-sm text-slate-500">
-          Hai già un account?{" "}
-          <Link to="/login" className="font-medium text-brand-600 underline-offset-2 hover:underline">
-            Accedi
-          </Link>
+        <p className="text-small text-ink-3">
+          La password la scegli tra un momento, aprendo l'email di conferma.
         </p>
-      </Card>
-    </div>
+
+        <Button type="submit" className="w-full" size="lg" loading={loading} disabled={!!info}>
+          Crea l'account
+        </Button>
+      </form>
+
+      {pianoAPagamento && pianoRichiestoObj && (
+        <Alert tono="info" className="mt-4">
+          Completerai l'acquisto di {pianoRichiestoObj.nome} dopo il primo accesso: parti da
+          Gratuito e lo attivi in un minuto.
+        </Alert>
+      )}
+
+      {error && (
+        <Alert tono="errore" className="mt-4">
+          {error}
+        </Alert>
+      )}
+      {info && (
+        <Alert tono="info" className="mt-4">
+          {info}
+          {/* Le vie d'uscita: senza, chi sbaglia l'indirizzo o non riceve
+              nulla resta fermo qui — il submit è disabilitato finché c'è
+              un esito, e «Vai al login» non serve a chi un account non ce
+              l'ha ancora. */}
+          <div className="-ml-2 mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleReinvia}
+              disabled={loading}
+            >
+              Non è arrivata? Reinvia
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={handleCorreggi}>
+              Ho sbagliato indirizzo
+            </Button>
+            <TextLink to="/login" className="px-2 text-small font-semibold">
+              Vai al login
+            </TextLink>
+          </div>
+        </Alert>
+      )}
+
+      <p className="mt-6 text-body text-ink-2">
+        Hai già un account? <TextLink to="/login">Accedi</TextLink>
+      </p>
+    </AuthLayout>
   );
 }

@@ -1,13 +1,14 @@
-import { Lock, Pencil } from "lucide-react";
-import { useId, useState } from "react";
+import { useState } from "react";
 import { useSalvaBudgetConsorzio } from "../../hooks/useConsorzio";
 import { apiErrorMessage } from "../../lib/api";
 import { CALL_COPY, CONSORZIO_COPY } from "../../lib/copy";
 import { formatEur } from "../../lib/format";
 import type { BudgetConsorzio as Budget, BudgetFasciaCall } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
+import { DefinitionList } from "../ui/Facts";
 import { SelectField, TextField } from "../ui/Field";
+import { Section, SectionHeader } from "../ui/SectionHeader";
 import { budgetNellaFascia, FASCE_BUDGET, fasciaDi, leggiImporto, mostraDecimale } from "./callDati";
 
 function Modifica({
@@ -46,7 +47,7 @@ function Modifica({
   return (
     <form
       noValidate
-      className="mt-3 space-y-3"
+      className="flex flex-col gap-4"
       onSubmit={(e) => {
         e.preventDefault();
         conferma();
@@ -80,16 +81,12 @@ function Modifica({
           helper={lettura.ok && lettura.valore ? formatEur(lettura.valore) : "Facoltativo"}
         />
       </div>
-      {salva.isError && (
-        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-          {apiErrorMessage(salva.error)}
-        </p>
-      )}
+      {salva.isError && <Alert tono="errore">{apiErrorMessage(salva.error)}</Alert>}
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" size="sm" loading={salva.isPending}>
+        <Button type="submit" loading={salva.isPending}>
           Salva il budget
         </Button>
-        <Button type="button" size="sm" variant="ghost" onClick={onAnnulla} disabled={salva.isPending}>
+        <Button type="button" variant="secondary" onClick={onAnnulla} disabled={salva.isPending}>
           Annulla
         </Button>
       </div>
@@ -112,68 +109,54 @@ export function BudgetConsorzio({
   seiCreatore: boolean;
   onAnnuncio: (testo: string) => void;
 }) {
-  const idTitolo = useId();
   const [modifica, setModifica] = useState(false);
   return (
-    <Card className="p-5">
-      <section aria-labelledby={idTitolo}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 id={idTitolo} className="font-display text-base font-semibold text-slate-900">
-            Budget del progetto
-          </h2>
-          {budget.modificabile && !modifica && (
+    <Section>
+      <SectionHeader
+        titolo="Budget del progetto"
+        azione={
+          budget.modificabile && !modifica ? (
             <Button size="sm" variant="secondary" onClick={() => setModifica(true)}>
-              <Pencil className="size-4" aria-hidden />
               Modifica il budget
             </Button>
-          )}
-        </div>
-        <p className="mt-1 text-sm text-slate-600">
-          Serve a calcolare il costo della quota di ogni membro per i requisiti economici del bando:
-          senza il budget esatto si usa la fascia.
-        </p>
-        {modifica ? (
-          <Modifica
-            callId={callId}
-            budget={budget}
-            onAnnulla={() => setModifica(false)}
-            onFatto={() => {
-              setModifica(false);
-              onAnnuncio("Budget salvato: la verifica del consorzio è aggiornata.");
-            }}
-          />
-        ) : (
-          <dl className="mt-3 grid gap-4 sm:grid-cols-2">
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Fascia (pubblica)</dt>
-              <dd className="mt-1 text-sm text-slate-700">
-                {budget.fascia ? CALL_COPY.fasceBudget[budget.fascia] : "Non indicata"}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Budget esatto (riservato)
-              </dt>
-              <dd className="mt-1 text-sm text-slate-700">
-                {budget.esatto ? (
-                  <span className="inline-flex items-center gap-1 tabular">
-                    <Lock className="size-3.5 text-slate-400" aria-hidden />
-                    {formatEur(budget.esatto)}
-                  </span>
-                ) : seiCreatore ? (
-                  "Non indicato"
-                ) : (
-                  "Non disponibile"
-                )}
-              </dd>
-            </div>
-          </dl>
-        )}
-        <p className="mt-3 flex items-start gap-1.5 text-xs text-slate-500" role="note">
-          <Lock className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-          {seiCreatore ? CONSORZIO_COPY.notaBudget : CONSORZIO_COPY.notaBudgetMembro}
-        </p>
-      </section>
-    </Card>
+          ) : undefined
+        }
+      />
+      <p className="text-body text-ink-2">
+        Serve a calcolare il costo della quota di ogni membro per i requisiti economici del bando:
+        senza il budget esatto si usa la fascia.
+      </p>
+      {modifica ? (
+        <Modifica
+          callId={callId}
+          budget={budget}
+          onAnnulla={() => setModifica(false)}
+          onFatto={() => {
+            setModifica(false);
+            onAnnuncio("Budget salvato: la verifica del consorzio è aggiornata.");
+          }}
+        />
+      ) : (
+        <DefinitionList
+          items={[
+            {
+              etichetta: "Fascia (pubblica)",
+              valore: budget.fascia ? CALL_COPY.fasceBudget[budget.fascia] : "Non indicata",
+            },
+            {
+              etichetta: "Budget esatto (riservato)",
+              valore: budget.esatto
+                ? formatEur(budget.esatto)
+                : seiCreatore
+                  ? "Non indicato"
+                  : "Non disponibile",
+            },
+          ]}
+        />
+      )}
+      <p className="text-small text-ink-3" role="note">
+        {seiCreatore ? CONSORZIO_COPY.notaBudget : CONSORZIO_COPY.notaBudgetMembro}
+      </p>
+    </Section>
   );
 }

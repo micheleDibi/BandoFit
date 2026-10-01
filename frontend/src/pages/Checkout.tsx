@@ -1,19 +1,26 @@
 import RevolutCheckout from "@revolut/checkout";
-import { ArrowLeft, Lock, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { BillingProfileForm } from "../components/BillingProfileForm";
+import { Alert } from "../components/ui/Alert";
 import { Button, LinkButton } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
-import { ErrorState, Skeleton } from "../components/ui/states";
+import { Checkbox } from "../components/ui/Checkbox";
+import { InlineError } from "../components/ui/InlineError";
+import { Page } from "../components/ui/Page";
+import { PageHeader } from "../components/ui/PageHeader";
+import { Section, SectionHeader } from "../components/ui/SectionHeader";
+import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
+import { TextLink } from "../components/ui/TextLink";
 import { useBillingProfile } from "../hooks/useBillingProfile";
 import { useCheckoutPreview, useStartCheckout } from "../hooks/useCheckout";
 import { apiErrorCode, apiErrorMessage } from "../lib/api";
 import { eurFromCents, formatDate } from "../lib/format";
 import { viesApplicabile } from "../lib/paesi";
 import { REVOLUT_MODE } from "../lib/revolut";
-import { Link } from "react-router-dom";
 import type { CheckoutPreview } from "../types";
+
+const INDIETRO = { label: "Abbonamento", to: "/app/abbonamento" };
 
 /** "25.00" → "25": l'aliquota arriva come stringa decimale dal backend. */
 const aliquotaDisplay = (aliquota: string) => String(Number(aliquota));
@@ -28,16 +35,16 @@ interface PendingOrder {
 function RigaRiepilogo({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-4">
-      <dt className="text-sm text-slate-600">{label}</dt>
-      <dd className="text-sm font-medium tabular-nums text-slate-900">{value}</dd>
+      <dt className="text-body text-ink-2">{label}</dt>
+      <dd className="text-body font-medium text-ink tabular-nums">{value}</dd>
     </div>
   );
 }
 
 function Riepilogo({ preview }: { preview: CheckoutPreview }) {
   return (
-    <>
-      <dl className="space-y-2">
+    <div className="flex flex-col gap-3">
+      <dl className="flex flex-col gap-2">
         <RigaRiepilogo
           label={
             preview.kind === "piano"
@@ -66,25 +73,23 @@ function Riepilogo({ preview }: { preview: CheckoutPreview }) {
           }
           value={eurFromCents(preview.iva_cents)}
         />
-        <div className="flex items-baseline justify-between gap-4 border-t border-slate-200 pt-3">
-          <dt className="font-display text-base font-semibold text-slate-900">Totale</dt>
-          <dd className="font-display text-2xl font-bold tabular-nums text-slate-900">
-            {eurFromCents(preview.totale_cents)}
-          </dd>
+        <div className="flex items-baseline justify-between gap-4 border-t border-line pt-3">
+          <dt className="text-title-group text-ink">Totale</dt>
+          <dd className="text-figure text-ink">{eurFromCents(preview.totale_cents)}</dd>
         </div>
       </dl>
       {preview.kind === "piano" && preview.scadenza_risultante && (
-        <p className="mt-3 text-sm text-slate-500">
+        <p className="text-body text-ink-2">
           Nuova scadenza dell'abbonamento:{" "}
-          <strong className="text-slate-700">{formatDate(preview.scadenza_risultante)}</strong>
+          <strong className="text-ink">{formatDate(preview.scadenza_risultante)}</strong>
         </p>
       )}
       {preview.natura_iva && (
-        <p className="mt-3 text-xs text-slate-400">
+        <p className="text-small text-ink-3">
           Fattura emessa senza IVA (reverse charge): l'imposta si assolve nel tuo paese.
         </p>
       )}
-    </>
+    </div>
   );
 }
 
@@ -167,18 +172,19 @@ export default function Checkout() {
     }
   };
 
+  const tornaAllAbbonamento = (
+    <LinkButton to="/app/abbonamento" variant="secondary">
+      Torna all'abbonamento
+    </LinkButton>
+  );
+
   const renderContent = () => {
     if (!targetValido) {
       return (
-        <Card className="mt-6 p-6 text-center">
-          <p className="text-sm text-slate-600">
-            Indica cosa vuoi acquistare partendo dalla pagina Abbonamento.
-          </p>
-          <LinkButton to="/app/abbonamento" variant="secondary" className="mt-4">
-            <ArrowLeft className="size-4" aria-hidden />
-            Vai all'abbonamento
-          </LinkButton>
-        </Card>
+        <EmptyState
+          title="Indica cosa vuoi acquistare partendo dalla pagina Abbonamento."
+          action={tornaAllAbbonamento}
+        />
       );
     }
 
@@ -188,17 +194,11 @@ export default function Checkout() {
       (billing.isError && apiErrorCode(billing.error) === "forbidden")
     ) {
       return (
-        <Card className="mt-6 flex flex-col items-center px-6 py-12 text-center">
-          <div className="rounded-full bg-slate-100 p-3 text-slate-500">
-            <Lock className="size-7" aria-hidden />
-          </div>
-          <h2 className="mt-4 font-display text-base font-semibold text-slate-900">
-            Gestito dall'account titolare
-          </h2>
-          <p className="mt-1 max-w-sm text-sm text-slate-500">
-            {apiErrorMessage(preview.isError ? preview.error : billing.error)}.
-          </p>
-        </Card>
+        <EmptyState
+          title="Gestito dall'account titolare."
+          description={`${apiErrorMessage(preview.isError ? preview.error : billing.error)}.`}
+          action={tornaAllAbbonamento}
+        />
       );
     }
 
@@ -209,35 +209,28 @@ export default function Checkout() {
       ["bad_request", "not_found"].includes(apiErrorCode(preview.error) ?? "")
     ) {
       return (
-        <Card className="mt-6 p-6 text-center">
-          <p className="text-sm text-slate-600">{apiErrorMessage(preview.error)}.</p>
-          <LinkButton to="/app/abbonamento" variant="secondary" className="mt-4">
-            <ArrowLeft className="size-4" aria-hidden />
-            Torna all'abbonamento
-          </LinkButton>
-        </Card>
+        <EmptyState title={`${apiErrorMessage(preview.error)}.`} action={tornaAllAbbonamento} />
       );
     }
 
     if (preview.isError || billing.isError) {
       return (
-        <div className="mt-6">
-          <ErrorState
-            message={apiErrorMessage(preview.isError ? preview.error : billing.error)}
-            onRetry={() => {
-              preview.refetch();
-              billing.refetch();
-            }}
-          />
-        </div>
+        <ErrorState
+          title="Non siamo riusciti a preparare il pagamento."
+          message={apiErrorMessage(preview.isError ? preview.error : billing.error)}
+          onRetry={() => {
+            preview.refetch();
+            billing.refetch();
+          }}
+        />
       );
     }
 
     if (preview.isPending || billing.isPending) {
       return (
-        <div className="mt-6 space-y-4">
-          <Skeleton className="h-56 w-full" />
-          <Skeleton className="h-14 w-full" />
+        <div className="flex flex-col gap-4" aria-hidden>
+          <Skeleton className="h-40 w-full" />
+          <Skeleton className="h-12 w-full" />
         </div>
       );
     }
@@ -255,19 +248,18 @@ export default function Checkout() {
 
     return (
       <>
-        <Card className="mt-6 p-6">
+        <Section aria-label="Riepilogo">
+          <SectionHeader titolo="Riepilogo" />
           <Riepilogo preview={dati} />
-        </Card>
+        </Section>
 
         {invitoVies && (
-          <p className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Sei un'azienda UE? Con la partita IVA verificata nel VIES l'acquisto è in
-            reverse charge, senza IVA.{" "}
-            <Link to="/app/fatturazione" className="font-medium underline">
-              Verifica dai dati di fatturazione
-            </Link>
+          <Alert tono="attenzione">
+            Sei un'azienda UE? Con la partita IVA verificata nel VIES l'acquisto è in reverse
+            charge, senza IVA.{" "}
+            <TextLink to="/app/abbonamento?tab=pagamento">Verifica dai dati di fatturazione</TextLink>
             .
-          </p>
+          </Alert>
         )}
 
         {/* Senza anagrafica di fatturazione niente pagamento: il backend la
@@ -275,89 +267,69 @@ export default function Checkout() {
             Al salvataggio la preview si ricalcola (l'IVA dipende dal
             soggetto: un'azienda UE passa in reverse charge). */}
         {billingMancante ? (
-          <Card className="mt-4 p-6">
-            <h2 className="font-display text-base font-semibold text-slate-900">
-              Completa i dati di fatturazione
-            </h2>
-            <p className="mt-1 text-sm text-slate-500">
+          <Section aria-label="Dati di fatturazione">
+            <SectionHeader titolo="Completa i dati di fatturazione" />
+            <p className="text-body text-ink-2">
               Servono per intestare la fattura dell'acquisto: un minuto e torni al pagamento.
             </p>
-            <div className="mt-4">
-              <BillingProfileForm profile={null} onSaved={() => preview.refetch()} />
-            </div>
-          </Card>
+            <BillingProfileForm profile={null} onSaved={() => preview.refetch()} />
+          </Section>
         ) : (
-          <Card className="mt-4 p-6">
+          <Section aria-label="Pagamento">
+            <SectionHeader titolo="Pagamento" />
             {dati.kind === "piano" && (
-              <label className="mb-4 flex cursor-pointer items-start gap-2.5">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 size-4 cursor-pointer accent-brand-500"
-                  checked={autoRenew}
-                  // La scelta è congelata nell'ordine creato: si sblocca solo
-                  // con un nuovo checkout, non tra un tentativo e l'altro.
-                  disabled={!!pending || start.isPending || opening}
-                  onChange={(e) => setAutoRenew(e.target.checked)}
-                />
-                <span>
-                  <span className="block text-sm font-medium text-slate-700">
-                    Rinnova automaticamente alla scadenza
-                  </span>
-                  <span className="mt-0.5 block text-xs text-slate-500">
-                    Ti avvisiamo via email almeno 7 giorni prima dell'addebito; puoi disdire
-                    quando vuoi.
-                  </span>
-                </span>
-              </label>
+              <Checkbox
+                label="Rinnova automaticamente alla scadenza"
+                descrizione="Ti avvisiamo via email almeno 7 giorni prima dell'addebito; puoi disdire quando vuoi."
+                checked={autoRenew}
+                // La scelta è congelata nell'ordine creato: si sblocca solo
+                // con un nuovo checkout, non tra un tentativo e l'altro.
+                disabled={!!pending || start.isPending || opening}
+                onChange={(e) => setAutoRenew(e.target.checked)}
+              />
             )}
-
-            <Button
-              className="w-full"
-              size="lg"
-              onClick={() => handlePaga(dati.kind)}
-              loading={start.isPending || opening}
-            >
-              {pending ? "Riprova il pagamento" : `Paga ${eurFromCents(dati.totale_cents)}`}
-            </Button>
-            <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-slate-400">
-              <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
+            <div>
+              <Button
+                type="button"
+                size="lg"
+                onClick={() => handlePaga(dati.kind)}
+                loading={start.isPending || opening}
+              >
+                {pending ? "Riprova il pagamento" : `Paga ${eurFromCents(dati.totale_cents)}`}
+              </Button>
+            </div>
+            <p className="inline-flex items-start gap-1.5 text-small text-ink-3">
+              <ShieldCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
               Il pagamento avviene nel popup di Revolut: i dati della carta non passano mai da
               BandoFit.
             </p>
-
-            {payNotice && (
-              <p
-                className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800"
-                role="alert"
-              >
-                {payNotice}
-              </p>
-            )}
+            {payNotice && <Alert tono="attenzione">{payNotice}</Alert>}
             {start.isError && (
-              <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-                {apiErrorMessage(start.error)}.
+              <div className="flex flex-col gap-2">
+                <InlineError>{apiErrorMessage(start.error)}.</InlineError>
                 {apiErrorCode(start.error) === "conflict" && (
-                  <p className="mt-1">
-                    <LinkButton to="/app/acquisti" variant="secondary" size="sm">
-                      Vedi i tuoi acquisti
+                  <div>
+                    <LinkButton to="/app/abbonamento?tab=acquisti" variant="secondary" size="sm">
+                      Vedi gli acquisti
                     </LinkButton>
-                  </p>
+                  </div>
                 )}
               </div>
             )}
-          </Card>
+          </Section>
         )}
       </>
     );
   };
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">Checkout</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        Controlla il riepilogo e completa il pagamento nel popup sicuro di Revolut.
-      </p>
+    <Page variante="flusso">
+      <PageHeader
+        indietro={INDIETRO}
+        titolo="Checkout"
+        descrizione="Controlla il riepilogo e completa il pagamento nel popup sicuro di Revolut."
+      />
       {renderContent()}
-    </div>
+    </Page>
   );
 }

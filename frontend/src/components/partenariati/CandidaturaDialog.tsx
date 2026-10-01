@@ -1,14 +1,17 @@
-import { Lock, UserRoundPen } from "lucide-react";
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState } from "react";
 import { useInviaCandidatura } from "../../hooks/useCandidature";
 import { useEntitlements } from "../../hooks/useEntitlements";
 import { apiErrorCode, apiErrorMessage } from "../../lib/api";
 import { CANDIDATURE_COPY } from "../../lib/copy";
 import type { Candidatura, CallDettaglioAltraAzienda, PartenariatiLimiteMese } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Badge } from "../ui/Badge";
-import { Button, LinkButton } from "../ui/Button";
+import { Button } from "../ui/Button";
+import { Checkbox } from "../ui/Checkbox";
 import { Dialog } from "../ui/Dialog";
 import { SelectField, TextareaField } from "../ui/Field";
+import { TextLink } from "../ui/TextLink";
+import { ANCORA_IDENTITA } from "./IdentitaAziendaBox";
 
 /** Limiti del messaggio della candidatura (come il server). */
 export const MESSAGGIO_CANDIDATURA_MIN = 50;
@@ -42,7 +45,7 @@ function bloccoDa(limite: PartenariatiLimiteMese | null | undefined, optIn: bool
   return null;
 }
 
-/** Codice d'errore del server → pannello dedicato (gli altri: il messaggio). */
+/** Codice d'errore del server → avviso dedicato (gli altri: il messaggio). */
 function bloccoDaErrore(codice: string | undefined): Blocco | null {
   if (codice === "funzione_non_inclusa") return "non_incluso";
   if (codice === "candidature_esaurite") return "esaurite";
@@ -50,50 +53,27 @@ function bloccoDaErrore(codice: string | undefined): Blocco | null {
   return null;
 }
 
-function Pannello({ icona, titolo, children, azione }: { icona: ReactNode; titolo: string; children: ReactNode; azione: ReactNode }) {
-  return (
-    <div className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-brand-900" role="note">
-      <div className="flex items-start gap-2">
-        <span className="mt-0.5 shrink-0">{icona}</span>
-        <div className="min-w-0 space-y-1 text-sm">
-          <p className="font-medium">{titolo}</p>
-          <p>{children}</p>
-        </div>
-      </div>
-      <div className="mt-3 flex justify-end">{azione}</div>
-    </div>
-  );
-}
-
-function PannelloBlocco({ blocco }: { blocco: Blocco }) {
+function AvvisoBlocco({ blocco }: { blocco: Blocco }) {
   if (blocco === "profilo") {
     return (
-      <Pannello
-        icona={<UserRoundPen className="size-4" aria-hidden />}
+      <Alert
+        tono="info"
         titolo={CANDIDATURE_COPY.profiloNonAttivoTitolo}
-        azione={
-          <LinkButton to="/app/azienda#partner" size="sm">
-            {CANDIDATURE_COPY.profiloCta}
-          </LinkButton>
-        }
+        azione={<TextLink to="/app/azienda#partner">{CANDIDATURE_COPY.profiloCta}</TextLink>}
       >
         {CANDIDATURE_COPY.profiloNonAttivo}
-      </Pannello>
+      </Alert>
     );
   }
   const nonIncluso = blocco === "non_incluso";
   return (
-    <Pannello
-      icona={<Lock className="size-4" aria-hidden />}
+    <Alert
+      tono="attenzione"
       titolo={nonIncluso ? CANDIDATURE_COPY.gratuitoTitolo : CANDIDATURE_COPY.esauriteTitolo}
-      azione={
-        <LinkButton to="/app/abbonamento" size="sm" variant="secondary">
-          {CANDIDATURE_COPY.vediPiani}
-        </LinkButton>
-      }
+      azione={<TextLink to="/app/abbonamento">{CANDIDATURE_COPY.vediPiani}</TextLink>}
     >
       {nonIncluso ? CANDIDATURE_COPY.gratuito : CANDIDATURE_COPY.esaurite}
-    </Pannello>
+    </Alert>
   );
 }
 
@@ -102,8 +82,8 @@ function PannelloBlocco({ blocco }: { blocco: Blocco }) {
  *  2000 caratteri, contatore collegato con `aria-describedby`), requisiti
  *  cercati che dichiari di avere (compaiono come «dichiarato»), la riga delle
  *  candidature usate nel mese. Se il piano non le include (Gratuito), se sono
- *  finite o se manca la visibilità come partner, al posto del form il
- *  pannello con il rimando giusto; lo stesso sui rifiuti del server. */
+ *  finite o se manca la visibilità come partner, al posto del modulo l'avviso
+ *  con il rimando giusto; lo stesso sui rifiuti del server. */
 export function CandidaturaDialog({
   open,
   onClose,
@@ -187,15 +167,15 @@ export function CandidaturaDialog({
       title="Candidati a questa call"
       footer={
         blocco ? (
-          <Button variant="ghost" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={onClose}>
             Chiudi
           </Button>
         ) : (
           <>
-            <Button variant="ghost" onClick={onClose} disabled={invia.isPending}>
+            <Button type="button" variant="secondary" onClick={onClose} disabled={invia.isPending}>
               Annulla
             </Button>
-            <Button onClick={conferma} loading={invia.isPending}>
+            <Button type="button" onClick={conferma} loading={invia.isPending}>
               Invia la candidatura
             </Button>
           </>
@@ -203,9 +183,9 @@ export function CandidaturaDialog({
       }
     >
       {blocco ? (
-        <PannelloBlocco blocco={blocco} />
+        <AvvisoBlocco blocco={blocco} />
       ) : (
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
           <p>
             Chi ha creato la call vede la tua candidatura con il profilo partner della tua azienda,
             in forma anonima, e decide se aprire una conversazione.
@@ -226,7 +206,7 @@ export function CandidaturaDialog({
             ))}
           </SelectField>
 
-          <div>
+          <div className="flex flex-col gap-1">
             <TextareaField
               label="Presentati"
               required
@@ -241,54 +221,48 @@ export function CandidaturaDialog({
                   : undefined
               }
             />
-            <p id={`${id}-aiuto`} className="mt-1 text-xs text-slate-500">
+            <p id={`${id}-aiuto`} className="text-small text-ink-3">
               Spiega come la tua azienda contribuirebbe al progetto. {CANDIDATURE_COPY.notaContatti}
             </p>
             <p
               id={`${id}-contatore`}
-              className={`mt-1 text-right text-xs tabular ${lunghezza < MESSAGGIO_CANDIDATURA_MIN ? "text-amber-700" : "text-slate-400"}`}
+              className={`text-right text-small tabular-nums ${lunghezza < MESSAGGIO_CANDIDATURA_MIN ? "text-warning-ink" : "text-ink-3"}`}
             >
               {contatore}
             </p>
           </div>
 
           {dichiarabili.length > 0 && (
-            <fieldset aria-describedby={`${id}-dichiarati`}>
-              <legend className="text-sm font-medium text-slate-700">
+            <fieldset aria-describedby={`${id}-dichiarati`} className="flex flex-col gap-2">
+              <legend className="text-small font-medium text-ink">
                 Requisiti della call che dichiari di avere
               </legend>
-              <p id={`${id}-dichiarati`} className="mt-0.5 text-xs text-slate-500">
+              <p id={`${id}-dichiarati`} className="text-small text-ink-3">
                 {CANDIDATURE_COPY.notaDichiarati}
               </p>
-              <ul className="mt-2 space-y-1.5">
+              <ul className="flex flex-col gap-2">
                 {dichiarabili.map((r) => {
                   const scelto = dichiarati.includes(r.id);
                   return (
                     <li key={r.id}>
-                      <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-                        <input
-                          type="checkbox"
-                          className="mt-0.5 size-4 shrink-0 cursor-pointer accent-brand-500"
-                          checked={scelto}
-                          onChange={() => alterna(r.id)}
-                        />
-                        <span className="min-w-0">
-                          <Badge tone="brand" className="mr-1.5 tabular">
-                            {r.etichetta}
-                          </Badge>
-                          {r.testo}
-                          {scelto && (
-                            <Badge tone="slate" className="ml-1.5">
-                              {CANDIDATURE_COPY.dichiarato}
-                            </Badge>
-                          )}
-                          {coperti.has(r.etichetta) && (
-                            <span className="block text-xs text-emerald-700">
-                              Dai dati della tua azienda risulta coperto.
-                            </span>
-                          )}
-                        </span>
-                      </label>
+                      <Checkbox
+                        checked={scelto}
+                        onChange={() => alterna(r.id)}
+                        label={
+                          <>
+                            <Badge className="mr-1.5 tabular-nums">{r.etichetta}</Badge>
+                            {r.testo}
+                            {scelto && (
+                              <span className="ml-1.5 text-small text-ink-3">({CANDIDATURE_COPY.dichiarato})</span>
+                            )}
+                          </>
+                        }
+                        descrizione={
+                          coperti.has(r.etichetta) ? (
+                            <span className="text-fit-ink">Dai dati della tua azienda risulta coperto.</span>
+                          ) : undefined
+                        }
+                      />
                     </li>
                   );
                 })}
@@ -297,21 +271,23 @@ export function CandidaturaDialog({
           )}
 
           {limite && limite.limite !== 0 && (
-            <p className="text-sm text-slate-600 tabular">
+            <p className="text-body text-ink-2 tabular-nums">
               {CANDIDATURE_COPY.quota(limite.usate, limite.limite)}
-              <span className="block text-xs text-slate-500">{CANDIDATURE_COPY.quotaNota}</span>
+              <span className="block text-small text-ink-3">{CANDIDATURE_COPY.quotaNota}</span>
             </p>
           )}
 
           {erroreGenerico && (
-            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-              <p>{apiErrorMessage(invia.error)}</p>
-              {apiErrorCode(invia.error) === "identita_non_verificata" && (
-                <LinkButton to="/app/azienda" size="sm" variant="secondary" className="mt-2">
-                  Dati aziendali
-                </LinkButton>
-              )}
-            </div>
+            <Alert
+              tono="errore"
+              azione={
+                apiErrorCode(invia.error) === "identita_non_verificata" ? (
+                  <TextLink to={`/app/azienda#${ANCORA_IDENTITA}`}>Dati azienda</TextLink>
+                ) : undefined
+              }
+            >
+              {apiErrorMessage(invia.error)}
+            </Alert>
           )}
         </div>
       )}

@@ -1,17 +1,25 @@
-import { ArrowLeft, Building2, CalendarClock, Handshake, Sparkles } from "lucide-react";
+import { CalendarClock } from "lucide-react";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { ConsulenzaStatoBadge } from "../Consulenze";
+import { useParams } from "react-router-dom";
+import { ConsulenzaStatoBadge, PropostaStatoBadge } from "../Consulenze";
 import { BadgeDaCall, titoloRichiesta } from "./Richieste";
 import { CallProgettista } from "../../components/partenariati/CallProgettista";
 import { AiReportBody } from "../../components/bandi/AiReportBody";
 import { DossierView } from "../../components/company/dossier/DossierView";
+import { orarioAppuntamento } from "../../components/consulenze/formato";
 import { VideocallButton } from "../../components/consulenze/VideocallButton";
-import { Badge } from "../../components/ui/Badge";
-import { Button } from "../../components/ui/Button";
-import { Card } from "../../components/ui/Card";
+import { Button, LinkButton } from "../../components/ui/Button";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
+import { DefinitionList } from "../../components/ui/Facts";
 import { TextareaField } from "../../components/ui/Field";
-import { ErrorState, Skeleton } from "../../components/ui/states";
+import { InlineError } from "../../components/ui/InlineError";
+import { Page } from "../../components/ui/Page";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Panel } from "../../components/ui/Panel";
+import { Section, SectionHeader } from "../../components/ui/SectionHeader";
+import { EmptyState, ErrorState, Skeleton } from "../../components/ui/states";
+import { TextLink } from "../../components/ui/TextLink";
+import { useToast } from "../../components/ui/Toast";
 import { useFunzioni } from "../../hooks/useFunzioni";
 import {
   useCallRichiesta,
@@ -21,8 +29,10 @@ import {
   useRitiraProposta,
 } from "../../hooks/useProgettistaRichieste";
 import { apiErrorCode, apiErrorMessage } from "../../lib/api";
-import { PROPOSTA_STATO_LABELS } from "../../lib/copy";
-import { formatDateTime, formatSlotGiorno, formatSlotOra } from "../../lib/format";
+import { formatDateTime } from "../../lib/format";
+import type { Proposta } from "../../types";
+
+const INDIETRO = { label: "Richieste di consulenza", to: "/app/progettista/richieste" };
 
 /** Vista FULL post-assegnazione: dati aziendali + dossier certificato.
  *  Il caricamento parte su azione esplicita: ogni lettura è registrata
@@ -34,82 +44,83 @@ function DossierCompleto({ requestId }: { requestId: string }) {
     visible,
   );
 
+  let contenuto;
   if (!visible) {
-    return (
-      <Card className="p-5">
-        <h2 className="inline-flex items-center gap-1.5 font-display text-sm font-semibold text-slate-900">
-          <Building2 className="size-4 text-brand-500" aria-hidden />
-          Dati completi dell'azienda
-        </h2>
-        <p className="mt-1.5 text-sm text-slate-600">
+    contenuto = (
+      <div className="flex flex-col items-start gap-3">
+        <p className="max-w-lettura text-body text-ink-2">
           Come progettista assegnato hai accesso a tutti i dati aziendali e al dossier
           certificato del Registro Imprese. Ogni accesso viene registrato.
         </p>
-        <Button variant="secondary" className="mt-3" onClick={() => setVisible(true)}>
+        <Button type="button" variant="secondary" onClick={() => setVisible(true)}>
           Apri i dati completi
         </Button>
-      </Card>
+      </div>
     );
-  }
-  if (isPending) {
-    return (
-      <div className="space-y-3">
+  } else if (isPending) {
+    contenuto = (
+      <div className="flex flex-col gap-3" aria-hidden>
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-40 w-full" />
       </div>
     );
-  }
-  if (isError || !data) {
-    return <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />;
+  } else if (isError || !data) {
+    contenuto = <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />;
+  } else {
+    const company = data.company;
+    const dati = company
+      ? (
+          [
+            ["Ragione sociale", company.ragione_sociale],
+            ["Partita IVA", company.partita_iva],
+            ["Forma giuridica", company.forma_giuridica],
+            ["ATECO", company.ateco_codice],
+            ["Settore", company.settore_nome],
+            ["Regione", company.regione_nome],
+            ["Comune", company.comune],
+            ["Dipendenti", company.numero_dipendenti],
+            ["Classe dimensionale", company.classe_dimensionale],
+            ["Fascia di fatturato", company.fascia_fatturato],
+            ["PEC", company.pec],
+            ["Telefono", company.telefono],
+          ] as Array<[string, string | number | null]>
+        ).filter(([, value]) => value !== null && value !== undefined && value !== "")
+      : [];
+    contenuto = (
+      <>
+        {company && (
+          <div className="flex flex-col gap-3">
+            <h3 className="font-sans text-title-group text-ink">Dati dichiarati dal titolare</h3>
+            <DefinitionList
+              items={dati.map(([etichetta, valore]) => ({ etichetta, valore }))}
+            />
+          </div>
+        )}
+        <div className="flex flex-col gap-3">
+          <h3 className="font-sans text-title-group text-ink">
+            Dossier certificato del Registro Imprese
+          </h3>
+          {data.dossier.imported && data.dossier.dossier ? (
+            <DossierView dossier={data.dossier.dossier} people={data.dossier.people} />
+          ) : (
+            <p className="text-body text-ink-2">
+              L'azienda non ha ancora importato il dossier certificato dal Registro Imprese.
+            </p>
+          )}
+        </div>
+      </>
+    );
   }
 
-  const company = data.company;
   return (
-    <div>
-      {company && (
-        <Card className="p-5">
-          <h2 className="font-display text-sm font-semibold text-slate-900">
-            Dati dichiarati dal titolare
-          </h2>
-          <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-            {(
-              [
-                ["Ragione sociale", company.ragione_sociale],
-                ["Partita IVA", company.partita_iva],
-                ["Forma giuridica", company.forma_giuridica],
-                ["ATECO", company.ateco_codice],
-                ["Settore", company.settore_nome],
-                ["Regione", company.regione_nome],
-                ["Comune", company.comune],
-                ["Dipendenti", company.numero_dipendenti],
-                ["Classe dimensionale", company.classe_dimensionale],
-                ["Fascia di fatturato", company.fascia_fatturato],
-                ["PEC", company.pec],
-                ["Telefono", company.telefono],
-              ] as Array<[string, string | number | null]>
-            )
-              .filter(([, value]) => value !== null && value !== undefined && value !== "")
-              .map(([label, value]) => (
-                <div key={label} className="flex items-baseline justify-between gap-3 sm:block">
-                  <dt className="text-xs text-slate-400">{label}</dt>
-                  <dd className="font-medium text-slate-800">{value}</dd>
-                </div>
-              ))}
-          </dl>
-        </Card>
-      )}
-      {data.dossier.imported && data.dossier.dossier ? (
-        <DossierView dossier={data.dossier.dossier} people={data.dossier.people} />
-      ) : (
-        <p className="mt-4 text-sm text-slate-500">
-          L'azienda non ha ancora importato il dossier certificato dal Registro Imprese.
-        </p>
-      )}
-    </div>
+    <Section aria-label="Dati completi dell'azienda">
+      <SectionHeader titolo="Dati completi dell'azienda" />
+      {contenuto}
+    </Section>
   );
 }
 
-/** La call di partenariato del cliente (consulto chiesto dalla call, WP9):
+/** La call di partenariato del cliente (consulenza chiesta dalla call, WP9):
  *  solo per il progettista assegnato e su azione esplicita, perché ogni
  *  lettura è registrata PRIMA di rispondere (se la registrazione non riesce il
  *  server non manda nulla). */
@@ -119,25 +130,21 @@ function CallDelCliente({ requestId }: { requestId: string }) {
 
   if (!visibile) {
     return (
-      <Card className="p-5">
-        <h2 className="inline-flex items-center gap-1.5 font-display text-sm font-semibold text-slate-900">
-          <Handshake className="size-4 text-brand-500" aria-hidden />
-          La call di partenariato del cliente
-        </h2>
-        <p className="mt-1.5 text-sm text-slate-600">
+      <div className="flex flex-col items-start gap-3">
+        <p className="max-w-lettura text-body text-ink-2">
           Come progettista assegnato vedi la call: testi, regole del bando, requisiti, posizioni e
           verifica del consorzio. Delle aziende partner vedi solo esiti e fasce, mai contatti,
           messaggi o numeri esatti. Ogni accesso viene registrato.
         </p>
-        <Button variant="secondary" className="mt-3" onClick={() => setVisibile(true)}>
+        <Button type="button" variant="secondary" onClick={() => setVisibile(true)}>
           Apri la call
         </Button>
-      </Card>
+      </div>
     );
   }
   if (isPending) {
     return (
-      <div className="space-y-3" aria-hidden>
+      <div className="flex flex-col gap-3" aria-hidden>
         <Skeleton className="h-32 w-full" />
         <Skeleton className="h-48 w-full" />
       </div>
@@ -165,29 +172,65 @@ export default function RichiestaDetail() {
   const invia = useInviaProposta(id ?? "");
   const ritira = useRitiraProposta();
   const { partenariatiAttivo } = useFunzioni();
+  const toast = useToast();
 
   const [messaggio, setMessaggio] = useState("");
+  const [ritirando, setRitirando] = useState<Proposta | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   if (isPending) {
     return (
-      <div className="mx-auto max-w-4xl space-y-4">
-        <Skeleton className="h-10 w-72" />
-        <Skeleton className="h-40 w-full" />
-      </div>
+      <Page
+        variante="dettaglio"
+        intestazione={
+          <div className="flex flex-col gap-4" aria-hidden>
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-8 w-2/3" />
+          </div>
+        }
+        laterale={<Skeleton className="h-32 w-full" />}
+      >
+        <div className="flex flex-col gap-3" aria-hidden>
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="h-40 w-full" />
+        </div>
+      </Page>
     );
   }
   if (isError || !richiesta) {
+    // Non più visibile (affidata a un altro progettista o annullata): definitivo,
+    // senza «Riprova».
+    const tornaAlleRichieste = (
+      <LinkButton to="/app/progettista/richieste" variant="secondary">
+        Torna alle richieste
+      </LinkButton>
+    );
     return (
-      <div className="mx-auto max-w-4xl">
-        <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
-      </div>
+      <Page variante="sezioni">
+        {apiErrorCode(error) === "not_found" ? (
+          <EmptyState
+            title="Questa richiesta non è più disponibile."
+            description="Il cliente l'ha affidata a un altro progettista oppure l'ha annullata."
+            action={tornaAlleRichieste}
+          />
+        ) : (
+          <>
+            <ErrorState
+              title="Non siamo riusciti a caricare la richiesta."
+              message={apiErrorMessage(error)}
+              onRetry={() => refetch()}
+            />
+            <div>{tornaAlleRichieste}</div>
+          </>
+        )}
+      </Page>
     );
   }
 
   const propostaAperta = richiesta.mie_proposte.find((p) => p.stato === "inviata");
   const report = richiesta.ai_check?.report ?? null;
-  // Consulto dalla call non ancora affidato a chi guarda: niente dati
+  // Consulenza dalla call non ancora affidata a chi guarda: niente dati
   // dell'azienda (li manda il server solo dopo l'assegnazione).
   const senzaDatiAzienda =
     !!richiesta.da_call && !richiesta.assegnata_a_me && !richiesta.ragione_sociale;
@@ -199,199 +242,194 @@ export default function RichiestaDetail() {
     try {
       await invia.mutateAsync(messaggio.trim());
       setMessaggio("");
+      toast.mostra({ testo: "Proposta inviata" });
     } catch (err) {
       setActionError(apiErrorMessage(err));
     }
   };
 
+  const handleWithdraw = async () => {
+    if (!ritirando || ritira.isPending) return;
+    setActionError(null);
+    try {
+      await ritira.mutateAsync(ritirando.id);
+      setRitirando(null);
+      toast.mostra({ testo: "Proposta ritirata" });
+    } catch (err) {
+      setActionError(apiErrorMessage(err));
+    }
+  };
+
+  const laterale = (
+    <>
+      {/* L'appuntamento, con la videochiamata: su mobile sopra il resto. */}
+      {richiesta.appuntamento && (
+        <Panel titolo="Appuntamento" className="order-first lg:order-none">
+          <p className="inline-flex items-start gap-2 text-body text-ink tabular-nums">
+            <CalendarClock className="mt-0.5 size-4 shrink-0 text-ink-3" aria-hidden />
+            <time dateTime={richiesta.appuntamento.inizio}>
+              {orarioAppuntamento(richiesta.appuntamento)}
+            </time>
+          </p>
+          {richiesta.appuntamento.videocall_url && (
+            <VideocallButton url={richiesta.appuntamento.videocall_url} />
+          )}
+        </Panel>
+      )}
+      <Panel titolo="Bando">
+        <p className="text-body text-ink">{richiesta.bando_titolo}</p>
+        <p className="text-small">
+          <TextLink to={`/app/bandi/${richiesta.bando_slug}`}>Vai al bando</TextLink>
+        </p>
+      </Panel>
+    </>
+  );
+
   return (
-    <div className="mx-auto max-w-4xl">
-      <Link
-        to="/app/progettista/richieste"
-        className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-800"
-      >
-        <ArrowLeft className="size-4" aria-hidden />
-        Tutte le richieste
-      </Link>
-
-      <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
-            {titoloRichiesta(richiesta)}
-          </h1>
-          {senzaDatiAzienda ? (
-            <p className="mt-1 text-sm text-slate-500">
-              I dati dell'azienda li vedi se il titolare ti affida la consulenza.
-            </p>
-          ) : (
-            <p className="mt-1 text-sm text-slate-500">
-              {richiesta.partita_iva && (
-                <span className="tabular">P.IVA {richiesta.partita_iva} · </span>
-              )}
-              {richiesta.denominazione_utente}
-              {richiesta.email && ` · ${richiesta.email}`}
-            </p>
-          )}
-          {richiesta.da_call && (
-            <div className="mt-2">
-              <BadgeDaCall />
-            </div>
-          )}
-        </div>
-        <ConsulenzaStatoBadge stato={richiesta.stato} />
-      </div>
-
-      {/* Bando + appuntamento */}
-      <Card className="mt-5 p-5">
-        <h2 className="font-display text-sm font-semibold text-slate-900">Bando</h2>
-        <p className="mt-1.5 text-sm text-slate-700">{richiesta.bando_titolo}</p>
-        <Link
-          to={`/app/bandi/${richiesta.bando_slug}`}
-          className="mt-1 inline-block text-sm font-medium text-brand-600 underline-offset-2 hover:underline"
-        >
-          Vai al bando →
-        </Link>
-        {richiesta.appuntamento && (
-          <div className="mt-3 rounded-xl bg-slate-50 px-4 py-3">
-            <p className="inline-flex items-center gap-2 text-sm font-medium text-slate-800">
-              <CalendarClock className="size-4 shrink-0 text-brand-500" aria-hidden />
-              <span>
-                <span className="capitalize">
-                  {formatSlotGiorno(richiesta.appuntamento.inizio)}
-                </span>
-                , {formatSlotOra(richiesta.appuntamento.inizio)} –{" "}
-                {formatSlotOra(richiesta.appuntamento.fine)}
+    <Page
+      variante="dettaglio"
+      intestazione={
+        <PageHeader
+          indietro={INDIETRO}
+          sopra={
+            <>
+              <ConsulenzaStatoBadge stato={richiesta.stato} />
+              {richiesta.da_call && <BadgeDaCall />}
+            </>
+          }
+          titolo={titoloRichiesta(richiesta)}
+          descrizione={
+            senzaDatiAzienda ? (
+              "I dati dell'azienda li vedi se il titolare ti affida la consulenza."
+            ) : (
+              <span className="flex flex-wrap gap-x-4 gap-y-1">
+                {richiesta.partita_iva && (
+                  <span className="tabular-nums">P.IVA {richiesta.partita_iva}</span>
+                )}
+                <span>{richiesta.denominazione_utente}</span>
+                {richiesta.email && <span>{richiesta.email}</span>}
               </span>
-            </p>
-            {richiesta.appuntamento.videocall_url && (
-              <div className="mt-3">
-                <VideocallButton url={richiesta.appuntamento.videocall_url} />
-              </div>
-            )}
-          </div>
-        )}
-      </Card>
-
+            )
+          }
+        />
+      }
+      laterale={laterale}
+    >
       {/* AI-check ricevuto dal cliente (requisito punto 3) */}
-      {report ? (
-        <Card className="mt-4 p-6">
-          <h2 className="inline-flex items-center gap-2 font-display text-lg font-bold text-slate-900">
-            <Sparkles className="size-5 text-brand-500" aria-hidden />
-            AI-check del cliente
-          </h2>
-          {richiesta.ai_check?.ready_at && (
-            <p className="mt-1 text-sm text-slate-500">
-              Generato il {formatDateTime(richiesta.ai_check.ready_at)}
-            </p>
-          )}
-          <AiReportBody report={report} mostraAzioni={false} />
-        </Card>
-      ) : (
-        <Card className="mt-4 p-5">
-          <p className="text-sm text-slate-500">
+      <Section aria-label="AI-check del cliente">
+        <SectionHeader titolo="AI-check del cliente" />
+        {report ? (
+          <>
+            {richiesta.ai_check?.ready_at && (
+              <p className="text-small text-ink-3">
+                Generato il {formatDateTime(richiesta.ai_check.ready_at)}
+              </p>
+            )}
+            <AiReportBody report={report} mostraAzioni={false} />
+          </>
+        ) : (
+          <p className="max-w-lettura text-body text-ink-2">
             {senzaDatiAzienda
-              ? "Il consulto è stato chiesto dalla call di partenariato: i dettagli li vedi se il titolare ti affida la consulenza."
+              ? "La consulenza è stata chiesta dalla call di partenariato: i dettagli li vedi se il titolare ti affida la consulenza."
               : richiesta.da_call
                 ? richiesta.esito
-                  ? "Il consulto è stato chiesto dalla call di partenariato: esito e punteggio sono quelli dell'ultimo AI-check del cliente su questo bando."
-                  : "Il consulto è stato chiesto dalla call di partenariato, senza un AI-check."
+                  ? "La consulenza è stata chiesta dalla call di partenariato: esito e punteggio sono quelli dell'ultimo AI-check del cliente su questo bando."
+                  : "La consulenza è stata chiesta dalla call di partenariato, senza un AI-check."
                 : "Il report AI-check non è più disponibile; esito e punteggio della richiesta restano quelli registrati alla creazione."}
           </p>
-        </Card>
-      )}
+        )}
+      </Section>
 
-      {/* Consulto dalla call (WP9): la call solo per l'assegnato, e solo a
+      {/* Consulenza dalla call (WP9): la call solo per l'assegnato, e solo a
           modulo partenariati acceso (da spento la sua rotta non esiste). */}
-      {partenariatiAttivo && richiesta.da_call && (
-        <section className="mt-4" aria-label="Call di partenariato del cliente">
+      {partenariatiAttivo && richiesta.da_call && (richiesta.assegnata_a_me || !senzaDatiAzienda) && (
+        <Section aria-label="Call di partenariato del cliente">
+          <SectionHeader titolo="La call di partenariato del cliente" />
           {richiesta.assegnata_a_me ? (
             <CallDelCliente requestId={richiesta.id} />
-          ) : !senzaDatiAzienda ? (
-            <Card className="p-5">
-              <p className="text-sm text-slate-500">
-                Il cliente ha chiesto un consulto sulla sua call di partenariato: la vedrai se ti
-                affida la consulenza.
-              </p>
-            </Card>
-          ) : null}
-        </section>
+          ) : (
+            <p className="max-w-lettura text-body text-ink-2">
+              Il cliente ha chiesto una consulenza sulla sua call di partenariato: la vedrai se ti
+              affida la consulenza.
+            </p>
+          )}
+        </Section>
       )}
 
       {/* Proposta */}
-      <section className="mt-6" aria-label="La tua proposta">
-        <h2 className="font-display text-lg font-bold tracking-tight text-slate-900">
-          La tua proposta
-        </h2>
+      <Section aria-label="La tua proposta">
+        <SectionHeader titolo="La tua proposta" />
         {richiesta.mie_proposte.length > 0 && (
-          <div className="mt-3 space-y-3">
+          <ul className="flex flex-col">
             {richiesta.mie_proposte.map((proposta) => (
-              <Card key={proposta.id} className="p-5">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <p className="text-xs text-slate-400">
-                    {formatDateTime(proposta.created_at)}
-                  </p>
-                  <Badge tone={proposta.stato === "accettata" ? "emerald" : proposta.stato === "inviata" ? "brand" : "slate"}>
-                    {PROPOSTA_STATO_LABELS[proposta.stato]}
-                  </Badge>
+              <li key={proposta.id} className="flex flex-col gap-2 border-b border-line px-2 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-small text-ink-3">{formatDateTime(proposta.created_at)}</p>
+                  <PropostaStatoBadge stato={proposta.stato} />
                 </div>
-                <p className="mt-2 whitespace-pre-line text-sm text-slate-700">
+                <p className="max-w-lettura whitespace-pre-line text-body text-ink">
                   {proposta.messaggio}
                 </p>
                 {proposta.stato === "inviata" && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="mt-3 text-red-600 hover:bg-red-50 hover:text-red-700"
-                    loading={ritira.isPending}
-                    onClick={async () => {
-                      setActionError(null);
-                      try {
-                        await ritira.mutateAsync(proposta.id);
-                      } catch (err) {
-                        setActionError(apiErrorMessage(err));
-                      }
-                    }}
-                  >
-                    Ritira la proposta
-                  </Button>
+                  <div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-danger hover:bg-danger-soft"
+                      onClick={() => {
+                        setActionError(null);
+                        setRitirando(proposta);
+                      }}
+                    >
+                      Ritira la proposta
+                    </Button>
+                  </div>
                 )}
-              </Card>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
 
         {richiesta.stato === "nuova" && !propostaAperta && (
-          <Card className="mt-3 p-5">
-            <form onSubmit={handleSend}>
-              <TextareaField
-                label="Messaggio per il titolare"
-                required
-                rows={5}
-                maxLength={4000}
-                value={messaggio}
-                onChange={(e) => setMessaggio(e.target.value)}
-                helper="Presentati e spiega come puoi aiutare su questo bando: il titolare sceglie tra le proposte ricevute."
-              />
-              <Button type="submit" className="mt-3" loading={invia.isPending}>
+          <form onSubmit={handleSend} className="flex max-w-lettura flex-col gap-3">
+            <TextareaField
+              label="Messaggio per il titolare"
+              required
+              rows={5}
+              maxLength={4000}
+              value={messaggio}
+              onChange={(e) => setMessaggio(e.target.value)}
+              helper="Presentati e spiega come puoi aiutare su questo bando: il titolare sceglie tra le proposte ricevute."
+            />
+            <div>
+              <Button type="submit" loading={invia.isPending}>
                 Invia la proposta
               </Button>
-            </form>
-          </Card>
+            </div>
+            {actionError && !ritirando && <InlineError>{actionError}</InlineError>}
+          </form>
         )}
-      </section>
-
-      {actionError && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-          {actionError}
-        </p>
-      )}
+      </Section>
 
       {/* Vista full: solo per l'assegnato */}
-      {richiesta.assegnata_a_me && (
-        <section className="mt-6" aria-label="Dati completi dell'azienda">
-          <DossierCompleto requestId={richiesta.id} />
-        </section>
-      )}
-    </div>
+      {richiesta.assegnata_a_me && <DossierCompleto requestId={richiesta.id} />}
+
+      <ConfirmDialog
+        open={!!ritirando}
+        titolo="Ritirare la proposta?"
+        conferma="Ritira la proposta"
+        distruttiva
+        inCorso={ritira.isPending}
+        onConferma={handleWithdraw}
+        onAnnulla={() => setRitirando(null)}
+      >
+        <p>
+          Il titolare non potrà più accettarla. Finché la richiesta è aperta potrai inviarne una
+          nuova.
+        </p>
+        {actionError && <InlineError className="mt-3">{actionError}</InlineError>}
+      </ConfirmDialog>
+    </Page>
   );
 }

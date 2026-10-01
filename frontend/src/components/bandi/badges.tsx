@@ -1,16 +1,7 @@
-import {
-  Ban,
-  CalendarClock,
-  CheckCircle2,
-  Clock3,
-  HelpCircle,
-  PauseCircle,
-  XCircle,
-} from "lucide-react";
-import { daysUntil } from "../../lib/format";
+import { CheckCircle2, HelpCircle } from "lucide-react";
 import type { AiEsito } from "../../types";
 import { Badge } from "../ui/Badge";
-import { dataConOra } from "./stato";
+import { Status, type TonoStatus } from "../ui/Status";
 
 /** Esito dell'AI-check. Il report è generato da un modello e può sbagliare:
  *  il linguaggio resta costruttivo — mai un «bocciato» secco. Per l'esito
@@ -19,7 +10,7 @@ import { dataConOra } from "./stato";
 export function AiEsitoBadge({ esito }: { esito: AiEsito }) {
   if (esito === "ammissibile") {
     return (
-      <Badge tone="emerald">
+      <Badge>
         <CheckCircle2 className="size-3" aria-hidden />
         In linea col bando
       </Badge>
@@ -27,7 +18,7 @@ export function AiEsitoBadge({ esito }: { esito: AiEsito }) {
   }
   if (esito === "da_verificare") {
     return (
-      <Badge tone="amber">
+      <Badge>
         <HelpCircle className="size-3" aria-hidden />
         Dati da completare
       </Badge>
@@ -36,113 +27,31 @@ export function AiEsitoBadge({ esito }: { esito: AiEsito }) {
   return null;
 }
 
-/** Stringa libera: un valore nuovo del catalogo ha il badge neutro in fondo. */
-export function StatoBadge({ stato }: { stato: string | null }) {
-  if (!stato) return null;
-  if (stato === "aperto") {
-    return (
-      <Badge tone="emerald">
-        <CheckCircle2 className="size-3" aria-hidden />
-        Aperto
-      </Badge>
-    );
+/** Parola e tono dello stato di un bando (stringa libera del catalogo: un
+ *  valore nuovo ha la parola neutra «Stato da verificare»). Un bando sospeso
+ *  o revocato non va mai presentato come aperto o in apertura (contratto DB
+ *  bandi §7, R0-a). */
+export function statoInParole(stato: string): { tono: TonoStatus; parola: string } {
+  switch (stato) {
+    case "aperto":
+      return { tono: "aperto", parola: "Aperto" };
+    case "chiuso":
+      return { tono: "chiuso", parola: "Chiuso" };
+    case "in apertura prossimamente":
+      return { tono: "in-apertura", parola: "In apertura" };
+    case "sospeso":
+      return { tono: "neutro", parola: "Sospeso" };
+    case "revocato":
+      return { tono: "neutro", parola: "Revocato" };
+    default:
+      return { tono: "neutro", parola: "Stato da verificare" };
   }
-  if (stato === "chiuso") {
-    return (
-      <Badge tone="slate">
-        <XCircle className="size-3" aria-hidden />
-        Chiuso
-      </Badge>
-    );
-  }
-  if (stato === "in apertura prossimamente") {
-    return (
-      <Badge tone="amber">
-        <Clock3 className="size-3" aria-hidden />
-        In apertura
-      </Badge>
-    );
-  }
-  // Tutto il resto ha un badge neutro: un bando sospeso o revocato non va mai
-  // presentato come aperto o in apertura (contratto DB bandi §7, R0-a).
-  if (stato === "sospeso") {
-    return (
-      <Badge tone="slate">
-        <PauseCircle className="size-3" aria-hidden />
-        Sospeso
-      </Badge>
-    );
-  }
-  if (stato === "revocato") {
-    return (
-      <Badge tone="slate">
-        <Ban className="size-3" aria-hidden />
-        Revocato
-      </Badge>
-    );
-  }
-  return (
-    <Badge tone="slate">
-      <HelpCircle className="size-3" aria-hidden />
-      Stato da verificare
-    </Badge>
-  );
 }
 
-/** Scadenza con il conto alla rovescia. Con `conConto` falso (bando non aperto
- *  né in apertura, vedi `bandoInCorso`) resta solo la data, neutra: un bando
- *  chiuso, sospeso o revocato non ha un «Scade tra…» né i colori d'urgenza.
- *  Una data passata dice sempre «Scaduto il…». */
-export function ScadenzaBadge({
-  dataScadenza,
-  oraScadenza,
-  conConto = true,
-}: {
-  dataScadenza: string | null;
-  oraScadenza?: string | null;
-  conConto?: boolean;
-}) {
-  const giorni = daysUntil(dataScadenza);
-  if (giorni === null) return null;
-  const quando = dataConOra(dataScadenza, oraScadenza);
-
-  if (giorni < 0) {
-    return (
-      <span className="inline-flex items-center gap-1 text-xs text-slate-400">
-        <CalendarClock className="size-3.5" aria-hidden />
-        Scaduto il {quando}
-      </span>
-    );
-  }
-
-  if (!conConto) {
-    return (
-      <span className="inline-flex items-center gap-1 text-xs text-slate-500">
-        <CalendarClock className="size-3.5" aria-hidden />
-        Scadenza: {quando}
-      </span>
-    );
-  }
-
-  const urgente = giorni <= 7;
-  const vicino = giorni <= 30;
-  return (
-    <span
-      className={
-        urgente
-          ? "inline-flex items-center gap-1 text-xs font-semibold text-red-600"
-          : vicino
-            ? "inline-flex items-center gap-1 text-xs font-medium text-amber-600"
-            : "inline-flex items-center gap-1 text-xs text-slate-500"
-      }
-    >
-      <CalendarClock className="size-3.5" aria-hidden />
-      {giorni === 0
-        ? "Scade oggi"
-        : giorni === 1
-          ? "Scade domani"
-          : `Scade tra ${giorni} giorni`}
-      <span className="text-slate-400">· {quando}</span>
-    </span>
-  );
+/** Lo stato del bando in parole (`Status`: punto + parola, mai un badge
+ *  colorato). Stesse props di prima: lo usano anche le pagine non ancora rifatte. */
+export function StatoBadge({ stato }: { stato: string | null }) {
+  if (!stato) return null;
+  const { tono, parola } = statoInParole(stato);
+  return <Status tono={tono}>{parola}</Status>;
 }

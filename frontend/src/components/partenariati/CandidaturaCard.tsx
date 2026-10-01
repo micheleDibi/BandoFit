@@ -1,21 +1,10 @@
-import {
-  Building2,
-  CalendarX,
-  Check,
-  Clock,
-  EyeOff,
-  MessagesSquare,
-  Undo2,
-  X,
-} from "lucide-react";
-import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useCandidatura, useDecidiCandidatura, type Decisione } from "../../hooks/useCandidature";
 import { apiErrorMessage } from "../../lib/api";
 import { etichettaFascia, FASCE_TITOLI, type TipoFascia } from "../../lib/bilanci";
 import { CANDIDATURE_COPY, PARTNER_COPY } from "../../lib/copy";
 import { formatDate } from "../../lib/format";
-import { cn } from "../../lib/cn";
 import type {
   Candidatura,
   CandidaturaPropria,
@@ -25,10 +14,13 @@ import type {
   StatoCandidatura,
   TipoCandidatura,
 } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Badge } from "../ui/Badge";
 import { Button, LinkButton } from "../ui/Button";
-import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";
+import { DefinitionList, type Definizione } from "../ui/Facts";
+import { Segment } from "../ui/Segment";
+import { Status, type TonoStatus } from "../ui/Status";
 import { Skeleton } from "../ui/states";
 import { CLASSI_DIMENSIONALI } from "./AnteprimaPartnerCard";
 import { BannerIdentitaNonRivelata } from "./BannerIdentitaNonRivelata";
@@ -39,30 +31,21 @@ import { MatchSpiegazione } from "./MatchSpiegazione";
 /** Motivo del rifiuto: facoltativo, fino a 500 caratteri (come il server). */
 const MOTIVO_RIFIUTO_MAX = 500;
 
-const TONI: Record<StatoCandidatura, ComponentProps<typeof Badge>["tone"]> = {
-  inviata: "amber",
-  accettata: "emerald",
-  rifiutata: "red",
-  ritirata: "slate",
-  scaduta: "slate",
-};
-const ICONE: Record<StatoCandidatura, typeof Check> = {
-  inviata: Clock,
-  accettata: Check,
-  rifiutata: X,
-  ritirata: Undo2,
-  scaduta: CalendarX,
+const TONI: Record<StatoCandidatura, TonoStatus> = {
+  inviata: "in-apertura",
+  accettata: "aperto",
+  rifiutata: "chiuso",
+  ritirata: "chiuso",
+  scaduta: "chiuso",
 };
 
-/** Stato di una candidatura o di un invito: icona **e** testo. */
+/** Stato di una candidatura o di un invito, in parole con il punto di `Status`. */
 export function StatoCandidaturaBadge({ stato }: { stato: StatoCandidatura }) {
-  const Icona = ICONE[stato] ?? Clock;
   return (
-    <Badge tone={TONI[stato] ?? "slate"}>
-      <Icona className="size-3.5" aria-hidden />
+    <Status tono={TONI[stato] ?? "neutro"}>
       <span className="sr-only">Stato: </span>
       {CANDIDATURE_COPY.stati[stato] ?? stato}
-    </Badge>
+    </Status>
   );
 }
 
@@ -79,17 +62,12 @@ export function etichettaTipo(c: Pick<Candidatura, "tipo" | "lato">): string {
   return inviata ? "Candidatura inviata" : "Candidatura ricevuta";
 }
 
-function descriviProfilo(p: ProfiloPartnerCall): string {
+/** Classe, regione e sezione ATECO del profilo pubblico, come voci separate. */
+function descriviProfilo(p: ProfiloPartnerCall): string[] {
   const classe = p.classe_dimensionale
     ? (CLASSI_DIMENSIONALI[p.classe_dimensionale] ?? p.classe_dimensionale)
     : null;
-  return [
-    classe,
-    p.regione_sede,
-    p.ateco_sezione ? `${p.ateco_sezione.lettera} — ${p.ateco_sezione.descrizione}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  return [classe, p.regione_sede, p.ateco_sezione?.descrizione ?? null].filter(Boolean) as string[];
 }
 
 /** Fasce pubbliche del profilo → tipi di `lib/bilanci` (come l'anteprima
@@ -110,55 +88,60 @@ function ProfiloVoci({ profilo }: { profilo: ProfiloPartnerCall }) {
     valore: etichettaFascia(tipo, profilo.fasce?.[chiave] ?? null),
   })).filter((f) => f.valore !== null);
   const competenze = [...profilo.competenze.map((c) => c.etichetta), ...profilo.competenze_libere];
-  return (
-    <dl className="space-y-3">
-      {fasce.length > 0 && (
-        <Voce titolo="Dai bilanci (per fasce)">
-          <ul className="space-y-0.5">
-            {fasce.map((f) => (
-              <li key={f.tipo}>
-                <span className="text-slate-500">{FASCE_TITOLI[f.tipo]}:</span> {f.valore}
-              </li>
-            ))}
-          </ul>
-        </Voce>
-      )}
-      {profilo.tipi_soggetto.length > 0 && (
-        <Voce titolo="Tipo di soggetto">
-          {profilo.tipi_soggetto
-            .map((t) => (t.fonte === "dichiarato" ? `${t.etichetta} (dichiarato)` : t.etichetta))
-            .join(", ")}
-        </Voce>
-      )}
-      {competenze.length > 0 && <Voce titolo="Competenze">{competenze.join(", ")}</Voce>}
-      {profilo.descrizione_competenze && (
-        <Voce titolo="In breve">
-          <span className="whitespace-pre-line">{profilo.descrizione_competenze}</span>
-        </Voce>
-      )}
-      {profilo.esperienze.length > 0 && (
-        <Voce titolo="Esperienze">
-          <ul className="list-disc space-y-0.5 pl-5">
-            {profilo.esperienze.map((e, i) => (
-              <li key={i}>
-                {[e.programma, e.anno ? String(e.anno) : null, e.ruolo, e.titolo]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </li>
-            ))}
-          </ul>
-        </Voce>
-      )}
-      {profilo.certificazioni.length > 0 && (
-        <Voce titolo="Certificazioni">{profilo.certificazioni.join(", ")}</Voce>
-      )}
-      {profilo.infrastrutture && (
-        <Voce titolo="Infrastrutture">
-          <span className="whitespace-pre-line">{profilo.infrastrutture}</span>
-        </Voce>
-      )}
-    </dl>
-  );
+  const voci: Definizione[] = [];
+  if (fasce.length > 0) {
+    voci.push({
+      etichetta: "Dai bilanci (per fasce)",
+      valore: (
+        <ul className="flex flex-col gap-0.5">
+          {fasce.map((f) => (
+            <li key={f.tipo}>
+              <span className="text-ink-3">{FASCE_TITOLI[f.tipo]}:</span> {f.valore}
+            </li>
+          ))}
+        </ul>
+      ),
+    });
+  }
+  if (profilo.tipi_soggetto.length > 0) {
+    voci.push({
+      etichetta: "Tipo di soggetto",
+      valore: profilo.tipi_soggetto
+        .map((t) => (t.fonte === "dichiarato" ? `${t.etichetta} (dichiarato)` : t.etichetta))
+        .join(", "),
+    });
+  }
+  if (competenze.length > 0) voci.push({ etichetta: "Competenze", valore: competenze.join(", ") });
+  if (profilo.descrizione_competenze) {
+    voci.push({
+      etichetta: "In breve",
+      valore: <span className="whitespace-pre-line">{profilo.descrizione_competenze}</span>,
+    });
+  }
+  if (profilo.esperienze.length > 0) {
+    voci.push({
+      etichetta: "Esperienze",
+      valore: (
+        <ul className="flex flex-col gap-0.5">
+          {profilo.esperienze.map((e, i) => (
+            <li key={i}>
+              {[e.programma, e.anno ? String(e.anno) : null, e.ruolo, e.titolo].filter(Boolean).join(", ")}
+            </li>
+          ))}
+        </ul>
+      ),
+    });
+  }
+  if (profilo.certificazioni.length > 0) {
+    voci.push({ etichetta: "Certificazioni", valore: profilo.certificazioni.join(", ") });
+  }
+  if (profilo.infrastrutture) {
+    voci.push({
+      etichetta: "Infrastrutture",
+      valore: <span className="whitespace-pre-line">{profilo.infrastrutture}</span>,
+    });
+  }
+  return <DefinitionList items={voci} />;
 }
 
 /** «Vedi il profilo» per chi ha creato la call: il dettaglio della
@@ -171,32 +154,34 @@ function ProfiloCandidato({ candidaturaId }: { candidaturaId: string }) {
   if (aperto) {
     if (dettaglio.isPending) {
       corpo = (
-        <div className="space-y-2" aria-hidden>
+        <div className="flex flex-col gap-2" aria-hidden>
           <Skeleton className="h-4 w-2/3" />
           <Skeleton className="h-4 w-1/2" />
         </div>
       );
     } else if (dettaglio.isError) {
-      corpo = (
-        <p className="text-sm text-red-700" role="alert">
-          {apiErrorMessage(dettaglio.error, "Impossibile caricare il profilo.")}
-        </p>
-      );
+      corpo = <Alert tono="errore">{apiErrorMessage(dettaglio.error, "Impossibile caricare il profilo.")}</Alert>;
     } else if (candidato?.profilo) {
       const descrizione = descriviProfilo(candidato.profilo);
       corpo = (
-        <div className="space-y-3">
-          {descrizione && <p className="text-xs text-slate-500">{descrizione}</p>}
+        <div className="flex flex-col gap-3">
+          {descrizione.length > 0 && (
+            <p className="flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-2">
+              {descrizione.map((d) => (
+                <span key={d}>{d}</span>
+              ))}
+            </p>
+          )}
           <ProfiloVoci profilo={candidato.profilo} />
         </div>
       );
     } else {
-      corpo = <p className="text-sm text-slate-500">{CANDIDATURE_COPY.nonPiuDisponibileNota}</p>;
+      corpo = <p className="text-body text-ink-3">{CANDIDATURE_COPY.nonPiuDisponibileNota}</p>;
     }
   }
   return (
-    <details className="group mt-2" onToggle={(e) => setAperto(e.currentTarget.open)}>
-      <summary className="inline-flex cursor-pointer select-none items-center gap-1 rounded text-sm font-medium text-brand-600 hover:text-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500">
+    <details className="group" onToggle={(e) => setAperto(e.currentTarget.open)}>
+      <summary className="inline-flex cursor-pointer select-none items-center gap-1 rounded-mark text-small font-medium text-accent-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
         <span className="group-open:hidden">Vedi il profilo</span>
         <span className="hidden group-open:inline">Nascondi il profilo</span>
       </summary>
@@ -207,63 +192,55 @@ function ProfiloCandidato({ candidaturaId }: { candidaturaId: string }) {
   );
 }
 
-/** Chi c'è dall'altra parte. Per il creatore: l'azienda candidata o invitata,
+/** Chi c'è dall'altra parte: nome (o «Azienda anonima»), classe, regione,
+ *  settore, riferimento. Per il creatore: l'azienda candidata o invitata,
  *  anonima, con il riferimento valido solo per questa call e il profilo
  *  pubblico su richiesta («Vedi il profilo»: lo porta solo il dettaglio); se
  *  ha tolto la visibilità, «non più disponibile» e nessun dato. Per
  *  l'azienda partner: chi ha creato la call, anonima (il server non manda
  *  nulla di lei). */
-function Controparte({ c }: { c: Candidatura }) {
+function Controparte({ c, comeTitolo }: { c: Candidatura; comeTitolo: boolean }) {
+  // Una funzione che restituisce l'elemento, non un componente definito qui
+  // dentro (che React smonterebbe e rimonterebbe a ogni render).
+  const nome = (testo: ReactNode) =>
+    comeTitolo ? (
+      <h3 className="font-sans text-row-title text-ink">{testo}</h3>
+    ) : (
+      <p className="font-medium text-ink">{testo}</p>
+    );
+
   if (c.lato === "partner") {
     return (
-      <div className="flex items-start gap-2">
-        <Building2 className="mt-0.5 size-4 shrink-0 text-slate-400" aria-hidden />
-        <p className="text-sm text-slate-700">
-          <span className="font-medium text-slate-900">{PARTNER_COPY.aziendaAnonima}</span>
-          <span className="text-slate-500"> — ha creato la call</span>
-        </p>
+      <div className="flex flex-col gap-0.5">
+        {nome(PARTNER_COPY.aziendaAnonima)}
+        <p className="text-small text-ink-2">Ha creato la call</p>
       </div>
     );
   }
   const candidato = c.candidato;
   if (candidato && !candidato.disponibile) {
     return (
-      <div className="flex items-start gap-2">
-        <EyeOff className="mt-0.5 size-4 shrink-0 text-slate-400" aria-hidden />
-        <div>
-          <p className="text-sm font-medium text-slate-700">{CANDIDATURE_COPY.nonPiuDisponibile}</p>
-          <p className="text-xs text-slate-500">{CANDIDATURE_COPY.nonPiuDisponibileNota}</p>
-        </div>
+      <div className="flex flex-col gap-0.5">
+        {nome(CANDIDATURE_COPY.nonPiuDisponibile)}
+        <p className="text-small text-ink-3">{CANDIDATURE_COPY.nonPiuDisponibileNota}</p>
       </div>
     );
   }
   const profilo = candidato?.profilo ?? null;
-  const descrizione = profilo ? descriviProfilo(profilo) : "";
+  const descrizione = profilo ? descriviProfilo(profilo) : [];
   return (
-    <div className="flex items-start gap-2">
-      <EyeOff className="mt-0.5 size-4 shrink-0 text-slate-400" aria-hidden />
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-slate-900">
-          {profilo?.denominazione ?? PARTNER_COPY.aziendaAnonima}
+    <div className="flex min-w-0 flex-col gap-0.5">
+      {nome(profilo?.denominazione ?? PARTNER_COPY.aziendaAnonima)}
+      {descrizione.length > 0 && (
+        <p className="flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-2">
+          {descrizione.map((d) => (
+            <span key={d}>{d}</span>
+          ))}
         </p>
-        {descrizione && <p className="text-xs text-slate-500">{descrizione}</p>}
-        {candidato?.pseudonimo && (
-          <p className="text-xs text-slate-400">
-            Riferimento per questa call:{" "}
-            <span className="font-mono tracking-wide">{candidato.pseudonimo}</span>
-          </p>
-        )}
-        {!profilo && candidato?.disponibile && <ProfiloCandidato candidaturaId={c.id} />}
-      </div>
-    </div>
-  );
-}
-
-function Voce({ titolo, children }: { titolo: string; children: ReactNode }) {
-  return (
-    <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">{titolo}</dt>
-      <dd className="mt-1 text-sm text-slate-700">{children}</dd>
+      )}
+      {candidato?.pseudonimo && (
+        <p className="text-small text-ink-3">Riferimento per questa call: {candidato.pseudonimo}</p>
+      )}
     </div>
   );
 }
@@ -277,7 +254,11 @@ type EsitoDati = Pick<
 function Esito({ c }: { c: EsitoDati }) {
   if (c.stato === "inviata") {
     if (c.tipo === "invito" && c.scade_at) {
-      return <p className="text-xs text-slate-500">Se nessuno risponde, l'invito scade il {formatDate(c.scade_at)}.</p>;
+      return (
+        <p className="text-small text-ink-3">
+          Se nessuno risponde, l'invito scade il {formatDate(c.scade_at)}.
+        </p>
+      );
     }
     return null;
   }
@@ -289,7 +270,7 @@ function Esito({ c }: { c: EsitoDati }) {
   if (quando) righe.push(`${CANDIDATURE_COPY.stati[c.stato]} il ${formatDate(quando)}.`);
   if (righe.filter(Boolean).length === 0) return null;
   return (
-    <div className="space-y-0.5 text-xs text-slate-600">
+    <div className="flex flex-col gap-0.5 text-small text-ink-2">
       {righe.filter(Boolean).map((r) => (
         <p key={r} className="whitespace-pre-line">
           {r}
@@ -299,8 +280,8 @@ function Esito({ c }: { c: EsitoDati }) {
   );
 }
 
-/** Scelta tra le candidature ricevute e quelle mandate: due bottoni
- *  (`aria-pressed`), lo stato lo tiene il chiamante (searchParams). */
+/** Scelta tra le candidature ricevute e quelle mandate: un `Segment`, lo
+ *  stato lo tiene il chiamante (searchParams). */
 export function SceltaDirezione({
   valore,
   onChange,
@@ -312,22 +293,12 @@ export function SceltaDirezione({
 }) {
   const direzioni: DirezioneCandidature[] = ["ricevute", "inviate"];
   return (
-    <div role="group" aria-label="Quali mostrare" className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-      {direzioni.map((d) => (
-        <button
-          key={d}
-          type="button"
-          aria-pressed={valore === d}
-          onClick={() => onChange(d)}
-          className={cn(
-            "cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand-500",
-            valore === d ? "bg-white text-brand-700 shadow-sm" : "text-slate-600 hover:text-slate-900",
-          )}
-        >
-          {etichette[d]}
-        </button>
-      ))}
-    </div>
+    <Segment
+      ariaLabel="Quali mostrare"
+      opzioni={direzioni.map((d) => ({ id: d, label: etichette[d] }))}
+      valore={valore}
+      onChange={onChange}
+    />
   );
 }
 
@@ -362,7 +333,9 @@ function testoDecisione(c: DecisioneSu, decisione: Decisione): string {
     : "Chi ha creato la call non la vedrà più tra quelle da decidere. Resta comunque tra le candidature usate questo mese.";
 }
 
-/** Conferma di una decisione; dopo un'accettazione si va alla conversazione. */
+/** Conferma di una decisione; dopo un'accettazione si va alla conversazione.
+ *  Resta su `Dialog` (non `ConfirmDialog`) perché il rifiuto ha un campo:
+ *  i pulsanti hanno `onClick` esplicito. */
 export function DecisioneDialog({
   su,
   decisione,
@@ -411,10 +384,11 @@ export function DecisioneDialog({
       footer={
         decisione ? (
           <>
-            <Button variant="ghost" onClick={onClose} disabled={decidi.isPending}>
+            <Button type="button" variant="secondary" onClick={onClose} disabled={decidi.isPending}>
               Non ora
             </Button>
             <Button
+              type="button"
               variant={decisione === "accetta" ? "primary" : "danger"}
               loading={decidi.isPending}
               onClick={conferma}
@@ -426,7 +400,7 @@ export function DecisioneDialog({
       }
     >
       {decisione && (
-        <div className="space-y-3">
+        <div className="flex flex-col gap-3">
           <p>{testoDecisione(su, decisione)}</p>
           {decisione === "accetta" && <BannerIdentitaNonRivelata />}
           {decisione === "rifiuta" && (
@@ -439,20 +413,17 @@ export function DecisioneDialog({
               righe={3}
             />
           )}
-          {decidi.isError && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-              {apiErrorMessage(decidi.error)}
-            </p>
-          )}
+          {decidi.isError && <Alert tono="errore">{apiErrorMessage(decidi.error)}</Alert>}
         </div>
       )}
     </Dialog>
   );
 }
 
-/** Bottoni delle azioni e dialog di conferma: «Apri la conversazione» dopo
- *  l'accettazione (anche per chi legge soltanto); «Accetta»/«Rifiuta» per chi
- *  riceve, «Ritira» per chi ha mandato, solo se ammesso (titolare, in attesa). */
+/** Azioni e finestra di conferma: «Apri la conversazione» dopo
+ *  l'accettazione (anche per chi legge soltanto); «Accetta» (secondaria) e
+ *  «Rifiuta» (testuale) per chi riceve, «Ritira» per chi ha mandato, solo se
+ *  ammesso (titolare, in attesa). */
 function Azioni({
   su,
   conversazioneId,
@@ -469,28 +440,24 @@ function Azioni({
   const [decisione, setDecisione] = useState<Decisione | null>(null);
   if (!(accettata && conversazioneId) && !puoDecidere && !puoRitirare) return null;
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       {accettata && conversazioneId && (
-        <LinkButton to={`/app/partenariati/conversazioni/${conversazioneId}`} size="sm">
-          <MessagesSquare className="size-4" aria-hidden />
+        <LinkButton to={`/app/partenariati/conversazioni/${conversazioneId}`} variant="ghost" size="sm">
           Apri la conversazione
         </LinkButton>
       )}
       {puoDecidere && (
         <>
-          <Button size="sm" onClick={() => setDecisione("accetta")}>
-            <Check className="size-4" aria-hidden />
+          <Button size="sm" variant="secondary" onClick={() => setDecisione("accetta")}>
             Accetta
           </Button>
-          <Button size="sm" variant="secondary" onClick={() => setDecisione("rifiuta")}>
-            <X className="size-4" aria-hidden />
+          <Button size="sm" variant="ghost" onClick={() => setDecisione("rifiuta")}>
             Rifiuta
           </Button>
         </>
       )}
       {puoRitirare && (
         <Button size="sm" variant="ghost" onClick={() => setDecisione("ritira")}>
-          <Undo2 className="size-4" aria-hidden />
           {su.tipo === "invito" ? "Ritira l'invito" : "Ritira la candidatura"}
         </Button>
       )}
@@ -501,7 +468,8 @@ function Azioni({
 
 /** La propria candidatura (o l'invito ricevuto) nella pagina di una call di
  *  altri (`CandidaturaPropriaOut`): tipo, stato, posizione, esito e le azioni
- *  che il server ammette per il titolare. */
+ *  che il server ammette per il titolare. Senza riquadro: sta nel pannello
+ *  della colonna laterale. */
 export function CandidaturaPropriaCard({
   candidatura: c,
   callId,
@@ -514,26 +482,26 @@ export function CandidaturaPropriaCard({
   const posizione = c.posizione_id ? posizioni.find((p) => p.id === c.posizione_id) : undefined;
   const su: DecisioneSu = { id: c.id, tipo: c.tipo, lato: "partner", callId };
   return (
-    <Card className="p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge tone={c.tipo === "invito" ? "brand" : "slate"}>{etichettaTipo(su)}</Badge>
-        <StatoCandidaturaBadge stato={c.stato} />
-        {c.created_at && (
-          <span className="text-xs text-slate-500">
-            <span className="sr-only">Data: </span>
-            {formatDate(c.created_at)}
-          </span>
-        )}
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        <p className="text-small text-ink-2">{etichettaTipo(su)}</p>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <StatoCandidaturaBadge stato={c.stato} />
+          {c.created_at && (
+            <span className="text-small text-ink-3">
+              <span className="sr-only">Data: </span>
+              {formatDate(c.created_at)}
+            </span>
+          )}
+        </div>
       </div>
       {posizione && (
-        <p className="mt-2 text-sm text-slate-700">
-          <span className="text-slate-500">Posizione: </span>
+        <p className="text-body text-ink">
+          <span className="text-ink-3">Posizione: </span>
           {posizione.titolo}
         </p>
       )}
-      <div className="mt-2">
-        <Esito c={c} />
-      </div>
+      <Esito c={c} />
       <Azioni
         su={su}
         conversazioneId={c.conversazione_id}
@@ -541,19 +509,19 @@ export function CandidaturaPropriaCard({
         puoDecidere={c.puo_decidere}
         puoRitirare={c.puo_ritirare}
       />
-    </Card>
+    </div>
   );
 }
 
-// ---- Card ---------------------------------------------------------------------------
+// ---- Riga ---------------------------------------------------------------------------
 
-/** Una candidatura o un invito, visto dalla tua parte: chi c'è dall'altra
- *  parte (sempre anonimo), la call (se `mostraCall`), posizione, messaggio,
+/** Una candidatura o un invito, visto dalla tua parte, come riga: chi c'è
+ *  dall'altra parte (sempre anonimo), la call (se `mostraCall`), posizione,
  *  requisiti dichiarati, per il creatore il confronto in vista «terzi» (solo
- *  esiti e fasce), l'esito. Le azioni le ammette il server (solo il
- *  titolare, solo in attesa): chi riceve accetta o rifiuta, chi ha mandato
- *  ritira; dopo l'accettazione tutti aprono la conversazione. La card è un
- *  `<li>`. */
+ *  esiti e fasce), messaggio; a destra lo stato, la data, l'esito e le
+ *  azioni. Le azioni le ammette il server (solo il titolare, solo in
+ *  attesa): chi riceve accetta o rifiuta, chi ha mandato ritira; dopo
+ *  l'accettazione tutti aprono la conversazione. La riga è un `<li>`. */
 export function CandidaturaCard({
   candidatura: c,
   mostraCall = true,
@@ -565,81 +533,89 @@ export function CandidaturaCard({
   testi?: ReadonlyMap<string, string>;
 }) {
   const tua = mandataDaTe(c);
+  const puoVedereProfilo =
+    c.lato === "creatore" && !c.candidato?.profilo && c.candidato?.disponibile !== false;
+
+  const voci: Definizione[] = [];
+  if (c.posizione) voci.push({ etichetta: "Posizione", valore: c.posizione.titolo });
+  if (c.requisiti_dichiarati.length > 0) {
+    voci.push({
+      etichetta: "Requisiti dichiarati",
+      valore: (
+        <ul className="flex flex-col gap-1">
+          {c.requisiti_dichiarati.map((r) => (
+            <li key={r.requisito_id} className="flex flex-wrap items-start gap-1.5">
+              <Badge className="shrink-0 tabular-nums">{r.etichetta}</Badge>
+              {testi?.get(r.etichetta) && <span className="min-w-0">{testi.get(r.etichetta)}</span>}
+              <span className="text-small text-ink-3">({CANDIDATURE_COPY.dichiarato})</span>
+            </li>
+          ))}
+        </ul>
+      ),
+    });
+  }
+  if (c.lato === "creatore" && c.valutazione) {
+    voci.push({
+      etichetta: "Confronto",
+      valore: (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <MatchBadge match={c.valutazione} persona="lei" />
+            <AttenzioneBadge match={c.valutazione} />
+          </div>
+          <MatchSpiegazione match={c.valutazione} persona="lei" testi={testi} compatta />
+        </div>
+      ),
+    });
+  }
+  if (c.messaggio) {
+    voci.push({
+      etichetta: tua ? "Il tuo messaggio" : "Messaggio",
+      valore: <span className="block whitespace-pre-line break-words">{c.messaggio}</span>,
+    });
+  }
 
   return (
-    <li>
-      <Card className="p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge tone={c.tipo === "invito" ? "brand" : "slate"}>{etichettaTipo(c)}</Badge>
-          <StatoCandidaturaBadge stato={c.stato} />
-          {c.created_at && (
-            <span className="text-xs text-slate-500">
-              <span className="sr-only">Data: </span>
-              {formatDate(c.created_at)}
-            </span>
-          )}
-        </div>
-
-        {mostraCall && (
-          <h3 className="mt-2 font-display text-base font-semibold text-slate-900">
-            <Link
-              to={`/app/partenariati/call/${c.call.id}`}
-              className="rounded hover:text-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
-            >
-              {c.call.titolo || "Call senza titolo"}
-            </Link>
-            <span className="block text-sm font-normal text-slate-600">Bando: {c.call.bando.titolo}</span>
-          </h3>
-        )}
-
-        <div className="mt-3">
-          <Controparte c={c} />
-        </div>
-
-        {c.lato === "creatore" && c.valutazione && (
-          <div className="mt-3 space-y-2">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <MatchBadge match={c.valutazione} persona="lei" />
-              <AttenzioneBadge match={c.valutazione} />
-            </div>
-            <MatchSpiegazione match={c.valutazione} persona="lei" testi={testi} compatta />
+    <li className="flex flex-col gap-4 border-b border-line py-5 md:flex-row md:gap-6">
+      <div className="flex min-w-0 grow flex-col gap-3">
+        {mostraCall ? (
+          <div className="flex flex-col gap-1">
+            <h3 className="font-sans text-row-title text-ink">
+              <Link to={`/app/partenariati/call/${c.call.id}`} className="rounded-mark hover:text-accent-hover">
+                {c.call.titolo || "Call senza titolo"}
+              </Link>
+            </h3>
+            <p className="text-body text-ink-2">Bando: {c.call.bando.titolo}</p>
+            <Controparte c={c} comeTitolo={false} />
           </div>
+        ) : (
+          <Controparte c={c} comeTitolo />
         )}
+
         {c.lato === "creatore" && c.compatibile === false && c.candidato?.disponibile !== false && (
-          <p className="mt-3 text-xs text-slate-500">
-            Quando è arrivata, l'azienda non risultava compatibile con i requisiti o le
-            posizioni della call: valuta tu dal messaggio.
+          <p className="text-small text-ink-3">
+            Quando è arrivata, l'azienda non risultava compatibile con i requisiti o le posizioni
+            della call: valuta tu dal messaggio.
           </p>
         )}
 
-        <dl className="mt-3 space-y-3 border-t border-slate-100 pt-3">
-          {c.posizione && <Voce titolo="Posizione">{c.posizione.titolo}</Voce>}
-          {c.messaggio && (
-            <Voce titolo={tua ? "Il tuo messaggio" : "Messaggio"}>
-              <span className="block whitespace-pre-line break-words">{c.messaggio}</span>
-            </Voce>
-          )}
-          {c.requisiti_dichiarati.length > 0 && (
-            <Voce titolo="Requisiti dichiarati">
-              <ul className="space-y-1">
-                {c.requisiti_dichiarati.map((r) => (
-                  <li key={r.requisito_id} className="flex flex-wrap items-start gap-1.5">
-                    <Badge tone="brand" className="shrink-0 tabular">
-                      {r.etichetta}
-                    </Badge>
-                    {testi?.get(r.etichetta) && <span className="min-w-0">{testi.get(r.etichetta)}</span>}
-                    <Badge tone="slate">{CANDIDATURE_COPY.dichiarato}</Badge>
-                  </li>
-                ))}
-              </ul>
-            </Voce>
-          )}
-        </dl>
+        {voci.length > 0 && <DefinitionList items={voci} />}
 
-        <div className="mt-3">
-          <Esito c={c} />
+        {puoVedereProfilo && <ProfiloCandidato candidaturaId={c.id} />}
+      </div>
+
+      <div className="flex shrink-0 flex-col items-start gap-3 md:w-48">
+        <div className="flex flex-col gap-1">
+          <p className="text-small text-ink-2">{etichettaTipo(c)}</p>
+          <StatoCandidaturaBadge stato={c.stato} />
+          {c.created_at && (
+            <p className="text-small text-ink-3">
+              <span className="sr-only">Data: </span>
+              {tua ? "mandata il" : "dal"} {formatDate(c.created_at)}
+            </p>
+          )}
         </div>
-
+        <Esito c={c} />
         <Azioni
           su={{ id: c.id, tipo: c.tipo, lato: c.lato, callId: c.call.id }}
           conversazioneId={c.conversazione_id}
@@ -647,7 +623,7 @@ export function CandidaturaCard({
           puoDecidere={c.puo_decidere}
           puoRitirare={c.puo_ritirare}
         />
-      </Card>
+      </div>
     </li>
   );
 }

@@ -21,22 +21,24 @@ import { formatDateTime, todayItalyIso } from "../../../lib/format";
 import { prezzoDisplay } from "../../../lib/prezzo";
 import type { BilancioRichiesta, StatoRichiestaBilancio } from "../../../types";
 import { ExportPdfButton } from "../../shared/ExportPdfButton";
-import { Badge, type BadgeProps } from "../../ui/Badge";
+import { Badge } from "../../ui/Badge";
 import { Button, LinkButton } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Dialog } from "../../ui/Dialog";
 import { SelectField } from "../../ui/Field";
 import { Skeleton } from "../../ui/states";
+import { Status, type TonoStatus } from "../../ui/Status";
 
-/** Il colore accompagna sempre lo stato scritto, non lo sostituisce. */
-const TONI_STATO: Record<StatoRichiestaBilancio, NonNullable<BadgeProps["tone"]>> = {
-  in_invio: "brand",
-  in_lavorazione: "brand",
-  esito_ignoto: "amber",
-  completata: "emerald",
-  non_disponibile: "slate",
-  annullata: "slate",
-  errore: "red",
+/** Lo stato in parole (`Status`): il punto accompagna sempre la parola, non
+ *  la sostituisce. */
+const TONI_STATO: Record<StatoRichiestaBilancio, TonoStatus> = {
+  in_invio: "neutro",
+  in_lavorazione: "neutro",
+  esito_ignoto: "in-apertura",
+  completata: "aperto",
+  non_disponibile: "chiuso",
+  annullata: "chiuso",
+  errore: "attenzione",
 };
 
 /** Riga di spiegazione sotto una richiesta: il messaggio del server se c'è,
@@ -77,26 +79,26 @@ function RichiestaVoce({ richiesta: r }: { richiesta: BilancioRichiesta }) {
     <li aria-atomic="true" className="flex flex-wrap items-start justify-between gap-3 py-3">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium text-slate-900">{COPY.esercizioTitolo(anno)}</span>
-          <Badge tone={inutilizzabile ? "amber" : (TONI_STATO[r.stato] ?? "slate")}>
+          <span className="text-body font-medium text-ink">{COPY.esercizioTitolo(anno)}</span>
+          <Status tono={inutilizzabile ? "in-apertura" : (TONI_STATO[r.stato] ?? "neutro")}>
             {inutilizzabile ? COPY.statoNonUtilizzabile : (COPY.stati[r.stato] ?? r.stato)}
-          </Badge>
+          </Status>
           {r.rimborsata && (
-            <Badge tone="emerald">
+            <Badge>
               <Undo2 className="size-3" aria-hidden />
               {COPY.unitaRestituita}
             </Badge>
           )}
         </div>
-        <p className="mt-0.5 text-xs text-slate-500">
+        <p className="mt-0.5 text-small text-ink-3">
           {COPY.richiestoIl(formatDateTime(r.created_at))}
           {r.stato === "completata" &&
             r.completata_at &&
-            ` · ${COPY.prontoIl(formatDateTime(r.completata_at))}`}
+            `, ${COPY.prontoIl(formatDateTime(r.completata_at))}`}
         </p>
-        {testo && <p className="mt-1 text-sm text-slate-600">{testo}</p>}
+        {testo && <p className="mt-1 text-body text-ink-2">{testo}</p>}
         {r.stato === "completata" && r.avvisi_count > 0 && (
-          <p className="mt-1 text-xs text-amber-700">
+          <p className="mt-1 text-small text-warning-ink">
             {r.pdf_disponibile ? COPY.avvisi(r.avvisi_count) : COPY.avvisiSenzaPdf(r.avvisi_count)}
           </p>
         )}
@@ -236,7 +238,7 @@ export function BilancioUfficialeCard({ className }: { className?: string }) {
     // Addon tolto dal catalogo: resta lo storico, con i PDF già pagati, e il
     // motivo per cui non se ne richiedono altri.
     azioni = data?.motivo_non_richiedibile ? (
-      <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+      <p className="mt-4 rounded-control border border-warning-line bg-warning-soft px-3 py-2 text-small text-ink">
         {data.motivo_non_richiedibile}
       </p>
     ) : null;
@@ -246,7 +248,7 @@ export function BilancioUfficialeCard({ className }: { className?: string }) {
     azioni = (
       <div
         role="alert"
-        className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"
+        className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-control border border-danger-line bg-danger-soft px-3 py-2 text-small text-danger"
       >
         {apiErrorMessage(error, COPY.erroreCaricamento)}
         <Button variant="secondary" size="sm" onClick={() => refetch()}>
@@ -255,10 +257,10 @@ export function BilancioUfficialeCard({ className }: { className?: string }) {
       </div>
     );
   } else if (!data.editable) {
-    azioni = <p className="mt-3 text-xs text-slate-500">{COPY.soloTitolare}</p>;
+    azioni = <p className="mt-3 text-small text-ink-3">{COPY.soloTitolare}</p>;
   } else if (!data.richiedibile) {
     azioni = data.motivo_non_richiedibile ? (
-      <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+      <p className="mt-4 rounded-control border border-warning-line bg-warning-soft px-3 py-2 text-small text-ink">
         {data.motivo_non_richiedibile}
       </p>
     ) : null;
@@ -293,15 +295,15 @@ export function BilancioUfficialeCard({ className }: { className?: string }) {
           </Button>
         </div>
         {anniAcquisiti.length > 0 && (
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="mt-2 text-small text-ink-3">
             {COPY.giaAcquisiti([...anniAcquisiti].sort((a, b) => b - a).join(", "))}
           </p>
         )}
         {aperta ? (
-          <p className="mt-2 text-xs text-slate-500">{COPY.inCorso}</p>
+          <p className="mt-2 text-small text-ink-3">{COPY.inCorso}</p>
         ) : bloccato ? (
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <p className="text-sm text-slate-600">{COPY.senzaUnita(prezzo ?? "")}</p>
+            <p className="text-body text-ink-2">{COPY.senzaUnita(prezzo ?? "")}</p>
             <LinkButton
               to={`/app/checkout?addon=${BILANCIO_UFFICIALE_ADDON_SLUG}`}
               variant="secondary"
@@ -313,7 +315,7 @@ export function BilancioUfficialeCard({ className }: { className?: string }) {
           </div>
         ) : (
           !attesaInventario && (
-            <p className="mt-2 text-xs text-slate-500">{COPY.disponibili(quantita)}</p>
+            <p className="mt-2 text-small text-ink-3">{COPY.disponibili(quantita)}</p>
           )
         )}
       </div>
@@ -323,13 +325,13 @@ export function BilancioUfficialeCard({ className }: { className?: string }) {
   return (
     <Card className={cn("p-5", className)}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h3 className="inline-flex items-center gap-1.5 font-display text-sm font-semibold text-slate-900">
-          <FileCheck2 className="size-4 text-brand-500" aria-hidden />
+        <h3 className="inline-flex items-center gap-1.5 font-sans text-title-group text-ink">
+          <FileCheck2 className="size-4 text-ink-2" aria-hidden />
           {addon?.nome ?? COPY.titolo}
         </h3>
-        {prezzo && <span className="text-xs text-slate-500">{COPY.prezzo(prezzo)}</span>}
+        {prezzo && <span className="text-small text-ink-3">{COPY.prezzo(prezzo)}</span>}
       </div>
-      <p className="mt-1 text-sm text-slate-600">{COPY.descrizione}</p>
+      <p className="mt-1 text-body text-ink-2">{COPY.descrizione}</p>
 
       {azioni}
 
@@ -337,7 +339,7 @@ export function BilancioUfficialeCard({ className }: { className?: string }) {
           corso): regione sempre montata, così l'annuncio non si perde. */}
       <div role="status" aria-live="polite">
         {esito && (
-          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{esito}</p>
+          <p className="mt-3 rounded-control border border-warning-line bg-warning-soft px-3 py-2 text-small text-ink">{esito}</p>
         )}
       </div>
 
@@ -350,10 +352,10 @@ export function BilancioUfficialeCard({ className }: { className?: string }) {
       >
         {richieste.length > 0 && (
           <>
-            <h4 className="text-xs font-medium uppercase tracking-wide text-slate-400">
+            <h4 className="text-small font-medium text-ink-3">
               {COPY.storicoTitolo}
             </h4>
-            <ul className="mt-1 divide-y divide-slate-100">
+            <ul className="mt-1 divide-y divide-line">
               {richieste.map((r) => (
                 <RichiestaVoce key={r.id} richiesta={r} />
               ))}
@@ -383,10 +385,10 @@ export function BilancioUfficialeCard({ className }: { className?: string }) {
         }
       >
         <p>{COPY.conferma(quantita)}</p>
-        <p className="mt-2 font-medium text-slate-800">{COPY.confermaEsercizio(annoScelto)}</p>
-        <p className="mt-2 text-xs text-slate-500">{COPY.confermaRimborso}</p>
+        <p className="mt-2 font-medium text-ink">{COPY.confermaEsercizio(annoScelto)}</p>
+        <p className="mt-2 text-small text-ink-3">{COPY.confermaRimborso}</p>
         {actionError && (
-          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+          <p className="mt-3 rounded-control border border-danger-line bg-danger-soft px-3 py-2 text-small text-danger" role="alert">
             {actionError}
           </p>
         )}

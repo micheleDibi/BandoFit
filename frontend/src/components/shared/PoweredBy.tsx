@@ -10,12 +10,12 @@ export function PoweredBy({ className }: { className?: string }) {
       rel="noopener noreferrer"
       aria-label="Powered by EduNews24"
       className={cn(
-        "group inline-flex items-center gap-2 rounded-lg",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500",
+        "group inline-flex items-center gap-2 rounded-control",
+        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
         className,
       )}
     >
-      <span className="text-xs text-slate-400 transition-colors group-hover:text-slate-500">
+      <span className="text-caption text-ink-3 transition-colors group-hover:text-ink-2">
         powered by
       </span>
       <img

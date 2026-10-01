@@ -11,6 +11,10 @@ export interface AlertProps {
   children: ReactNode;
   /** Azione a destra (un `TextLink` o un `Button` piccolo). */
   azione?: ReactNode;
+  /** Ruolo ARIA: di default `status` per info/ok e `alert` per attenzione/errore.
+   *  `none` dentro una regione `aria-live` già montata, che annuncia da sé
+   *  (due regioni annidate rischiano il doppio annuncio). */
+  ruolo?: "status" | "alert" | "none";
   className?: string;
 }
 
@@ -36,11 +40,12 @@ const toni: Record<AlertTono, { classi: string; icona: LucideIcon; ruolo: "statu
 /** Avviso nella pagina: bordo intero, icona e parola, mai una barra colorata a
  *  sinistra. Info e ok sono `status` (annuncio educato); attenzione ed errore
  *  sono `alert` (annuncio immediato). */
-export function Alert({ tono, titolo, children, azione, className }: AlertProps) {
-  const { classi, icona: Icona, ruolo } = toni[tono];
+export function Alert({ tono, titolo, children, azione, ruolo, className }: AlertProps) {
+  const { classi, icona: Icona, ruolo: ruoloDelTono } = toni[tono];
+  const ruoloEffettivo = ruolo ?? ruoloDelTono;
   return (
     <div
-      role={ruolo}
+      role={ruoloEffettivo === "none" ? undefined : ruoloEffettivo}
       className={cn(
         "flex items-start gap-3 rounded-control border px-4 py-3 text-body text-ink",
         classi,

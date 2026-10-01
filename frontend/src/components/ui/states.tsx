@@ -9,24 +9,6 @@ export function Skeleton({ className }: { className?: string }) {
   return <div className={cn("rounded-mark bg-sunken", className)} aria-hidden />;
 }
 
-export function BandoCardSkeleton() {
-  return (
-    <div className="rounded-panel border border-line bg-sheet p-5">
-      <div className="flex items-center gap-2">
-        <Skeleton className="h-5 w-16" />
-        <Skeleton className="h-5 w-24" />
-      </div>
-      <Skeleton className="mt-3 h-5 w-3/4" />
-      <Skeleton className="mt-2 h-4 w-full" />
-      <Skeleton className="mt-1 h-4 w-2/3" />
-      <div className="mt-4 flex gap-4">
-        <Skeleton className="h-4 w-24" />
-        <Skeleton className="h-4 w-28" />
-      </div>
-    </div>
-  );
-}
-
 /** Stato vuoto: che cosa manca e un'azione per cominciare, allineati a
  *  sinistra, senza icona. `icon` è accettata per compatibilità e ignorata. */
 export function EmptyState({
@@ -41,7 +23,7 @@ export function EmptyState({
 }) {
   return (
     <div className="flex max-w-[520px] flex-col items-start gap-2 py-8">
-      <h3 className="text-row-title text-ink">{title}</h3>
+      <h3 className="font-sans text-row-title text-ink">{title}</h3>
       {description && <p className="text-body text-ink-2">{description}</p>}
       {action && <div className="mt-2">{action}</div>}
     </div>
@@ -62,7 +44,7 @@ export function ErrorState({
 }) {
   return (
     <div className="flex max-w-[520px] flex-col items-start gap-2 py-8" role="alert">
-      <h3 className="flex items-start gap-2 text-row-title text-ink">
+      <h3 className="flex items-start gap-2 font-sans text-row-title text-ink">
         <TriangleAlert className="mt-0.5 size-5 shrink-0 text-danger" aria-hidden />
         {title}
       </h3>

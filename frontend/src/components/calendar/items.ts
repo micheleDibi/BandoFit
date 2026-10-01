@@ -48,37 +48,79 @@ export function itemChipLabel(item: CalendarItem): string {
     case "evento":
       return item.event.titolo;
     case "slot":
-      return `${formatSlotOra(item.slot.inizio)} · Disponibile`;
+      return `${formatSlotOra(item.slot.inizio)} Disponibile`;
     case "appuntamento":
-      return `${formatSlotOra(item.appuntamento.inizio)} · ${
+      return `${formatSlotOra(item.appuntamento.inizio)} ${
         item.appuntamento.ragione_sociale ?? "Consulenza"
       }`;
   }
 }
 
-/** Classi del chip desktop. Il ramo evento conserva le stringhe storiche di
- *  MonthGrid: per i non-progettisti il rendering non cambia. */
-export function itemChipClasses(item: CalendarItem): string {
+/** Il tipo dell'item in parole (legenda, elenco del giorno, screen reader):
+ *  il colore del chip non basta mai da solo. */
+export function itemKindLabel(item: CalendarItem): string {
   switch (item.kind) {
     case "evento":
-      return item.event.tipo === "bando"
-        ? "border-l-2 border-amber-500 bg-amber-50 font-medium text-amber-900 hover:bg-amber-100"
-        : "border-l-2 border-brand-400 bg-brand-50 text-brand-900 hover:bg-brand-100";
+      return item.event.tipo === "bando" ? "Scadenza del bando" : "Evento personale";
     case "slot":
-      return "border-l-2 border-emerald-500 bg-emerald-50 text-emerald-900 hover:bg-emerald-100";
+      return "Disponibilità";
     case "appuntamento":
-      return "border-l-2 border-violet-500 bg-violet-50 font-medium text-violet-900 hover:bg-violet-100";
+      return "Appuntamento";
   }
 }
 
-/** Pallino presentazionale (celle mobile). */
-export function itemDotClass(item: CalendarItem): string {
+/** Ruoli di colore del calendario (docs/design-system.md): personali
+ *  `accent-soft` + `ink`; scadenze dei bandi `warning-soft` + `warning-ink`;
+ *  disponibilità come slot vuoto (`sheet`, bordo tratteggiato `line-control`,
+ *  testo `ink-2`); appuntamenti `accent` + `on-accent`. Il verde resta della
+ *  compatibilità. Stesse classi per il chip, il campione della legenda e la
+ *  riga dell'elenco del giorno. */
+// Bordo trasparente sugli altri ruoli: stessa altezza del chip tratteggiato.
+const RUOLI = {
+  personale: "border border-transparent bg-accent-soft text-ink",
+  bando: "border border-transparent bg-warning-soft text-warning-ink",
+  slot: "border border-dashed border-line-control bg-sheet text-ink-2",
+  appuntamento: "border border-transparent bg-accent text-on-accent",
+} as const;
+
+export type RuoloCalendario = keyof typeof RUOLI;
+
+export function itemRuolo(item: CalendarItem): RuoloCalendario {
   switch (item.kind) {
     case "evento":
-      return item.event.tipo === "bando" ? "bg-amber-500" : "bg-brand-500";
+      return item.event.tipo === "bando" ? "bando" : "personale";
     case "slot":
-      return "bg-emerald-500";
+      return "slot";
     case "appuntamento":
-      return "bg-violet-500";
+      return "appuntamento";
   }
+}
+
+export function ruoloClasses(ruolo: RuoloCalendario): string {
+  return RUOLI[ruolo];
+}
+
+const HOVER: Record<RuoloCalendario, string> = {
+  personale: "hover:bg-accent-line",
+  bando: "hover:bg-warning-line/50",
+  slot: "hover:bg-desk",
+  appuntamento: "hover:bg-accent-hover",
+};
+
+/** Classi del chip desktop: colore del ruolo più il passaggio del mouse. */
+export function itemChipClasses(item: CalendarItem): string {
+  const ruolo = itemRuolo(item);
+  return `${RUOLI[ruolo]} ${HOVER[ruolo]}`;
+}
+
+/** Pallino presentazionale (celle mobile), 8px: pieno, tenue o vuoto secondo il ruolo. */
+const PALLINI: Record<RuoloCalendario, string> = {
+  personale: "bg-accent-soft ring-1 ring-inset ring-accent",
+  bando: "bg-warning-ink",
+  slot: "bg-sheet ring-1 ring-inset ring-ink-3",
+  appuntamento: "bg-accent",
+};
+
+export function itemDotClass(item: CalendarItem): string {
+  return PALLINI[itemRuolo(item)];
 }

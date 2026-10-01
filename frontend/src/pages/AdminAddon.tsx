@@ -1,11 +1,17 @@
-import { BadgeCheck, Plus } from "lucide-react";
-import { useState, type FormEvent } from "react";
-import { Badge } from "../components/ui/Badge";
+import { Plus } from "lucide-react";
+import { useId, useState, type FormEvent } from "react";
+import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
+import { Checkbox } from "../components/ui/Checkbox";
 import { Dialog } from "../components/ui/Dialog";
 import { SelectField, TextField } from "../components/ui/Field";
-import { ErrorState, Skeleton } from "../components/ui/states";
+import { InlineError } from "../components/ui/InlineError";
+import { Page } from "../components/ui/Page";
+import { PageHeader } from "../components/ui/PageHeader";
+import { Section, SectionHeader } from "../components/ui/SectionHeader";
+import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
+import { Status } from "../components/ui/Status";
+import { useToast } from "../components/ui/Toast";
 import {
   useAdminAddons,
   useAdminCreateAddon,
@@ -148,21 +154,12 @@ function AddonFormFields({
         value={form.ordering}
         onChange={(e) => setForm((f) => ({ ...f, ordering: e.target.value }))}
       />
-      <div className="flex items-center gap-2 sm:col-span-2">
-        <input
-          id={`addon-attivo-${form.slug || "new"}`}
-          type="checkbox"
-          checked={form.is_active}
-          onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))}
-          className="size-4 cursor-pointer accent-brand-500"
-        />
-        <label
-          htmlFor={`addon-attivo-${form.slug || "new"}`}
-          className="cursor-pointer text-sm text-slate-700"
-        >
-          Add-on attivo (visibile ai clienti nella pagina Abbonamento)
-        </label>
-      </div>
+      <Checkbox
+        className="sm:col-span-2"
+        label="Add-on attivo (visibile ai clienti nella pagina Abbonamento)"
+        checked={form.is_active}
+        onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))}
+      />
     </div>
   );
 }
@@ -170,54 +167,50 @@ function AddonFormFields({
 function AddonEditor({ addon }: { addon: Addon }) {
   const [form, setForm] = useState<AddonFormState>(() => toFormState(addon));
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
   const updateAddon = useAdminUpdateAddon();
+  const toast = useToast();
+  const idTitolo = useId();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    setSaved(false);
     const problem = validate(form);
     setValidationError(problem);
     if (problem) return;
     try {
       await updateAddon.mutateAsync({ addonId: addon.id, data: toPayload(form) });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      toast.mostra({ testo: `Add-on «${form.nome.trim()}» salvato` });
     } catch {
       // errore mostrato sotto
     }
   };
 
+  // Un add-on per sezione: titolo con il filetto e lo stato in parole; il
+  // pulsante pieno della pagina è «Nuovo add-on», qui «Salva» è secondario.
   return (
-    <Card className={`p-6 ${form.is_active ? "" : "opacity-80"}`}>
-      <form onSubmit={handleSubmit}>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-base font-semibold text-slate-900">{addon.nome}</h2>
-          {form.is_active ? (
-            <Badge tone="emerald">Attivo</Badge>
+    <Section aria-labelledby={idTitolo}>
+      <SectionHeader
+        id={idTitolo}
+        titolo={addon.nome}
+        azione={
+          form.is_active ? (
+            <Status tono="aperto">Attivo</Status>
           ) : (
-            <Badge tone="slate">Disattivato</Badge>
-          )}
-        </div>
+            <Status tono="chiuso">Disattivato</Status>
+          )
+        }
+      />
+      <form onSubmit={handleSubmit} className="flex flex-col gap-5">
         <AddonFormFields form={form} setForm={setForm} />
-        <div className="mt-5 flex items-center gap-3">
-          <Button type="submit" loading={updateAddon.isPending}>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="submit" variant="secondary" loading={updateAddon.isPending}>
             Salva add-on
           </Button>
-          {saved && (
-            <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600" role="status">
-              <BadgeCheck className="size-4" aria-hidden />
-              Salvato
-            </span>
-          )}
           {(validationError || updateAddon.isError) && (
-            <span className="text-sm text-red-600" role="alert">
-              {validationError ?? apiErrorMessage(updateAddon.error)}
-            </span>
+            <InlineError>{validationError ?? apiErrorMessage(updateAddon.error)}</InlineError>
           )}
         </div>
       </form>
-    </Card>
+    </Section>
   );
 }
 
@@ -245,46 +238,40 @@ export default function AdminAddon() {
     }
   };
 
+  const apriCreazione = () => {
+    setCreateError(null);
+    setNewForm(EMPTY_FORM);
+    setCreateOpen(true);
+  };
+
   return (
-    <div className="mx-auto max-w-4xl">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
-            Gestione add-on
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Il catalogo mostrato ai clienti nella pagina Abbonamento. Gli add-on non si
-            eliminano: si disattivano.
-          </p>
-        </div>
-        <Button
-          onClick={() => {
-            setCreateError(null);
-            setNewForm(EMPTY_FORM);
-            setCreateOpen(true);
-          }}
-        >
-          <Plus className="size-4" aria-hidden />
-          Nuovo add-on
-        </Button>
-      </div>
+    <Page variante="sezioni">
+      <PageHeader
+        titolo="Add-on"
+        descrizione="Il catalogo mostrato ai clienti nella pagina Abbonamento. Gli add-on non si eliminano: si disattivano."
+        azioni={
+          <Button onClick={apriCreazione}>
+            <Plus className="size-4" aria-hidden />
+            Nuovo add-on
+          </Button>
+        }
+      />
 
       {isPending ? (
-        <div className="mt-6 space-y-5">
+        <div className="flex flex-col gap-6" aria-hidden>
           {Array.from({ length: 2 }).map((_, i) => (
             <Skeleton key={i} className="h-64 w-full" />
           ))}
         </div>
       ) : isError ? (
-        <div className="mt-6">
-          <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
-        </div>
+        <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
       ) : (addons ?? []).length === 0 ? (
-        <p className="mt-8 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center text-sm text-slate-400">
-          Nessun add-on nel catalogo: creane uno con «Nuovo add-on».
-        </p>
+        <EmptyState
+          title="Nessun add-on nel catalogo"
+          description="Creane uno con «Nuovo add-on»."
+        />
       ) : (
-        <div className="mt-6 space-y-5">
+        <div className="flex flex-col gap-12">
           {(addons ?? []).map((addon) => (
             <AddonEditor key={addon.id} addon={addon} />
           ))}
@@ -297,22 +284,20 @@ export default function AdminAddon() {
         title="Nuovo add-on"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setCreateOpen(false)}>
+            <Button type="button" variant="secondary" onClick={() => setCreateOpen(false)}>
               Annulla
             </Button>
-            <Button onClick={handleCreate} loading={createAddon.isPending}>
+            <Button type="button" onClick={handleCreate} loading={createAddon.isPending}>
               Crea add-on
             </Button>
           </>
         }
       >
-        <AddonFormFields form={newForm} setForm={setNewForm} isNew />
-        {createError && (
-          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-red-700" role="alert">
-            {createError}
-          </p>
-        )}
+        <div className="flex flex-col gap-4">
+          <AddonFormFields form={newForm} setForm={setNewForm} isNew />
+          {createError && <Alert tono="errore">{createError}</Alert>}
+        </div>
       </Dialog>
-    </div>
+    </Page>
   );
 }

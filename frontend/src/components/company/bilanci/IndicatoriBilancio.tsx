@@ -1,11 +1,11 @@
 import { ChevronDown } from "lucide-react";
 import { formatIndicatore, intervalloAnni } from "../../../lib/bilanci";
-import { cn } from "../../../lib/cn";
 import type { IndicatoreBilancio } from "../../../types";
 
 /** Indicatori calcolati dal server (il frontend non fa conti): valore, anni
  *  usati e formula a richiesta. Un indicatore non calcolabile resta visibile
- *  con il motivo, così si capisce cosa manca. */
+ *  con il motivo, così si capisce cosa manca. Un valore negativo è un fatto,
+ *  non un errore: stesso colore, il segno basta. */
 export function IndicatoriBilancio({ indicatori }: { indicatori: IndicatoreBilancio[] }) {
   if (indicatori.length === 0) return null;
   return (
@@ -13,44 +13,32 @@ export function IndicatoriBilancio({ indicatori }: { indicatori: IndicatoreBilan
       {indicatori.map((indicatore) => (
         <li
           key={indicatore.chiave}
-          className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-card"
+          className="flex flex-col gap-0.5 rounded-panel border border-line bg-sheet p-4"
         >
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-            {indicatore.etichetta}
-          </p>
+          <p className="text-small text-ink-3">{indicatore.etichetta}</p>
           {indicatore.valore !== null ? (
             <>
-              <p
-                className={cn(
-                  "tabular mt-1 font-display text-xl font-bold",
-                  indicatore.valore < 0 ? "text-red-600" : "text-slate-900",
-                )}
-              >
-                {formatIndicatore(indicatore)}
-              </p>
+              <p className="text-figure-sm text-ink">{formatIndicatore(indicatore)}</p>
               {indicatore.anni.length > 0 && (
-                <p className="mt-0.5 text-xs text-slate-500">
+                <p className="text-small text-ink-3">
                   {indicatore.anni.length === 1 ? "Esercizio" : "Esercizi"}{" "}
                   {intervalloAnni(indicatore.anni)}
                 </p>
               )}
             </>
           ) : (
-            <p className="mt-1 text-sm text-slate-500">
-              <span className="font-medium text-slate-700">Dato mancante</span>
+            <p className="text-small text-ink-2">
+              <span className="font-medium text-ink">Dato mancante</span>
               {indicatore.motivo_mancanza ? `: ${indicatore.motivo_mancanza}` : ""}
             </p>
           )}
           {indicatore.formula && (
-            <details className="group mt-auto pt-3 text-xs">
-              <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded text-slate-500 hover:text-brand-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 [&::-webkit-details-marker]:hidden">
+            <details className="group mt-auto pt-3 text-small">
+              <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-mark text-ink-2 hover:text-ink [&::-webkit-details-marker]:hidden">
                 Come si calcola
-                <ChevronDown
-                  className="size-3.5 transition-transform group-open:rotate-180"
-                  aria-hidden
-                />
+                <ChevronDown className="size-4 group-open:rotate-180" aria-hidden />
               </summary>
-              <p className="mt-1.5 text-slate-600">{indicatore.formula}</p>
+              <p className="mt-1.5 text-ink-2">{indicatore.formula}</p>
             </details>
           )}
         </li>

@@ -1,7 +1,6 @@
 import { lazy, Suspense } from "react";
 import { Outlet, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/layout/AppShell";
-import { CorniceProvvisoria } from "./components/layout/CorniceProvvisoria";
 import {
   AdminRoute,
   PartenariatiRoute,
@@ -11,9 +10,7 @@ import {
 import { RedirectLegacy } from "./components/layout/RedirectLegacy";
 import Abbonamento from "./pages/Abbonamento";
 import Collegati from "./pages/Collegati";
-import MieiAddon from "./pages/MieiAddon";
 import AccettaInvito from "./pages/AccettaInvito";
-import Acquisti from "./pages/Acquisti";
 import AdminAddon from "./pages/AdminAddon";
 import AdminPagamenti from "./pages/AdminPagamenti";
 import AdminPartenariati from "./pages/AdminPartenariati";
@@ -33,7 +30,6 @@ import ConfermaEmail from "./pages/ConfermaEmail";
 import Consulenze from "./pages/Consulenze";
 import ConsulenzaDetail from "./pages/ConsulenzaDetail";
 import ConversazionePartenariato from "./pages/ConversazionePartenariato";
-import Fatturazione from "./pages/Fatturazione";
 import Home from "./pages/Home";
 import Landing from "./pages/Landing";
 import Richieste from "./pages/progettista/Richieste";
@@ -86,40 +82,45 @@ export default function App() {
       >
         <Route index element={<Home />} />
 
-        {/* Pagine non ancora rifatte: nella cornice provvisoria con i margini
-            di prima. Ogni pagina migrata a `Page` esce da questo gruppo. I
-            guard stanno SOPRA la cornice, così un accesso negato rende
-            `NonDisponibile` con la sola impaginazione di `Page`. */}
-        <Route element={<CorniceProvvisoria />}>
-          <Route path="bandi" element={<BandiList />} />
-          <Route path="bandi/:slug" element={<BandoDetail />} />
-          <Route path="salvati" element={<Salvati />} />
-          <Route path="calendario" element={<Calendario />} />
-          <Route path="notifiche" element={<Notifiche />} />
-          <Route path="azienda" element={<Azienda />} />
-          <Route path="aziende" element={<Aziende />} />
-          <Route path="ai-check" element={<AiCheck />} />
-          <Route path="preferenze" element={<Preferenze />} />
-          <Route path="abbonamento" element={<Abbonamento />} />
-          <Route path="addon" element={<MieiAddon />} />
-          <Route path="collegati" element={<Collegati />} />
-          <Route path="fatturazione" element={<Fatturazione />} />
-          <Route path="checkout" element={<Checkout />} />
-          <Route path="checkout/esito/:purchaseId" element={<CheckoutEsito />} />
-          <Route path="acquisti" element={<Acquisti />} />
-          {/* Il vecchio deep-link «Account collegati» (#collegati) ha ora una
-              pagina sua: redirect, altrimenti il profilo di sempre. */}
-          <Route
-            path="profilo"
-            element={
-              <RedirectLegacy to="/app/collegati" quandoHash="#collegati">
-                <Profilo />
-              </RedirectLegacy>
-            }
-          />
-          <Route path="consulenze" element={<Consulenze />} />
-          <Route path="consulenze/:id" element={<ConsulenzaDetail />} />
-        </Route>
+        {/* Ogni pagina ha la sua impaginazione (`Page`). I guard (partenariati,
+            progettista, admin) avvolgono le rotte con un `Outlet`: un accesso
+            negato rende `NonDisponibile` dentro la cornice dell'app. */}
+        <Route path="bandi" element={<BandiList />} />
+        <Route path="bandi/:slug" element={<BandoDetail />} />
+        <Route path="salvati" element={<Salvati />} />
+        <Route path="ai-check" element={<AiCheck />} />
+        <Route path="abbonamento" element={<Abbonamento />} />
+        <Route path="checkout" element={<Checkout />} />
+        <Route path="checkout/esito/:purchaseId" element={<CheckoutEsito />} />
+        <Route path="azienda" element={<Azienda />} />
+        <Route path="aziende" element={<Aziende />} />
+        {/* Le pagine unite nell'Abbonamento: redirect alla loro scheda, con
+            query (`?azienda=`, `page`) e hash conservati. */}
+        <Route path="addon" element={<RedirectLegacy to="/app/abbonamento" tab="addon" />} />
+        <Route
+          path="fatturazione"
+          element={<RedirectLegacy to="/app/abbonamento" tab="pagamento" />}
+        />
+        <Route path="acquisti" element={<RedirectLegacy to="/app/abbonamento" tab="acquisti" />} />
+        {/* Area personale. */}
+        <Route path="collegati" element={<Collegati />} />
+        <Route path="preferenze" element={<Preferenze />} />
+        <Route path="notifiche" element={<Notifiche />} />
+        <Route path="calendario" element={<Calendario />} />
+        {/* Il vecchio deep-link «Account collegati» (#collegati) ha ora una
+            pagina sua: redirect, altrimenti il profilo di sempre. */}
+        <Route
+          path="profilo"
+          element={
+            <RedirectLegacy to="/app/collegati" quandoHash="#collegati">
+              <Profilo />
+            </RedirectLegacy>
+          }
+        />
+
+        {/* Consulenze (area E). */}
+        <Route path="consulenze" element={<Consulenze />} />
+        <Route path="consulenze/:id" element={<ConsulenzaDetail />} />
 
         {/* Modulo partenariati: a modulo spento le pagine «non esistono». */}
         <Route
@@ -129,14 +130,12 @@ export default function App() {
             </PartenariatiRoute>
           }
         >
-          <Route element={<CorniceProvvisoria />}>
-            <Route path="partenariati" element={<Partenariati />} />
-            <Route path="partenariati/call/nuova" element={<CallWizard />} />
-            <Route path="partenariati/call/:id/modifica" element={<CallWizard />} />
-            <Route path="partenariati/call/:id" element={<CallPartenariato />} />
-            <Route path="partenariati/conversazioni/:id" element={<ConversazionePartenariato />} />
-            <Route path="partenariati/segnalazioni/:id" element={<SegnalazionePartenariato />} />
-          </Route>
+          <Route path="partenariati" element={<Partenariati />} />
+          <Route path="partenariati/call/nuova" element={<CallWizard />} />
+          <Route path="partenariati/call/:id/modifica" element={<CallWizard />} />
+          <Route path="partenariati/call/:id" element={<CallPartenariato />} />
+          <Route path="partenariati/conversazioni/:id" element={<ConversazionePartenariato />} />
+          <Route path="partenariati/segnalazioni/:id" element={<SegnalazionePartenariato />} />
         </Route>
 
         <Route
@@ -146,10 +145,8 @@ export default function App() {
             </ProgettistaRoute>
           }
         >
-          <Route element={<CorniceProvvisoria />}>
-            <Route path="progettista/richieste" element={<Richieste />} />
-            <Route path="progettista/richieste/:id" element={<RichiestaDetail />} />
-          </Route>
+          <Route path="progettista/richieste" element={<Richieste />} />
+          <Route path="progettista/richieste/:id" element={<RichiestaDetail />} />
         </Route>
 
         <Route
@@ -159,12 +156,10 @@ export default function App() {
             </AdminRoute>
           }
         >
-          <Route element={<CorniceProvvisoria />}>
-            <Route path="admin/utenti" element={<AdminUtenti />} />
-            <Route path="admin/piani" element={<AdminPiani />} />
-            <Route path="admin/addon" element={<AdminAddon />} />
-            <Route path="admin/pagamenti" element={<AdminPagamenti />} />
-          </Route>
+          <Route path="admin/utenti" element={<AdminUtenti />} />
+          <Route path="admin/piani" element={<AdminPiani />} />
+          <Route path="admin/addon" element={<AdminAddon />} />
+          <Route path="admin/pagamenti" element={<AdminPagamenti />} />
           {/* Pannello admin dei partenariati (WP9): admin E modulo acceso. */}
           <Route
             element={
@@ -173,9 +168,7 @@ export default function App() {
               </PartenariatiRoute>
             }
           >
-            <Route element={<CorniceProvvisoria />}>
-              <Route path="admin/partenariati" element={<AdminPartenariati />} />
-            </Route>
+            <Route path="admin/partenariati" element={<AdminPartenariati />} />
           </Route>
         </Route>
 

@@ -1,5 +1,5 @@
 import { Menu } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, Outlet } from "react-router-dom";
 import { InviteBanner } from "../shared/InviteBanner";
 import { UpgradeBanner } from "../shared/UpgradeBanner";
@@ -15,6 +15,22 @@ import { Sidebar } from "./Sidebar";
 export function AppShell() {
   const [menuAperto, setMenuAperto] = useState(false);
   const chiudiMenu = () => setMenuAperto(false);
+
+  // Da `lg` in su la barra laterale è visibile: il cassetto aperto si chiude da
+  // solo quando la finestra supera la soglia (rotazione, ridimensionamento).
+  useEffect(() => {
+    if (!menuAperto) return;
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    if (desktop.matches) {
+      setMenuAperto(false);
+      return;
+    }
+    const onChange = (e: MediaQueryListEvent) => {
+      if (e.matches) setMenuAperto(false);
+    };
+    desktop.addEventListener("change", onChange);
+    return () => desktop.removeEventListener("change", onChange);
+  }, [menuAperto]);
 
   return (
     <div className="flex min-h-dvh bg-sheet">
@@ -49,8 +65,13 @@ export function AppShell() {
           {menuAperto && <Sidebar conLogo={false} onNavigate={chiudiMenu} />}
         </Drawer>
 
-        <InviteBanner />
-        <UpgradeBanner />
+        {/* Banner globali con i margini e la larghezza di `Page` (elenco e
+            dettaglio, 1112px: `box-content` la conta senza il padding); senza
+            banner il contenitore è vuoto e sparisce (`empty:hidden`). */}
+        <div className="box-content flex max-w-[1112px] flex-col gap-3 px-4 pt-6 sm:px-6 lg:px-10 lg:pt-8 empty:hidden">
+          <InviteBanner />
+          <UpgradeBanner />
+        </div>
 
         <main className="flex flex-1 flex-col">
           <Outlet />

@@ -1,23 +1,35 @@
 import RevolutCheckout from "@revolut/checkout";
-import { CalendarClock, CreditCard, Loader2 } from "lucide-react";
+import { CreditCard } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useCancelScheduledChange, useRemoveMethod, useScheduleDowngrade, useSetAutoRenew, useStartAddMethod, useSubscriptionManagement } from "../../hooks/useSubscriptionManagement";
+import {
+  useCancelScheduledChange,
+  useRemoveMethod,
+  useScheduleDowngrade,
+  useSetAutoRenew,
+  useStartAddMethod,
+  useSubscriptionManagement,
+} from "../../hooks/useSubscriptionManagement";
 import { apiErrorCode, apiErrorMessage } from "../../lib/api";
 import { formatDateNumeric } from "../../lib/format";
 import { REVOLUT_MODE } from "../../lib/revolut";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
-import { Dialog } from "../ui/Dialog";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { InlineError } from "../ui/InlineError";
+import { Section, SectionHeader } from "../ui/SectionHeader";
+import { Spinner } from "../ui/Spinner";
 import { Skeleton } from "../ui/states";
+import { Switch } from "../ui/Switch";
 
 // Dopo l'onSuccess del widget il metodo compare via riconciliazione, ma in
 // dev il webhook non è garantito: breve polling, poi si passa al messaggio
 // «aggiorna tra poco».
 const METHOD_POLL_MAX_MS = 20_000;
 
-/** Sezione «Pagamento e rinnovo» di Abbonamento: metodo salvato, rinnovo
- *  automatico, disdetta e cambio programmato. Visibile solo con un piano a
- *  pagamento attivo (o con un cambio già programmato da mostrare). */
+/** Sezione «Pagamento e rinnovo» dell'Abbonamento: metodo salvato, rinnovo
+ *  automatico, disdetta e cambio programmato. Con un piano gratuito e nessun
+ *  cambio programmato dice solo che non c'è nulla da gestire. Il flusso del
+ *  provider (popup e token) è invariato: i dati carta vivono SOLO nel popup. */
 export function SubscriptionManagement({
   pianoAPagamento,
   pianoNome,
@@ -68,10 +80,6 @@ export function SubscriptionManagement({
     return () => clearTimeout(timer);
   }, [pollMetodo]);
 
-  // Niente piano a pagamento e niente cambio da mostrare: niente sezione.
-  // (Return DOPO tutti gli hook.)
-  if (!pianoAPagamento && !data?.cambio_programmato) return null;
-
   /** Widget a 0 €: salva la carta senza acquisto. I dati carta vivono SOLO
    *  nel popup del provider. */
   const handleAddMethod = async (poiAttivaRinnovo = false) => {
@@ -119,7 +127,7 @@ export function SubscriptionManagement({
       await downgrade.mutateAsync("gratuito");
       setConfermaDisdetta(false);
     } catch {
-      // errore mostrato nel dialog
+      // errore mostrato nella finestra
     }
   };
 
@@ -129,85 +137,104 @@ export function SubscriptionManagement({
       await removeMethod.mutateAsync();
       setConfermaRimozione(false);
     } catch {
-      // errore mostrato nel dialog
+      // errore mostrato nella finestra
     }
   };
 
-  return (
-    <section className="mt-10" aria-label="Pagamento e rinnovo">
-      <h2 className="inline-flex items-center gap-2 font-display text-xl font-bold tracking-tight text-slate-900">
-        <CreditCard className="size-5 text-brand-500" aria-hidden />
-        Pagamento e rinnovo
-      </h2>
-      <p className="mt-1 text-sm text-slate-500">
-        Il metodo di pagamento salvato e come si rinnova il tuo piano.
-      </p>
+  // Niente piano a pagamento e niente cambio da mostrare: nulla da gestire.
+  // (Dopo tutti gli hook.)
+  const nullaDaGestire = !pianoAPagamento && !data?.cambio_programmato;
+  const testoNulla = (
+    <p className="text-body text-ink-2">
+      Con il piano attuale non c'è un rinnovo da gestire: il metodo di pagamento si chiede al
+      primo acquisto.
+    </p>
+  );
 
-      {management.isError ? (
-        <p className="mt-4 max-w-2xl rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
-          {apiErrorMessage(management.error)}{" "}
-          <button
-            type="button"
-            onClick={() => management.refetch()}
-            className="cursor-pointer font-medium underline underline-offset-2"
-          >
-            Riprova
-          </button>
-        </p>
+  return (
+    <Section aria-label="Pagamento e rinnovo">
+      <SectionHeader titolo="Pagamento e rinnovo" />
+      {/* Prima il piano: a chi non paga un errore della lettura non riguarda
+          nulla (come in HEAD, dove la sezione non compariva). */}
+      {!pianoAPagamento && management.isError ? (
+        testoNulla
+      ) : management.isError ? (
+        <div className="flex flex-col gap-2">
+          <InlineError>{apiErrorMessage(management.error)}</InlineError>
+          <div>
+            <Button type="button" variant="secondary" size="sm" onClick={() => management.refetch()}>
+              Riprova
+            </Button>
+          </div>
+        </div>
       ) : management.isPending || !data ? (
-        <Skeleton className="mt-4 h-48 w-full max-w-2xl" />
+        <div className="flex flex-col gap-3" aria-hidden>
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-2/3" />
+        </div>
+      ) : nullaDaGestire ? (
+        testoNulla
       ) : (
-        <Card className="mt-4 max-w-2xl divide-y divide-slate-100 p-0">
+        <div className="flex flex-col">
           {/* Cambio programmato: informa e lascia annullare */}
           {data.cambio_programmato && (
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-50/60 p-5">
-              <p className="text-sm text-amber-800">
-                <strong>
-                  {data.cambio_programmato.motivo === "disdetta"
+            <div className="border-b border-line pb-4">
+              <Alert
+                tono="attenzione"
+                titolo={
+                  data.cambio_programmato.motivo === "disdetta"
                     ? "Disdetta programmata"
-                    : "Downgrade programmato"}
-                </strong>
-                : passerai a {data.cambio_programmato.to_plan_nome} il{" "}
+                    : "Downgrade programmato"
+                }
+                azione={
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => annullaCambio.mutate()}
+                    loading={annullaCambio.isPending}
+                  >
+                    Annulla
+                  </Button>
+                }
+              >
+                Passerai a {data.cambio_programmato.to_plan_nome} il{" "}
                 {formatDateNumeric(data.cambio_programmato.effective_date)}. Fino ad allora resta
                 tutto attivo.
-              </p>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => annullaCambio.mutate()}
-                loading={annullaCambio.isPending}
-              >
-                Annulla
-              </Button>
+                {annullaCambio.isError && (
+                  <InlineError className="mt-2">{apiErrorMessage(annullaCambio.error)}</InlineError>
+                )}
+              </Alert>
             </div>
-          )}
-          {annullaCambio.isError && (
-            <p className="px-5 py-3 text-sm text-red-700" role="alert">
-              {apiErrorMessage(annullaCambio.error)}
-            </p>
           )}
 
           {/* Metodo di pagamento salvato */}
-          <div className="flex flex-wrap items-center justify-between gap-3 p-5">
-            <div>
-              <p className="text-sm font-medium text-slate-700">Metodo di pagamento</p>
-              <p className="mt-0.5 inline-flex items-center gap-1.5 text-sm text-slate-500">
-                <CreditCard className="size-4 shrink-0 text-slate-400" aria-hidden />
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-4">
+            <div className="flex flex-col gap-0.5">
+              <p className="text-body font-semibold text-ink">Metodo di pagamento</p>
+              <p className="inline-flex items-center gap-1.5 text-body text-ink-2">
+                <CreditCard className="size-4 shrink-0 text-ink-3" aria-hidden />
                 {metodoPresente ? (data.metodo.label ?? "Metodo salvato") : "Nessun metodo salvato"}
               </p>
             </div>
             <div className="flex gap-2">
               <Button
+                type="button"
                 variant="secondary"
                 size="sm"
                 onClick={() => handleAddMethod(false)}
                 loading={opening || startAddMethod.isPending}
                 disabled={pollMetodo}
               >
-                {metodoPresente ? "Sostituisci" : "Aggiungi metodo"}
+                {metodoPresente ? "Sostituisci" : "Aggiungi un metodo"}
               </Button>
               {metodoPresente && (
-                <Button variant="ghost" size="sm" onClick={() => setConfermaRimozione(true)}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setConfermaRimozione(true)}
+                >
                   Rimuovi
                 </Button>
               )}
@@ -216,38 +243,30 @@ export function SubscriptionManagement({
 
           {/* Rinnovo automatico */}
           {pianoAPagamento && (
-            <div className="p-5">
-              <label className="flex cursor-pointer items-start gap-2.5">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 size-4 cursor-pointer accent-brand-500"
-                  checked={data.auto_renew}
-                  disabled={autoRenew.isPending}
-                  onChange={(e) => handleToggleRenew(e.target.checked)}
-                />
-                <span>
-                  <span className="block text-sm font-medium text-slate-700">
-                    Rinnovo automatico
-                  </span>
-                  <span className="mt-0.5 block text-xs text-slate-500">
-                    Ti avvisiamo via email almeno 7 giorni prima di ogni addebito. Puoi disdire
-                    quando vuoi.
-                  </span>
-                </span>
-              </label>
-
+            <div className="flex flex-col gap-4 border-b border-line py-4">
+              <Switch
+                label="Rinnovo automatico"
+                descrizione="Ti avvisiamo via email almeno 7 giorni prima di ogni addebito. Puoi disdire quando vuoi."
+                checked={data.auto_renew}
+                disabled={autoRenew.isPending}
+                onChange={handleToggleRenew}
+              />
               {/* Disdetta: solo con rinnovo attivo e nessun cambio già programmato */}
               {!data.cambio_programmato &&
                 (data.auto_renew ? (
-                  <div className="mt-4 border-t border-slate-100 pt-4">
-                    <Button variant="secondary" size="sm" onClick={() => setConfermaDisdetta(true)}>
-                      <CalendarClock className="size-4" aria-hidden />
+                  <div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setConfermaDisdetta(true)}
+                    >
                       Disdici il rinnovo
                     </Button>
                   </div>
                 ) : (
                   data.data_scadenza && (
-                    <p className="mt-3 text-xs text-slate-400">
+                    <p className="text-small text-ink-3">
                       Il piano non si rinnova da solo: resta attivo fino al{" "}
                       {formatDateNumeric(data.data_scadenza)}.
                     </p>
@@ -258,91 +277,72 @@ export function SubscriptionManagement({
 
           {/* Area di stato condivisa (salvataggio carta, errori) */}
           {(pollMetodo || (pollScaduto && !metodoPresente) || notice) && (
-            <div className="space-y-2 p-5">
+            <div className="flex flex-col gap-2 py-4">
               {pollMetodo && (
-                <p className="inline-flex items-center gap-2 text-sm text-slate-500" role="status">
-                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                <p className="inline-flex items-center gap-2 text-body text-ink-2" role="status">
+                  <Spinner size="sm" />
                   Stiamo registrando la carta…
                 </p>
               )}
               {pollScaduto && !metodoPresente && (
-                <p className="text-sm text-slate-500" role="status">
-                  Stiamo ancora registrando la carta: aggiorna tra poco.{" "}
-                  <button
+                <div className="flex flex-wrap items-center gap-2" role="status">
+                  <p className="text-body text-ink-2">
+                    Stiamo ancora registrando la carta: aggiorna tra poco.
+                  </p>
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="sm"
                     onClick={() => management.refetch()}
-                    className="cursor-pointer font-medium text-brand-600 underline underline-offset-2"
                   >
                     Ricontrolla
-                  </button>
-                </p>
+                  </Button>
+                </div>
               )}
-              {notice && (
-                <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-                  {notice}
-                </p>
-              )}
+              {notice && <InlineError>{notice}</InlineError>}
             </div>
           )}
-        </Card>
+        </div>
       )}
 
       {/* Conferma disdetta */}
-      <Dialog
+      <ConfirmDialog
         open={confermaDisdetta}
-        onClose={() => setConfermaDisdetta(false)}
-        title="Disdici il rinnovo"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setConfermaDisdetta(false)}>
-              Annulla
-            </Button>
-            <Button onClick={handleDisdetta} loading={downgrade.isPending}>
-              Conferma la disdetta
-            </Button>
-          </>
-        }
+        titolo="Disdire il rinnovo?"
+        conferma="Conferma la disdetta"
+        inCorso={downgrade.isPending}
+        onConferma={handleDisdetta}
+        onAnnulla={() => setConfermaDisdetta(false)}
       >
         <p>
-          Resterai su <strong className="text-slate-900">{pianoNome ?? "il tuo piano"}</strong>{" "}
-          fino al{" "}
-          <strong className="text-slate-900">{formatDateNumeric(data?.data_scadenza)}</strong>,
-          poi passerai a Gratuito. Non perdi nulla del periodo già pagato e puoi annullare la
-          disdetta fino a quel giorno.
+          Resterai su <strong className="text-ink">{pianoNome ?? "il tuo piano"}</strong> fino al{" "}
+          <strong className="text-ink">{formatDateNumeric(data?.data_scadenza)}</strong>, poi
+          passerai a Gratuito. Non perdi nulla del periodo già pagato e puoi annullare la disdetta
+          fino a quel giorno.
         </p>
         {downgrade.isError && (
-          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-red-700" role="alert">
-            {apiErrorMessage(downgrade.error)}
-          </p>
+          <InlineError className="mt-3">{apiErrorMessage(downgrade.error)}</InlineError>
         )}
-      </Dialog>
+      </ConfirmDialog>
 
       {/* Conferma rimozione metodo */}
-      <Dialog
+      <ConfirmDialog
         open={confermaRimozione}
-        onClose={() => setConfermaRimozione(false)}
-        title="Rimuovi il metodo di pagamento"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setConfermaRimozione(false)}>
-              Annulla
-            </Button>
-            <Button variant="danger" onClick={handleRimuovi} loading={removeMethod.isPending}>
-              Rimuovi
-            </Button>
-          </>
-        }
+        titolo="Rimuovere il metodo di pagamento?"
+        conferma="Rimuovi"
+        distruttiva
+        inCorso={removeMethod.isPending}
+        onConferma={handleRimuovi}
+        onAnnulla={() => setConfermaRimozione(false)}
       >
         <p>
           Rimuovendo {data?.metodo.label ?? "la carta"} si spegne anche il rinnovo automatico: il
           piano resta attivo fino alla scadenza e non verrà addebitato nulla.
         </p>
         {removeMethod.isError && (
-          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-red-700" role="alert">
-            {apiErrorMessage(removeMethod.error)}
-          </p>
+          <InlineError className="mt-3">{apiErrorMessage(removeMethod.error)}</InlineError>
         )}
-      </Dialog>
-    </section>
+      </ConfirmDialog>
+    </Section>
   );
 }

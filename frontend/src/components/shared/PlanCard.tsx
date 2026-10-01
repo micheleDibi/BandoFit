@@ -1,4 +1,4 @@
-import { Check, Sparkles } from "lucide-react";
+import { Check } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
 import { prezzoDisplay } from "../../lib/prezzo";
@@ -55,42 +55,34 @@ export function PlanCard({
       onClick={onClick}
       aria-pressed={interactive ? selected : undefined}
       className={cn(
-        "relative flex h-full flex-col rounded-xl border bg-white p-5 text-left shadow-card transition-all duration-200",
-        interactive && "cursor-pointer hover:-translate-y-0.5 hover:shadow-card-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500",
+        "relative flex h-full flex-col rounded-panel border bg-sheet p-5 text-left",
+        interactive &&
+          "cursor-pointer transition-colors duration-150 hover:bg-desk focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
         selected
-          ? "border-brand-500 ring-2 ring-brand-500"
+          ? "border-accent ring-1 ring-accent"
           : highlighted
-            ? "border-brand-300"
-            : "border-slate-200",
+            ? "border-accent"
+            : "border-line",
       )}
     >
-      {badge && (
-        <span className="absolute -top-2.5 left-4 inline-flex items-center gap-1 rounded-full bg-brand-500 px-2.5 py-0.5 text-xs font-semibold text-white shadow-sm">
-          <Sparkles className="size-3" aria-hidden />
-          {badge}
-        </span>
-      )}
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-title-section text-ink">{plan.nome}</h3>
+        {badge && <span className="text-caption font-semibold text-accent-hover">{badge}</span>}
+      </div>
+      {plan.descrizione && <p className="mt-1 text-small text-ink-3">{plan.descrizione}</p>}
 
-      <h3 className="font-display text-base font-semibold text-slate-900">{plan.nome}</h3>
-      {plan.descrizione && <p className="mt-1 text-xs text-slate-500">{plan.descrizione}</p>}
-
-      <p className="mt-3">
+      <p className="mt-4">
         {/* L'etichetta «su richiesta» è testo libero: corpo ridotto per non sforare. */}
-        <span
-          className={cn(
-            "tabular font-display font-bold text-slate-900",
-            display.suRichiesta ? "text-2xl" : "text-3xl",
-          )}
-        >
+        <span className={cn("text-ink", display.suRichiesta ? "text-figure-sm" : "text-figure")}>
           {display.testo}
         </span>
-        {display.conSuffissoPeriodo && <span className="text-sm text-slate-500"> /anno</span>}
+        {display.conSuffissoPeriodo && <span className="text-small text-ink-3"> /anno</span>}
       </p>
 
-      <ul className="mt-4 flex-1 space-y-2">
+      <ul className="mt-4 flex flex-1 flex-col gap-2">
         {planFeatures(plan).map((feature) => (
-          <li key={feature} className="flex items-start gap-2 text-sm text-slate-600">
-            <Check className="mt-0.5 size-4 shrink-0 text-brand-500" aria-hidden />
+          <li key={feature} className="flex items-start gap-2 text-body text-ink-2">
+            <Check className="mt-0.75 size-4 shrink-0 text-accent" aria-hidden />
             {feature}
           </li>
         ))}

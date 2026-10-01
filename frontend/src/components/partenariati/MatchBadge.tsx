@@ -1,12 +1,13 @@
-import { AlertTriangle, CheckCircle2, CircleDashed, CircleDot, Target } from "lucide-react";
+import { CircleDashed, Target, TriangleAlert } from "lucide-react";
+import { cn } from "../../lib/cn";
 import type { MatchOut } from "../../types";
-import { Badge } from "../ui/Badge";
+import { Fit } from "../ui/Fit";
 
 /** Chi è il soggetto del confronto: «tu» (la tua azienda con una call) o
  *  «lei» (il proponente che guarda un'azienda suggerita). */
 export type PersonaMatch = "tu" | "lei";
 
-/** Il testo del badge: quanti dei requisiti cercati sono coperti. Senza
+/** Il testo del confronto: quanti dei requisiti cercati sono coperti. Senza
  *  requisiti cercati, le posizioni a cui l'azienda corrisponde. */
 export function testoCopertura(match: MatchOut, persona: PersonaMatch): string {
   const { coperti, cercati } = match.copertura;
@@ -22,8 +23,10 @@ export function testoCopertura(match: MatchOut, persona: PersonaMatch): string {
   return "Nessun requisito cercato";
 }
 
-/** Copertura dei requisiti cercati: icona **e** testo (mai il solo colore),
- *  es. «Copri 2 requisiti su 2». */
+/** Copertura dei requisiti cercati: le barre di `Fit` con «N su M» e la parola
+ *  accanto («requisiti coperti»); la frase intera («Copri 2 requisiti su 3») è
+ *  il nome per lo screen reader. Senza requisiti cercati, solo parole. Una
+ *  copertura bassa non è un errore: barre vuote, mai rosso. */
 export function MatchBadge({
   match,
   persona = "tu",
@@ -34,14 +37,28 @@ export function MatchBadge({
   className?: string;
 }) {
   const { coperti, cercati } = match.copertura;
-  const tutti = cercati > 0 && coperti === cercati;
-  const alcuni = cercati > 0 ? coperti > 0 : match.posizioni_compatibili.length > 0;
-  const Icona = tutti ? CheckCircle2 : cercati === 0 && alcuni ? Target : alcuni ? CircleDot : CircleDashed;
+  const testo = testoCopertura(match, persona);
+  if (cercati > 0) {
+    return (
+      <span
+        className={cn(
+          "inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 text-small text-ink-2",
+          className,
+        )}
+      >
+        <Fit soddisfatti={coperti} totale={cercati} label={testo} />
+        <span aria-hidden>{cercati === 1 ? "requisito coperto" : "requisiti coperti"}</span>
+      </span>
+    );
+  }
+  const Icona = match.posizioni_compatibili.length > 0 ? Target : CircleDashed;
   return (
-    <Badge tone={tutti ? "emerald" : alcuni ? "brand" : "slate"} className={className}>
-      <Icona className="size-3.5" aria-hidden />
-      {testoCopertura(match, persona)}
-    </Badge>
+    <span
+      className={cn("inline-flex items-center gap-1.5 text-small font-medium text-ink-2", className)}
+    >
+      <Icona className="size-4 shrink-0" aria-hidden />
+      {testo}
+    </span>
   );
 }
 
@@ -50,9 +67,14 @@ export function AttenzioneBadge({ match, className }: { match: MatchOut; classNa
   const n = match.attenzione.length;
   if (n === 0) return null;
   return (
-    <Badge tone="amber" className={className}>
-      <AlertTriangle className="size-3.5" aria-hidden />
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 text-small font-medium text-warning-ink",
+        className,
+      )}
+    >
+      <TriangleAlert className="size-4 shrink-0" aria-hidden />
       {n === 1 ? "1 voce da verificare" : `${n} voci da verificare`}
-    </Badge>
+    </span>
   );
 }

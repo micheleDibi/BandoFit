@@ -1,10 +1,11 @@
-import { TriangleAlert, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useDismissible } from "../../hooks/useDismissible";
-import { cn } from "../../lib/cn";
 import { QUOTA_BANNER_COPY as COPY } from "../../lib/copy";
 import { formatDate } from "../../lib/format";
 import type { AiQuota, Me, Plan } from "../../types";
+import { Alert } from "../ui/Alert";
 import { LinkButton } from "../ui/Button";
+import { IconButton } from "../ui/IconButton";
 
 /** Soglia: due terzi della quota del PIANO, non un numero fisso. In aritmetica
  *  intera per non dipendere da come arrotonda 66,6…% (con `totale = 3` e
@@ -22,8 +23,9 @@ function esistePianoSuperiore(corrente: Plan, piani: Plan[]): boolean {
 }
 
 /** Avviso in-pagina quando la quota AI-check del piano è consumata per ≥ 2/3.
- *  È un callout inline, NON modale e NON bloccante: gli AI-check residui
- *  restano usabili (a bloccare, a zero, è già il backend). */
+ *  È un `Alert` di attenzione (anche a quota finita: il rosso è per gli errori
+ *  e le azioni distruttive; cambia il testo), NON modale e NON bloccante: gli
+ *  AI-check residui restano usabili (a bloccare, a zero, è già il backend). */
 export function QuotaUpgradeBanner({
   quota,
   me,
@@ -42,7 +44,7 @@ export function QuotaUpgradeBanner({
     `aicheck-quota:${quota?.periodo_inizio ?? "n-d"}:${livello}`,
   );
 
-  // Sotto soglia, piano senza AI-check (lo StatTile lo dice già, con link ai
+  // Sotto soglia, piano senza AI-check (la quota lo dice già, con il link ai
   // piani), o dati non ancora arrivati: niente avviso.
   if (!quota || !me || !plans || !piano) return null;
   if (!inEsaurimento(quota)) return null;
@@ -60,54 +62,22 @@ export function QuotaUpgradeBanner({
   }
 
   return (
-    <div
-      role="status"
-      className={cn(
-        "mt-4 flex flex-wrap items-start gap-x-4 gap-y-3 rounded-xl border px-4 py-3",
-        esaurito ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50",
-      )}
+    <Alert
+      tono="attenzione"
+      titolo={esaurito ? COPY.titoloEsaurito : COPY.titoloWarning}
+      azione={
+        <div className="flex items-center gap-1">
+          {/* Anche a quota zero la CTA resta: è l'unica via d'uscita. */}
+          {puoiFareUpgrade && (
+            <LinkButton to="/app/abbonamento" variant="secondary" size="sm">
+              {COPY.cta}
+            </LinkButton>
+          )}
+          <IconButton label={COPY.chiudi} icon={<X />} size="sm" onClick={dismiss} />
+        </div>
+      }
     >
-      <TriangleAlert
-        className={cn("mt-0.5 size-5 shrink-0", esaurito ? "text-red-500" : "text-amber-500")}
-        aria-hidden
-      />
-
-      <div className="min-w-0 flex-1">
-        <p className={cn("text-sm font-semibold", esaurito ? "text-red-900" : "text-amber-900")}>
-          {esaurito ? COPY.titoloEsaurito : COPY.titoloWarning}
-        </p>
-        <p
-          className={cn(
-            "mt-0.5 text-sm leading-relaxed",
-            esaurito ? "text-red-800" : "text-amber-800",
-          )}
-        >
-          {esaurito ? COPY.esaurito : COPY.consumo(quota.usati, quota.totale)} {seguito}
-        </p>
-      </div>
-
-      <div className="flex shrink-0 items-center gap-1">
-        {/* Anche a quota zero la CTA resta: è l'unica via d'uscita. */}
-        {puoiFareUpgrade && (
-          <LinkButton to="/app/abbonamento" variant="secondary" size="sm">
-            {COPY.cta}
-          </LinkButton>
-        )}
-        <button
-          type="button"
-          onClick={dismiss}
-          title={COPY.chiudi}
-          aria-label={COPY.chiudi}
-          className={cn(
-            "rounded-lg p-1.5 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2",
-            esaurito
-              ? "text-red-400 hover:bg-red-100 hover:text-red-700 focus-visible:outline-red-500"
-              : "text-amber-400 hover:bg-amber-100 hover:text-amber-700 focus-visible:outline-amber-500",
-          )}
-        >
-          <X className="size-4" aria-hidden />
-        </button>
-      </div>
-    </div>
+      {esaurito ? COPY.esaurito : COPY.consumo(quota.usati, quota.totale)} {seguito}
+    </Alert>
   );
 }

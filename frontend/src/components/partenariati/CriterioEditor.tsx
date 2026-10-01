@@ -10,6 +10,8 @@ import type {
   TipoCriterio,
   TipoSoggettoPartenariato,
 } from "../../types";
+import { Checkbox } from "../ui/Checkbox";
+import { SelectField } from "../ui/Field";
 import { SceltaCodici, SceltaDivisioni, SceltaPaesi, SceltaRadio } from "./CampiCall";
 import { LIMITI_CALL } from "./callDati";
 import { GruppoCheckbox, SceltaLookup } from "./PartnerProfileForm";
@@ -109,10 +111,10 @@ export function CriterioEditor({
 
   if (criterio.tipo === "regola_finanziaria") {
     return (
-      <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
-        <p className="font-medium text-slate-700">{CALL_COPY.tipiCriterio.regola_finanziaria}</p>
-        <p className="mt-0.5">{criterio.regola.descrizione}</p>
-        <p className="mt-1 text-xs text-slate-500">
+      <div className="flex flex-col gap-1 text-body text-ink-2">
+        <p className="font-medium text-ink">{CALL_COPY.tipiCriterio.regola_finanziaria}</p>
+        <p>{criterio.regola.descrizione}</p>
+        <p className="text-small text-ink-3">
           Viene dalle regole del bando che hai confermato: non si modifica a mano. Puoi solo
           toglierla o decidere se la cerchi.
         </p>
@@ -192,15 +194,11 @@ export function CriterioEditor({
             onChange={(v) => onChange({ ...criterio, paesi: v })}
             massimo={LIMITI_CALL.paesiMax}
           />
-          <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              className="mt-0.5 size-4 shrink-0 cursor-pointer accent-brand-500"
-              checked={criterio.escludi}
-              onChange={(e) => onChange({ ...criterio, escludi: e.target.checked })}
-            />
-            <span>Escludi questi paesi (il partner NON deve essere di uno di questi)</span>
-          </label>
+          <Checkbox
+            label="Escludi questi paesi (il partner NON deve essere di uno di questi)"
+            checked={criterio.escludi}
+            onChange={(e) => onChange({ ...criterio, escludi: e.target.checked })}
+          />
         </>
       );
       break;
@@ -284,7 +282,7 @@ export function CriterioEditor({
       break;
     case "manuale":
       campi = (
-        <p className="text-xs text-slate-500">
+        <p className="text-small text-ink-3">
           Un requisito solo a parole non si controlla in automatico: lo verifichi tu con le aziende
           che si candidano.
         </p>
@@ -293,26 +291,23 @@ export function CriterioEditor({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="space-y-1.5">
-        <label htmlFor={idTipo} className="block text-sm font-medium text-slate-700">
-          Come si verifica
-        </label>
-        <select
+    <div className="flex flex-col gap-4">
+      <div className="max-w-md">
+        <SelectField
           id={idTipo}
+          label="Come si verifica"
           value={criterio.tipo}
           onChange={(e) => {
             const tipo = e.target.value as Exclude<TipoCriterio, "regola_finanziaria">;
             onChange(tipo === "manuale" ? null : criterioVuoto(tipo));
           }}
-          className="h-10 w-full max-w-md cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-brand-500 focus:outline-2 focus:outline-offset-0 focus:outline-brand-500/30"
         >
           {TIPI_CRITERIO_SCEGLIBILI.map((t) => (
             <option key={t} value={t}>
               {CALL_COPY.tipiCriterio[t]}
             </option>
           ))}
-        </select>
+        </SelectField>
       </div>
       {campi}
     </div>

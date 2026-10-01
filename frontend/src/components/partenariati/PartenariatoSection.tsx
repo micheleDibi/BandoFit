@@ -1,4 +1,4 @@
-import { ChevronDown, Handshake, Loader2, RefreshCw } from "lucide-react";
+import { ChevronDown, RefreshCw } from "lucide-react";
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { useFunzioni } from "../../hooks/useFunzioni";
@@ -16,8 +16,10 @@ import { cn } from "../../lib/cn";
 import { PARTENARIATO_COPY } from "../../lib/copy";
 import { formatDate, formatDateTime } from "../../lib/format";
 import type { FasePartenariato, PartenariatoBando } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
+import { Section, SectionHeader } from "../ui/SectionHeader";
+import { Spinner } from "../ui/Spinner";
 import { ErrorState, Skeleton } from "../ui/states";
 import {
   PARTENARIATO_ANCORA,
@@ -117,9 +119,9 @@ function sottotitolo(dati: PartenariatoBando | undefined): string {
   if (dati?.regole && dati.estratta_at) {
     const verificata =
       dati.verificata_at && formatDate(dati.verificata_at) !== formatDate(dati.estratta_at)
-        ? ` · ricontrollate il ${formatDate(dati.verificata_at)}`
+        ? ` e ricontrollate il ${formatDate(dati.verificata_at)}`
         : "";
-    return `Lette dai documenti ufficiali il ${formatDate(dati.estratta_at)}${verificata}`;
+    return `Lette dai documenti ufficiali il ${formatDate(dati.estratta_at)}${verificata}.`;
   }
   return "Chi può partecipare insieme a chi: forme ammesse, numero di partner, quote e documenti.";
 }
@@ -230,48 +232,47 @@ export function PartenariatoSection({
     (erroreAvvio.automatico && data?.regole ? (
       // Aggiornamento partito da solo e rifiutato: le regole restano valide,
       // basta dirlo senza allarmare.
-      <p className="text-xs text-slate-500">
+      <p className="text-small text-ink-3">
         Non è stato possibile aggiornare le regole adesso: {erroreAvvio.testo}
       </p>
     ) : (
-      <div>
-        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-          {erroreAvvio.testo}
-        </p>
-        {conBottone && puoRiprovareDopoErrore && (
-          <Button
-            variant="secondary"
-            size="sm"
-            className="mt-2"
-            loading={avvio.isPending}
-            onClick={() => void avvia(false, false)}
-          >
-            Riprova
-          </Button>
-        )}
-      </div>
+      <Alert
+        tono="errore"
+        azione={
+          conBottone && puoRiprovareDopoErrore ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={avvio.isPending}
+              onClick={() => void avvia(false, false)}
+            >
+              Riprova
+            </Button>
+          ) : undefined
+        }
+      >
+        {erroreAvvio.testo}
+      </Alert>
     ));
 
   const bloccoFermo = (
-    <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-4 py-3">
-      <p className="text-sm text-slate-700">L'analisi sta impiegando più del previsto.</p>
-      <Button
-        variant="secondary"
-        size="sm"
-        className="mt-2"
-        loading={isFetching}
-        onClick={() => void refetch()}
-      >
-        <RefreshCw className="size-4" aria-hidden />
-        Aggiorna lo stato
-      </Button>
-    </div>
+    <Alert
+      tono="attenzione"
+      azione={
+        <Button variant="secondary" size="sm" loading={isFetching} onClick={() => void refetch()}>
+          <RefreshCw className="size-4" aria-hidden />
+          Aggiorna lo stato
+        </Button>
+      }
+    >
+      L'analisi sta impiegando più del previsto.
+    </Alert>
   );
 
   let corpo: ReactNode;
   if (isPending) {
     corpo = (
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         <Skeleton className="h-5 w-1/2" />
         <Skeleton className="h-11 w-full" />
         <Skeleton className="h-11 w-full" />
@@ -289,7 +290,7 @@ export function PartenariatoSection({
       <>
         {oltreFinestra && bloccoFermo}
         {data.errore && !inCorso && (
-          <p className="text-xs text-slate-500">
+          <p className="text-small text-ink-3">
             L'ultimo aggiornamento non è riuscito
             {data.estratta_at && `: ti mostriamo le regole lette il ${formatDate(data.estratta_at)}`}
             .
@@ -297,7 +298,7 @@ export function PartenariatoSection({
         )}
         {avvisoAvvio(false)}
         {vocabolario.isPending ? (
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <Skeleton className="h-11 w-full" />
             <Skeleton className="h-11 w-full" />
           </div>
@@ -317,19 +318,19 @@ export function PartenariatoSection({
   } else if (data.stato === "nessun_segnale") {
     corpo = (
       <>
-        <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-4">
-          <p className="text-sm text-slate-700">
+        <div className="flex flex-col items-start gap-2 rounded-panel bg-desk p-5">
+          <p className="text-body text-ink">
             Nel testo che abbiamo letto non ci sono riferimenti a partenariati o aggregazioni.
           </p>
           {data.errore ? (
             // «Analizza comunque» (o un aggiornamento) chiesto e fallito: va
             // detto, altrimenti sembra che l'analisi completa abbia confermato.
-            <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            <Alert tono="errore" className="self-stretch">
               L'ultima analisi non è riuscita.{" "}
               {testoPerUtente(data.errore, "Riprova più tardi.")}
-            </p>
+            </Alert>
           ) : (
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="text-small text-ink-3">
               Se pensi che il bando li preveda, possiamo analizzarlo comunque: ti mostreremo i
               passaggi da cui ricaviamo le regole.
             </p>
@@ -338,7 +339,7 @@ export function PartenariatoSection({
             <Button
               variant="secondary"
               size="sm"
-              className="mt-3"
+              className="mt-1"
               loading={avvio.isPending}
               onClick={() => void avvia(true, false)}
             >
@@ -346,7 +347,7 @@ export function PartenariatoSection({
             </Button>
           ) : (
             data.motivo_non_avviabile && (
-              <p className="mt-2 text-xs text-slate-500">
+              <p className="text-small text-ink-3">
                 {testoPerUtente(data.motivo_non_avviabile, NON_RILANCIABILE)}
               </p>
             )
@@ -375,7 +376,7 @@ export function PartenariatoSection({
           >
             Riprova
           </Button>
-          {suggerimento && <p className="text-xs text-slate-500">{suggerimento}</p>}
+          {suggerimento && <p className="text-small text-ink-3">{suggerimento}</p>}
         </div>
         {avvisoAvvio(false)}
         {(data.fonti ?? []).length > 0 && <DocumentiAnalizzati fonti={data.fonti} />}
@@ -388,77 +389,68 @@ export function PartenariatoSection({
     corpo = erroreAvvio ? (
       avvisoAvvio(true)
     ) : !data.puo_avviare && !avvio.isPending ? (
-      <p className="text-sm text-slate-600">
+      <p className="text-body text-ink-2">
         {testoPerUtente(
           data.motivo_non_avviabile,
           "Per ora non possiamo analizzare le regole di questo bando: riprova più tardi",
         )}
       </p>
     ) : avvio.isSuccess ? (
-      <Button variant="secondary" size="sm" onClick={() => void avvia(false, false)}>
-        Avvia l'analisi
-      </Button>
+      <div>
+        <Button variant="secondary" size="sm" onClick={() => void avvia(false, false)}>
+          Avvia l'analisi
+        </Button>
+      </div>
     ) : null;
   }
 
+  // Stessa cornice della sezione «Report AI-check» che la precede (titolo con
+  // il filetto, `scroll-mt-16`): le due ancore della scheda si fermano allo
+  // stesso punto. Il titolo è il pulsante che apre e chiude la sezione.
   return (
-    <section
-      id={PARTENARIATO_ANCORA}
-      aria-labelledby={TITOLO_ID}
-      className="mt-10 scroll-mt-24"
-    >
-      <Card className="p-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 id={TITOLO_ID} className="font-display text-lg font-bold text-slate-900">
-              <button
-                id={PARTENARIATO_TOGGLE_ID}
-                type="button"
-                aria-expanded={open}
-                aria-controls={PARTENARIATO_CONTENUTO_ID}
-                onClick={() => onOpenChange(!open)}
-                className="inline-flex cursor-pointer items-center gap-2 rounded-lg text-left transition-colors hover:text-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
-              >
-                <Handshake className="size-5 shrink-0 text-brand-500" aria-hidden />
-                Regole di partenariato
-                <ChevronDown
-                  className={cn(
-                    "size-5 shrink-0 text-slate-400 transition-transform",
-                    open && "rotate-180",
-                  )}
-                  aria-hidden
-                />
-              </button>
-            </h2>
-            <p className="mt-1 text-sm text-slate-500">{sottotitolo(data)}</p>
-          </div>
-          {data?.regole && <ModalitaBadge modalita={data.regole.modalita_effettiva} />}
-        </div>
+    <Section id={PARTENARIATO_ANCORA} aria-labelledby={TITOLO_ID} className="scroll-mt-16 pt-6">
+      <SectionHeader
+        id={TITOLO_ID}
+        titolo={
+          <button
+            id={PARTENARIATO_TOGGLE_ID}
+            type="button"
+            aria-expanded={open}
+            aria-controls={PARTENARIATO_CONTENUTO_ID}
+            onClick={() => onOpenChange(!open)}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-mark text-left transition-colors hover:text-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            Regole di partenariato
+            <ChevronDown
+              className={cn("size-5 shrink-0 text-ink-3 transition-transform", open && "rotate-180")}
+              aria-hidden
+            />
+          </button>
+        }
+        azione={data?.regole && <ModalitaBadge modalita={data.regole.modalita_effettiva} />}
+      />
+      <p className="text-small text-ink-3">{sottotitolo(data)}</p>
 
-        <div id={PARTENARIATO_CONTENUTO_ID} hidden={!open}>
-          {open && (
-            <div className="mt-5 space-y-5">
-              <div role="status" aria-live="polite">
-                {testoAvanzamento ? (
-                  <p className="inline-flex items-center gap-2 text-sm font-medium text-amber-700">
-                    <Loader2 className="size-4 animate-spin" aria-hidden />
-                    {testoAvanzamento}
-                  </p>
-                ) : annuncio ? (
-                  <p className="sr-only">{annuncio}</p>
-                ) : null}
-              </div>
-              <p
-                role="note"
-                className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600"
-              >
-                {PARTENARIATO_COPY.disclaimer}
-              </p>
-              {corpo}
+      <div id={PARTENARIATO_CONTENUTO_ID} hidden={!open}>
+        {open && (
+          <div className="flex flex-col gap-5">
+            <div role="status" aria-live="polite">
+              {testoAvanzamento ? (
+                <p className="inline-flex items-center gap-2 text-body font-medium text-ink-2">
+                  <Spinner size="sm" />
+                  {testoAvanzamento}
+                </p>
+              ) : annuncio ? (
+                <p className="sr-only">{annuncio}</p>
+              ) : null}
             </div>
-          )}
-        </div>
-      </Card>
-    </section>
+            <p role="note" className="text-small text-ink-3">
+              {PARTENARIATO_COPY.disclaimer}
+            </p>
+            {corpo}
+          </div>
+        )}
+      </div>
+    </Section>
   );
 }

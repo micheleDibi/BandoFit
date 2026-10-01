@@ -27,7 +27,8 @@ _TIMEOUT_SECONDS = 15
 
 def _branded_html(heading: str, paragraphs: list[str], cta_label: str, cta_url: str, footer: str) -> str:
     """Wrapper HTML comune a tutte le email transazionali (i paragrafi sono
-    già HTML: l'escaping dei dati utente avviene nei chiamanti)."""
+    già HTML: l'escaping dei dati utente avviene nei chiamanti). `cta_url` si
+    passa grezzo: l'escape per l'attributo `href` lo fa questa funzione."""
     body = "".join(
         f'<p style="font-size:15px;line-height:1.6;margin:0 0 12px">{p}</p>' for p in paragraphs
     )
@@ -39,7 +40,7 @@ def _branded_html(heading: str, paragraphs: list[str], cta_label: str, cta_url: 
   <div style="border:1px solid #e2e8f0;border-top:none;border-radius:0 0 12px 12px;padding:28px">
     <h1 style="font-size:18px;margin:0 0 12px">{html.escape(heading)}</h1>
     {body}
-    <a href="{cta_url}"
+    <a href="{html.escape(cta_url, quote=True)}"
        style="display:inline-block;background:#1E5EFF;color:#fff;text-decoration:none;
               font-weight:600;font-size:15px;padding:12px 24px;border-radius:8px;margin-top:8px">
       {html.escape(cta_label)}
@@ -872,7 +873,7 @@ async def send_partner_digest_email(
         heading,
         paragraphs,
         "Vedi le call per te",
-        html.escape(cta_url, quote=True),
+        cta_url,
         "Ricevi questa email perché la tua azienda è visibile come partner su BandoFit.",
     )
     text = (
@@ -994,7 +995,7 @@ async def _invia_evento_partner(
             "restano.</span>",
         ],
         cta_label,
-        html.escape(cta_url, quote=True),
+        cta_url,
         footer,
     )
     text = (
@@ -1281,7 +1282,7 @@ async def send_moderazione_decisione_email(
             blocco,
         ],
         "Vedi la decisione",
-        html.escape(cta_url, quote=True),
+        cta_url,
         "Ricevi questa email perché la decisione riguarda un contenuto della tua azienda "
         "su BandoFit: è un avviso obbligatorio e non si disattiva dalle preferenze.",
     )

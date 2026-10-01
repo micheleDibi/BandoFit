@@ -1,11 +1,17 @@
-import { BadgeCheck, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useId, useState, type FormEvent } from "react";
-import { Badge } from "../components/ui/Badge";
+import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
+import { Checkbox } from "../components/ui/Checkbox";
 import { Dialog } from "../components/ui/Dialog";
-import { SelectField, TextareaField, TextField } from "../components/ui/Field";
+import { inputClasses, SelectField, TextareaField, TextField } from "../components/ui/Field";
+import { InlineError } from "../components/ui/InlineError";
+import { Page } from "../components/ui/Page";
+import { PageHeader } from "../components/ui/PageHeader";
+import { Section, SectionHeader } from "../components/ui/SectionHeader";
 import { ErrorState, Skeleton } from "../components/ui/states";
+import { Status } from "../components/ui/Status";
+import { useToast } from "../components/ui/Toast";
 import {
   useAdminCreatePlan,
   useAdminPlans,
@@ -14,6 +20,7 @@ import {
 } from "../hooks/useAdmin";
 import { useFunzioni } from "../hooks/useFunzioni";
 import { apiErrorMessage } from "../lib/api";
+import { cn } from "../lib/cn";
 import type { Plan, TipoPrezzo } from "../types";
 
 /** Limite di partenariato nel form: «Illimitate» (null all'API) oppure un
@@ -182,24 +189,24 @@ function LimitePartenariatoField({
 }) {
   const id = useId();
   return (
-    <fieldset aria-describedby={`${id}-helper`}>
-      <legend className="text-sm font-medium text-slate-700">{legend}</legend>
-      <div className="mt-2 flex flex-wrap items-center gap-4">
-        <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-700">
+    <fieldset aria-describedby={`${id}-helper`} className="flex min-w-0 flex-col gap-2">
+      <legend className="mb-1 text-small font-medium text-ink">{legend}</legend>
+      <div className="flex flex-wrap items-center gap-4">
+        <label className="inline-flex cursor-pointer items-center gap-2 text-body text-ink">
           <input
             type="radio"
             name={`${id}-scelta`}
-            className="accent-brand-500"
+            className="size-4 cursor-pointer accent-accent"
             checked={value.illimitato}
             onChange={() => onChange({ ...value, illimitato: true })}
           />
           Illimitate
         </label>
-        <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-700">
+        <label className="inline-flex cursor-pointer items-center gap-2 text-body text-ink">
           <input
             type="radio"
             name={`${id}-scelta`}
-            className="accent-brand-500"
+            className="size-4 cursor-pointer accent-accent"
             checked={!value.illimitato}
             onChange={() => onChange({ illimitato: false, limite: value.limite || "0" })}
           />
@@ -213,10 +220,10 @@ function LimitePartenariatoField({
           disabled={value.illimitato}
           value={value.illimitato ? "" : value.limite}
           onChange={(e) => onChange({ illimitato: false, limite: e.target.value })}
-          className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm tabular-nums focus:border-brand-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50"
+          className={cn(inputClasses, "w-24 tabular-nums")}
         />
       </div>
-      <p id={`${id}-helper`} className="mt-1.5 text-sm text-slate-500">
+      <p id={`${id}-helper`} className="text-small text-ink-3">
         {helper}
       </p>
     </fieldset>
@@ -329,7 +336,7 @@ function PlanFormFields({
         disabled={!form.alert_attivo}
         helper={
           form.alert_attivo
-            ? "Vuoto = avvisi nuovi bandi esclusi · 0 = stesso giorno della pubblicazione"
+            ? "Vuoto = avvisi nuovi bandi esclusi; 0 = stesso giorno della pubblicazione"
             : "Attiva gli alert per impostarlo"
         }
         value={form.alert_ritardo_giorni}
@@ -383,18 +390,12 @@ function PlanFormFields({
           onChange={(e) => setForm((f) => ({ ...f, features_override: e.target.value }))}
         />
       </div>
-      <div className="flex items-center gap-2 sm:col-span-2">
-        <input
-          id={`attivo-${form.slug || "new"}`}
-          type="checkbox"
-          checked={form.is_active}
-          onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))}
-          className="size-4 cursor-pointer accent-brand-500"
-        />
-        <label htmlFor={`attivo-${form.slug || "new"}`} className="cursor-pointer text-sm text-slate-700">
-          Piano attivo (visibile in registrazione e cambio piano)
-        </label>
-      </div>
+      <Checkbox
+        className="sm:col-span-2"
+        label="Piano attivo (visibile in registrazione e cambio piano)"
+        checked={form.is_active}
+        onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))}
+      />
     </div>
   );
 }
@@ -402,51 +403,51 @@ function PlanFormFields({
 function PlanEditor({ plan }: { plan: Plan }) {
   const [form, setForm] = useState<PlanFormState>(() => toFormState(plan));
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
   const updatePlan = useAdminUpdatePlan();
   const { partenariatiAttivo } = useFunzioni();
+  const toast = useToast();
+  const idTitolo = useId();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    setSaved(false);
     const problem = validate(form, partenariatiAttivo);
     setValidationError(problem);
     if (problem) return;
     try {
       await updatePlan.mutateAsync({ planId: plan.id, data: toPayload(form, partenariatiAttivo) });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      toast.mostra({ testo: `Piano «${form.nome.trim()}» salvato` });
     } catch {
       // errore mostrato sotto
     }
   };
 
+  // Un piano per sezione: titolo con il filetto e lo stato in parole; il
+  // pulsante pieno della pagina è «Nuovo piano», qui «Salva» è secondario.
   return (
-    <Card className={`p-6 ${form.is_active ? "" : "opacity-80"}`}>
-      <form onSubmit={handleSubmit}>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-base font-semibold text-slate-900">{plan.nome}</h2>
-          {form.is_active ? <Badge tone="emerald">Attivo</Badge> : <Badge tone="slate">Disattivato</Badge>}
-        </div>
+    <Section aria-labelledby={idTitolo}>
+      <SectionHeader
+        id={idTitolo}
+        titolo={plan.nome}
+        azione={
+          form.is_active ? (
+            <Status tono="aperto">Attivo</Status>
+          ) : (
+            <Status tono="chiuso">Disattivato</Status>
+          )
+        }
+      />
+      <form onSubmit={handleSubmit} className="flex flex-col gap-5">
         <PlanFormFields form={form} setForm={setForm} />
-        <div className="mt-5 flex items-center gap-3">
-          <Button type="submit" loading={updatePlan.isPending}>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="submit" variant="secondary" loading={updatePlan.isPending}>
             Salva piano
           </Button>
-          {saved && (
-            <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600" role="status">
-              <BadgeCheck className="size-4" aria-hidden />
-              Salvato
-            </span>
-          )}
           {(validationError || updatePlan.isError) && (
-            <span className="text-sm text-red-600" role="alert">
-              {validationError ?? apiErrorMessage(updatePlan.error)}
-            </span>
+            <InlineError>{validationError ?? apiErrorMessage(updatePlan.error)}</InlineError>
           )}
         </div>
       </form>
-    </Card>
+    </Section>
   );
 }
 
@@ -472,40 +473,34 @@ export default function AdminPiani() {
   };
 
   return (
-    <div className="mx-auto max-w-4xl">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
-            Gestione abbonamenti
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Modifica parametri e prezzi dei piani. I piani non si eliminano: si disattivano.
-          </p>
-        </div>
-        <Button
-          onClick={() => {
-            setCreateError(null);
-            setNewForm(EMPTY_FORM);
-            setCreateOpen(true);
-          }}
-        >
-          <Plus className="size-4" aria-hidden />
-          Nuovo piano
-        </Button>
-      </div>
+    <Page variante="sezioni">
+      <PageHeader
+        titolo="Piani"
+        descrizione="Modifica parametri e prezzi dei piani. I piani non si eliminano: si disattivano."
+        azioni={
+          <Button
+            onClick={() => {
+              setCreateError(null);
+              setNewForm(EMPTY_FORM);
+              setCreateOpen(true);
+            }}
+          >
+            <Plus className="size-4" aria-hidden />
+            Nuovo piano
+          </Button>
+        }
+      />
 
       {isPending ? (
-        <div className="mt-6 space-y-5">
+        <div className="flex flex-col gap-6" aria-hidden>
           {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-72 w-full" />
           ))}
         </div>
       ) : isError ? (
-        <div className="mt-6">
-          <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
-        </div>
+        <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
       ) : (
-        <div className="mt-6 space-y-5">
+        <div className="flex flex-col gap-12">
           {(plans ?? []).map((plan) => (
             <PlanEditor key={plan.id} plan={plan} />
           ))}
@@ -518,22 +513,20 @@ export default function AdminPiani() {
         title="Nuovo piano di abbonamento"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setCreateOpen(false)}>
+            <Button type="button" variant="secondary" onClick={() => setCreateOpen(false)}>
               Annulla
             </Button>
-            <Button onClick={handleCreate} loading={createPlan.isPending}>
+            <Button type="button" onClick={handleCreate} loading={createPlan.isPending}>
               Crea piano
             </Button>
           </>
         }
       >
-        <PlanFormFields form={newForm} setForm={setNewForm} isNew />
-        {createError && (
-          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-red-700" role="alert">
-            {createError}
-          </p>
-        )}
+        <div className="flex flex-col gap-4">
+          <PlanFormFields form={newForm} setForm={setNewForm} isNew />
+          {createError && <Alert tono="errore">{createError}</Alert>}
+        </div>
       </Dialog>
-    </div>
+    </Page>
   );
 }

@@ -1,4 +1,3 @@
-import { AlertTriangle, CheckCircle2, FileText } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
 import { PARTENARIATO_COPY } from "../../lib/copy";
@@ -20,6 +19,9 @@ import type {
   VariabileFinanziaria,
   Vocabolario,
 } from "../../types";
+import { Alert } from "../ui/Alert";
+import { Stepper } from "../ui/Stepper";
+import { TextLink } from "../ui/TextLink";
 import { ModalitaBadge } from "./ModalitaBadge";
 import { RegolaVoce } from "./RegolaVoce";
 
@@ -234,7 +236,7 @@ export function titoloQuota(
   vocabolario: Vocabolario | undefined,
 ): string {
   const categoria = voce.categoria ? etichettaTipo(voce.categoria, null, vocabolario) : null;
-  // «Grande impresa» → «grande impresa» dentro la parentesi; le sigle («PMI») restano intatte.
+  // «Grande impresa» diventa «grande impresa» dentro la parentesi; le sigle («PMI») restano intatte.
   const tra = (s: string) => (/^.\p{Ll}/u.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s);
   const chi =
     voce.ambito === "per_categoria"
@@ -295,54 +297,43 @@ function descrizioneFonte(fonte: FontePartenariato): string {
 
 // ---- Blocchi ---------------------------------------------------------------
 
+/** Gruppo di voci: titolo di gruppo con il filetto, poi le righe (o un testo). */
 function Blocco({ titolo, children }: { titolo: string; children: ReactNode }) {
   return (
-    <div>
-      <h3 className="text-sm font-semibold text-slate-800">{titolo}</h3>
-      <div className="mt-2 space-y-2">{children}</div>
+    <div className="flex flex-col">
+      <h3 className="border-b border-line pb-2 text-title-group text-ink">{titolo}</h3>
+      <div className="flex flex-col gap-2 pt-2">{children}</div>
     </div>
   );
 }
 
 function Dettaglio({ etichetta, children }: { etichetta: string; children: ReactNode }) {
   return (
-    <p className="text-slate-600">
-      <span className="font-medium text-slate-700">{etichetta}:</span> {children}
+    <p className="text-small text-ink-2">
+      <span className="font-medium text-ink">{etichetta}:</span> {children}
     </p>
   );
 }
 
+const NOMI_PASSI = FASI.map((passo) => FASE_PASSO[passo]);
+
 export function Avanzamento({ fase }: { fase: FasePartenariato | null }) {
   const corrente = Math.max(0, FASI.indexOf(fase ?? "documenti"));
+  const fatti = NOMI_PASSI.slice(0, corrente);
   return (
-    <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-4 py-4">
-      <ol aria-label="Passi dell'analisi" className="flex flex-wrap gap-x-5 gap-y-1.5 text-xs">
-        {FASI.map((passo, i) => {
-          const fatto = i < corrente;
-          const attuale = i === corrente;
-          return (
-            <li
-              key={passo}
-              aria-current={attuale ? "step" : undefined}
-              className={cn(
-                "inline-flex items-center gap-1.5",
-                attuale && "font-semibold text-amber-800",
-                fatto && "text-emerald-700",
-                !fatto && !attuale && "text-slate-400",
-              )}
-            >
-              {fatto ? (
-                <CheckCircle2 className="size-3.5" aria-hidden />
-              ) : (
-                <span className="tabular">{i + 1}.</span>
-              )}
-              {FASE_PASSO[passo]}
-              {fatto && <span className="sr-only">(fatto)</span>}
-            </li>
-          );
-        })}
-      </ol>
-      <p className="mt-2 text-xs text-slate-500">
+    <div className="flex flex-col gap-3">
+      {/* Un nome al gruppo: nel wizard sta sotto lo Stepper della call, e due
+          «Passo N di M» senza contesto non si distinguono. Lo Stepper non dice
+          quali passi sono fatti: lo dice la riga sr-only. */}
+      <div role="group" aria-label="Passi dell'analisi">
+        <Stepper passi={NOMI_PASSI} corrente={corrente} />
+        {fatti.length > 0 && (
+          <p className="sr-only">
+            {fatti.map((nome) => `${nome} (fatto)`).join(", ")}.
+          </p>
+        )}
+      </div>
+      <p className="text-small text-ink-3">
         Di solito servono da 1 a 3 minuti: puoi restare su questa pagina, le regole compaiono qui
         appena sono pronte.
       </p>
@@ -354,52 +345,44 @@ export function DocumentiAnalizzati({ fonti }: { fonti: FontePartenariato[] }) {
   return (
     <Blocco titolo="Documenti analizzati">
       {fonti.length === 0 ? (
-        <p className="text-sm text-slate-500">
+        <p className="text-body text-ink-2">
           Il bando non ha documenti PDF che possiamo leggere: abbiamo usato solo la sua scheda nel
           catalogo.
         </p>
       ) : (
         <>
-          <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
+          <ul className="flex flex-col">
             {fonti.map((fonte) => {
               const url = fonte.url && /^https:\/\//i.test(fonte.url) ? fonte.url : null;
               const letto = FONTE_LETTA.includes(fonte.stato);
               return (
-                <li key={fonte.n} className="flex items-start gap-2.5 px-3.5 py-2.5 text-sm">
-                  <FileText className="mt-0.5 size-4 shrink-0 text-slate-400" aria-hidden />
-                  <div className="min-w-0 flex-1">
-                    <p className="break-words">
-                      {url ? (
-                        <a
-                          href={url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-medium text-brand-600 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-brand-500"
-                        >
-                          {fonte.etichetta}
-                          <span className="sr-only"> (si apre in una nuova scheda)</span>
-                        </a>
-                      ) : (
-                        <span className="font-medium text-slate-800">{fonte.etichetta}</span>
-                      )}
-                      {fonte.dominio && (
-                        <span className="text-xs text-slate-400"> · {fonte.dominio}</span>
-                      )}
-                    </p>
-                    <p
-                      className={cn(
-                        "mt-0.5 text-xs",
-                        letto && !fonte.troncato ? "text-slate-500" : "text-amber-700",
-                      )}
-                    >
-                      {descrizioneFonte(fonte)}
-                    </p>
-                  </div>
+                <li key={fonte.n} className="flex flex-col gap-0.5 border-b border-line py-3">
+                  <p className="break-words text-body">
+                    {url ? (
+                      <TextLink href={url} esterno className="font-medium">
+                        {fonte.etichetta}
+                        <span className="sr-only"> (si apre in una nuova scheda)</span>
+                      </TextLink>
+                    ) : (
+                      <span className="font-medium text-ink">{fonte.etichetta}</span>
+                    )}
+                    {fonte.dominio && (
+                      <span className="ml-2 text-small text-ink-3">{fonte.dominio}</span>
+                    )}
+                  </p>
+                  <p
+                    className={cn(
+                      "text-small",
+                      letto && !fonte.troncato ? "text-ink-3" : "text-warning-ink",
+                    )}
+                  >
+                    {descrizioneFonte(fonte)}
+                  </p>
                 </li>
               );
             })}
           </ul>
-          <p className="text-xs text-slate-500">Abbiamo letto anche la scheda del bando nel catalogo.</p>
+          <p className="text-small text-ink-3">Abbiamo letto anche la scheda del bando nel catalogo.</p>
         </>
       )}
     </Blocco>
@@ -436,8 +419,8 @@ export function Regole({
     lookups?.regioni.find((r) => r.id === id)?.nome ?? String(id);
 
   return (
-    <div className="space-y-6">
-      <p className="text-xs text-slate-500">
+    <div className="flex flex-col gap-6">
+      <p className="text-small text-ink-3">
         Apri una voce per leggere il passaggio del bando da cui viene. Le voci «da verificare» hanno
         un passaggio che non abbiamo ritrovato alla lettera, preso solo dalla scheda del catalogo
         (non dal bando ufficiale), o un valore che non torna: controllale sul documento.
@@ -446,18 +429,18 @@ export function Regole({
       <Blocco titolo="Modalità di partecipazione">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <ModalitaBadge modalita={effettiva} />
-          <span className="text-sm text-slate-600">
+          <span className="text-body text-ink-2">
             {PARTENARIATO_COPY.modalitaSpiegazione[effettiva]}
           </span>
         </div>
         {dichiarata && dichiarata !== effettiva && dichiarata !== "non_determinabile" && (
-          <p className="text-xs text-amber-700">
+          <p className="text-small text-warning-ink">
             Il testo sembra indicare «{PARTENARIATO_COPY.modalita[dichiarata]}», ma non siamo
             riusciti a confermarlo: controlla il passaggio qui sotto.
           </p>
         )}
         {effettiva === "non_determinabile" && (
-          <p className="text-xs text-slate-500">
+          <p className="text-small text-ink-3">
             Più in basso trovi i documenti che abbiamo letto e com'è andata la lettura.
           </p>
         )}
@@ -475,7 +458,7 @@ export function Regole({
               voce={forma}
               fonti={fonti}
             >
-              {forma.note && <p className="whitespace-pre-line text-slate-600">{forma.note}</p>}
+              {forma.note && <p className="whitespace-pre-line">{forma.note}</p>}
             </RegolaVoce>
           ))}
         </Blocco>
@@ -508,7 +491,7 @@ export function Regole({
             />
           )}
           {regole.conteggio_note && (
-            <p className="whitespace-pre-line text-xs text-slate-500">
+            <p className="whitespace-pre-line text-small text-ink-3">
               Come si contano: {regole.conteggio_note}
             </p>
           )}
@@ -551,7 +534,7 @@ export function Regole({
                 voce={voce}
                 fonti={fonti}
               >
-                {effetto && <p className="text-slate-600">{effetto}</p>}
+                {effetto && <p>{effetto}</p>}
               </RegolaVoce>
             );
           })}
@@ -588,9 +571,7 @@ export function Regole({
                 fonti={fonti}
               >
                 {formula && <Dettaglio etichetta="In sintesi">{formula}</Dettaglio>}
-                {AMBITO_FINANZIARIO[voce.ambito] && (
-                  <p className="text-slate-600">{AMBITO_FINANZIARIO[voce.ambito]}.</p>
-                )}
+                {AMBITO_FINANZIARIO[voce.ambito] && <p>{AMBITO_FINANZIARIO[voce.ambito]}.</p>}
               </RegolaVoce>
             );
           })}
@@ -608,9 +589,7 @@ export function Regole({
                 voce={voce}
                 fonti={fonti}
               >
-                {voce.descrizione && (
-                  <p className="whitespace-pre-line text-slate-600">{voce.descrizione}</p>
-                )}
+                {voce.descrizione && <p className="whitespace-pre-line">{voce.descrizione}</p>}
                 {quando && <Dettaglio etichetta="Quando">{quando}</Dettaglio>}
               </RegolaVoce>
             );
@@ -619,12 +598,8 @@ export function Regole({
       )}
 
       {(regole.fonti_insufficienti || avvisi.length > 0) && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-800">
-          <p className="inline-flex items-center gap-1.5 font-medium">
-            <AlertTriangle className="size-4 shrink-0" aria-hidden />
-            Da controllare sul bando
-          </p>
-          <ul className="mt-1.5 list-disc space-y-1 pl-5 text-xs">
+        <Alert tono="attenzione" titolo="Da controllare sul bando">
+          <ul className="list-disc pl-5">
             {regole.fonti_insufficienti && (
               <li>I documenti che abbiamo letto non bastano per un quadro completo.</li>
             )}
@@ -632,12 +607,12 @@ export function Regole({
               <li key={i}>{avviso}</li>
             ))}
           </ul>
-        </div>
+        </Alert>
       )}
 
       {regole.note && (
         <Blocco titolo="Note">
-          <p className="whitespace-pre-line text-sm text-slate-600">{regole.note}</p>
+          <p className="whitespace-pre-line text-body text-ink-2">{regole.note}</p>
         </Blocco>
       )}
     </div>

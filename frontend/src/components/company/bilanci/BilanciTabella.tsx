@@ -16,7 +16,7 @@ import type { EsercizioBilancio, FonteBilancio } from "../../../types";
 /** Classi della prima colonna: resta ferma mentre gli anni scorrono in
  *  orizzontale, quindi deve avere uno sfondo pieno. */
 const PRIMA_COLONNA =
-  "sticky left-0 z-10 min-w-[9.5rem] max-w-[14rem] border-r border-slate-200 px-4 text-left";
+  "sticky left-0 z-10 min-w-38 max-w-56 border-r border-line px-4 text-left";
 
 function Cella({
   esercizio,
@@ -32,7 +32,7 @@ function Cella({
   // Spazio fisso per la sigla: le cifre restano allineate in colonna anche
   // dove la sigla manca.
   const marcatore = marcaFonte && (
-    <span className="ml-1 inline-block w-2.5 text-left align-super text-[10px] font-semibold text-slate-400">
+    <span className="ml-1 inline-block w-2.5 text-left align-super text-caption font-semibold text-ink-3">
       {valore !== null && fonte && (
         <>
           <span aria-hidden>{FONTI_BILANCIO[fonte].sigla}</span>
@@ -45,7 +45,7 @@ function Cella({
   if (valore === null) {
     return (
       <>
-        <span className="text-slate-300" aria-hidden>
+        <span className="text-ink-off" aria-hidden>
           —
         </span>
         <span className="sr-only">non disponibile</span>
@@ -55,7 +55,7 @@ function Cella({
   }
   return (
     <>
-      <span className={cn("tabular", valore < 0 ? "text-red-600" : "text-slate-800")}>
+      <span className="text-ink tabular-nums">
         {formatValoreBilancio(valore, voce.unita)}
       </span>
       {marcatore}
@@ -102,9 +102,9 @@ export function BilanciTabella({ esercizi }: { esercizi: EsercizioBilancio[] }) 
         role="region"
         aria-labelledby={captionId}
         tabIndex={0}
-        className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
+        className="overflow-x-auto rounded-panel border border-line bg-sheet focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
-        <table className="w-full border-separate border-spacing-0 text-sm">
+        <table className="w-full border-separate border-spacing-0 text-body">
           <caption id={captionId} className="sr-only">
             Bilanci per esercizio, {intervalloAnni(anni)}. Valori in euro, tranne il numero di
             dipendenti.
@@ -115,7 +115,7 @@ export function BilanciTabella({ esercizi }: { esercizi: EsercizioBilancio[] }) 
                 scope="col"
                 className={cn(
                   PRIMA_COLONNA,
-                  "border-b bg-slate-50 py-3 text-xs font-medium uppercase tracking-wide text-slate-500",
+                  "border-b border-line-control bg-desk py-3 text-small font-medium text-ink-3",
                 )}
               >
                 Voce
@@ -126,17 +126,17 @@ export function BilanciTabella({ esercizi }: { esercizi: EsercizioBilancio[] }) 
                   <th
                     key={e.anno}
                     scope="col"
-                    className="min-w-[7.5rem] whitespace-nowrap border-b border-slate-200 bg-slate-50 px-4 py-3 text-right align-bottom font-normal"
+                    className="min-w-30 whitespace-nowrap border-b border-line-control bg-desk px-4 py-3 text-right align-bottom font-normal"
                   >
-                    <span className="tabular block font-display text-sm font-semibold text-slate-900">
+                    <span className="block font-semibold text-ink tabular-nums">
                       {e.anno}
                     </span>
                     {chiusuraNonSolare(e.data_chiusura) && (
-                      <span className="tabular block text-xs text-slate-500">
+                      <span className="block text-small text-ink-3 tabular-nums">
                         chiuso il {formatDateNumeric(e.data_chiusura)}
                       </span>
                     )}
-                    {tipo && <span className="block text-xs text-slate-400">{tipo}</span>}
+                    {tipo && <span className="block text-small text-ink-3">{tipo}</span>}
                   </th>
                 );
               })}
@@ -149,12 +149,12 @@ export function BilanciTabella({ esercizi }: { esercizi: EsercizioBilancio[] }) 
                   scope="rowgroup"
                   className={cn(
                     PRIMA_COLONNA,
-                    "border-b bg-slate-50 pb-1.5 pt-4 text-xs font-semibold uppercase tracking-wide text-brand-700",
+                    "border-b border-line bg-desk pb-1.5 pt-4 text-small font-semibold text-ink",
                   )}
                 >
                   {gruppo.titolo}
                 </th>
-                <td colSpan={anni.length} className="border-b border-slate-200 bg-slate-50" />
+                <td colSpan={anni.length} className="border-b border-line bg-desk" />
               </tr>
               {gruppo.voci.map((voce) => (
                 <tr key={voce.campo}>
@@ -162,7 +162,7 @@ export function BilanciTabella({ esercizi }: { esercizi: EsercizioBilancio[] }) 
                     scope="row"
                     className={cn(
                       PRIMA_COLONNA,
-                      "border-b border-b-slate-100 bg-white py-2.5 font-normal text-slate-700",
+                      "border-b border-line bg-sheet py-2.5 font-normal text-ink-2",
                     )}
                   >
                     {voce.etichetta}
@@ -170,7 +170,7 @@ export function BilanciTabella({ esercizi }: { esercizi: EsercizioBilancio[] }) 
                   {ordinati.map((e) => (
                     <td
                       key={e.anno}
-                      className="whitespace-nowrap border-b border-slate-100 px-4 py-2.5 text-right"
+                      className="whitespace-nowrap border-b border-line px-4 py-2.5 text-right"
                     >
                       <Cella esercizio={e} voce={voce} marcaFonte={marcaFonte} />
                     </td>
@@ -182,14 +182,14 @@ export function BilanciTabella({ esercizi }: { esercizi: EsercizioBilancio[] }) 
         </table>
       </div>
 
-      <div className="mt-2 space-y-1 text-xs text-slate-500">
+      <div className="mt-2 flex flex-col gap-1 text-small text-ink-3">
         {marcaFonte ? (
           <>
             <p className="flex flex-wrap gap-x-4 gap-y-1">
-              <span className="font-medium text-slate-600">Fonti:</span>
+              <span className="font-medium text-ink-2">Fonti:</span>
               {fontiUsate.map((fonte) => (
                 <span key={fonte} className="whitespace-nowrap">
-                  <span className="font-semibold text-slate-600">
+                  <span className="font-semibold text-ink-2">
                     {FONTI_BILANCIO[fonte].sigla}
                   </span>{" "}
                   = {FONTI_BILANCIO[fonte].etichetta}

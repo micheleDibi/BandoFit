@@ -1,6 +1,7 @@
-import { CalendarClock, Check, Eye, Flag, Handshake, Lock, Pencil, Scale, Send, X } from "lucide-react";
+import { Pencil } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
+import { useRientroPagina } from "../components/partenariati/useRientroPagina";
 import { BannerOptIn } from "../components/partenariati/BannerOptIn";
 import { BozzeTab } from "../components/partenariati/BozzeTab";
 import { CallPubblicaCard } from "../components/partenariati/CallPubblicaCard";
@@ -15,24 +16,30 @@ import { descriviCriterio, linkCall, mostraDecimale, percentuale } from "../comp
 import { ConsorzioTab } from "../components/partenariati/ConsorzioTab";
 import { ConsultoCallCard } from "../components/partenariati/ConsultoCallCard";
 import { CallNonTrovata } from "../components/partenariati/UscitaCallSospesa";
-import { CoperturaBadge } from "../components/partenariati/PassoGap";
-import { NotaAnonima } from "../components/partenariati/PassoBando";
 import { paginaDa } from "../components/partenariati/FiltriBacheca";
 import { AttenzioneBadge, MatchBadge } from "../components/partenariati/MatchBadge";
 import { MatchSpiegazione } from "../components/partenariati/MatchSpiegazione";
 import { InvitaDialog } from "../components/partenariati/InvitaDialog";
 import { etichettaForma } from "../components/partenariati/PartenariatoRegole";
 import { SalvaCallButton } from "../components/partenariati/SalvaCallButton";
-import { Schede } from "../components/partenariati/Schede";
 import { SegnalaDialog } from "../components/partenariati/SegnalaDialog";
 import { SuggeritoCard } from "../components/partenariati/SuggeritoCard";
 import { useNomiCall } from "../components/partenariati/useNomiCall";
+import { Alert } from "../components/ui/Alert";
 import { Badge } from "../components/ui/Badge";
 import { Button, LinkButton } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
-import { Dialog } from "../components/ui/Dialog";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { Due, tempoRelativo } from "../components/ui/Due";
+import { DefinitionList, type Definizione } from "../components/ui/Facts";
+import { Page } from "../components/ui/Page";
+import { BackLink, PageHeader } from "../components/ui/PageHeader";
 import { Pagination } from "../components/ui/Pagination";
+import { Panel } from "../components/ui/Panel";
+import { Section, SectionHeader } from "../components/ui/SectionHeader";
+import { Status, type TonoStatus } from "../components/ui/Status";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
+import { TabPanel, Tabs, type Scheda } from "../components/ui/Tabs";
+import { TextLink } from "../components/ui/TextLink";
 import { useAziendaDaLink } from "../hooks/useAziendaDaLink";
 import { useCandidature } from "../hooks/useCandidature";
 import {
@@ -44,6 +51,7 @@ import {
 import { useCompany } from "../hooks/useCompany";
 import { useSuggeriti } from "../hooks/usePartenariati";
 import { usePartenariatiVocabolario } from "../hooks/usePartenariatiVocabolario";
+import { useTab } from "../hooks/useTab";
 import { apiErrorCode, apiErrorMessage } from "../lib/api";
 import { BOZZE_COPY, CALL_COPY, CANDIDATURE_COPY, PARTENARIATO_COPY } from "../lib/copy";
 import { formatDate, formatDateTime, formatEur } from "../lib/format";
@@ -54,6 +62,7 @@ import type {
   CallPubblicaDettaglio,
   CallVistaCreatore,
   DirezioneCandidature,
+  EsitoCoperturaCall,
   MatchOut,
   PartnerSuggerito,
   PartnerSuggeritoContatto,
@@ -61,29 +70,31 @@ import type {
 
 type Tab = "panoramica" | "suggeriti" | "candidature" | "consorzio" | "bozze";
 
+const PREFISSO_SCHEDE = "call";
+
 /** Schede per l'azienda che ha creato la call: i suggeriti solo quando la
  *  call è pubblicata (prima nessuna azienda la vede, dopo non si propone);
  *  candidature, inviti, consorzio e bozze dei documenti (WP10: ruoli e quote
  *  vengono dal consorzio, che nasce alla pubblicazione) da quando è stata
  *  pubblicata (restano consultabili anche dopo la chiusura). */
-function schedeCreatore(call: CallVistaCreatore): Array<{ id: Tab; etichetta: string }> {
-  const schede: Array<{ id: Tab; etichetta: string }> = [{ id: "panoramica", etichetta: "Panoramica" }];
-  if (call.stato === "pubblicata") schede.push({ id: "suggeriti", etichetta: "Aziende suggerite" });
-  if (call.pubblicata_at) schede.push({ id: "candidature", etichetta: "Candidature e inviti" });
-  if (call.pubblicata_at) schede.push({ id: "consorzio", etichetta: "Consorzio" });
-  if (call.pubblicata_at) schede.push({ id: "bozze", etichetta: BOZZE_COPY.titolo });
+function schedeCreatore(call: CallVistaCreatore): Scheda<Tab>[] {
+  const schede: Scheda<Tab>[] = [{ id: "panoramica", label: "Panoramica" }];
+  if (call.stato === "pubblicata") schede.push({ id: "suggeriti", label: "Aziende suggerite" });
+  if (call.pubblicata_at) schede.push({ id: "candidature", label: "Candidature e inviti" });
+  if (call.pubblicata_at) schede.push({ id: "consorzio", label: "Consorzio" });
+  if (call.pubblicata_at) schede.push({ id: "bozze", label: BOZZE_COPY.titolo });
   return schede;
 }
 
 /** Schede per le altre aziende: solo la controparte accettata (membro del
  *  consorzio) ha, oltre alla call, le schede del consorzio e delle bozze dei
  *  documenti. */
-function schedeAltraAzienda(call: CallPubblica): Array<{ id: Tab; etichetta: string }> {
+function schedeAltraAzienda(call: CallPubblica): Scheda<Tab>[] {
   if (!perLaTuaAzienda(call).controparte) return [];
   return [
-    { id: "panoramica", etichetta: "La call" },
-    { id: "consorzio", etichetta: "Consorzio" },
-    { id: "bozze", etichetta: BOZZE_COPY.titolo },
+    { id: "panoramica", label: "La call" },
+    { id: "consorzio", label: "Consorzio" },
+    { id: "bozze", label: BOZZE_COPY.titolo },
   ];
 }
 
@@ -106,28 +117,23 @@ function perLaTuaAzienda(call: CallPubblica): Pick<CallPubblicaDettaglio, "match
   };
 }
 
-function Voce({ titolo, children }: { titolo: string; children: ReactNode }) {
+/** La tua copertura di un requisito, in parole (mai mostrata agli altri). */
+const TONI_COPERTURA: Record<EsitoCoperturaCall, TonoStatus> = {
+  coperto: "aperto",
+  non_coperto: "chiuso",
+  dato_mancante: "in-apertura",
+  incerto: "in-apertura",
+  non_valutabile: "neutro",
+};
+
+function Copertura({ esito }: { esito: EsitoCoperturaCall }) {
   return (
-    <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">{titolo}</dt>
-      <dd className="mt-1 text-sm text-slate-700">{children}</dd>
-    </div>
+    <Status tono={TONI_COPERTURA[esito] ?? "neutro"}>{CALL_COPY.esitiCopertura[esito] ?? esito}</Status>
   );
 }
 
-function Sezione({ titolo, azione, children }: { titolo: string; azione?: ReactNode; children: ReactNode }) {
-  return (
-    <Card className="p-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-display text-base font-semibold text-slate-900">{titolo}</h2>
-        {azione}
-      </div>
-      <div className="mt-3">{children}</div>
-    </Card>
-  );
-}
-
-/** Chiusura manuale: completata (partenariato fatto) o annullata. */
+/** Chiusura manuale dalla testata: completata (partenariato fatto) o
+ *  annullata; una sola finestra di conferma con i testi del caso. */
 function ChiudiCall({ call }: { call: CallVistaCreatore }) {
   const chiudi = useChiudiCall(call.id);
   const [esito, setEsito] = useState<"completata" | "annullata" | null>(null);
@@ -139,57 +145,40 @@ function ChiudiCall({ call }: { call: CallVistaCreatore }) {
   return (
     <>
       {call.stato === "pubblicata" && (
-        <Button variant="secondary" size="sm" onClick={() => setEsito("completata")}>
-          Chiudi: partenariato completato
+        <Button variant="secondary" onClick={() => setEsito("completata")}>
+          Chiudi la call
         </Button>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="text-red-700 hover:bg-red-50 hover:text-red-800"
-        onClick={() => setEsito("annullata")}
-      >
+      <Button variant="ghost" className="text-danger hover:bg-danger-soft" onClick={() => setEsito("annullata")}>
         {bozza ? "Annulla la bozza" : "Annulla la call"}
       </Button>
-      <Dialog
+      <ConfirmDialog
         open={esito !== null}
-        onClose={() => setEsito(null)}
-        dismissible={!chiudi.isPending}
-        title={
+        titolo={
           esito === "completata"
             ? "Chiudere la call come completata?"
             : bozza
               ? "Annullare la bozza?"
               : "Annullare la call?"
         }
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setEsito(null)} disabled={chiudi.isPending}>
-              Non ora
-            </Button>
-            <Button
-              variant={esito === "completata" ? "primary" : "danger"}
-              loading={chiudi.isPending}
-              onClick={conferma}
-            >
-              {esito === "completata" ? "Chiudi la call" : bozza ? "Annulla la bozza" : "Annulla la call"}
-            </Button>
-          </>
-        }
+        conferma={esito === "completata" ? "Chiudi la call" : bozza ? "Annulla la bozza" : "Annulla la call"}
+        annulla="Non ora"
+        distruttiva={esito !== "completata"}
+        inCorso={chiudi.isPending}
+        onConferma={conferma}
+        onAnnulla={() => setEsito(null)}
       >
-        <p>
-          {esito === "completata"
-            ? "Hai trovato i partner: la call non riceve più candidature e non conta più tra le call attive del tuo piano."
-            : bozza
-              ? "La bozza si chiude e non si può riprendere: per lo stesso bando potrai crearne una nuova."
-              : "La call non riceve più candidature e non conta più tra le call attive del tuo piano. Non si può riaprire."}
-        </p>
-        {chiudi.isError && (
-          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-            {apiErrorMessage(chiudi.error)}
+        <div className="flex flex-col gap-3">
+          <p>
+            {esito === "completata"
+              ? "Hai trovato i partner: la call non riceve più candidature e non conta più tra le call attive del tuo piano."
+              : bozza
+                ? "La bozza si chiude e non si può riprendere: per lo stesso bando potrai crearne una nuova."
+                : "La call non riceve più candidature e non conta più tra le call attive del tuo piano. Non si può riaprire."}
           </p>
-        )}
-      </Dialog>
+          {chiudi.isError && <Alert tono="errore">{apiErrorMessage(chiudi.error)}</Alert>}
+        </div>
+      </ConfirmDialog>
     </>
   );
 }
@@ -198,27 +187,26 @@ function Versioni({ call }: { call: CallVistaCreatore }) {
   const versioni = useVersioniCall(call.id, !!call.pubblicata_at);
   if (!call.pubblicata_at) return null;
   return (
-    <Sezione titolo="Versioni pubblicate">
+    <Section>
+      <SectionHeader titolo="Versioni pubblicate" />
       {versioni.isPending ? (
         <Skeleton className="h-10 w-full" />
       ) : versioni.isError ? (
-        <p className="text-sm text-red-700" role="alert">
-          {apiErrorMessage(versioni.error, "Impossibile caricare le versioni.")}
-        </p>
+        <Alert tono="errore">{apiErrorMessage(versioni.error, "Impossibile caricare le versioni.")}</Alert>
       ) : (versioni.data ?? []).length === 0 ? (
-        <p className="text-sm text-slate-500">Nessuna versione.</p>
+        <p className="text-body text-ink-3">Nessuna versione.</p>
       ) : (
-        <ol className="space-y-1 text-sm text-slate-700">
+        <ol className="flex flex-col gap-1 text-body text-ink-2">
           {[...(versioni.data ?? [])]
             .sort((a, b) => b.versione - a.versione)
             .map((v) => (
               <li key={v.versione}>
-                Versione {v.versione} — {formatDateTime(v.created_at)}
+                Versione {v.versione}, {formatDateTime(v.created_at)}
               </li>
             ))}
         </ol>
       )}
-    </Sezione>
+    </Section>
   );
 }
 
@@ -232,155 +220,127 @@ function Panoramica({ call }: { call: CallVistaCreatore }) {
   const regole = call.regole_partenariato;
   const etichetteRequisiti = new Map(requisiti.flatMap((r) => (r.id ? [[r.id, r.etichetta ?? r.testo] as const] : [])));
 
+  const sintesi: Definizione[] = [
+    { etichetta: "Il tuo ruolo", valore: CALL_COPY.ruoliCreatore[call.ruolo_creatore] },
+    {
+      etichetta: "Forma prevista",
+      valore: call.forma_aggregazione_prevista
+        ? etichettaForma(call.forma_aggregazione_prevista, vocabolario)
+        : "Non ancora decisa",
+    },
+    { etichetta: "Candidature fino al", valore: call.scadenza_call ? formatDate(call.scadenza_call) : "Da decidere" },
+    {
+      etichetta: "Budget (fascia pubblica)",
+      valore: call.budget_fascia ? CALL_COPY.fasceBudget[call.budget_fascia] : "Non indicato",
+    },
+    {
+      etichetta: "Budget esatto (riservato)",
+      valore: call.budget_progetto_eur ? formatEur(call.budget_progetto_eur) : "Non indicato",
+    },
+    // Dopo la pubblicazione la quota vive nel consorzio: qui resta quella di partenza.
+    {
+      etichetta: call.pubblicata_at ? "La tua quota alla pubblicazione" : "La tua quota",
+      valore: call.quota_creatore_pct ? `${mostraDecimale(call.quota_creatore_pct)}%` : "Non indicata",
+    },
+    { etichetta: "Chi la vede", valore: CALL_COPY.visibilita[call.visibilita] },
+  ];
+  if (call.pubblicata_at) sintesi.push({ etichetta: "Pubblicata il", valore: formatDate(call.pubblicata_at) });
+  if (call.versione > 0) sintesi.push({ etichetta: "Versione", valore: String(call.versione) });
+
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-8">
       {call.motivo_chiusura && (
-        <p className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-700" role="note">
+        <Alert tono="info">
           {CALL_COPY.motiviChiusura[call.motivo_chiusura] ?? call.motivo_chiusura}
           {call.chiusa_at ? ` Chiusa il ${formatDate(call.chiusa_at)}.` : ""}
-        </p>
+        </Alert>
       )}
       {call.stato === "sospesa_moderazione" && (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="note">
-          La call è sospesa dalla moderazione
-          {call.sospesa_at ? ` dal ${formatDate(call.sospesa_at)}` : ""}
-          {call.sospeso_motivo ? `: ${call.sospeso_motivo}` : "."} Per chiarimenti scrivi
-          all'assistenza.
+        <Alert tono="errore" titolo="La call è sospesa dalla moderazione">
+          {call.sospesa_at ? `Dal ${formatDate(call.sospesa_at)}` : ""}
+          {call.sospeso_motivo ? `${call.sospesa_at ? ": " : ""}${call.sospeso_motivo}` : ""}
+          {call.sospesa_at || call.sospeso_motivo ? ". " : ""}
+          Per chiarimenti scrivi all'assistenza.
+        </Alert>
+      )}
+      {!call.editable && <p className="text-small text-ink-3">{CALL_COPY.soloTitolare}</p>}
+      {call.editable && aperta && (
+        <p>
+          <TextLink to={`/app/partenariati/call/${call.id}/modifica?passo=6`}>Come ti vedono</TextLink>
         </p>
       )}
-      {!call.editable && (
-        <p className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">{CALL_COPY.soloTitolare}</p>
-      )}
 
-      {call.editable && aperta && (
-        <div className="flex flex-wrap gap-2">
-          {call.stato === "bozza" ? (
-            <LinkButton to={linkCall(call)} size="sm">
-              <Pencil className="size-4" aria-hidden />
-              Riprendi dal passo {call.wizard_passo}: {CALL_COPY.passi[call.wizard_passo - 1] ?? ""}
-            </LinkButton>
-          ) : (
-            <LinkButton to={`/app/partenariati/call/${call.id}/modifica?passo=5`} size="sm">
-              <Pencil className="size-4" aria-hidden />
-              Modifica
-            </LinkButton>
-          )}
-          <LinkButton to={`/app/partenariati/call/${call.id}/modifica?passo=6`} size="sm" variant="secondary">
-            <Eye className="size-4" aria-hidden />
-            Come ti vedono
-          </LinkButton>
-          <ChiudiCall call={call} />
-        </div>
-      )}
+      <Section>
+        <SectionHeader titolo="In sintesi" />
+        <DefinitionList items={sintesi} />
+        <Alert tono="info">{call.anonima ? CALL_COPY.notaAnonima : CALL_COPY.notaNominativa}</Alert>
+      </Section>
 
-      <Sezione titolo="In sintesi">
-        <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Voce titolo="Il tuo ruolo">{CALL_COPY.ruoliCreatore[call.ruolo_creatore]}</Voce>
-          <Voce titolo="Forma prevista">
-            {call.forma_aggregazione_prevista
-              ? etichettaForma(call.forma_aggregazione_prevista, vocabolario)
-              : "Non ancora decisa"}
-          </Voce>
-          <Voce titolo="Candidature fino al">
-            {call.scadenza_call ? formatDate(call.scadenza_call) : "Da decidere"}
-          </Voce>
-          <Voce titolo="Budget (fascia pubblica)">
-            {call.budget_fascia ? CALL_COPY.fasceBudget[call.budget_fascia] : "Non indicato"}
-          </Voce>
-          <Voce titolo="Budget esatto (riservato)">
-            {call.budget_progetto_eur ? (
-              <span className="inline-flex items-center gap-1">
-                <Lock className="size-3.5 text-slate-400" aria-hidden />
-                {formatEur(call.budget_progetto_eur)}
-              </span>
-            ) : (
-              "Non indicato"
-            )}
-          </Voce>
-          {/* Dopo la pubblicazione la quota vive nel consorzio: qui resta
-              quella di partenza. */}
-          <Voce titolo={call.pubblicata_at ? "La tua quota alla pubblicazione" : "La tua quota"}>
-            {call.quota_creatore_pct ? `${mostraDecimale(call.quota_creatore_pct)}%` : "Non indicata"}
-          </Voce>
-          <Voce titolo="Chi la vede">{CALL_COPY.visibilita[call.visibilita]}</Voce>
-          {call.pubblicata_at && <Voce titolo="Pubblicata il">{formatDate(call.pubblicata_at)}</Voce>}
-          {call.versione > 0 && <Voce titolo="Versione">{call.versione}</Voce>}
-        </dl>
-        <div className="mt-4">
-          <NotaAnonima anonima={call.anonima} />
-        </div>
-      </Sezione>
-
-      <ConsultoCallCard call={call} />
-
-      <Sezione titolo={call.titolo || "Call senza titolo"}>
-        <dl className="space-y-4">
-          <Voce titolo="Il progetto">
-            {call.descrizione_pubblica ? (
-              <span className="whitespace-pre-line">{call.descrizione_pubblica}</span>
-            ) : (
-              <span className="text-slate-500">Non ancora scritto.</span>
-            )}
-          </Voce>
-          {call.profilo_partner_ideale && (
-            <Voce titolo="Il partner ideale">
-              <span className="whitespace-pre-line">{call.profilo_partner_ideale}</span>
-            </Voce>
-          )}
-          {call.dettagli_riservati && (
-            <Voce titolo="Dettagli riservati (solo per chi accetti)">
-              <span className="whitespace-pre-line">{call.dettagli_riservati}</span>
-            </Voce>
-          )}
-        </dl>
-      </Sezione>
-
-      <Sezione titolo={`Requisiti (ne cerchi ${cercati})`}>
-        {requisiti.length === 0 ? (
-          <p className="text-sm text-slate-500">Nessun requisito salvato.</p>
+      <Section>
+        <SectionHeader titolo="Il progetto" />
+        {call.descrizione_pubblica ? (
+          <p className="max-w-[680px] whitespace-pre-line text-prose text-ink">{call.descrizione_pubblica}</p>
         ) : (
-          <ul className="space-y-2">
+          <p className="text-body text-ink-3">Non ancora scritto.</p>
+        )}
+      </Section>
+      {call.profilo_partner_ideale && (
+        <Section>
+          <SectionHeader titolo="Il partner ideale" />
+          <p className="max-w-[680px] whitespace-pre-line text-prose text-ink">{call.profilo_partner_ideale}</p>
+        </Section>
+      )}
+      {call.dettagli_riservati && (
+        <Section>
+          <SectionHeader titolo="Dettagli riservati (solo per chi accetti)" />
+          <p className="max-w-[680px] whitespace-pre-line text-prose text-ink">{call.dettagli_riservati}</p>
+        </Section>
+      )}
+
+      <Section>
+        <SectionHeader titolo={`Requisiti (ne cerchi ${cercati})`} />
+        {requisiti.length === 0 ? (
+          <p className="text-body text-ink-3">Nessun requisito salvato.</p>
+        ) : (
+          <ul className="flex flex-col">
             {requisiti.map((r, i) => (
-              <li key={r.id ?? i} className="flex flex-wrap items-start gap-2 text-sm">
-                {r.etichetta && (
-                  <Badge tone="brand" className="shrink-0 tabular">
-                    {r.etichetta}
-                  </Badge>
-                )}
+              <li key={r.id ?? i} className="flex flex-wrap items-start gap-x-4 gap-y-1 border-b border-line py-3 text-body">
+                {r.etichetta && <Badge className="mt-0.5 shrink-0 tabular-nums">{r.etichetta}</Badge>}
                 <div className="min-w-0 flex-1">
-                  <p className="text-slate-800">
+                  <p className="text-ink">
                     {r.testo}
-                    {r.cercato && <span className="ml-1.5 text-xs font-medium text-brand-700">· lo cerchi</span>}
+                    {r.cercato && <span className="ml-2 text-small font-medium text-accent-hover">Lo cerchi</span>}
                   </p>
-                  <p className="text-xs text-slate-500">
-                    {descriviCriterio(r.criterio, nomi)} · {CALL_COPY.ambiti[r.ambito]}
+                  <p className="text-small text-ink-3">
+                    {descriviCriterio(r.criterio, nomi)}, {CALL_COPY.ambiti[r.ambito]}
                   </p>
                 </div>
-                {r.copertura_creatore && <CoperturaBadge esito={r.copertura_creatore} />}
+                {r.copertura_creatore && <Copertura esito={r.copertura_creatore} />}
               </li>
             ))}
           </ul>
         )}
-        <p className="mt-3 text-xs text-slate-500">La tua copertura dei requisiti la vedi solo tu.</p>
-      </Sezione>
+        <p className="text-small text-ink-3">La tua copertura dei requisiti la vedi solo tu.</p>
+      </Section>
 
-      <Sezione titolo="Posizioni cercate">
+      <Section>
+        <SectionHeader titolo="Posizioni cercate" />
         {call.posizioni.length === 0 ? (
-          <p className="text-sm text-slate-500">Nessuna posizione salvata.</p>
+          <p className="text-body text-ink-3">Nessuna posizione salvata.</p>
         ) : (
-          <ul className="space-y-2">
+          <ul className="flex flex-col">
             {call.posizioni.map((p) => (
-              <li key={p.id} className="rounded-lg border border-slate-200 px-3.5 py-2.5 text-sm">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-slate-800">{p.titolo}</span>
-                  <Badge tone={p.ruolo === "capofila" ? "brand" : "slate"}>
-                    {p.ruolo === "capofila" ? "Capofila" : "Partner"}
-                  </Badge>
-                  {p.numero > 1 && <Badge tone="slate">{p.numero} partner</Badge>}
-                  {p.quota_ipotizzata_pct && <Badge tone="slate">Quota {percentuale(p.quota_ipotizzata_pct)}</Badge>}
-                </div>
+              <li key={p.id} className="flex flex-col gap-1 border-b border-line py-3">
+                <p className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                  <span className="font-medium text-ink">{p.titolo}</span>
+                  <span className="text-small text-ink-2">{p.ruolo === "capofila" ? "Capofila" : "Partner"}</span>
+                  {p.numero > 1 && <span className="text-small text-ink-2">{p.numero} partner</span>}
+                  {p.quota_ipotizzata_pct && (
+                    <span className="text-small text-ink-2">Quota {percentuale(p.quota_ipotizzata_pct)}</span>
+                  )}
+                </p>
                 {p.requisiti_ids.length > 0 && (
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="text-small text-ink-3">
                     Copre i requisiti: {p.requisiti_ids.map((id) => etichetteRequisiti.get(id) ?? "—").join(", ")}
                   </p>
                 )}
@@ -388,25 +348,21 @@ function Panoramica({ call }: { call: CallVistaCreatore }) {
             ))}
           </ul>
         )}
-      </Sezione>
+      </Section>
 
-      <Sezione
-        titolo="Regole del bando confermate"
-        azione={
-          call.editable && call.stato === "bozza" ? (
-            <Link
-              to={`/app/partenariati/call/${call.id}/modifica?passo=2`}
-              className="text-sm font-medium text-brand-600 hover:text-brand-700"
-            >
-              Rivedi
-            </Link>
-          ) : undefined
-        }
-      >
+      <Section>
+        <SectionHeader
+          titolo="Regole del bando confermate"
+          azione={
+            call.editable && call.stato === "bozza" ? (
+              <TextLink to={`/app/partenariati/call/${call.id}/modifica?passo=2`}>Rivedi</TextLink>
+            ) : undefined
+          }
+        />
         {regole ? (
-          <div className="space-y-1 text-sm text-slate-700">
+          <div className="flex flex-col gap-1 text-body text-ink-2">
             <p>Modalità: {PARTENARIATO_COPY.modalita[regole.modalita.valore] ?? regole.modalita.valore}</p>
-            <p className="text-xs text-slate-500">
+            <p className="text-small text-ink-3">
               {[
                 regole.forme_ammesse.length ? `${regole.forme_ammesse.length} forme ammesse` : null,
                 regole.composizione.length ? `${regole.composizione.length} voci sulla composizione` : null,
@@ -415,17 +371,17 @@ function Panoramica({ call }: { call: CallVistaCreatore }) {
                 regole.regole_finanziarie.length ? `${regole.regole_finanziarie.length} requisiti economici` : null,
               ]
                 .filter(Boolean)
-                .join(" · ") || "Nessuna voce oltre alla modalità."}
+                .join(", ") || "Nessuna voce oltre alla modalità."}
             </p>
             {call.esclusivita && <p>Il bando ammette un solo partenariato per soggetto.</p>}
             {call.regole_confermate_at && (
-              <p className="text-xs text-slate-500">Confermate il {formatDate(call.regole_confermate_at)}.</p>
+              <p className="text-small text-ink-3">Confermate il {formatDate(call.regole_confermate_at)}.</p>
             )}
           </div>
         ) : (
-          <p className="text-sm text-slate-500">Non ancora confermate.</p>
+          <p className="text-body text-ink-3">Non ancora confermate.</p>
         )}
-      </Sezione>
+      </Section>
 
       <Versioni call={call} />
     </div>
@@ -447,33 +403,20 @@ function AzioneSuggerito({
   onInvita: () => void;
 }) {
   const contatto = (suggerito as PartnerSuggeritoContatto).stato_contatto ?? null;
-  if (contatto === "accettata") {
-    return (
-      <Badge tone="emerald">
-        <Check className="size-3.5" aria-hidden />
-        Accettata
-      </Badge>
-    );
-  }
+  if (contatto === "accettata") return <Status tono="aperto">Accettata</Status>;
   if (contatto === "rifiutata" && !invitata) {
     // Ha già rifiutato un tuo invito su questa call: non si reinvita.
-    return (
-      <Badge tone="slate">
-        <X className="size-3.5" aria-hidden />
-        Ha rifiutato l'invito
-      </Badge>
-    );
+    return <Status tono="chiuso">Ha rifiutato l'invito</Status>;
   }
   if (contatto === "inviata" || invitata) {
     return (
-      <Badge tone="amber">
-        <Send className="size-3.5" aria-hidden />
+      <Status tono="in-apertura">
         {invitata && contatto !== "inviata" ? "Invito inviato" : "In attesa di risposta"}
-      </Badge>
+      </Status>
     );
   }
   if (!suggerito.profilo.accetta_inviti) {
-    return <p className="max-w-32 text-right text-xs text-slate-500">Preferisce non ricevere inviti</p>;
+    return <p className="text-small text-ink-3">Preferisce non ricevere inviti</p>;
   }
   if (!puoInvitare) return null;
   return (
@@ -483,9 +426,17 @@ function AzioneSuggerito({
       onClick={onInvita}
       aria-label={`Invita l'azienda con riferimento ${suggerito.pseudonimo}`}
     >
-      <Send className="size-4" aria-hidden />
       Invita
     </Button>
+  );
+}
+
+function ListaInCaricamento() {
+  return (
+    <div className="flex flex-col gap-3" aria-hidden>
+      <Skeleton className="h-32 w-full" />
+      <Skeleton className="h-32 w-full" />
+    </div>
   );
 }
 
@@ -509,24 +460,25 @@ function Suggeriti({ call }: { call: CallVistaCreatore }) {
   const testi = new Map(
     call.gap.requisiti.flatMap((r) => (r.etichetta ? [[r.etichetta, r.testo] as const] : [])),
   );
+  const scrivi = (n: number, replace: boolean) =>
+    setParams(
+      (prima) => {
+        const dopo = new URLSearchParams(prima);
+        if (n > 1) dopo.set("page", String(n));
+        else dopo.delete("page");
+        return dopo;
+      },
+      { replace },
+    );
   const vaiA = (n: number) => {
-    setParams((prima) => {
-      const dopo = new URLSearchParams(prima);
-      if (n > 1) dopo.set("page", String(n));
-      else dopo.delete("page");
-      return dopo;
-    });
+    scrivi(n, false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+  const inRientro = useRientroPagina(suggeriti.data, pagina, suggeriti.isPlaceholderData, (n) =>
+    scrivi(n, true),
+  );
 
-  if (suggeriti.isPending) {
-    return (
-      <div className="space-y-3" aria-hidden>
-        <Skeleton className="h-40 w-full" />
-        <Skeleton className="h-40 w-full" />
-      </div>
-    );
-  }
+  if (suggeriti.isPending || inRientro) return <ListaInCaricamento />;
   if (suggeriti.isError) {
     return (
       <ErrorState
@@ -545,13 +497,13 @@ function Suggeriti({ call }: { call: CallVistaCreatore }) {
     );
   }
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-slate-500">
+    <div className="flex flex-col gap-3">
+      <p className="text-body text-ink-2">
         Aziende che hanno scelto di farsi trovare come partner e coprono qualcosa di ciò che
         cerchi, dalle più adatte. Non sanno che le stai guardando. Le aziende collegate alla tua
         non compaiono.
       </p>
-      <p className="text-sm text-slate-500" role="status" aria-live="polite">
+      <p className="text-small text-ink-3" role="status" aria-live="polite">
         {suggeriti.isPlaceholderData
           ? "Aggiornamento…"
           : dati.total === 1
@@ -559,7 +511,7 @@ function Suggeriti({ call }: { call: CallVistaCreatore }) {
             : `${dati.total} aziende suggerite`}
       </p>
       <ul
-        className={`space-y-3 transition-opacity ${suggeriti.isPlaceholderData ? "opacity-60" : ""}`}
+        className={`flex flex-col border-t border-line transition-opacity ${suggeriti.isPlaceholderData ? "opacity-60" : ""}`}
         aria-busy={suggeriti.isPlaceholderData}
       >
         {dati.items.map((s) => (
@@ -617,22 +569,21 @@ function CandidatureCall({ call }: { call: CallVistaCreatore }) {
       else p.delete("direzione");
       p.delete("page");
     });
-  const vaiA = (n: number) => {
+  const scriviPagina = (n: number) =>
     aggiorna((p) => {
       if (n > 1) p.set("page", String(n));
       else p.delete("page");
     });
+  const vaiA = (n: number) => {
+    scriviPagina(n);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+  // `aggiorna` scrive già in sostituzione: il rientro è la stessa scrittura, senza scroll.
+  const inRientro = useRientroPagina(lista.data, pagina, lista.isPlaceholderData, scriviPagina);
 
   let corpo: ReactNode;
-  if (lista.isPending) {
-    corpo = (
-      <div className="space-y-3" aria-hidden>
-        <Skeleton className="h-40 w-full" />
-        <Skeleton className="h-40 w-full" />
-      </div>
-    );
+  if (lista.isPending || inRientro) {
+    corpo = <ListaInCaricamento />;
   } else if (lista.isError) {
     corpo = (
       <ErrorState
@@ -659,8 +610,8 @@ function CandidatureCall({ call }: { call: CallVistaCreatore }) {
       );
   } else {
     corpo = (
-      <div className="space-y-3">
-        <p className="text-sm text-slate-500" role="status" aria-live="polite">
+      <div className="flex flex-col gap-3">
+        <p className="text-small text-ink-3" role="status" aria-live="polite">
           {lista.isPlaceholderData
             ? "Aggiornamento…"
             : lista.data.total === 1
@@ -672,7 +623,7 @@ function CandidatureCall({ call }: { call: CallVistaCreatore }) {
                 : `${lista.data.total} inviti`}
         </p>
         <ul
-          className={`space-y-3 transition-opacity ${lista.isPlaceholderData ? "opacity-60" : ""}`}
+          className={`flex flex-col border-t border-line transition-opacity ${lista.isPlaceholderData ? "opacity-60" : ""}`}
           aria-busy={lista.isPlaceholderData}
         >
           {lista.data.items.map((c) => (
@@ -680,18 +631,24 @@ function CandidatureCall({ call }: { call: CallVistaCreatore }) {
           ))}
         </ul>
         <Pagination page={lista.data.page} totalPages={lista.data.total_pages} onChange={vaiA} />
+        {direzione === "ricevute" && call.editable && (
+          <p className="text-small text-ink-3">
+            Quando accetti una candidatura si apre una conversazione con l'azienda. Da quel momento
+            vede anche i dettagli riservati e il budget esatto della call.
+          </p>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <SceltaDirezione
         valore={direzione}
         onChange={cambiaDirezione}
         etichette={{ ricevute: "Candidature ricevute", inviate: "Inviti mandati" }}
       />
-      {!call.editable && <p className="text-sm text-slate-500">{CANDIDATURE_COPY.soloTitolare}</p>}
+      {!call.editable && <p className="text-small text-ink-3">{CANDIDATURE_COPY.soloTitolare}</p>}
       {corpo}
     </div>
   );
@@ -701,33 +658,23 @@ function CandidatureCall({ call }: { call: CallVistaCreatore }) {
  *  con il dettaglio della call (vista «proprio», con i tuoi numeri). */
 function Confronto({ call, match }: { call: CallPubblica; match: MatchOut | null }) {
   const testi = new Map(call.requisiti.map((r) => [r.etichetta, r.testo] as const));
-  let corpo: ReactNode;
-  if (!match) {
-    corpo = (
-      <p className="text-sm text-slate-600">
-        La tua azienda non risulta tra quelle adatte a questa call. Controlla i requisiti e le
-        posizioni cercate.
-      </p>
-    );
-  } else {
-    corpo = (
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <MatchBadge match={match} />
-          <AttenzioneBadge match={match} />
-        </div>
-        <MatchSpiegazione match={match} testi={testi} />
-      </div>
-    );
-  }
   return (
-    <Card className="p-5">
-      <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
-        <Scale className="size-4 text-brand-500" aria-hidden />
-        La tua azienda e questa call
-      </h2>
-      <div className="mt-3">{corpo}</div>
-    </Card>
+    <Panel titolo="La tua azienda e questa call">
+      {!match ? (
+        <p className="text-body text-ink-2">
+          La tua azienda non risulta tra quelle adatte a questa call. Controlla i requisiti e le
+          posizioni cercate.
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <MatchBadge match={match} />
+            <AttenzioneBadge match={match} />
+          </div>
+          <MatchSpiegazione match={match} testi={testi} />
+        </>
+      )}
+    </Panel>
   );
 }
 
@@ -756,36 +703,33 @@ function LaTuaCandidatura({
   const titolo = propria?.tipo === "invito" ? "L'invito ricevuto" : "La tua candidatura";
 
   return (
-    <section aria-label={titolo} className="space-y-3">
-      <div role="status" aria-live="polite">
+    <section aria-label={titolo} className="flex flex-col gap-4">
+      <div aria-live="polite">
         {annuncio && (
-          <p className="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{annuncio}</p>
+          <Alert tono="ok" ruolo="none">
+            {annuncio}
+          </Alert>
         )}
       </div>
       {propria && (
-        <div>
-          <h2 className="mb-2 font-display text-base font-semibold text-slate-900">{titolo}</h2>
+        <Panel titolo={titolo}>
           <CandidaturaPropriaCard candidatura={propria} callId={call.id} posizioni={call.posizioni} />
-        </div>
+        </Panel>
       )}
       {puoCandidarsi && (
-        <Card className="p-5">
-          <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
-            <Send className="size-4 text-brand-500" aria-hidden />
-            {propria?.tipo === "candidatura" ? "Candidati di nuovo" : "Ti interessa?"}
-          </h2>
-          <p className="mt-2 text-sm text-slate-600">
+        <Panel titolo={propria?.tipo === "candidatura" ? "Candidati di nuovo" : "Ti interessa?"}>
+          <p className="text-body text-ink-2">
             Candidati con un messaggio: chi ha creato la call vede il profilo partner della tua
             azienda, in forma anonima, e decide se aprire una conversazione.
           </p>
           {editable ? (
-            <Button className="mt-3 w-full" onClick={() => setAperto(true)}>
-              Candidati
-            </Button>
+            <div>
+              <Button onClick={() => setAperto(true)}>Candidati</Button>
+            </div>
           ) : (
-            <p className="mt-2 text-xs text-slate-500">{CANDIDATURE_COPY.soloTitolare}</p>
+            <p className="text-small text-ink-3">{CANDIDATURE_COPY.soloTitolare}</p>
           )}
-        </Card>
+        </Panel>
       )}
       {editable && (
         <CandidaturaDialog
@@ -812,31 +756,64 @@ function Riservati({ call }: { call: CallDettaglioAltraAzienda }) {
   const identita = call.identita_rivelata ? call.identita : null;
   const dettagli = call.dettagli_riservati ?? null;
   const budget = call.budget_progetto_eur ?? null;
+  const voci: Definizione[] = [];
+  if (identita?.ragione_sociale) {
+    voci.push({
+      etichetta: "Azienda",
+      valore: identita.ragione_sociale,
+      nota: [identita.sito_web, identita.pec ? `PEC ${identita.pec}` : null].filter(Boolean).join(", ") || undefined,
+    });
+  }
+  if (identita?.referente_nome) voci.push({ etichetta: "Referente", valore: identita.referente_nome });
+  voci.push({ etichetta: "Budget esatto del progetto", valore: budget ? formatEur(budget) : "Non indicato" });
+  voci.push({
+    etichetta: "Dettagli riservati",
+    valore: dettagli ? (
+      <span className="whitespace-pre-line">{dettagli}</span>
+    ) : (
+      <span className="text-ink-3">Nessun dettaglio riservato.</span>
+    ),
+  });
   return (
-    <Card className="p-5">
-      <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
-        <Lock className="size-4 text-slate-400" aria-hidden />
-        Riservato alle aziende accettate
-      </h2>
-      <dl className="mt-3 space-y-4">
-        {identita?.ragione_sociale && (
-          <Voce titolo="Azienda">
-            {identita.ragione_sociale}
-            {identita.sito_web ? ` · ${identita.sito_web}` : ""}
-            {identita.pec ? ` · PEC ${identita.pec}` : ""}
-          </Voce>
+    <Section>
+      <SectionHeader titolo="Riservato alle aziende accettate" />
+      <DefinitionList items={voci} />
+    </Section>
+  );
+}
+
+/** «La call in breve»: posizioni cercate, scadenza del bando e visibilità,
+ *  nel pannello della colonna laterale. */
+function CallInBreve({ call }: { call: CallVistaCreatore }) {
+  const n = call.posizioni.length;
+  return (
+    <Panel titolo="La call in breve">
+      <div className="flex flex-col gap-1">
+        <p className="font-semibold text-ink">
+          {n === 0 ? "Nessuna posizione cercata" : n === 1 ? "1 posizione cercata" : `${n} posizioni cercate`}
+        </p>
+        {n > 0 && (
+          <ul className="flex flex-col gap-0.5 text-small text-ink-2">
+            {call.posizioni.map((p) => (
+              <li key={p.id}>{p.titolo}</li>
+            ))}
+          </ul>
         )}
-        {identita?.referente_nome && <Voce titolo="Referente">{identita.referente_nome}</Voce>}
-        <Voce titolo="Budget esatto del progetto">{budget ? formatEur(budget) : "Non indicato"}</Voce>
-        <Voce titolo="Dettagli riservati">
-          {dettagli ? (
-            <span className="whitespace-pre-line">{dettagli}</span>
-          ) : (
-            <span className="text-slate-500">Nessun dettaglio riservato.</span>
-          )}
-        </Voce>
-      </dl>
-    </Card>
+      </div>
+      <div className="flex flex-col gap-1 border-t border-line pt-3">
+        <p className="font-semibold text-ink">Scadenza del bando</p>
+        <Due data={call.bando.scadenza} />
+      </div>
+      <div className="flex flex-col gap-1 border-t border-line pt-3">
+        <p className="font-semibold text-ink">Visibilità</p>
+        <p className="text-small text-ink-2">
+          {CALL_COPY.visibilita[call.visibilita]}.{" "}
+          {call.anonima
+            ? "La call è anonima: le altre aziende non vedono il nome della tua."
+            : "La call mostra il nome della tua azienda."}
+        </p>
+      </div>
+    </Panel>
   );
 }
 
@@ -848,7 +825,6 @@ function Riservati({ call }: { call: CallDettaglioAltraAzienda }) {
  *  anche i dettagli riservati e le schede del consorzio e delle bozze. */
 export default function CallPartenariato() {
   const { id } = useParams();
-  const [params, setParams] = useSearchParams();
   const location = useLocation();
   const { avviso } = useAziendaDaLink();
   const { data: azienda } = useCompany();
@@ -864,161 +840,214 @@ export default function CallPartenariato() {
     const timer = window.setTimeout(() => setAnnuncio(annuncioArrivo), 150);
     return () => window.clearTimeout(timer);
   }, [annuncioArrivo, location.key]);
-  const schede = isVistaCreatore(callQ.data)
+  // Il type guard va usato direttamente nella condizione: in una variabile
+  // booleana non restringerebbe `callQ.data`.
+  const schede: Scheda<Tab>[] = isVistaCreatore(callQ.data)
     ? schedeCreatore(callQ.data)
     : callQ.data
       ? schedeAltraAzienda(callQ.data)
       : [];
-  const tab: Tab = schede.some((s) => s.id === params.get("tab")) ? (params.get("tab") as Tab) : "panoramica";
-  const cambiaScheda = (t: Tab) =>
-    setParams(
-      (p) => {
-        const nuovi = new URLSearchParams(p);
-        nuovi.set("tab", t);
-        // La pagina è della scheda: si riparte dalla prima.
-        nuovi.delete("page");
-        return nuovi;
-      },
-      { replace: true },
-    );
+  const { tab, setTab: cambiaScheda } = useTab<Tab>(
+    schede.map((s) => s.id),
+    { default: "panoramica" },
+  );
+  const editable = azienda?.editable ?? false;
 
-  let corpo: ReactNode;
+  const avvisi = (
+    <>
+      {avviso && <Alert tono="attenzione">{avviso}</Alert>}
+      <div aria-live="polite">
+        {annuncio && (
+          <Alert tono="ok" ruolo="none">
+            {annuncio}
+          </Alert>
+        )}
+      </div>
+    </>
+  );
+
+  // Il ritorno a «Partenariati» c'è in ogni stato, anche in caricamento ed errore.
+  const ritorno = <BackLink label="Partenariati" to="/app/partenariati" />;
+
   if (callQ.isPending) {
-    corpo = (
-      <div className="space-y-4" aria-hidden>
-        <Skeleton className="h-10 w-2/3" />
-        <Skeleton className="h-40 w-full" />
-        <Skeleton className="h-64 w-full" />
-      </div>
-    );
-  } else if (callQ.isError) {
-    corpo =
-      apiErrorCode(callQ.error) === "not_found" && id ? (
-        // «Call non trovata», oppure (WP9) l'uscita dal consorzio di una
-        // call sospesa per moderazione di cui la tua azienda fa parte.
-        <CallNonTrovata callId={id} />
-      ) : (
-        <ErrorState
-          message={apiErrorMessage(callQ.error, "Impossibile caricare la call.")}
-          onRetry={() => void callQ.refetch()}
-        />
-      );
-  } else if (!isVistaCreatore(callQ.data)) {
-    const pubblica = callQ.data;
-    const tua = perLaTuaAzienda(pubblica);
-    const vistaCall = (
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-        {!tua.controparte && <h1 className="sr-only">{pubblica.titolo || "Call di partenariato"}</h1>}
-        <div className="min-w-0 space-y-4">
-          <CallPubblicaCard call={pubblica} />
-          {tua.controparte && <Riservati call={pubblica as CallDettaglioAltraAzienda} />}
+    return (
+      <Page variante="dettaglio">
+        {ritorno}
+        {avvisi}
+        <div className="flex flex-col gap-4" aria-hidden>
+          <Skeleton className="h-8 w-2/3" />
+          <Skeleton className="h-40 w-full" />
+          <Skeleton className="h-64 w-full" />
         </div>
-        <aside className="space-y-4" aria-label="Per la tua azienda">
-          <LaTuaCandidatura
-            call={pubblica as CallDettaglioAltraAzienda}
-            propria={tua.candidatura}
-            editable={azienda?.editable ?? false}
+      </Page>
+    );
+  }
+  if (callQ.isError) {
+    return (
+      <Page variante="dettaglio">
+        {ritorno}
+        {avvisi}
+        {apiErrorCode(callQ.error) === "not_found" && id ? (
+          // «Call non trovata», oppure (WP9) l'uscita dal consorzio di una
+          // call sospesa per moderazione di cui la tua azienda fa parte.
+          <CallNonTrovata callId={id} />
+        ) : (
+          <ErrorState
+            message={apiErrorMessage(callQ.error, "Impossibile caricare la call.")}
+            onRetry={() => void callQ.refetch()}
           />
-          {/* La controparte accettata non ha confronto né «salvata»: il
-              partenariato c'è già. */}
-          {!tua.controparte && <Confronto call={pubblica} match={tua.match} />}
-          {!tua.controparte && <BannerOptIn optIn={tua.opt_in} />}
-          <div className="flex flex-wrap items-start justify-end gap-2">
-            {azienda?.editable && !tua.controparte && (
-              <SalvaCallButton
-                id={pubblica.id}
-                titolo={pubblica.titolo || "Call senza titolo"}
-                salvata={tua.salvata}
-              />
-            )}
-            <Button variant="ghost" size="sm" onClick={() => setSegnala(true)}>
-              <Flag className="size-4" aria-hidden />
-              Segnala
-            </Button>
-          </div>
-        </aside>
-        <SegnalaDialog open={segnala} onClose={() => setSegnala(false)} oggettoTipo="call" oggettoId={pubblica.id} />
-      </div>
-    );
-    // La controparte accettata è nel consorzio: la call, il consorzio e le
-    // bozze dei documenti in schede; il titolo della call resta
-    // l'intestazione (nascosta) della pagina.
-    corpo = tua.controparte ? (
-      <div className="space-y-4">
-        <h1 className="sr-only">{pubblica.titolo || "Call di partenariato"}</h1>
-        <Schede etichetta="Sezioni della call" schede={schede} attiva={tab} onCambia={cambiaScheda}>
-          {tab === "consorzio" ? (
-            <ConsorzioTab callId={pubblica.id} />
-          ) : tab === "bozze" ? (
-            <BozzeTab callId={pubblica.id} editable={azienda?.editable ?? false} />
-          ) : (
-            vistaCall
-          )}
-        </Schede>
-      </div>
-    ) : (
-      vistaCall
-    );
-  } else {
-    const call = callQ.data;
-    corpo = (
-      <div className="space-y-5">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <CallStatoBadge stato={call.stato} />
-            {call.scadenza_call && (
-              <span className="inline-flex items-center gap-1 text-sm text-slate-600">
-                <CalendarClock className="size-4 text-slate-400" aria-hidden />
-                Candidature fino al {formatDate(call.scadenza_call)}
-              </span>
-            )}
-          </div>
-          <h1 className="mt-2 font-display text-2xl font-bold tracking-tight text-slate-900">
-            {call.titolo || "Call senza titolo"}
-          </h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Per il bando{" "}
-            <Link to={`/app/bandi/${call.bando.slug}`} className="font-medium text-brand-600 hover:text-brand-700">
-              {call.bando.titolo}
-            </Link>
-            {call.bando.scadenza ? `, che scade il ${formatDate(call.bando.scadenza)}` : ""}
-          </p>
-        </div>
-        <Schede etichetta="Sezioni della call" schede={schede} attiva={tab} onCambia={cambiaScheda}>
-          {tab === "panoramica" && <Panoramica call={call} />}
-          {tab === "suggeriti" && <Suggeriti call={call} />}
-          {tab === "candidature" && <CandidatureCall call={call} />}
-          {tab === "consorzio" && (
-            <ConsorzioTab callId={call.id} posizioni={call.posizioni} />
-          )}
-          {tab === "bozze" && <BozzeTab callId={call.id} editable={call.editable} />}
-        </Schede>
-      </div>
+        )}
+      </Page>
     );
   }
 
-  return (
-    <div className="mx-auto max-w-5xl space-y-4">
-      <p className="text-sm text-slate-500">
-        <Link
-          to={isVistaCreatore(callQ.data) ? "/app/partenariati?vista=mie" : "/app/partenariati"}
-          className="inline-flex items-center gap-1.5 font-medium text-brand-600 hover:text-brand-700"
-        >
-          <Handshake className="size-4" aria-hidden />
-          Partenariati
-        </Link>
-      </p>
-      {avviso && (
-        <p role="status" className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {avviso}
-        </p>
+  const call = callQ.data;
+  const titolo = call.titolo || "Call senza titolo";
+  const relativo = call.scadenza_call ? tempoRelativo(call.scadenza_call) : "";
+  const sopra = (
+    <>
+      <CallStatoBadge stato={call.stato} />
+      {call.scadenza_call && (
+        <span className="text-small text-ink-2">Candidature fino al {formatDate(call.scadenza_call)}</span>
       )}
-      <div role="status" aria-live="polite">
-        {annuncio && (
-          <p className="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{annuncio}</p>
+      {relativo && <span className="text-caption text-ink-3">{relativo}</span>}
+    </>
+  );
+  const descrizione = (
+    <>
+      Per il bando <TextLink to={`/app/bandi/${call.bando.slug}`}>{call.bando.titolo}</TextLink>
+      {call.bando.scadenza ? `, che scade il ${formatDate(call.bando.scadenza)}` : ""}
+    </>
+  );
+  const schedeVisibili = schede.length > 1 && (
+    <Tabs tabs={schede} attivo={tab} onChange={cambiaScheda} ariaLabel="Sezioni della call" prefisso={PREFISSO_SCHEDE} />
+  );
+
+  if (!isVistaCreatore(call)) {
+    const pubblica = call as CallPubblica;
+    const tua = perLaTuaAzienda(pubblica);
+    const dettaglio = pubblica as CallDettaglioAltraAzienda;
+    const vistaCall = (
+      <>
+        <CallPubblicaCard call={pubblica} senzaTitolo />
+        {tua.controparte && <Riservati call={dettaglio} />}
+      </>
+    );
+    const laterale = (
+      <>
+        <LaTuaCandidatura call={dettaglio} propria={tua.candidatura} editable={editable} />
+        {/* La controparte accettata non ha confronto né «salvata»: il partenariato c'è già. */}
+        {!tua.controparte && <Confronto call={pubblica} match={tua.match} />}
+        {!tua.controparte && <BannerOptIn optIn={tua.opt_in} />}
+      </>
+    );
+    const inPanoramica = !tua.controparte || tab === "panoramica";
+    return (
+      <Page
+        variante="dettaglio"
+        intestazione={
+          <>
+            <PageHeader
+              indietro={{ label: "Partenariati", to: "/app/partenariati" }}
+              sopra={sopra}
+              titolo={titolo}
+              descrizione={descrizione}
+              azioni={
+                <>
+                  {editable && !tua.controparte && (
+                    <SalvaCallButton id={pubblica.id} titolo={titolo} salvata={tua.salvata} />
+                  )}
+                  <Button variant="ghost" onClick={() => setSegnala(true)}>
+                    Segnala
+                  </Button>
+                </>
+              }
+            />
+            {avvisi}
+            {schedeVisibili}
+          </>
+        }
+        laterale={inPanoramica ? laterale : undefined}
+      >
+        {/* Il pannello solo se ci sono le schede: senza, `aria-labelledby`
+            punterebbe a una scheda che non esiste. */}
+        {tua.controparte && schede.length > 1 ? (
+          <TabPanel key={tab} id={tab} attivo={tab} prefisso={PREFISSO_SCHEDE}>
+            {tab === "consorzio" ? (
+              <ConsorzioTab callId={pubblica.id} />
+            ) : tab === "bozze" ? (
+              <BozzeTab callId={pubblica.id} editable={editable} />
+            ) : (
+              vistaCall
+            )}
+          </TabPanel>
+        ) : (
+          vistaCall
         )}
-      </div>
-      {corpo}
-    </div>
+        <SegnalaDialog open={segnala} onClose={() => setSegnala(false)} oggettoTipo="call" oggettoId={pubblica.id} />
+      </Page>
+    );
+  }
+
+  const aperta = call.stato === "bozza" || call.stato === "pubblicata";
+  const contenutoScheda = (
+    <>
+      {tab === "panoramica" && <Panoramica call={call} />}
+      {tab === "suggeriti" && <Suggeriti call={call} />}
+      {tab === "candidature" && <CandidatureCall call={call} />}
+      {tab === "consorzio" && <ConsorzioTab callId={call.id} posizioni={call.posizioni} />}
+      {tab === "bozze" && <BozzeTab callId={call.id} editable={call.editable} />}
+    </>
+  );
+  return (
+    <Page
+      variante="dettaglio"
+      intestazione={
+        <>
+          <PageHeader
+            indietro={{ label: "Partenariati", to: "/app/partenariati?tab=mie" }}
+            sopra={sopra}
+            titolo={titolo}
+            descrizione={descrizione}
+            azioni={
+              call.editable && aperta ? (
+                <>
+                  {call.stato === "bozza" ? (
+                    <LinkButton to={linkCall(call)}>
+                      <Pencil className="size-4" aria-hidden />
+                      Riprendi dal passo {call.wizard_passo}
+                    </LinkButton>
+                  ) : (
+                    <LinkButton to={`/app/partenariati/call/${call.id}/modifica?passo=5`} variant="secondary">
+                      <Pencil className="size-4" aria-hidden />
+                      Modifica la call
+                    </LinkButton>
+                  )}
+                  <ChiudiCall call={call} />
+                </>
+              ) : undefined
+            }
+          />
+          {avvisi}
+          {schedeVisibili}
+        </>
+      }
+      laterale={
+        <>
+          <CallInBreve call={call} />
+          <ConsultoCallCard call={call} />
+        </>
+      }
+    >
+      {/* Senza schede (bozza) niente pannello: `aria-labelledby` punterebbe a
+          una scheda che non esiste. */}
+      {schede.length > 1 ? (
+        <TabPanel key={tab} id={tab} attivo={tab} prefisso={PREFISSO_SCHEDE}>
+          {contenutoScheda}
+        </TabPanel>
+      ) : (
+        contenutoScheda
+      )}
+    </Page>
   );
 }

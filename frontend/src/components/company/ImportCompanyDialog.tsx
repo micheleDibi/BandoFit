@@ -1,7 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Handshake, Loader2, Plus, Sparkles, TriangleAlert } from "lucide-react";
+import { CheckCircle2, Plus, TriangleAlert } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
 import { useConfirmImport, usePreviewImport } from "../../hooks/useCompanyDossier";
 import { useFunzioni } from "../../hooks/useFunzioni";
 import { PARTNER_PROFILE_ROOT, usePartnerProfile } from "../../hooks/usePartnerProfile";
@@ -17,11 +16,14 @@ import type {
   MotivoBilanci,
 } from "../../types";
 import { ConsensoPartnerDialog } from "../partenariati/ConsensoPartnerDialog";
-import { Badge } from "../ui/Badge";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { TextField } from "../ui/Field";
+import { Spinner } from "../ui/Spinner";
 import { Skeleton } from "../ui/states";
+import { Status } from "../ui/Status";
+import { TextLink } from "../ui/TextLink";
 
 const FIELD_LABELS: Record<string, string> = {
   ragione_sociale: "Ragione sociale",
@@ -63,8 +65,8 @@ function Riga({ etichetta, valore }: { etichetta: string; valore: string | null 
   if (!valore) return null;
   return (
     <div className="flex gap-3 py-1.5">
-      <dt className="w-40 shrink-0 text-xs uppercase tracking-wide text-slate-400">{etichetta}</dt>
-      <dd className="text-sm text-slate-700">{valore}</dd>
+      <dt className="w-40 shrink-0 text-small text-ink-3">{etichetta}</dt>
+      <dd className="text-body text-ink">{valore}</dd>
     </div>
   );
 }
@@ -101,18 +103,18 @@ function BloccoBilanci({
   const nota = motivo ? notaStorico(motivo, trovati, storicoAttivo) : "";
   return (
     <div>
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+      <p className="text-small font-medium text-ink-3">
         {IMPORT_COPY.bilanciTitolo}
       </p>
       <div className="mt-1.5">
-        <Badge tone={trovati ? "emerald" : "amber"}>
+        <Status tono={trovati ? "aperto" : "neutro"}>
           {trovati
             ? IMPORT_COPY.bilanciTrovati(anni.length, intervalloAnni(anni))
             : IMPORT_COPY.bilanciNonTrovati}
-        </Badge>
+        </Status>
       </div>
       {(trovati || nota) && (
-        <p className="mt-1.5 text-sm text-slate-600">
+        <p className="mt-1.5 text-body text-ink-2">
           {trovati && IMPORT_COPY.bilanciTrovatiNota}
           {trovati && nota && " "}
           {nota}
@@ -257,7 +259,7 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
             : IMPORT_COPY.titoloForm;
 
   const erroreBox = error && (
-    <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+    <p className="rounded-control border border-danger-line bg-danger-soft px-3 py-2 text-small text-danger" role="alert">
       {error}
     </p>
   );
@@ -330,7 +332,7 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
     >
       {previewImport.isPending ? (
         <div className="flex items-start gap-3 py-2">
-          <Loader2 className="mt-0.5 size-5 shrink-0 animate-spin text-brand-600" aria-hidden />
+          <Spinner className="mt-0.5 text-accent" />
           <p aria-live="polite">{IMPORT_COPY.attesa}</p>
         </div>
       ) : step === "conferma-annulla" ? (
@@ -339,7 +341,7 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
         !profiloPartner ? (
           <Skeleton className="h-40 w-full" />
         ) : partnerAttivato ? (
-          <p className="inline-flex items-start gap-2 text-sm text-emerald-700" role="status">
+          <p className="inline-flex items-start gap-2 text-body text-fit-ink" role="status">
             <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden />
             {PARTNER_COPY.attivato}
           </p>
@@ -355,17 +357,17 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
         )
       ) : step === "esito" && result ? (
         <div className="space-y-4">
-          <p className="inline-flex items-start gap-2 text-sm text-emerald-700">
+          <p className="inline-flex items-start gap-2 text-body text-fit-ink">
             <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden />
             {IMPORT_COPY.esitoImportato(result.dossier.anagrafica.denominazione ?? "—")}
           </p>
 
           {result.autofill.applied.length > 0 && (
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              <p className="text-small font-medium text-ink-3">
                 Campi compilati automaticamente
               </p>
-              <p className="mt-1 text-sm text-slate-700">
+              <p className="mt-1 text-body text-ink">
                 {result.autofill.applied.map(fieldLabel).join(", ")}
               </p>
             </div>
@@ -373,11 +375,8 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
 
           {suggested.length > 0 && (
             <div>
-              <p className="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">
-                <Sparkles className="size-3.5 text-brand-500" aria-hidden />
-                ATECO secondari trovati
-              </p>
-              <p className="mt-1 text-sm text-slate-500">
+              <p className="text-small font-medium text-ink-3">ATECO secondari trovati</p>
+              <p className="mt-1 text-body text-ink-2">
                 L'azienda opera anche in altri settori: aggiungili alle tue preferenze per
                 vederli tra i bandi consigliati.
               </p>
@@ -390,15 +389,15 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
                       type="button"
                       onClick={() => handleAddAteco(s.id)}
                       disabled={added || savePreferences.isPending}
-                      className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700 transition-colors hover:bg-brand-100 disabled:cursor-default disabled:opacity-70"
+                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-pill border border-accent-line bg-accent-soft px-3 py-1 text-small font-medium text-accent-hover transition-colors hover:bg-accent-line focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-default disabled:opacity-70"
                     >
                       {added ? (
-                        <CheckCircle2 className="size-3.5" aria-hidden />
+                        <CheckCircle2 className="size-4" aria-hidden />
                       ) : (
-                        <Plus className="size-3.5" aria-hidden />
+                        <Plus className="size-4" aria-hidden />
                       )}
                       {s.codice} {s.descrizione ? `— ${s.descrizione}` : ""}
-                      {added && " ✓ aggiunto"}
+                      {added && " (aggiunto)"}
                     </button>
                   );
                 })}
@@ -406,27 +405,20 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
             </div>
           )}
 
-          <p className="text-sm">
-            <Link
-              to="/app/azienda"
-              onClick={onClose}
-              className="font-medium text-brand-600 hover:text-brand-700"
-            >
-              Vedi il dossier completo →
-            </Link>
+          <p>
+            <TextLink to="/app/azienda?tab=dossier" onClick={onClose} className="font-medium">
+              Vedi il dossier completo
+            </TextLink>
           </p>
 
           {passoPartner && (
-            <p className="flex items-start gap-2 rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-900">
-              <Handshake className="mt-0.5 size-4 shrink-0 text-brand-500" aria-hidden />
-              {PARTNER_COPY.passoImport}
-            </p>
+            <Alert tono="info">{PARTNER_COPY.passoImport}</Alert>
           )}
         </div>
       ) : step === "anteprima" && preview ? (
         <div className="space-y-4">
           <div>
-            <p className="text-sm font-medium text-slate-900">
+            <p className="text-body font-medium text-ink">
               {preview.azienda.ragione_sociale
                 ? IMPORT_COPY.anteprimaTrovata(
                     preview.azienda.partita_iva,
@@ -436,13 +428,13 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
             </p>
             <p className="mt-1">{IMPORT_COPY.anteprimaIstruzioni}</p>
             {preview.reused && (
-              <p className="mt-1 text-xs text-slate-400">{IMPORT_COPY.anteprimaRiusata}</p>
+              <p className="mt-1 text-small text-ink-3">{IMPORT_COPY.anteprimaRiusata}</p>
             )}
           </div>
 
           {!isStatoAttivo(preview.azienda.stato_impresa) && (
             <p
-              className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800"
+              className="flex items-start gap-2 rounded-control border border-warning-line bg-warning-soft px-3 py-2 text-small text-ink"
               role="alert"
             >
               <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
@@ -450,7 +442,7 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
             </p>
           )}
 
-          <dl className="divide-y divide-slate-100 border-y border-slate-100">
+          <dl className="divide-y divide-line border-y border-line">
             <Riga etichetta="Partita IVA" valore={preview.azienda.partita_iva} />
             <Riga etichetta="Codice fiscale" valore={preview.azienda.codice_fiscale} />
             <Riga etichetta="Forma giuridica" valore={preview.azienda.forma_giuridica} />
@@ -476,17 +468,17 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
 
           {preview.autofill.applied.length > 0 && (
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              <p className="text-small font-medium text-ink-3">
                 {IMPORT_COPY.campiCompilati}
               </p>
-              <p className="mt-1 text-sm text-slate-700">
+              <p className="mt-1 text-body text-ink">
                 {preview.autofill.applied.map(fieldLabel).join(", ")}
               </p>
             </div>
           )}
 
           {preview.autofill.conflicts.length > 0 && (
-            <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <div className="rounded-control border border-warning-line bg-warning-soft px-3 py-2 text-small text-ink">
               <p className="font-medium">{IMPORT_COPY.campiNonToccati}</p>
               <ul className="mt-1 space-y-0.5">
                 {preview.autofill.conflicts.map((c) => (
@@ -501,7 +493,7 @@ export function ImportCompanyDialog({ open, onClose, defaultPiva }: ImportCompan
           )}
 
           {preview.autofill.applied.length === 0 && preview.autofill.conflicts.length === 0 && (
-            <p className="text-sm text-slate-500">{IMPORT_COPY.nessunCampo}</p>
+            <p className="text-body text-ink-2">{IMPORT_COPY.nessunCampo}</p>
           )}
 
           {erroreBox}

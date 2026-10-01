@@ -170,6 +170,25 @@ class TestDisiscrizioneEventi:
         assert resp.status_code == 204
         assert chiamate == [(TOKEN, "eventi")]
 
+    async def test_conferma_html_porta_agli_avvisi_email(self, monkeypatch):
+        # Dal browser la conferma ha il link alla scheda «Avvisi email».
+        async def disiscrivi(primary, token, tipo):
+            return None
+
+        monkeypatch.setattr(partenariato_notifiche, "unsubscribe_by_token", disiscrivi)
+        app = FastAPI()
+        register_exception_handlers(app)
+        app.include_router(partenariati_email.router, prefix="/api/v1")
+        app.dependency_overrides[deps.get_primary] = lambda: object()
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://test") as client:
+            resp = await client.post(
+                f"/api/v1/partenariati/email/unsubscribe?token={TOKEN}&tipo=eventi",
+                headers={"accept": "text/html,application/xhtml+xml"},
+            )
+        assert resp.status_code == 200
+        assert "/app/preferenze?tab=avvisi" in resp.text
+
 
 # ------------------------------------------------------------------ contenuti
 
@@ -187,6 +206,8 @@ class TestContenuti:
         assert "L'invito scade il 13/10/2026." in text_part
         assert f"Vedi l'invito: {CTA}" in text_part
         assert "Vedi l&#x27;invito" in html_part  # etichetta escapata da `_branded_html`
+        # link della CTA escapato una sola volta (niente «&amp;amp;»)
+        assert f'href="{CTA.replace("&", "&amp;")}"' in html_part
         assert "riferimento per questa call" not in text_part  # del creatore nessun dato
 
     async def test_invito_minimo(self, posta):
@@ -378,6 +399,14 @@ class TestResend:
             "List-Unsubscribe": f"<{DISISCRIZIONE}>",
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
         }
+
+
+def test_branded_html_escapa_il_link_della_cta():
+    """L'`href` della CTA è escapato con le virgolette: un URL non può
+    chiudere l'attributo né aprire un tag."""
+    out = email_service._branded_html("T", [], "Apri", 'https://x.test/a?b=1&c="><script>', "f")
+    assert 'href="https://x.test/a?b=1&amp;c=&quot;&gt;&lt;script&gt;"' in out
+    assert "<script>" not in out
 
 
 def test_modulo_senza_dipendenze_nuove():

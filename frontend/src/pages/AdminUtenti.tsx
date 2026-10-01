@@ -1,25 +1,21 @@
-import {
-  Ban,
-  Briefcase,
-  CreditCard,
-  Gift,
-  RotateCcw,
-  Search,
-  ShieldCheck,
-  UserCog,
-  UserRound,
-  UsersRound,
-  X,
-} from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { Badge } from "../components/ui/Badge";
+import { Ban, CreditCard, Gift, RotateCcw, UserCog } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Alert } from "../components/ui/Alert";
+import { Avatar } from "../components/ui/Avatar";
 import { Button } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { Dialog } from "../components/ui/Dialog";
 import { SelectField, TextareaField, TextField } from "../components/ui/Field";
 import { Menu, MenuItem, MenuSeparator } from "../components/ui/Menu";
+import { Page } from "../components/ui/Page";
+import { PageHeader } from "../components/ui/PageHeader";
 import { Pagination } from "../components/ui/Pagination";
+import { SearchInput } from "../components/ui/SearchInput";
+import { Select } from "../components/ui/Select";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
+import { Status } from "../components/ui/Status";
+import { Table, Td, Th } from "../components/ui/Table";
+import { useToast } from "../components/ui/Toast";
 import { useAddons } from "../hooks/useAddons";
 import {
   useAdminGrantAddon,
@@ -49,60 +45,10 @@ type PendingAction =
 /** Ordine di presentazione nei select (dal ruolo base al più privilegiato). */
 const RUOLI: UserRole[] = ["cliente", "progettista", "admin"];
 
-function RuoloBadge({ role }: { role: UserRole }) {
-  if (role === "admin") {
-    return (
-      <Badge tone="brand">
-        <ShieldCheck className="size-3" aria-hidden />
-        {RUOLO_LABELS.admin}
-      </Badge>
-    );
-  }
-  if (role === "progettista") {
-    return (
-      <Badge tone="emerald">
-        <Briefcase className="size-3" aria-hidden />
-        {RUOLO_LABELS.progettista}
-      </Badge>
-    );
-  }
-  return (
-    <Badge tone="slate">
-      <UserRound className="size-3" aria-hidden />
-      {RUOLO_LABELS.cliente}
-    </Badge>
-  );
-}
-
-/** Iniziali per l'avatar: nome+cognome, o le prime lettere dell'email. */
-function iniziali(nome: string | null, cognome: string | null, email: string): string {
-  const n = (nome ?? "").trim();
-  const c = (cognome ?? "").trim();
-  if (n || c) return `${n[0] ?? ""}${c[0] ?? ""}`.toUpperCase();
-  return email.slice(0, 2).toUpperCase();
-}
-
-/** Avatar iniziali: ancora di scansione della riga; tinta coerente col ruolo. */
-function UserAvatar({ user }: { user: AdminUser }) {
-  const { role, nome, cognome, email } = user.profile;
-  const tint =
-    role === "admin"
-      ? "bg-brand-100 text-brand-700"
-      : role === "progettista"
-        ? "bg-emerald-100 text-emerald-700"
-        : "bg-slate-100 text-slate-600";
-  return (
-    <div
-      aria-hidden
-      className={cn(
-        "flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
-        tint,
-      )}
-    >
-      {iniziali(nome, cognome, email)}
-    </div>
-  );
-}
+/** Classi delle caselle di selezione della tabella: native, con `aria-label`
+ *  (la `Checkbox` di ui ha sempre un'etichetta visibile). */
+const CASELLA =
+  "size-4 cursor-pointer accent-accent disabled:cursor-not-allowed disabled:opacity-50";
 
 /** Testo del piano corrente (o «Nessun piano»), con la nota disattivato/ereditato. */
 function planoCorrente(user: AdminUser, planiAttivi: Set<number>): string {
@@ -110,6 +56,18 @@ function planoCorrente(user: AdminUser, planiAttivi: Set<number>): string {
   if (!sub) return "—";
   const disattivato = !planiAttivi.has(sub.plan.id);
   return sub.plan.nome + (disattivato ? " (disattivato)" : "");
+}
+
+/** Il gruppo di account dell'utente in parole (sotto la ragione sociale). */
+function gruppoAzienda(user: AdminUser): string | null {
+  const f = user.family;
+  if (f?.type === "child") {
+    const stato =
+      f.status === "active" ? "In azienda" : f.status === "pending" ? "Invitato" : "Retrocesso";
+    return f.parent_email ? `${stato}, di ${f.parent_email}` : stato;
+  }
+  if (f?.type === "parent") return `Titolare, ${f.members_count ?? 0} collegati`;
+  return null;
 }
 
 export default function AdminUtenti() {
@@ -121,8 +79,6 @@ export default function AdminUtenti() {
   const q = useDebounce(searchInput, 400);
   const hasFilter = q.trim() !== "" || role !== "";
 
-  useEffect(() => setPage(1), [q, role]);
-
   const { data, isPending, isError, error, refetch, isPlaceholderData } = useAdminUsers({
     q,
     role,
@@ -132,6 +88,21 @@ export default function AdminUtenti() {
   const switchPlan = useAdminSwitchUserPlan();
   const grantAddon = useAdminGrantAddon();
   const { data: catalogoAddons } = useAddons();
+  const toast = useToast();
+
+  // Pagina oltre l'ultima (il totale è calato, per esempio dopo una
+  // sospensione): si rientra sull'ultima piena invece di mostrare il vuoto.
+  // Mai sui dati segnaposto della query precedente.
+  const fuoriPagina =
+    !!data && page > 1 && page > data.total_pages && data.items.length === 0 && data.total > 0;
+  useEffect(() => {
+    if (fuoriPagina && !isPlaceholderData && data) setPage(Math.max(1, data.total_pages));
+  }, [fuoriPagina, isPlaceholderData, data]);
+
+  // Cambio di filtro o ricerca: si riparte da pagina 1. Dichiarato DOPO il
+  // rientro: se nello stesso commit partono tutti e due (pagina vuota già in
+  // cache per il nuovo filtro), vince il ritorno a pagina 1.
+  useEffect(() => setPage(1), [q, role]);
 
   const planiAttivi = new Set((plans ?? []).map((p) => p.id));
 
@@ -162,16 +133,10 @@ export default function AdminUtenti() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPending, setBulkPending] = useState<{ is_active: boolean } | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
-  const [bulkNotice, setBulkNotice] = useState<string | null>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
 
   // La selezione è per-pagina: si azzera cambiando pagina, filtro o ricerca.
   useEffect(() => setSelected(new Set()), [q, role, page]);
-  useEffect(() => {
-    if (!bulkNotice) return;
-    const t = setTimeout(() => setBulkNotice(null), 6000);
-    return () => clearTimeout(t);
-  }, [bulkNotice]);
 
   // Sé stessi non è selezionabile (non ci si può sospendere).
   const selezionabili = (data?.items ?? []).filter((u) => u.profile.id !== me?.profile.id);
@@ -221,10 +186,14 @@ export default function AdminUtenti() {
     setBulkBusy(false);
     setBulkPending(null);
     setSelected(new Set());
-    setBulkNotice(
+    toast.mostra(
       ko === 0
-        ? `${utenti(ok)} ${verbo(ok)}.`
-        : `${ok} ${verbo(ok)}, ${ko} non riuscit${ko === 1 ? "o" : "i"}.`,
+        ? { testo: `${utenti(ok)} ${verbo(ok)}.` }
+        : {
+            testo: `${ok} ${verbo(ok)}, ${ko} non riuscit${ko === 1 ? "o" : "i"}.`,
+            tono: "errore",
+            durata: 6000,
+          },
     );
   };
 
@@ -302,340 +271,265 @@ export default function AdminUtenti() {
         !motivazione.trim())) ||
     (pending?.kind === "addon" && grantIncompleto);
 
-  return (
-    <div>
-      <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
-        Gestione utenti
-      </h1>
-      <p className="mt-1 text-sm text-slate-500">
-        {data ? (
-          <>
-            <span className="tabular font-medium text-slate-700">{data.total}</span>{" "}
-            {hasFilter ? "risultati" : "utenti registrati"}
-          </>
-        ) : (
-          "Cerca, modifica ruoli e abbonamenti"
-        )}
-      </p>
+  // Pagina oltre l'ultima (`fuoriPagina`, sopra): finché non si rientra si
+  // mostra lo scheletro, non lo stato vuoto.
 
-      {/* Toolbar */}
-      <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-        <div className="relative flex-1">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"
-            aria-hidden
-          />
-          <input
-            type="search"
+  let elenco: ReactNode;
+  if (isPending) {
+    elenco = <SkeletonRighe />;
+  } else if (isError) {
+    elenco = <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />;
+  } else if (fuoriPagina) {
+    elenco = <SkeletonRighe />;
+  } else if (data && data.items.length === 0) {
+    elenco = <EmptyState title="Nessun utente trovato" description="Prova con un'altra ricerca." />;
+  } else {
+    elenco = (
+      <Table
+        className={cn("min-w-[760px]", isPlaceholderData && "opacity-60 transition-opacity")}
+      >
+        <caption className="sr-only">Elenco degli utenti registrati</caption>
+        <thead>
+          <tr>
+            <Th className="w-10">
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                checked={tuttiSelezionati}
+                onChange={toggleAll}
+                disabled={selezionabili.length === 0}
+                aria-label="Seleziona tutti gli utenti della pagina"
+                className={CASELLA}
+              />
+            </Th>
+            <Th>Utente</Th>
+            <Th>Ruolo</Th>
+            <Th>Azienda</Th>
+            <Th>Piano</Th>
+            <Th>Stato</Th>
+            <Th>Registrato</Th>
+            <Th className="text-right">
+              <span className="sr-only">Azioni</span>
+            </Th>
+          </tr>
+        </thead>
+        <tbody>
+          {data?.items.map((user) => {
+            const isSelf = user.profile.id === me?.profile.id;
+            const fullName = [user.profile.nome, user.profile.cognome].filter(Boolean).join(" ");
+            // Solo i figli ATTIVI ereditano il piano (pending/retrocessi
+            // hanno un piano proprio, gestibile normalmente).
+            const isManagedChild = user.family?.type === "child" && user.family.status === "active";
+            const sospeso = !user.profile.is_active;
+            const checked = selected.has(user.profile.id);
+            const gruppo = gruppoAzienda(user);
+            return (
+              <tr
+                key={user.profile.id}
+                className={cn("transition-colors", checked ? "bg-accent-soft" : "hover:bg-desk")}
+              >
+                <Td>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleOne(user.profile.id)}
+                    disabled={isSelf}
+                    title={isSelf ? "Non puoi selezionare il tuo account" : undefined}
+                    aria-label={`Seleziona ${user.profile.email}`}
+                    className={CASELLA}
+                  />
+                </Td>
+                <Td>
+                  <div className="flex items-center gap-3">
+                    {/* Il nome è accanto: l'avatar non lo ripete allo screen reader. */}
+                    <span aria-hidden>
+                      <Avatar nome={fullName || user.profile.email} />
+                    </span>
+                    <div className="min-w-0">
+                      <p className={cn("font-medium", sospeso ? "text-ink-2" : "text-ink")}>
+                        {fullName || "—"}
+                        {isSelf && <span className="ml-1.5 text-small font-normal text-ink-3">(tu)</span>}
+                      </p>
+                      <p className="text-small text-ink-3">{user.profile.email}</p>
+                    </div>
+                  </div>
+                </Td>
+                <Td>
+                  <p className="text-ink-2">{RUOLO_LABELS[user.profile.role]}</p>
+                  {user.progettista?.codice && (
+                    <p className="text-small text-ink-3 tabular-nums">{user.progettista.codice}</p>
+                  )}
+                </Td>
+                <Td>
+                  {/* Ragione sociale (dal dossier, se no dalla registrazione) in cima; il
+                      gruppo di account resta come informazione sotto. */}
+                  {user.azienda_nome ? (
+                    <p className="text-ink">{user.azienda_nome}</p>
+                  ) : (
+                    !gruppo && <span className="text-ink-3">—</span>
+                  )}
+                  {gruppo && <p className="text-small text-ink-3">{gruppo}</p>}
+                </Td>
+                <Td>
+                  {user.subscription ? (
+                    <>
+                      <p className="text-ink-2">{planoCorrente(user, planiAttivi)}</p>
+                      {user.subscription.inherited && (
+                        <p className="text-small text-ink-3">(ereditato)</p>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-ink-3">—</span>
+                  )}
+                </Td>
+                <Td>
+                  {user.profile.is_active ? (
+                    <Status tono="aperto">Attivo</Status>
+                  ) : (
+                    <Status tono="attenzione">Sospeso</Status>
+                  )}
+                </Td>
+                <Td className="whitespace-nowrap text-ink-2 tabular-nums">
+                  {formatDate(user.profile.created_at)}
+                </Td>
+                <Td>
+                  <div className="flex justify-end">
+                    <Menu label={`Azioni per ${user.profile.email}`}>
+                      <MenuItem
+                        icon={<UserCog className="size-4" />}
+                        disabled={isSelf}
+                        title={isSelf ? "Non puoi modificare il tuo ruolo" : undefined}
+                        onSelect={() => openRole(user)}
+                      >
+                        Cambia ruolo…
+                      </MenuItem>
+                      <MenuItem
+                        icon={<CreditCard className="size-4" />}
+                        disabled={isManagedChild}
+                        title={
+                          isManagedChild
+                            ? "Il piano si gestisce sull'account titolare dell'azienda"
+                            : undefined
+                        }
+                        onSelect={() => openPlan(user)}
+                      >
+                        Cambia piano…
+                      </MenuItem>
+                      <MenuItem icon={<Gift className="size-4" />} onSelect={() => openAddon(user)}>
+                        Assegna add-on…
+                      </MenuItem>
+                      <MenuSeparator />
+                      <MenuItem
+                        icon={
+                          user.profile.is_active ? (
+                            <Ban className="size-4" />
+                          ) : (
+                            <RotateCcw className="size-4" />
+                          )
+                        }
+                        danger={user.profile.is_active}
+                        disabled={isSelf}
+                        title={isSelf ? "Non puoi disattivare il tuo account" : undefined}
+                        onSelect={() => openActive(user)}
+                      >
+                        {user.profile.is_active ? "Sospendi" : "Riattiva"}
+                      </MenuItem>
+                    </Menu>
+                  </div>
+                </Td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </Table>
+    );
+  }
+
+  return (
+    <Page variante="elenco">
+      <PageHeader
+        titolo="Utenti"
+        descrizione={
+          data ? (
+            <>
+              <span className="font-medium text-ink tabular-nums">{data.total}</span>{" "}
+              {hasFilter ? "risultati" : "utenti registrati"}
+            </>
+          ) : (
+            "Cerca, modifica ruoli e abbonamenti"
+          )
+        }
+      />
+
+      <div className="flex flex-col gap-3">
+        {/* Barra: ricerca, ruolo, azzera. */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <SearchInput
             value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
+            onChange={setSearchInput}
             placeholder="Cerca per email, nome o azienda…"
-            aria-label="Cerca utenti"
-            className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-4 text-sm shadow-card placeholder:text-slate-400 focus:border-brand-500 focus:outline-none"
+            label="Cerca utenti"
+            className="sm:flex-1"
           />
-        </div>
-        <select
-          value={role}
-          onChange={(e) => setRole(e.target.value as typeof role)}
-          aria-label="Filtra per ruolo"
-          className="h-11 cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-sm shadow-card focus:border-brand-500 focus:outline-none"
-        >
-          <option value="">Tutti i ruoli</option>
-          <option value="admin">Solo admin</option>
-          <option value="progettista">Solo progettisti</option>
-          <option value="cliente">Solo clienti</option>
-        </select>
-        {hasFilter && (
-          <Button
-            variant="ghost"
-            onClick={() => {
-              setSearchInput("");
-              setRole("");
-            }}
-            className="h-11 shrink-0"
+          <Select
+            label="Filtra per ruolo"
+            value={role}
+            onChange={(e) => setRole(e.target.value as typeof role)}
           >
-            <X className="size-4" aria-hidden />
-            Azzera filtri
-          </Button>
+            <option value="">Tutti i ruoli</option>
+            <option value="admin">Solo admin</option>
+            <option value="progettista">Solo progettisti</option>
+            <option value="cliente">Solo clienti</option>
+          </Select>
+          {hasFilter && (
+            <Button
+              variant="ghost"
+              className="shrink-0 self-start sm:self-auto"
+              onClick={() => {
+                setSearchInput("");
+                setRole("");
+              }}
+            >
+              Azzera i filtri
+            </Button>
+          )}
+        </div>
+
+        {/* Azioni di massa sugli utenti selezionati. */}
+        {selected.size > 0 && (
+          <div className="flex flex-wrap items-center gap-3 rounded-control bg-sunken px-4 py-3">
+            <p className="text-body font-medium text-ink tabular-nums" aria-live="polite">
+              {selected.size} selezionat{selected.size === 1 ? "o" : "i"}
+            </p>
+            <div className="ml-auto flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setBulkPending({ is_active: true })}
+              >
+                <RotateCcw className="size-4" aria-hidden />
+                Riattiva selezionati
+              </Button>
+              <Button variant="danger" size="sm" onClick={() => setBulkPending({ is_active: false })}>
+                <Ban className="size-4" aria-hidden />
+                Sospendi selezionati
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+                Deseleziona
+              </Button>
+            </div>
+          </div>
         )}
       </div>
 
-      {/* Barra azioni di massa */}
-      {selected.size > 0 && (
-        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3">
-          <p className="text-sm font-medium text-brand-800" aria-live="polite">
-            {selected.size} selezionat{selected.size === 1 ? "o" : "i"}
-          </p>
-          <div className="ml-auto flex flex-wrap gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setBulkPending({ is_active: true })}
-            >
-              <RotateCcw className="size-4" aria-hidden />
-              Riattiva selezionati
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="text-red-600 hover:border-red-300 hover:text-red-700 active:bg-red-50"
-              onClick={() => setBulkPending({ is_active: false })}
-            >
-              <Ban className="size-4" aria-hidden />
-              Sospendi selezionati
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
-              Deseleziona
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {bulkNotice && (
-        <p
-          className="mt-4 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
-          role="status"
-        >
-          {bulkNotice}
-        </p>
-      )}
-
-      <Card
-        className="mt-5 overflow-hidden p-0"
-        aria-busy={isPending || isPlaceholderData}
-      >
-        {isPending ? (
-          <div className="space-y-3 p-5">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-12 w-full" />
-            ))}
-          </div>
-        ) : isError ? (
-          <div className="p-5">
-            <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
-          </div>
-        ) : data && data.items.length === 0 ? (
-          <div className="p-5">
-            <EmptyState title="Nessun utente trovato" description="Prova con un'altra ricerca." />
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table
-              className={cn(
-                "w-full min-w-[760px] text-left text-sm",
-                isPlaceholderData && "opacity-60 transition-opacity",
-              )}
-            >
-              <caption className="sr-only">Elenco degli utenti registrati</caption>
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50/70 text-xs uppercase tracking-wide text-slate-500">
-                  <th scope="col" className="w-10 px-4 py-3">
-                    <input
-                      ref={selectAllRef}
-                      type="checkbox"
-                      checked={tuttiSelezionati}
-                      onChange={toggleAll}
-                      disabled={selezionabili.length === 0}
-                      aria-label="Seleziona tutti gli utenti della pagina"
-                      className="size-4 cursor-pointer accent-brand-500 disabled:cursor-not-allowed"
-                    />
-                  </th>
-                  <th scope="col" className="px-4 py-3 font-medium">Utente</th>
-                  <th scope="col" className="px-4 py-3 font-medium">Ruolo</th>
-                  <th scope="col" className="px-4 py-3 font-medium">Azienda</th>
-                  <th scope="col" className="px-4 py-3 font-medium">Piano</th>
-                  <th scope="col" className="px-4 py-3 font-medium">Stato</th>
-                  <th scope="col" className="px-4 py-3 font-medium">Registrato</th>
-                  <th scope="col" className="px-4 py-3 text-right font-medium">
-                    <span className="sr-only">Azioni</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {data?.items.map((user) => {
-                  const isSelf = user.profile.id === me?.profile.id;
-                  const fullName = [user.profile.nome, user.profile.cognome]
-                    .filter(Boolean)
-                    .join(" ");
-                  // Solo i figli ATTIVI ereditano il piano (pending/retrocessi
-                  // hanno un piano proprio, gestibile normalmente).
-                  const isManagedChild =
-                    user.family?.type === "child" && user.family.status === "active";
-                  const sospeso = !user.profile.is_active;
-                  const checked = selected.has(user.profile.id);
-                  return (
-                    <tr
-                      key={user.profile.id}
-                      className={cn(
-                        "border-b border-slate-100 transition-colors last:border-b-0",
-                        checked ? "bg-brand-50/50" : sospeso ? "bg-slate-50/40" : "hover:bg-slate-50/60",
-                      )}
-                    >
-                      <td className="px-4 py-3">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleOne(user.profile.id)}
-                          disabled={isSelf}
-                          title={isSelf ? "Non puoi selezionare il tuo account" : undefined}
-                          aria-label={`Seleziona ${user.profile.email}`}
-                          className="size-4 cursor-pointer accent-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <UserAvatar user={user} />
-                          <div className="min-w-0">
-                            <div
-                              className={cn(
-                                "font-medium",
-                                sospeso ? "text-slate-500" : "text-slate-900",
-                              )}
-                            >
-                              {fullName || "—"}
-                              {isSelf && (
-                                <span className="ml-1.5 text-xs text-brand-500">(tu)</span>
-                              )}
-                            </div>
-                            <div className="text-xs text-slate-500">{user.profile.email}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <RuoloBadge role={user.profile.role} />
-                        {user.progettista?.codice && (
-                          <p className="tabular mt-1 text-xs text-slate-400">
-                            {user.progettista.codice}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        {/* Ragione sociale (dossier → registrazione) in cima; il
-                            gruppo account resta come info secondaria sotto. */}
-                        {user.azienda_nome ? (
-                          <div className="font-medium text-slate-700">{user.azienda_nome}</div>
-                        ) : (
-                          !user.family && <span className="text-xs text-slate-300">—</span>
-                        )}
-                        {user.family?.type === "child" ? (
-                          <div className="mt-1">
-                            <Badge
-                              tone={
-                                user.family.status === "active"
-                                  ? "brand"
-                                  : user.family.status === "pending"
-                                    ? "amber"
-                                    : "slate"
-                              }
-                            >
-                              <UsersRound className="size-3" aria-hidden />
-                              {user.family.status === "active"
-                                ? "In azienda"
-                                : user.family.status === "pending"
-                                  ? "Invitato"
-                                  : "Retrocesso"}
-                            </Badge>
-                            {user.family.parent_email && (
-                              <p className="mt-1 text-xs text-slate-400">
-                                di {user.family.parent_email}
-                              </p>
-                            )}
-                          </div>
-                        ) : user.family?.type === "parent" ? (
-                          <div className="mt-1">
-                            <Badge tone="brand">
-                              <UsersRound className="size-3" aria-hidden />
-                              Titolare · {user.family.members_count ?? 0} collegati
-                            </Badge>
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {user.subscription ? (
-                          <>
-                            {planoCorrente(user, planiAttivi)}
-                            {user.subscription.inherited && (
-                              <p className="mt-0.5 text-xs text-slate-400">(ereditato)</p>
-                            )}
-                          </>
-                        ) : (
-                          <span className="text-xs text-slate-300">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        {user.profile.is_active ? (
-                          <Badge tone="emerald">Attivo</Badge>
-                        ) : (
-                          <Badge tone="red">Sospeso</Badge>
-                        )}
-                      </td>
-                      <td className="tabular px-4 py-3 text-slate-500">
-                        {formatDate(user.profile.created_at)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex justify-end">
-                          <Menu label={`Azioni per ${user.profile.email}`}>
-                            <MenuItem
-                              icon={<UserCog className="size-4" />}
-                              disabled={isSelf}
-                              title={isSelf ? "Non puoi modificare il tuo ruolo" : undefined}
-                              onSelect={() => openRole(user)}
-                            >
-                              Cambia ruolo…
-                            </MenuItem>
-                            <MenuItem
-                              icon={<CreditCard className="size-4" />}
-                              disabled={isManagedChild}
-                              title={
-                                isManagedChild
-                                  ? "Il piano si gestisce sull'account titolare dell'azienda"
-                                  : undefined
-                              }
-                              onSelect={() => openPlan(user)}
-                            >
-                              Cambia piano…
-                            </MenuItem>
-                            <MenuItem
-                              icon={<Gift className="size-4" />}
-                              onSelect={() => openAddon(user)}
-                            >
-                              Assegna addon…
-                            </MenuItem>
-                            <MenuSeparator />
-                            <MenuItem
-                              icon={
-                                user.profile.is_active ? (
-                                  <Ban className="size-4" />
-                                ) : (
-                                  <RotateCcw className="size-4" />
-                                )
-                              }
-                              danger={user.profile.is_active}
-                              disabled={isSelf}
-                              title={isSelf ? "Non puoi disattivare il tuo account" : undefined}
-                              onSelect={() => openActive(user)}
-                            >
-                              {user.profile.is_active ? "Sospendi" : "Riattiva"}
-                            </MenuItem>
-                          </Menu>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+      <div aria-busy={isPending || isPlaceholderData || fuoriPagina}>{elenco}</div>
 
       {data && data.total_pages > 1 && (
-        <div className="mt-6">
-          <Pagination page={page} totalPages={data.total_pages} onChange={setPage} />
-        </div>
+        <Pagination page={page} totalPages={data.total_pages} onChange={setPage} />
       )}
 
-      {/* Dialog di conferma (azione singola) */}
+      {/* Dialog di conferma (azione singola): contiene le scelte, non è una
+          semplice conferma. */}
       <Dialog
         open={!!pending}
         onClose={() => setPending(null)}
@@ -643,7 +537,7 @@ export default function AdminUtenti() {
         title="Conferma operazione"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setPending(null)}>
+            <Button variant="secondary" onClick={() => setPending(null)} disabled={actionBusy}>
               Annulla
             </Button>
             <Button
@@ -657,13 +551,12 @@ export default function AdminUtenti() {
           </>
         }
       >
-        {pending?.kind === "role" && (
-          <>
-            <p>
-              Cambia il ruolo di{" "}
-              <strong className="text-slate-900">{pending.user.profile.email}</strong>.
-            </p>
-            <div className="mt-3">
+        <div className="flex flex-col gap-3">
+          {pending?.kind === "role" && (
+            <>
+              <p>
+                Cambia il ruolo di <strong className="text-ink">{pending.user.profile.email}</strong>.
+              </p>
               <SelectField
                 label="Nuovo ruolo"
                 value={roleChoice}
@@ -675,50 +568,38 @@ export default function AdminUtenti() {
                   </option>
                 ))}
               </SelectField>
-            </div>
-            {roleChoice === "progettista" && (
-              <p className="mt-2 text-sm text-slate-500">
-                {ADMIN_RUOLO_COPY.promozioneProgettista}
-              </p>
-            )}
-            {roleChoice === "admin" && (
-              <p className="mt-2 text-sm text-slate-500">{ADMIN_RUOLO_COPY.nominaAdmin}</p>
-            )}
-            {/* L'area progettista si perde solo tornando cliente (parità admin). */}
-            {hasAreaProgettista(pending.user.profile.role) && !hasAreaProgettista(roleChoice) && (
-              <p className="mt-2 text-sm text-slate-500">
-                {ADMIN_RUOLO_COPY.perditaAreaProgettista}
-              </p>
-            )}
-          </>
-        )}
-        {pending?.kind === "active" && (
-          <p>
-            {pending.is_active ? "Riattivare" : "Sospendere"} l'account di{" "}
-            <strong className="text-slate-900">{pending.user.profile.email}</strong>?
-            {!pending.is_active && " L'utente non potrà più accedere alla piattaforma."}
-          </p>
-        )}
-        {pending?.kind === "addon" && (
-          <>
+              {roleChoice === "progettista" && <p>{ADMIN_RUOLO_COPY.promozioneProgettista}</p>}
+              {roleChoice === "admin" && <p>{ADMIN_RUOLO_COPY.nominaAdmin}</p>}
+              {/* L'area progettista si perde solo tornando cliente (parità admin). */}
+              {hasAreaProgettista(pending.user.profile.role) && !hasAreaProgettista(roleChoice) && (
+                <p>{ADMIN_RUOLO_COPY.perditaAreaProgettista}</p>
+              )}
+            </>
+          )}
+          {pending?.kind === "active" && (
             <p>
-              Assegna un add-on a{" "}
-              <strong className="text-slate-900">{pending.user.profile.email}</strong>.
+              {pending.is_active ? "Riattivare" : "Sospendere"} l'account di{" "}
+              <strong className="text-ink">{pending.user.profile.email}</strong>?
+              {!pending.is_active && " L'utente non potrà più accedere alla piattaforma."}
             </p>
-            {(inventarioUtente?.length ?? 0) > 0 && (
-              <p className="mt-2 text-sm text-slate-500">
-                Possiede già:{" "}
-                {inventarioUtente!.map((m) => `${m.quantita} × ${m.nome}`).join(", ")}.
+          )}
+          {pending?.kind === "addon" && (
+            <>
+              <p>
+                Assegna un add-on a{" "}
+                <strong className="text-ink">{pending.user.profile.email}</strong>.
               </p>
-            )}
-            <div className="mt-3 space-y-3">
+              {(inventarioUtente?.length ?? 0) > 0 && (
+                <p>
+                  Possiede già:{" "}
+                  {inventarioUtente!.map((m) => `${m.quantita} × ${m.nome}`).join(", ")}.
+                </p>
+              )}
               <SelectField
                 label="Add-on"
                 required
                 value={grantAddonId}
-                onChange={(e) =>
-                  setGrantAddonId(e.target.value === "" ? "" : Number(e.target.value))
-                }
+                onChange={(e) => setGrantAddonId(e.target.value === "" ? "" : Number(e.target.value))}
               >
                 <option value="">Seleziona un add-on…</option>
                 {(catalogoAddons ?? []).map((a) => (
@@ -735,9 +616,7 @@ export default function AdminUtenti() {
                 required
                 value={addonPermanente ? "1" : grantQuantita}
                 disabled={addonPermanente}
-                helper={
-                  addonPermanente ? "Add-on permanente: si possiede una volta sola." : undefined
-                }
+                helper={addonPermanente ? "Add-on permanente: si possiede una volta sola." : undefined}
                 error={
                   !addonPermanente && grantQuantita !== "" && !grantQuantitaValida
                     ? "Indica un numero intero da 1 a 100."
@@ -754,42 +633,37 @@ export default function AdminUtenti() {
                 maxLength={500}
                 rows={2}
               />
-            </div>
-            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              L'accredito è gratuito e verrà registrato nello storico dell'utente con il tuo
-              nome.
-            </p>
-          </>
-        )}
-        {pending?.kind === "plan" && (
-          <>
-            <p>
-              Cambia il piano di{" "}
-              <strong className="text-slate-900">{pending.user.profile.email}</strong>.
-              {planNome && (
-                <>
-                  {" "}
-                  L'abbonamento annuale di{" "}
-                  <strong className="text-slate-900">{planNome}</strong> riparte da oggi.
-                </>
-              )}
-            </p>
-            <div className="mt-3 space-y-3">
+              {/* Nota fissa del dialog: non va annunciata come allarme all'apertura. */}
+              <Alert tono="attenzione" ruolo="none">
+                L'accredito è gratuito e verrà registrato nello storico dell'utente con il tuo
+                nome.
+              </Alert>
+            </>
+          )}
+          {pending?.kind === "plan" && (
+            <>
+              <p>
+                Cambia il piano di <strong className="text-ink">{pending.user.profile.email}</strong>.
+                {planNome && (
+                  <>
+                    {" "}
+                    L'abbonamento annuale di <strong className="text-ink">{planNome}</strong>{" "}
+                    riparte da oggi.
+                  </>
+                )}
+              </p>
               <SelectField
                 label="Nuovo piano"
                 required
                 value={planChoice}
-                onChange={(e) =>
-                  setPlanChoice(e.target.value === "" ? "" : Number(e.target.value))
-                }
+                onChange={(e) => setPlanChoice(e.target.value === "" ? "" : Number(e.target.value))}
               >
                 <option value="">Seleziona un piano…</option>
-                {pending.user.subscription &&
-                  !planiAttivi.has(pending.user.subscription.plan.id) && (
-                    <option value={pending.user.subscription.plan.id} disabled>
-                      {pending.user.subscription.plan.nome} (disattivato)
-                    </option>
-                  )}
+                {pending.user.subscription && !planiAttivi.has(pending.user.subscription.plan.id) && (
+                  <option value={pending.user.subscription.plan.id} disabled>
+                    {pending.user.subscription.plan.nome} (disattivato)
+                  </option>
+                )}
                 {(plans ?? []).map((plan) => (
                   <option key={plan.id} value={plan.id}>
                     {plan.nome}
@@ -805,52 +679,48 @@ export default function AdminUtenti() {
                 maxLength={500}
                 rows={2}
               />
-            </div>
-            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              Il cambio è gratuito e verrà registrato nello storico con il tuo nome. Un eventuale
-              pagamento in corso dell'utente verrà annullato.
-            </p>
-          </>
-        )}
-        {actionError && (
-          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-red-700" role="alert">
-            {actionError}
-          </p>
-        )}
+              {/* Nota fissa del dialog: non va annunciata come allarme all'apertura. */}
+              <Alert tono="attenzione" ruolo="none">
+                Il cambio è gratuito e verrà registrato nello storico con il tuo nome. Un eventuale
+                pagamento in corso dell'utente verrà annullato.
+              </Alert>
+            </>
+          )}
+          {actionError && <Alert tono="errore">{actionError}</Alert>}
+        </div>
       </Dialog>
 
-      {/* Dialog di conferma (azione di massa) */}
-      <Dialog
+      {/* Conferma dell'azione di massa. */}
+      <ConfirmDialog
         open={!!bulkPending}
-        onClose={() => setBulkPending(null)}
-        dismissible={!bulkBusy}
-        title="Conferma operazione di massa"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setBulkPending(null)}>
-              Annulla
-            </Button>
-            <Button
-              variant={bulkPending?.is_active ? "primary" : "danger"}
-              onClick={confirmBulk}
-              loading={bulkBusy}
-            >
-              Conferma
-            </Button>
-          </>
-        }
+        titolo="Conferma operazione di massa"
+        conferma="Conferma"
+        distruttiva={!!bulkPending && !bulkPending.is_active}
+        inCorso={bulkBusy}
+        onConferma={() => void confirmBulk()}
+        onAnnulla={() => setBulkPending(null)}
       >
         {bulkPending && (
           <p>
             {bulkPending.is_active ? "Riattivare" : "Sospendere"}{" "}
-            <strong className="text-slate-900">
+            <strong className="text-ink">
               {selected.size} utent{selected.size === 1 ? "e" : "i"}
             </strong>{" "}
             selezionat{selected.size === 1 ? "o" : "i"}?
             {!bulkPending.is_active && " Non potranno più accedere alla piattaforma."}
           </p>
         )}
-      </Dialog>
+      </ConfirmDialog>
+    </Page>
+  );
+}
+
+function SkeletonRighe() {
+  return (
+    <div className="flex flex-col gap-3" aria-hidden>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <Skeleton key={i} className="h-12 w-full" />
+      ))}
     </div>
   );
 }

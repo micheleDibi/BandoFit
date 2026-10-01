@@ -1,4 +1,4 @@
-import { AlertTriangle, Briefcase, Check, Lock, X } from "lucide-react";
+import { Briefcase, Check, Lock, TriangleAlert, X } from "lucide-react";
 import { useId, type ReactNode } from "react";
 import { etichettaFascia, FASCE_TITOLI, type TipoFascia } from "../../lib/bilanci";
 import { BACHECA_COPY } from "../../lib/copy";
@@ -19,10 +19,10 @@ function Gruppo({ titolo, children }: { titolo: string; children: ReactNode }) {
   const id = useId();
   return (
     <div>
-      <p id={id} className="text-xs font-medium uppercase tracking-wide text-slate-400">
+      <p id={id} className="text-small font-medium text-ink-3">
         {titolo}
       </p>
-      <ul aria-labelledby={id} className="mt-1.5 space-y-1">
+      <ul aria-labelledby={id} className="mt-1.5 flex flex-col gap-1">
         {children}
       </ul>
     </div>
@@ -40,11 +40,9 @@ function Requisito({
 }) {
   const testo = testi?.get(voce.etichetta);
   return (
-    <li className="flex items-start gap-2 text-sm text-slate-700">
+    <li className="flex items-start gap-2 text-body text-ink-2">
       {icona}
-      <Badge tone="brand" className="shrink-0 tabular">
-        {voce.etichetta}
-      </Badge>
+      <Badge className="shrink-0 tabular-nums">{voce.etichetta}</Badge>
       {testo && <span className="min-w-0">{testo}</span>}
     </li>
   );
@@ -68,7 +66,7 @@ function Dettagli({
   const dettaglio = tu ? (match.dettaglio ?? []) : [];
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       {match.copre.length > 0 && (
         <Gruppo titolo={tu ? "Requisiti cercati che copri" : "Requisiti cercati che copre"}>
           {match.copre.map((r) => (
@@ -76,7 +74,7 @@ function Dettagli({
               key={r.requisito_id}
               voce={r}
               testi={testi}
-              icona={<Check className="mt-0.5 size-4 shrink-0 text-emerald-600" aria-hidden />}
+              icona={<Check className="mt-0.5 size-4 shrink-0 text-fit-ink" aria-hidden />}
             />
           ))}
         </Gruppo>
@@ -88,7 +86,7 @@ function Dettagli({
               key={r.requisito_id}
               voce={r}
               testi={testi}
-              icona={<X className="mt-0.5 size-4 shrink-0 text-slate-400" aria-hidden />}
+              icona={<X className="mt-0.5 size-4 shrink-0 text-ink-off" aria-hidden />}
             />
           ))}
         </Gruppo>
@@ -97,20 +95,20 @@ function Dettagli({
         <div>
           <Gruppo titolo="Da verificare">
             {match.attenzione.map((a, i) => (
-              <li key={`${a.codice}-${i}`} className="flex items-start gap-2 text-sm text-slate-700">
-                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden />
+              <li key={`${a.codice}-${i}`} className="flex items-start gap-2 text-body text-ink-2">
+                <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning-ink" aria-hidden />
                 <span className="min-w-0">{a.testo}</span>
               </li>
             ))}
           </Gruppo>
-          <p className="mt-1 text-xs text-slate-500">{BACHECA_COPY.daVerificareNota}</p>
+          <p className="mt-1 text-small text-ink-3">{BACHECA_COPY.daVerificareNota}</p>
         </div>
       )}
       {match.posizioni_compatibili.length > 0 && (
         <Gruppo titolo={tu ? "Posizioni adatte alla tua azienda" : "Posizioni adatte"}>
           {match.posizioni_compatibili.map((p) => (
-            <li key={p.id} className="flex items-start gap-2 text-sm text-slate-700">
-              <Briefcase className="mt-0.5 size-4 shrink-0 text-slate-400" aria-hidden />
+            <li key={p.id} className="flex items-start gap-2 text-body text-ink-2">
+              <Briefcase className="mt-0.5 size-4 shrink-0 text-ink-3" aria-hidden />
               <span className="min-w-0">{p.titolo}</span>
             </li>
           ))}
@@ -118,14 +116,12 @@ function Dettagli({
       )}
       {!tu && fasce.length > 0 && (
         <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-            Fasce di bilancio
-          </p>
-          <dl className="mt-1.5 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
+          <p className="text-small font-medium text-ink-3">Fasce di bilancio</p>
+          <dl className="mt-1.5 grid gap-x-4 gap-y-1 text-body sm:grid-cols-2">
             {fasce.map((f) => (
               <div key={f.tipo}>
-                <dt className="inline text-slate-500">{FASCE_TITOLI[f.tipo]}: </dt>
-                <dd className="inline text-slate-700">{f.valore}</dd>
+                <dt className="inline text-ink-3">{FASCE_TITOLI[f.tipo]}: </dt>
+                <dd className="inline text-ink">{f.valore}</dd>
               </div>
             ))}
           </dl>
@@ -134,8 +130,8 @@ function Dettagli({
       {dettaglio.length > 0 && (
         <Gruppo titolo="I tuoi numeri (li vedi solo tu)">
           {dettaglio.map((riga, i) => (
-            <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-              <Lock className="mt-0.5 size-4 shrink-0 text-slate-400" aria-hidden />
+            <li key={i} className="flex items-start gap-2 text-body text-ink-2">
+              <Lock className="mt-0.5 size-4 shrink-0 text-ink-3" aria-hidden />
               <span className="min-w-0">{riga}</span>
             </li>
           ))}
@@ -172,7 +168,7 @@ export function fraseConfronto(match: MatchOut, persona: PersonaMatch): string {
  *  cercati coperti e non coperti, voci da verificare, posizioni adatte, fasce
  *  (solo verso il proponente) e i propri numeri (solo per sé). `testi`
  *  aggiunge il testo dei requisiti per etichetta, quando la pagina lo ha.
- *  `compatta`: le voci stanno in un `<details>` chiuso (card delle liste). */
+ *  `compatta`: le voci stanno in un `<details>` chiuso («Dettagli del confronto»). */
 export function MatchSpiegazione({
   match,
   persona = "tu",
@@ -185,11 +181,11 @@ export function MatchSpiegazione({
   compatta?: boolean;
 }) {
   return (
-    <div className="space-y-2">
-      <p className="text-sm text-slate-700">{fraseConfronto(match, persona)}</p>
+    <div className="flex flex-col gap-2">
+      <p className="text-body text-ink-2">{fraseConfronto(match, persona)}</p>
       {compatta ? (
         <details className="group">
-          <summary className="inline-flex cursor-pointer select-none items-center gap-1 rounded text-sm font-medium text-brand-600 hover:text-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500">
+          <summary className="inline-flex cursor-pointer select-none items-center gap-1 rounded-mark text-small font-medium text-accent-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
             <span className="group-open:hidden">Dettagli del confronto</span>
             <span className="hidden group-open:inline">Nascondi i dettagli</span>
           </summary>

@@ -14,39 +14,38 @@ function displayName(person: DossierPerson): string {
   return [person.nome, person.cognome].filter(Boolean).join(" ") || "—";
 }
 
-/** Cariche, soci e organi di controllo dalla visura. */
+/** Cariche, soci e organi di controllo dalla visura: righe con filetto. */
 export function PeopleTable({ people }: { people: DossierPerson[] }) {
   if (people.length === 0) {
-    return (
-      <p className="text-sm text-slate-400">
-        Nessuna persona presente nei dati importati.
-      </p>
-    );
+    return <p className="text-body text-ink-2">Nessuna persona presente nei dati importati.</p>;
   }
   return (
-    <ul className="divide-y divide-slate-100">
+    <ul className="flex flex-col">
       {people.map((person, index) => (
-        <li key={`${person.codice_fiscale ?? person.nome}-${index}`} className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-slate-900">
+        <li
+          key={`${person.codice_fiscale ?? person.nome}-${index}`}
+          className="flex flex-wrap items-center gap-3 border-b border-line py-3 last:border-b-0"
+        >
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <p className="text-body font-medium text-ink">
               {displayName(person)}
               {person.is_legale_rappresentante && (
-                <span className="ml-2 inline-flex items-center gap-1 align-middle text-xs font-medium text-brand-600">
-                  <BadgeCheck className="size-3.5" aria-hidden />
+                <span className="ml-2 inline-flex items-center gap-1 align-middle text-small font-medium text-ink-2">
+                  <BadgeCheck className="size-4" aria-hidden />
                   Legale rappresentante
                 </span>
               )}
             </p>
-            <p className="mt-0.5 text-xs text-slate-500">
+            <p className="text-small text-ink-2">
               {person.ruoli.length > 0
                 ? person.ruoli.map((r) => r.description).filter(Boolean).join(", ")
                 : KIND_LABELS[person.kind]}
-              {person.quota_percentuale !== null && ` · quota ${person.quota_percentuale}%`}
+              {person.quota_percentuale !== null && `, quota ${person.quota_percentuale}%`}
               {person.data_inizio_carica &&
-                ` · dal ${formatDateNumeric(person.data_inizio_carica)}`}
+                `, dal ${formatDateNumeric(person.data_inizio_carica)}`}
             </p>
             {(person.data_nascita || person.luogo_nascita) && (
-              <p className="text-xs text-slate-400">
+              <p className="text-small text-ink-3">
                 {[
                   person.luogo_nascita,
                   person.data_nascita ? formatDateNumeric(person.data_nascita) : null,
@@ -56,7 +55,7 @@ export function PeopleTable({ people }: { people: DossierPerson[] }) {
               </p>
             )}
           </div>
-          <Badge tone="slate">{KIND_LABELS[person.kind]}</Badge>
+          <Badge>{KIND_LABELS[person.kind]}</Badge>
         </li>
       ))}
     </ul>

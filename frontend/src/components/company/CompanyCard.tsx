@@ -1,22 +1,23 @@
-import { BadgeCheck, Building2, Download, PencilLine, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useCompany, useSaveCompany, type CompanyPayload } from "../../hooks/useCompany";
 import { useLookups } from "../../hooks/useLookups";
 import { apiErrorMessage } from "../../lib/api";
 import type { CompanyProfile } from "../../types";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
+import { Chip } from "../ui/Chip";
 import { Combobox } from "../ui/Combobox";
+import { DefinitionList, type Definizione } from "../ui/Facts";
 import { SelectField, TextField } from "../ui/Field";
+import { InlineError } from "../ui/InlineError";
 import { Skeleton } from "../ui/states";
 import { TagSelect } from "../ui/TagSelect";
-import { ImportCompanyDialog } from "./ImportCompanyDialog";
+import { useToast } from "../ui/Toast";
 
 const CLASSI = [
-  { value: "micro", label: "Micro impresa (< 10 dipendenti)" },
-  { value: "piccola", label: "Piccola impresa (< 50 dipendenti)" },
-  { value: "media", label: "Media impresa (< 250 dipendenti)" },
-  { value: "grande", label: "Grande impresa" },
+  { value: "micro", label: "Micro impresa", nota: "meno di 10 dipendenti" },
+  { value: "piccola", label: "Piccola impresa", nota: "meno di 50 dipendenti" },
+  { value: "media", label: "Media impresa", nota: "meno di 250 dipendenti" },
+  { value: "grande", label: "Grande impresa", nota: null },
 ];
 
 const FASCE = [
@@ -28,7 +29,8 @@ const FASCE = [
   { value: "oltre_50m", label: "Oltre 50 mln €" },
 ];
 
-interface FormState {
+/** Il modulo dei dati aziendali; la pagina ne tiene la bozza durante la modifica. */
+export interface FormState {
   ragione_sociale: string;
   forma_giuridica: string;
   partita_iva: string;
@@ -133,129 +135,143 @@ function toPayload(form: FormState): CompanyPayload {
   };
 }
 
-function ReadOnlyRow({ label, value }: { label: string; value: string | null | undefined }) {
-  if (!value) return null;
-  return (
-    <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</dt>
-      <dd className="mt-0.5 text-sm text-slate-800">{value}</dd>
-    </div>
-  );
-}
-
-/** Riepilogo in sola lettura: la vista di default per tutti (il form si apre
- *  solo in modifica). Mostra soltanto i campi compilati. */
+/** Riepilogo in sola lettura (tavola Azienda): etichetta a sinistra, valore a
+ *  destra; solo i campi compilati. */
 function CompanySummary({ company }: { company: CompanyProfile }) {
-  return (
-    <dl className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
-      <ReadOnlyRow label="Ragione sociale" value={company.ragione_sociale} />
-      <ReadOnlyRow label="Forma giuridica" value={company.forma_giuridica} />
-      <ReadOnlyRow label="Partita IVA" value={company.partita_iva} />
-      <ReadOnlyRow label="Codice fiscale" value={company.codice_fiscale} />
-      <ReadOnlyRow
-        label="Codice ATECO"
-        value={
-          company.ateco_codice
-            ? `${company.ateco_codice} — ${company.ateco_descrizione ?? ""}`
-            : null
+  const classe = CLASSI.find((c) => c.value === company.classe_dimensionale);
+  const voci: (Definizione | null)[] = [
+    { etichetta: "Ragione sociale", valore: company.ragione_sociale },
+    company.forma_giuridica ? { etichetta: "Forma giuridica", valore: company.forma_giuridica } : null,
+    { etichetta: "Partita IVA", valore: company.partita_iva },
+    company.codice_fiscale ? { etichetta: "Codice fiscale", valore: company.codice_fiscale } : null,
+    company.ateco_codice
+      ? {
+          etichetta: "Codice ATECO",
+          valore: company.ateco_codice,
+          nota: company.ateco_descrizione ?? undefined,
         }
-      />
-      <ReadOnlyRow label="Settore" value={company.settore_nome} />
-      <ReadOnlyRow label="Regione" value={company.regione_nome} />
-      <ReadOnlyRow
-        label="Categorie di beneficiario"
-        value={company.beneficiari?.map((b) => b.nome).join(", ") || null}
-      />
-      <ReadOnlyRow
-        label="Anno di fondazione"
-        value={company.anno_fondazione ? String(company.anno_fondazione) : null}
-      />
-      <ReadOnlyRow
-        label="Sede legale"
-        value={[company.indirizzo, company.cap, company.comune, company.provincia]
-          .filter(Boolean)
-          .join(", ") || null}
-      />
-      <ReadOnlyRow
-        label="Dimensione"
-        value={CLASSI.find((c) => c.value === company.classe_dimensionale)?.label ?? null}
-      />
-      <ReadOnlyRow
-        label="Numero dipendenti"
-        value={company.numero_dipendenti !== null ? String(company.numero_dipendenti) : null}
-      />
-      <ReadOnlyRow
-        label="Fascia di fatturato"
-        value={FASCE.find((f) => f.value === company.fascia_fatturato)?.label ?? null}
-      />
-      <ReadOnlyRow label="PEC" value={company.pec} />
-      <ReadOnlyRow label="Telefono" value={company.telefono} />
-      <ReadOnlyRow label="Sito web" value={company.sito_web} />
-    </dl>
-  );
+      : null,
+    company.settore_nome ? { etichetta: "Settore", valore: company.settore_nome } : null,
+    company.regione_nome ? { etichetta: "Regione", valore: company.regione_nome } : null,
+    company.beneficiari?.length
+      ? {
+          etichetta: "Categorie di beneficiario",
+          valore: company.beneficiari.map((b) => b.nome).join(", "),
+        }
+      : null,
+    company.anno_fondazione
+      ? { etichetta: "Anno di fondazione", valore: String(company.anno_fondazione) }
+      : null,
+    [company.indirizzo, company.cap, company.comune, company.provincia].some(Boolean)
+      ? {
+          etichetta: "Sede legale",
+          valore: [company.indirizzo, company.cap, company.comune, company.provincia]
+            .filter(Boolean)
+            .join(", "),
+        }
+      : null,
+    classe ? { etichetta: "Dimensione", valore: classe.label, nota: classe.nota ?? undefined } : null,
+    company.numero_dipendenti !== null
+      ? { etichetta: "Numero dipendenti", valore: String(company.numero_dipendenti) }
+      : null,
+    company.fascia_fatturato
+      ? {
+          etichetta: "Fascia di fatturato",
+          valore: FASCE.find((f) => f.value === company.fascia_fatturato)?.label ?? null,
+        }
+      : null,
+    company.pec ? { etichetta: "PEC", valore: company.pec } : null,
+    company.telefono ? { etichetta: "Telefono", valore: company.telefono } : null,
+    company.sito_web ? { etichetta: "Sito web", valore: company.sito_web } : null,
+  ];
+  return <DefinitionList items={voci.filter((v): v is Definizione => !!v && !!v.valore)} />;
 }
 
-export function CompanyCard() {
+/** Dati aziendali: il riepilogo e, in modifica, il modulo. Lo stato di
+ *  modifica è della pagina (il pulsante «Modifica» sta nell'intestazione),
+ *  e così la bozza del modulo (`bozza`/`onBozzaChange`): la scheda si smonta
+ *  cambiando scheda, la bozza no. Stesse validazioni e stesso payload di
+ *  sempre. Alla prima compilazione (nessun dato) si parte già in modifica. */
+export function CompanyCard({
+  editing,
+  onEditingChange,
+  bozza = null,
+  onBozzaChange,
+}: {
+  editing: boolean;
+  onEditingChange: (editing: boolean) => void;
+  /** Bozza della modifica in corso, conservata dalla pagina. */
+  bozza?: FormState | null;
+  onBozzaChange?: (bozza: FormState | null) => void;
+}) {
   const { data, isPending } = useCompany();
   const { data: lookups } = useLookups();
   const saveCompany = useSaveCompany();
+  const { mostra } = useToast();
 
-  const [form, setForm] = useState<FormState>(EMPTY);
-  const [editing, setEditing] = useState(false);
+  // Il modulo riparte dalla bozza della pagina (modifica in corso, scheda
+  // rimontata dopo un cambio di scheda) o dai dati in cache: mai vuoto in
+  // modifica, che al salvataggio azzererebbe i campi.
+  const [form, setForm] = useState<FormState>(() =>
+    editing && bozza ? bozza : data ? toFormState(data.company) : EMPTY,
+  );
+  const [inizializzato, setInizializzato] = useState(() => (editing && !!bozza) || !!data);
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     // Mai risincronizzare il form MENTRE si sta modificando: un refetch in
     // background (es. al refocus della finestra) cancellerebbe ciò che
-    // l'utente sta scrivendo.
-    if (data && !editing) {
+    // l'utente sta scrivendo. L'eccezione è il primo arrivo dei dati, anche
+    // in modifica: prima di allora il modulo non è dell'azienda.
+    if (data && (!editing || !inizializzato)) {
       setForm(toFormState(data.company));
-      // Senza alcun dato non c'è nulla da riepilogare: si parte dal form.
-      if (data.editable && !data.company) setEditing(true);
+      setInizializzato(true);
+      // Senza alcun dato non c'è nulla da riepilogare: si parte dal modulo.
+      if (!editing && data.editable && !data.company) onEditingChange(true);
     }
-  }, [data, editing]);
+  }, [data, editing, inizializzato, onEditingChange]);
 
-  if (isPending) {
+  // La bozza alla pagina: le modifiche sopravvivono al cambio di scheda; fuori
+  // dalla modifica non c'è bozza.
+  useEffect(() => {
+    if (!onBozzaChange) return;
+    onBozzaChange(editing && inizializzato ? form : null);
+  }, [editing, inizializzato, form, onBozzaChange]);
+
+  if (isPending || (editing && !inizializzato)) {
     return (
-      <Card className="p-6">
-        <Skeleton className="h-6 w-48" />
-        <Skeleton className="mt-4 h-40 w-full" />
-      </Card>
+      <div className="flex flex-col gap-3" aria-hidden>
+        <Skeleton className="h-5 w-48" />
+        <Skeleton className="h-40 w-full" />
+      </div>
     );
   }
   if (!data) return null;
 
   const company = data.company;
 
-  // Vista figlio: solo riepilogo.
+  // Vista del membro: solo riepilogo.
   if (!data.editable) {
     return (
-      <Card className="p-6">
-        <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
-          <Building2 className="size-4 text-brand-500" aria-hidden />
-          Dati aziendali
-        </h2>
-        <p className="mt-1 text-sm text-slate-500">
+      <div className="flex flex-col gap-4">
+        <p className="text-small text-ink-3">
           Dati della tua azienda, gestiti dal titolare (sola lettura).
         </p>
         {company ? (
           <CompanySummary company={company} />
         ) : (
-          <p className="mt-4 text-sm text-slate-400">
-            Il titolare non ha ancora compilato i dati aziendali.
-          </p>
+          <p className="text-body text-ink-2">Il titolare non ha ancora compilato i dati aziendali.</p>
         )}
-      </Card>
+      </div>
     );
   }
 
-  const set = (key: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setForm((f) => ({ ...f, [key]: e.target.value }));
+  const set =
+    (key: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+      setForm((f) => ({ ...f, [key]: e.target.value }));
 
   const beneficiariOptions = (lookups?.beneficiari ?? []).map((b) => ({ id: b.id, label: b.nome }));
-  // Fallback all'id: se il catalogo non è ancora arrivato la chip resta leggibile.
+  // Ripiego all'id: se il catalogo non è ancora arrivato il chip resta leggibile.
   const beneficiarioNome = (id: number) =>
     beneficiariOptions.find((b) => b.id === id)?.label ?? String(id);
   const toggleBeneficiario = (id: number) =>
@@ -269,245 +285,193 @@ export function CompanyCard() {
   const handleCancel = () => {
     setForm(toFormState(company));
     setValidationError(null);
-    setEditing(false);
+    onEditingChange(false);
   };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    setSaved(false);
+    // Mai un PUT con i campi non ancora caricati.
+    if (!inizializzato) return;
     const problem = validate(form);
     setValidationError(problem);
     if (problem) return;
     try {
       await saveCompany.mutateAsync(toPayload(form));
-      setEditing(false);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      onEditingChange(false);
+      mostra({ testo: "Dati aziendali salvati" });
     } catch {
       // errore mostrato sotto
     }
   };
 
+  if (!editing) {
+    return company ? (
+      <CompanySummary company={company} />
+    ) : (
+      <p className="text-body text-ink-2">Nessun dato inserito.</p>
+    );
+  }
+
   return (
-    <Card className="p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold text-slate-900">
-            <Building2 className="size-4 text-brand-500" aria-hidden />
-            Dati aziendali
-            {saved && (
-              <span
-                className="inline-flex items-center gap-1 text-sm font-medium text-emerald-600"
-                role="status"
-              >
-                <BadgeCheck className="size-4" aria-hidden />
-                Salvato
-              </span>
-            )}
-          </h2>
-          <p className="mt-1 text-sm text-slate-500">
-            La base dell'AI-check e di «Bandi per te»; condivisi con gli account collegati.
+    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <TextField
+          label="Ragione sociale"
+          required
+          value={form.ragione_sociale}
+          onChange={set("ragione_sociale")}
+        />
+        <TextField
+          label="Forma giuridica"
+          placeholder="es. SRL, SPA, ditta individuale"
+          value={form.forma_giuridica}
+          onChange={set("forma_giuridica")}
+        />
+        <TextField
+          label="Partita IVA"
+          required
+          inputMode="numeric"
+          placeholder="11 cifre"
+          value={form.partita_iva}
+          onChange={set("partita_iva")}
+        />
+        <TextField label="Codice fiscale" value={form.codice_fiscale} onChange={set("codice_fiscale")} />
+        <Combobox
+          label="Codice ATECO primario"
+          options={(lookups?.codici_ateco ?? []).map((a) => ({
+            id: a.id,
+            label: a.codice,
+            sublabel: a.descrizione ?? undefined,
+          }))}
+          value={form.ateco_id}
+          onChange={(id) => setForm((f) => ({ ...f, ateco_id: id }))}
+        />
+        <Combobox
+          label="Settore"
+          options={(lookups?.settori ?? []).map((s) => ({ id: s.id, label: s.nome }))}
+          value={form.settore_id}
+          onChange={(id) => setForm((f) => ({ ...f, settore_id: id }))}
+        />
+        <Combobox
+          label="Regione"
+          options={(lookups?.regioni ?? []).map((r) => ({ id: r.id, label: r.nome }))}
+          value={form.regione_id}
+          onChange={(id) => setForm((f) => ({ ...f, regione_id: id }))}
+        />
+        <TextField
+          label="Anno di fondazione"
+          type="number"
+          min={1800}
+          max={2100}
+          value={form.anno_fondazione}
+          onChange={set("anno_fondazione")}
+        />
+        {/* Dichiarato, non deducibile dalla visura: il catalogo distingue
+            Istituti Scolastici, Enti pubblici, Organismi di formazione… che
+            nessun attributo camerale esprime. Multi-valore.
+            TagSelect è solo il selettore (la sua `label` è sr-only e non
+            mostra i valori scelti): etichetta e chip stanno qui. */}
+        <div className="flex flex-col gap-1.5 sm:col-span-2">
+          <span className="text-small font-medium text-ink">Categorie di beneficiario</span>
+          {form.beneficiari_ids.length > 0 && (
+            <ul className="flex flex-wrap gap-1.5">
+              {form.beneficiari_ids.map((id) => (
+                <li key={id}>
+                  <Chip
+                    onRemove={() => toggleBeneficiario(id)}
+                    label={`Rimuovi ${beneficiarioNome(id)}`}
+                  >
+                    {beneficiarioNome(id)}
+                  </Chip>
+                </li>
+              ))}
+            </ul>
+          )}
+          <TagSelect
+            label="Aggiungi una categoria di beneficiario"
+            options={beneficiariOptions}
+            values={form.beneficiari_ids}
+            onToggle={toggleBeneficiario}
+            placeholder="Cerca e aggiungi una categoria…"
+          />
+          <p className="text-small text-ink-3">
+            Come ti presenti ai bandi: PMI, Startup, Organismo di formazione, Ente pubblico… Puoi
+            sceglierne più di una. Finché è vuota, i bandi che limitano i beneficiari non la
+            conteggiano nella compatibilità.
           </p>
         </div>
-        {!editing && (
-          <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={() => setImportOpen(true)}>
-              <Download className="size-4" aria-hidden />
-              Importa da P.IVA
-            </Button>
-            <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
-              <PencilLine className="size-4" aria-hidden />
-              Modifica
-            </Button>
-          </div>
+      </div>
+
+      <fieldset className="grid gap-4 border-t border-line pt-4 sm:grid-cols-2">
+        <legend className="sr-only">Sede legale</legend>
+        <div className="sm:col-span-2">
+          <TextField label="Indirizzo sede legale" value={form.indirizzo} onChange={set("indirizzo")} />
+        </div>
+        <TextField label="Comune" value={form.comune} onChange={set("comune")} />
+        <div className="grid grid-cols-2 gap-4">
+          <TextField label="Provincia" value={form.provincia} onChange={set("provincia")} />
+          <TextField label="CAP" inputMode="numeric" value={form.cap} onChange={set("cap")} />
+        </div>
+      </fieldset>
+
+      <fieldset className="grid gap-4 border-t border-line pt-4 sm:grid-cols-3">
+        <legend className="sr-only">Dimensione aziendale</legend>
+        <SelectField
+          label="Classe dimensionale"
+          value={form.classe_dimensionale}
+          onChange={set("classe_dimensionale")}
+        >
+          <option value="">Non specificata</option>
+          {CLASSI.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.nota ? `${c.label} (${c.nota})` : c.label}
+            </option>
+          ))}
+        </SelectField>
+        <TextField
+          label="Numero dipendenti"
+          type="number"
+          min={0}
+          value={form.numero_dipendenti}
+          onChange={set("numero_dipendenti")}
+        />
+        <SelectField
+          label="Fascia di fatturato"
+          value={form.fascia_fatturato}
+          onChange={set("fascia_fatturato")}
+        >
+          <option value="">Non specificata</option>
+          {FASCE.map((f) => (
+            <option key={f.value} value={f.value}>
+              {f.label}
+            </option>
+          ))}
+        </SelectField>
+      </fieldset>
+
+      <fieldset className="grid gap-4 border-t border-line pt-4 sm:grid-cols-3">
+        <legend className="sr-only">Contatti</legend>
+        <TextField label="PEC" type="email" value={form.pec} onChange={set("pec")} />
+        <TextField label="Telefono" type="tel" value={form.telefono} onChange={set("telefono")} />
+        <TextField
+          label="Sito web"
+          placeholder="https://…"
+          value={form.sito_web}
+          onChange={set("sito_web")}
+        />
+      </fieldset>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="submit" loading={saveCompany.isPending}>
+          Salva i dati aziendali
+        </Button>
+        <Button type="button" variant="ghost" onClick={handleCancel}>
+          Annulla
+        </Button>
+        {(validationError || saveCompany.isError) && (
+          <InlineError>{validationError ?? apiErrorMessage(saveCompany.error)}</InlineError>
         )}
       </div>
-      <ImportCompanyDialog
-        open={importOpen}
-        onClose={() => setImportOpen(false)}
-        defaultPiva={form.partita_iva || null}
-      />
-
-      {!editing ? (
-        company ? (
-          <CompanySummary company={company} />
-        ) : (
-          <p className="mt-4 text-sm text-slate-400">Nessun dato inserito.</p>
-        )
-      ) : (
-        <form onSubmit={handleSubmit} className="mt-5 space-y-5">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <TextField
-              label="Ragione sociale"
-              required
-              value={form.ragione_sociale}
-              onChange={set("ragione_sociale")}
-            />
-            <TextField
-              label="Forma giuridica"
-              placeholder="es. SRL, SPA, ditta individuale"
-              value={form.forma_giuridica}
-              onChange={set("forma_giuridica")}
-            />
-            <TextField
-              label="Partita IVA"
-              required
-              inputMode="numeric"
-              placeholder="11 cifre"
-              value={form.partita_iva}
-              onChange={set("partita_iva")}
-            />
-            <TextField
-              label="Codice fiscale"
-              value={form.codice_fiscale}
-              onChange={set("codice_fiscale")}
-            />
-            <Combobox
-              label="Codice ATECO primario"
-              options={(lookups?.codici_ateco ?? []).map((a) => ({
-                id: a.id,
-                label: a.codice,
-                sublabel: a.descrizione ?? undefined,
-              }))}
-              value={form.ateco_id}
-              onChange={(id) => setForm((f) => ({ ...f, ateco_id: id }))}
-            />
-            <Combobox
-              label="Settore"
-              options={(lookups?.settori ?? []).map((s) => ({ id: s.id, label: s.nome }))}
-              value={form.settore_id}
-              onChange={(id) => setForm((f) => ({ ...f, settore_id: id }))}
-            />
-            <Combobox
-              label="Regione"
-              options={(lookups?.regioni ?? []).map((r) => ({ id: r.id, label: r.nome }))}
-              value={form.regione_id}
-              onChange={(id) => setForm((f) => ({ ...f, regione_id: id }))}
-            />
-            <TextField
-              label="Anno di fondazione"
-              type="number"
-              min={1800}
-              max={2100}
-              value={form.anno_fondazione}
-              onChange={set("anno_fondazione")}
-            />
-            {/* Dichiarato, non deducibile dalla visura: il catalogo distingue
-                Istituti Scolastici, Enti pubblici, Organismi di formazione… che
-                nessun attributo camerale esprime. Multi-valore.
-                TagSelect è solo il selettore (la sua `label` è sr-only e non
-                mostra i valori scelti): etichetta e chip stanno qui. */}
-            <div className="sm:col-span-2">
-              <span className="block text-sm font-medium text-slate-700">
-                Categorie di beneficiario
-              </span>
-              {form.beneficiari_ids.length > 0 && (
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {form.beneficiari_ids.map((id) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => toggleBeneficiario(id)}
-                      title="Rimuovi"
-                      className="inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200 transition-colors hover:bg-brand-100"
-                    >
-                      <span className="truncate">{beneficiarioNome(id)}</span>
-                      <X className="size-3 shrink-0" aria-hidden />
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="mt-1.5">
-                <TagSelect
-                  label="Aggiungi una categoria di beneficiario"
-                  options={beneficiariOptions}
-                  values={form.beneficiari_ids}
-                  onToggle={toggleBeneficiario}
-                  placeholder="Cerca e aggiungi una categoria…"
-                />
-              </div>
-              <p className="mt-1.5 text-xs text-slate-500">
-                Come ti presenti ai bandi: PMI, Startup, Organismo di formazione, Ente
-                pubblico… Puoi sceglierne più di una. Finché è vuota, i bandi che limitano i
-                beneficiari non la conteggiano nella compatibilità.
-              </p>
-            </div>
-          </div>
-
-          <fieldset className="grid gap-4 border-t border-slate-100 pt-4 sm:grid-cols-2">
-            <legend className="sr-only">Sede legale</legend>
-            <div className="sm:col-span-2">
-              <TextField label="Indirizzo sede legale" value={form.indirizzo} onChange={set("indirizzo")} />
-            </div>
-            <TextField label="Comune" value={form.comune} onChange={set("comune")} />
-            <div className="grid grid-cols-2 gap-4">
-              <TextField label="Provincia" value={form.provincia} onChange={set("provincia")} />
-              <TextField label="CAP" inputMode="numeric" value={form.cap} onChange={set("cap")} />
-            </div>
-          </fieldset>
-
-          <fieldset className="grid gap-4 border-t border-slate-100 pt-4 sm:grid-cols-3">
-            <legend className="sr-only">Dimensione aziendale</legend>
-            <SelectField
-              label="Classe dimensionale"
-              value={form.classe_dimensionale}
-              onChange={set("classe_dimensionale")}
-            >
-              <option value="">Non specificata</option>
-              {CLASSI.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </SelectField>
-            <TextField
-              label="Numero dipendenti"
-              type="number"
-              min={0}
-              value={form.numero_dipendenti}
-              onChange={set("numero_dipendenti")}
-            />
-            <SelectField
-              label="Fascia di fatturato"
-              value={form.fascia_fatturato}
-              onChange={set("fascia_fatturato")}
-            >
-              <option value="">Non specificata</option>
-              {FASCE.map((f) => (
-                <option key={f.value} value={f.value}>
-                  {f.label}
-                </option>
-              ))}
-            </SelectField>
-          </fieldset>
-
-          <fieldset className="grid gap-4 border-t border-slate-100 pt-4 sm:grid-cols-3">
-            <legend className="sr-only">Contatti</legend>
-            <TextField label="PEC" type="email" value={form.pec} onChange={set("pec")} />
-            <TextField label="Telefono" type="tel" value={form.telefono} onChange={set("telefono")} />
-            <TextField
-              label="Sito web"
-              placeholder="https://…"
-              value={form.sito_web}
-              onChange={set("sito_web")}
-            />
-          </fieldset>
-
-          <div className="flex items-center gap-3">
-            <Button type="submit" loading={saveCompany.isPending}>
-              Salva dati aziendali
-            </Button>
-            <Button type="button" variant="ghost" onClick={handleCancel}>
-              Annulla
-            </Button>
-            {(validationError || saveCompany.isError) && (
-              <span className="text-sm text-red-600" role="alert">
-                {validationError ?? apiErrorMessage(saveCompany.error)}
-              </span>
-            )}
-          </div>
-        </form>
-      )}
-    </Card>
+    </form>
   );
 }

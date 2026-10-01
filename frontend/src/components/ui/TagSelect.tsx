@@ -153,7 +153,11 @@ export function TagSelect({
                   "flex items-start gap-2 rounded-md px-2.5 py-2 text-body",
                   isInherited
                     ? "cursor-default text-ink-3"
-                    : cn("cursor-pointer text-ink", index === highlighted && "bg-desk"),
+                    : cn(
+                        "cursor-pointer text-ink",
+                        // Voce evidenziata da tastiera: fondo più un anello, non il solo colore.
+                        index === highlighted && "bg-sunken outline-2 -outline-offset-2 outline-accent",
+                      ),
                 )}
               >
                 <Check

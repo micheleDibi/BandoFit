@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { AccessoLaterale } from "../../../components/landing/AccessoLaterale";
 import { AuthLayout } from "../../../components/ui/AuthLayout";
 import { Avatar } from "../../../components/ui/Avatar";
 import { Button } from "../../../components/ui/Button";
@@ -260,20 +261,7 @@ export default function Campi() {
       <Blocco nome="AuthLayout" nota="Due colonne da lg (modulo a sinistra, laterale su desk); qui in un riquadro.">
         <AuthLayout
           className="w-full min-h-0 overflow-hidden rounded-panel border border-line"
-          laterale={
-            <div className="flex flex-col gap-6">
-              <p className="text-title-page text-ink">
-                Fa per me?
-                <br />
-                Quanto vale?
-                <br />
-                Entro quando?
-              </p>
-              <p className="text-body text-ink-2">
-                Qui vanno due righe di esempio dell'elenco (arrivano con BandoRow).
-              </p>
-            </div>
-          }
+          laterale={<AccessoLaterale />}
         >
           <form className="flex flex-col gap-4" onSubmit={(e) => e.preventDefault()}>
             <h2 className="text-title-page text-ink">Accedi</h2>

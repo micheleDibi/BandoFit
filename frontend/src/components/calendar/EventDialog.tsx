@@ -1,4 +1,4 @@
-import { ExternalLink, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import {
   useCreateEvent,
@@ -9,9 +9,15 @@ import {
 import { apiErrorMessage } from "../../lib/api";
 import { formatDate } from "../../lib/format";
 import type { CalendarEvent } from "../../types";
-import { Button, LinkButton } from "../ui/Button";
+import { Alert } from "../ui/Alert";
+import { Button } from "../ui/Button";
+import { Checkbox } from "../ui/Checkbox";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Dialog } from "../ui/Dialog";
 import { TextareaField, TextField } from "../ui/Field";
+import { InlineError } from "../ui/InlineError";
+import { TextLink } from "../ui/TextLink";
+import { useToast } from "../ui/Toast";
 
 export type DialogState =
   | { mode: "create"; date: string }
@@ -48,6 +54,7 @@ export function EventDialog({ state, onClose }: { state: DialogState; onClose: (
   const createEvent = useCreateEvent();
   const updateEvent = useUpdateEvent();
   const deleteEvent = useDeleteEvent();
+  const { mostra } = useToast();
 
   const [form, setForm] = useState<FormState>({
     titolo: "", data: "", tuttoIlGiorno: true, oraInizio: "", oraFine: "", note: "",
@@ -110,6 +117,7 @@ export function EventDialog({ state, onClose }: { state: DialogState; onClose: (
               note: form.note.trim() || null,
             };
         await updateEvent.mutateAsync({ id: editing.id, patch });
+        mostra({ testo: "Evento salvato" });
       } else {
         await createEvent.mutateAsync({
           titolo: form.titolo.trim(),
@@ -119,6 +127,7 @@ export function EventDialog({ state, onClose }: { state: DialogState; onClose: (
           ora_fine: form.tuttoIlGiorno || !form.oraFine ? null : form.oraFine,
           note: form.note.trim() || null,
         });
+        mostra({ testo: "Evento aggiunto" });
       }
       onClose();
     } catch {
@@ -128,133 +137,150 @@ export function EventDialog({ state, onClose }: { state: DialogState; onClose: (
 
   const handleDelete = async () => {
     if (!editing) return;
-    if (!confirmDelete) {
-      setConfirmDelete(true);
-      return;
-    }
     try {
       await deleteEvent.mutateAsync(editing.id);
+      setConfirmDelete(false);
       onClose();
+      mostra({ testo: "Evento eliminato" });
     } catch {
-      // errore mostrato sotto
+      // errore mostrato nella conferma
     }
   };
 
-  const mutationError = createEvent.error ?? updateEvent.error ?? deleteEvent.error;
+  const mutationError = createEvent.error ?? updateEvent.error;
 
+  // La conferma dell'eliminazione è una SORELLA della finestra, non una figlia:
+  // React propaga `close`/`cancel` lungo l'albero dei componenti, e chiudendo
+  // la conferma chiuderebbe anche la finestra sotto.
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title={editing ? "Modifica evento" : "Nuovo evento"}
-      footer={
-        <>
-          {editing && (
-            <Button
-              type="button"
-              variant="danger"
-              onClick={handleDelete}
-              loading={deleteEvent.isPending}
-              className="mr-auto"
-            >
-              <Trash2 className="size-4" aria-hidden />
-              {confirmDelete ? "Confermi?" : "Elimina"}
-            </Button>
-          )}
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Annulla
-          </Button>
-          {/* onClick esplicito, non l'associazione `form=` (fragile in Safari
-              con il bottone fuori dal form dentro un <dialog> modale). */}
-          <Button type="button" onClick={() => handleSubmit()} loading={busy && !deleteEvent.isPending}>
-            Salva
-          </Button>
-        </>
-      }
-    >
-      <form onSubmit={handleSubmit} noValidate className="space-y-4">
-        <TextField
-          label="Titolo"
-          required
-          maxLength={200}
-          value={form.titolo}
-          onChange={(e) => setForm((f) => ({ ...f, titolo: e.target.value }))}
-        />
-
-        {isBando ? (
-          <div className="rounded-lg bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
-            <p>
-              Scadenza del bando: <strong>{formatDate(form.data)}</strong> — la data non è
-              modificabile perché deriva dal bando ufficiale.
-            </p>
-            {editing?.bando_slug && (
-              <LinkButton
-                to={`/app/bandi/${editing.bando_slug}`}
-                variant="ghost"
-                size="sm"
-                className="mt-1 -ml-2 text-amber-800"
-              >
-                Vai al bando
-                <ExternalLink className="size-3.5" aria-hidden />
-              </LinkButton>
-            )}
-          </div>
-        ) : (
+    <>
+      <Dialog
+        open={open}
+        onClose={onClose}
+        title={editing ? "Modifica evento" : "Nuovo evento"}
+        footer={
           <>
-            <TextField
-              label="Data"
-              type="date"
-              required
-              min="2000-01-01"
-              max="2100-12-31"
-              value={form.data}
-              onChange={(e) => setForm((f) => ({ ...f, data: e.target.value }))}
-            />
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
+            {editing && (
+              <Button
+                type="button"
+                variant="danger"
+                onClick={() => {
+                  deleteEvent.reset();
+                  setConfirmDelete(true);
+                }}
+                disabled={busy}
+                className="mr-auto"
+              >
+                <Trash2 className="size-4" aria-hidden />
+                Elimina
+              </Button>
+            )}
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Annulla
+            </Button>
+            {/* onClick esplicito, non l'associazione `form=` (fragile in Safari
+                con il bottone fuori dal form dentro un <dialog> modale). */}
+            <Button type="button" onClick={() => handleSubmit()} loading={busy && !deleteEvent.isPending}>
+              Salva
+            </Button>
+          </>
+        }
+      >
+        <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
+          <TextField
+            label="Titolo"
+            required
+            maxLength={200}
+            value={form.titolo}
+            onChange={(e) => setForm((f) => ({ ...f, titolo: e.target.value }))}
+          />
+
+          {isBando ? (
+            <Alert
+              tono="info"
+              azione={
+                editing?.bando_slug && (
+                  <TextLink
+                    to={`/app/bandi/${editing.bando_slug}`}
+                    onClick={onClose}
+                    className="text-small font-medium"
+                  >
+                    Apri il bando
+                  </TextLink>
+                )
+              }
+            >
+              Scadenza del bando: <strong>{formatDate(form.data)}</strong>. La data non è
+              modificabile perché deriva dal bando ufficiale.
+            </Alert>
+          ) : (
+            <>
+              <TextField
+                label="Data"
+                type="date"
+                required
+                min="2000-01-01"
+                max="2100-12-31"
+                value={form.data}
+                onChange={(e) => setForm((f) => ({ ...f, data: e.target.value }))}
+              />
+              <Checkbox
+                label="Tutto il giorno"
                 checked={form.tuttoIlGiorno}
                 onChange={(e) => setForm((f) => ({ ...f, tuttoIlGiorno: e.target.checked }))}
-                className="size-4 cursor-pointer accent-brand-500"
               />
-              Tutto il giorno
-            </label>
-            {!form.tuttoIlGiorno && (
-              <div className="grid grid-cols-2 gap-4">
-                <TextField
-                  label="Ora di inizio"
-                  type="time"
-                  required
-                  value={form.oraInizio}
-                  onChange={(e) => setForm((f) => ({ ...f, oraInizio: e.target.value }))}
-                />
-                <TextField
-                  label="Ora di fine"
-                  type="time"
-                  helper="Opzionale"
-                  value={form.oraFine}
-                  onChange={(e) => setForm((f) => ({ ...f, oraFine: e.target.value }))}
-                />
-              </div>
-            )}
-          </>
-        )}
+              {!form.tuttoIlGiorno && (
+                <div className="grid grid-cols-2 gap-4">
+                  <TextField
+                    label="Ora di inizio"
+                    type="time"
+                    required
+                    value={form.oraInizio}
+                    onChange={(e) => setForm((f) => ({ ...f, oraInizio: e.target.value }))}
+                  />
+                  <TextField
+                    label="Ora di fine"
+                    type="time"
+                    helper="Opzionale"
+                    value={form.oraFine}
+                    onChange={(e) => setForm((f) => ({ ...f, oraFine: e.target.value }))}
+                  />
+                </div>
+              )}
+            </>
+          )}
 
-        <TextareaField
-          label="Note"
-          maxLength={2000}
-          rows={3}
-          placeholder="Appunti, promemoria…"
-          value={form.note}
-          onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
-        />
+          <TextareaField
+            label="Note"
+            maxLength={2000}
+            rows={3}
+            placeholder="Appunti, promemoria…"
+            value={form.note}
+            onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
+          />
 
-        {(validationError || mutationError) && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-            {validationError ?? apiErrorMessage(mutationError)}
-          </p>
+          {(validationError || mutationError) && (
+            <InlineError>{validationError ?? apiErrorMessage(mutationError)}</InlineError>
+          )}
+        </form>
+      </Dialog>
+      <ConfirmDialog
+        open={confirmDelete}
+        titolo="Eliminare l'evento?"
+        conferma="Elimina"
+        distruttiva
+        inCorso={deleteEvent.isPending}
+        onConferma={handleDelete}
+        onAnnulla={() => setConfirmDelete(false)}
+      >
+        <p>
+          <strong className="text-ink">{form.titolo || editing?.titolo}</strong> sparisce dal
+          calendario.
+        </p>
+        {deleteEvent.isError && (
+          <InlineError className="mt-3">{apiErrorMessage(deleteEvent.error)}</InlineError>
         )}
-      </form>
-    </Dialog>
+      </ConfirmDialog>
+    </>
   );
 }

@@ -1,4 +1,3 @@
-import { Building2, Plus, X } from "lucide-react";
 import { useId, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useLookups } from "../../hooks/useLookups";
 import { usePartenariatiVocabolario } from "../../hooks/usePartenariatiVocabolario";
@@ -6,7 +5,6 @@ import { useSalvaPartnerProfile } from "../../hooks/usePartnerProfile";
 import { apiErrorMessage } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { PARTNER_COPY } from "../../lib/copy";
-import { nomePaese, paesiOrdinati } from "../../lib/paesi";
 import type {
   FormaProfiloPartner,
   LookupItem,
@@ -14,11 +12,17 @@ import type {
   RuoloPartner,
   TipoSoggettoPartenariato,
 } from "../../types";
+import { Alert } from "../ui/Alert";
+import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
-import { TextareaField } from "../ui/Field";
+import { Checkbox } from "../ui/Checkbox";
+import { Chip } from "../ui/Chip";
+import { TextField } from "../ui/Field";
+import { InlineError } from "../ui/InlineError";
+import { Section, SectionHeader } from "../ui/SectionHeader";
 import { TagSelect } from "../ui/TagSelect";
 import { Skeleton } from "../ui/states";
+import { SceltaPaesi, TestoLungo } from "./CampiCall";
 import { EsperienzeEditor, erroreEsperienza } from "./EsperienzeEditor";
 
 // ---- Limiti e regole (gli stessi dello schema del server) ------------------
@@ -116,6 +120,8 @@ export function alterna<T extends string>(scelti: T[], codice: T, ordine: readon
 
 // ---- Blocchi del form ---------------------------------------------------------
 
+/** Sezione del form: titolo con il filetto (livello 3, dentro la sezione
+ *  «Profilo partner»), una riga di descrizione e i campi. */
 function Sezione({
   titolo,
   descrizione,
@@ -127,15 +133,13 @@ function Sezione({
 }) {
   const id = useId();
   return (
-    <Card className="p-5">
-      <section aria-labelledby={id}>
-        <h3 id={id} className="font-display text-base font-semibold text-slate-900">
-          {titolo}
-        </h3>
-        {descrizione && <p className="mt-0.5 text-sm text-slate-500">{descrizione}</p>}
-        <div className="mt-4 space-y-5">{children}</div>
-      </section>
-    </Card>
+    <Section aria-labelledby={id}>
+      <div className="flex flex-col gap-2">
+        <SectionHeader id={id} titolo={titolo} livello={3} />
+        {descrizione && <p className="text-small text-ink-3">{descrizione}</p>}
+      </div>
+      <div className="flex flex-col gap-6">{children}</div>
+    </Section>
   );
 }
 
@@ -169,41 +173,52 @@ export function GruppoCheckbox<T extends string>({
   const idNota = useId();
   const pieno = massimo !== undefined && scelti.length >= massimo;
   return (
-    <fieldset aria-describedby={nota ? idNota : undefined}>
-      <legend className="text-sm font-medium text-slate-700">{legenda}</legend>
+    <fieldset className="flex min-w-0 flex-col gap-2" aria-describedby={nota ? idNota : undefined}>
+      <legend className="mb-1 text-small font-medium text-ink">{legenda}</legend>
       {nota && (
-        <p id={idNota} className="mt-0.5 text-xs text-slate-500">
+        <p id={idNota} className="text-small text-ink-3">
           {nota}
         </p>
       )}
-      <div className={cn("mt-2 grid gap-x-4 gap-y-1.5", colonne === 2 && "sm:grid-cols-2")}>
+      <div className={cn("grid gap-x-4 gap-y-2", colonne === 2 && "sm:grid-cols-2")}>
         {opzioni.map((o) => {
           const scelto = scelti.includes(o.codice);
           const bloccato = (!scelto && pieno) || (scelto && scelti.length <= minimo);
           return (
-            <label
+            <Checkbox
               key={o.codice}
-              className={cn(
-                "flex items-start gap-2 text-sm",
-                bloccato ? "cursor-not-allowed text-slate-400" : "cursor-pointer text-slate-700",
-              )}
-            >
-              <input
-                type="checkbox"
-                className="mt-0.5 size-4 shrink-0 cursor-pointer accent-brand-500 disabled:cursor-not-allowed"
-                checked={scelto}
-                disabled={bloccato}
-                onChange={() => onToggle(o.codice)}
-              />
-              <span>
-                {o.etichetta}
-                {o.nota && <span className="block text-xs text-slate-500">{o.nota}</span>}
-              </span>
-            </label>
+              label={o.etichetta}
+              descrizione={o.nota}
+              checked={scelto}
+              disabled={bloccato}
+              onChange={() => onToggle(o.codice)}
+            />
           );
         })}
       </div>
     </fieldset>
+  );
+}
+
+/** Voci scelte come `Chip` rimovibili, sotto il campo che le aggiunge. */
+function VociScelte({
+  voci,
+  onRimuovi,
+}: {
+  voci: Array<{ chiave: string; testo: string }>;
+  onRimuovi: (chiave: string) => void;
+}) {
+  if (voci.length === 0) return null;
+  return (
+    <ul className="flex flex-wrap gap-1.5">
+      {voci.map((v) => (
+        <li key={v.chiave} className="max-w-full">
+          <Chip onRemove={() => onRimuovi(v.chiave)} label={`Rimuovi «${v.testo}»`}>
+            {v.testo}
+          </Chip>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -252,70 +267,53 @@ function VociLibere({
   };
 
   return (
-    <div className="space-y-1.5">
-      <label htmlFor={id} className="block text-sm font-medium text-slate-700">
-        {etichetta}
-      </label>
-      {aiuto && (
-        <p id={`${id}-aiuto`} className="text-xs text-slate-500">
-          {aiuto}
-        </p>
-      )}
-      {voci.length > 0 && (
-        <ul className="flex flex-wrap gap-1.5">
-          {voci.map((v) => (
-            <li key={v}>
-              <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-brand-50 py-1 pl-2.5 pr-1 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200">
-                <span className="truncate">{v}</span>
-                <button
-                  type="button"
-                  onClick={() => onChange(voci.filter((x) => x !== v))}
-                  aria-label={`Rimuovi «${v}»`}
-                  className="cursor-pointer rounded-full p-0.5 transition-colors hover:bg-brand-100 focus-visible:outline-2 focus-visible:outline-brand-500 disabled:cursor-not-allowed"
-                >
-                  <X className="size-3" aria-hidden />
-                </button>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="flex max-w-md gap-2">
-        <input
-          id={id}
-          value={bozza}
-          maxLength={lunghezzaMassima}
-          placeholder={pieno ? `Massimo ${massimo} voci` : segnaposto}
-          disabled={pieno}
-          aria-describedby={aiuto ? `${id}-aiuto` : undefined}
-          onChange={(e) => {
-            setBozza(e.target.value);
-            setAvviso(null);
-          }}
-          onKeyDown={onKeyDown}
-          className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-2 focus:outline-offset-0 focus:outline-brand-500/30 disabled:cursor-not-allowed disabled:bg-slate-50"
-        />
+    <div className="flex flex-col gap-1.5">
+      <div className="flex max-w-md items-end gap-2">
+        <div className="min-w-0 flex-1">
+          <TextField
+            id={id}
+            label={etichetta}
+            value={bozza}
+            maxLength={lunghezzaMassima}
+            placeholder={pieno ? `Massimo ${massimo} voci` : segnaposto}
+            disabled={pieno}
+            aria-describedby={aiuto ? `${id}-aiuto` : undefined}
+            onChange={(e) => {
+              setBozza(e.target.value);
+              setAvviso(null);
+            }}
+            onKeyDown={onKeyDown}
+          />
+        </div>
         <Button
-          variant="secondary"
+          variant="ghost"
           onClick={aggiungi}
           disabled={pieno || !bozza.trim()}
           aria-label={`Aggiungi a ${etichetta.toLowerCase()}`}
         >
-          <Plus className="size-4" aria-hidden />
           Aggiungi
         </Button>
       </div>
+      {aiuto && (
+        <p id={`${id}-aiuto`} className="text-small text-ink-3">
+          {aiuto}
+        </p>
+      )}
       {avviso && (
-        <p className="text-xs text-amber-700" role="status">
+        <p className="text-small text-warning-ink" role="status">
           {avviso}
         </p>
       )}
+      <VociScelte
+        voci={voci.map((v) => ({ chiave: v, testo: v }))}
+        onRimuovi={(v) => onChange(voci.filter((x) => x !== v))}
+      />
     </div>
   );
 }
 
 /** Scelta multipla su una lookup del catalogo (regioni, settori, tipologie):
- *  chip rimovibili + ricerca. */
+ *  ricerca + chip rimovibili. */
 export function SceltaLookup({
   etichetta,
   aiuto,
@@ -338,31 +336,8 @@ export function SceltaLookup({
     else if (!pieno) onChange([...scelti, id]);
   };
   return (
-    <div className="space-y-1.5">
-      <p className="text-sm font-medium text-slate-700">{etichetta}</p>
-      {aiuto && <p className="text-xs text-slate-500">{aiuto}</p>}
-      {scelti.length > 0 && (
-        <ul className="flex flex-wrap gap-1.5">
-          {scelti.map((id) => {
-            const nome = nomi.get(id) ?? `#${id}`;
-            return (
-              <li key={id}>
-                <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-brand-50 py-1 pl-2.5 pr-1 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200">
-                  <span className="truncate">{nome}</span>
-                  <button
-                    type="button"
-                    onClick={() => alternaId(id)}
-                    aria-label={`Rimuovi ${nome}`}
-                    className="cursor-pointer rounded-full p-0.5 transition-colors hover:bg-brand-100 focus-visible:outline-2 focus-visible:outline-brand-500 disabled:cursor-not-allowed"
-                  >
-                    <X className="size-3" aria-hidden />
-                  </button>
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+    <div className="flex flex-col gap-1.5">
+      <p className="text-small font-medium text-ink">{etichetta}</p>
       <div className="max-w-md">
         {opzioni ? (
           <TagSelect
@@ -376,76 +351,16 @@ export function SceltaLookup({
           <Skeleton className="h-10 w-full" />
         )}
       </div>
+      {aiuto && <p className="text-small text-ink-3">{aiuto}</p>}
+      <VociScelte
+        voci={scelti.map((id) => ({ chiave: String(id), testo: nomi.get(id) ?? `#${id}` }))}
+        onRimuovi={(chiave) => alternaId(Number(chiave))}
+      />
     </div>
   );
 }
 
-/** Paesi d'interesse (codici ISO a due lettere, nomi in italiano). */
-function SceltaPaesi({
-  scelti,
-  onChange,
-}: {
-  scelti: string[];
-  onChange: (paesi: string[]) => void;
-}) {
-  const id = useId();
-  const [paese, setPaese] = useState("");
-  const disponibili = useMemo(() => paesiOrdinati().filter((c) => !scelti.includes(c)), [scelti]);
-  const pieno = scelti.length >= MAX_PAESI;
-  const aggiungi = () => {
-    if (!paese || pieno || scelti.includes(paese)) return;
-    onChange([...scelti, paese]);
-    setPaese("");
-  };
-  return (
-    <div className="space-y-1.5">
-      <label htmlFor={id} className="block text-sm font-medium text-slate-700">
-        Paesi d'interesse
-      </label>
-      <p className="text-xs text-slate-500">Per i bandi europei e internazionali.</p>
-      {scelti.length > 0 && (
-        <ul className="flex flex-wrap gap-1.5">
-          {scelti.map((codice) => (
-            <li key={codice}>
-              <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 py-1 pl-2.5 pr-1 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200">
-                {nomePaese(codice)}
-                <button
-                  type="button"
-                  onClick={() => onChange(scelti.filter((c) => c !== codice))}
-                  aria-label={`Rimuovi ${nomePaese(codice)}`}
-                  className="cursor-pointer rounded-full p-0.5 transition-colors hover:bg-brand-100 focus-visible:outline-2 focus-visible:outline-brand-500 disabled:cursor-not-allowed"
-                >
-                  <X className="size-3" aria-hidden />
-                </button>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="flex max-w-md gap-2">
-        <select
-          id={id}
-          value={paese}
-          disabled={pieno}
-          onChange={(e) => setPaese(e.target.value)}
-          className="h-10 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-brand-500 focus:outline-2 focus:outline-offset-0 focus:outline-brand-500/30 disabled:cursor-not-allowed disabled:bg-slate-50"
-        >
-          <option value="">{pieno ? `Massimo ${MAX_PAESI} paesi` : "Scegli un paese…"}</option>
-          {disponibili.map((c) => (
-            <option key={c} value={c}>
-              {nomePaese(c)}
-            </option>
-          ))}
-        </select>
-        <Button variant="secondary" onClick={aggiungi} disabled={!paese || pieno}>
-          <Plus className="size-4" aria-hidden />
-          Aggiungi
-        </Button>
-      </div>
-    </div>
-  );
-}
-
+/** Testo lungo facoltativo: vuoto = `null` (come lo vuole il server). */
 function TestoConContatore({
   etichetta,
   aiuto,
@@ -459,21 +374,15 @@ function TestoConContatore({
   onChange: (v: string | null) => void;
   righe?: number;
 }) {
-  const lunghezza = valore?.length ?? 0;
   return (
-    <div>
-      <TextareaField
-        label={etichetta}
-        helper={aiuto}
-        rows={righe}
-        maxLength={MAX_TESTO_LUNGO}
-        value={valore ?? ""}
-        onChange={(e) => onChange(e.target.value || null)}
-      />
-      <p className="mt-1 text-right text-xs text-slate-400 tabular" aria-hidden>
-        {lunghezza.toLocaleString("it-IT")} / {MAX_TESTO_LUNGO.toLocaleString("it-IT")}
-      </p>
-    </div>
+    <TestoLungo
+      etichetta={etichetta}
+      aiuto={aiuto}
+      valore={valore ?? ""}
+      onChange={(v) => onChange(v || null)}
+      massimo={MAX_TESTO_LUNGO}
+      righe={righe}
+    />
   );
 }
 
@@ -586,21 +495,21 @@ export function PartnerProfileForm({
 
   return (
     <div className={cn(barraVisibile && "pb-24")}>
-      <fieldset disabled={!editable} className="min-w-0 space-y-4">
+      <fieldset disabled={!editable} className="flex min-w-0 flex-col gap-8">
         <legend className="sr-only">Profilo partner</legend>
 
         {anonimo && avvisiAnonimato.length > 0 && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            <p className="font-medium">
-              Nei testi c'è qualcosa che potrebbe far riconoscere l'azienda anche se resta anonima:
-            </p>
-            <ul className="mt-1 list-disc pl-5">
+          <Alert
+            tono="attenzione"
+            titolo="Nei testi c'è qualcosa che potrebbe far riconoscere l'azienda anche se resta anonima:"
+          >
+            <ul className="list-disc pl-5">
               {avvisiAnonimato.map((a, i) => (
                 <li key={i}>{a}</li>
               ))}
             </ul>
-            <p className="mt-1 text-xs">Non blocca il salvataggio: valuta tu se toglierlo.</p>
-          </div>
+            <p className="mt-1 text-small">Non blocca il salvataggio: valuta tu se toglierlo.</p>
+          </Alert>
         )}
 
         <Sezione
@@ -616,14 +525,14 @@ export function PartnerProfileForm({
           {vocabolario.isPending ? (
             <Skeleton className="h-40 w-full" />
           ) : vocabolario.isError ? (
-            <p className="text-sm text-red-700" role="alert">
+            <Alert tono="errore">
               {apiErrorMessage(vocabolario.error, "Impossibile caricare l'elenco delle competenze.")}
-            </p>
+            </Alert>
           ) : (
-            <div className="space-y-4">
-              <p className="text-sm text-slate-600">
+            <div className="flex flex-col gap-5">
+              <p className="text-body text-ink-2">
                 Competenze scelte:{" "}
-                <span className="font-medium tabular">
+                <span className="font-medium text-ink tabular-nums">
                   {valore.competenze.length} di {MAX_COMPETENZE}
                 </span>
               </p>
@@ -656,23 +565,21 @@ export function PartnerProfileForm({
           titolo="Tipo di soggetto"
           descrizione="Dimensione e qualifiche vengono dal Registro Imprese; il resto lo dichiari tu."
         >
-          <div>
-            <p className="text-sm font-medium text-slate-700">Dal Registro Imprese</p>
+          <div className="flex flex-col gap-2">
+            <p className="text-small font-medium text-ink">Dal Registro Imprese</p>
             {dedotti.length > 0 ? (
-              <ul className="mt-2 flex flex-wrap gap-1.5">
+              <ul className="flex flex-wrap gap-1.5">
                 {dedotti.map((codice) => (
-                  <li
-                    key={codice}
-                    className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200"
-                  >
-                    <Building2 className="size-3 text-slate-400" aria-hidden />
-                    {etichettaTipo(codice)}
-                    <span className="sr-only"> (dal Registro Imprese, non modificabile)</span>
+                  <li key={codice}>
+                    <Badge>
+                      {etichettaTipo(codice)}
+                      <span className="sr-only"> (dal Registro Imprese, non modificabile)</span>
+                    </Badge>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="mt-1 text-sm text-slate-500">
+              <p className="text-body text-ink-2">
                 Nessun dato: importa i dati ufficiali dell'azienda per ricavare dimensione e
                 qualifiche.
               </p>
@@ -734,20 +641,12 @@ export function PartnerProfileForm({
               }
             />
           )}
-          <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              className="mt-0.5 size-4 shrink-0 cursor-pointer accent-brand-500 disabled:cursor-not-allowed"
-              checked={valore.accetta_inviti}
-              onChange={(e) => set("accetta_inviti", e.target.checked)}
-            />
-            <span>
-              <span className="font-medium">Accetto inviti dalle altre aziende</span>
-              <span className="block text-xs text-slate-500">
-                Se lo togli, le altre aziende non possono invitarti ai loro partenariati.
-              </span>
-            </span>
-          </label>
+          <Checkbox
+            label="Accetto inviti dalle altre aziende"
+            descrizione="Se lo togli, le altre aziende non possono invitarti ai loro partenariati."
+            checked={valore.accetta_inviti}
+            onChange={(e) => set("accetta_inviti", e.target.checked)}
+          />
         </Sezione>
 
         <Sezione titolo="Dove e su cosa" descrizione="Aiuta a proporti i partenariati giusti.">
@@ -758,10 +657,15 @@ export function PartnerProfileForm({
             onChange={(v) => set("regioni_interesse", v)}
             massimo={MAX_REGIONI}
           />
-          <SceltaPaesi
-            scelti={valore.paesi_interesse}
-            onChange={(v) => set("paesi_interesse", v)}
-          />
+          <div className="flex flex-col gap-1.5">
+            <SceltaPaesi
+              etichetta="Paesi d'interesse"
+              scelti={valore.paesi_interesse}
+              onChange={(v) => set("paesi_interesse", v)}
+              massimo={MAX_PAESI}
+            />
+            <p className="text-small text-ink-3">Per i bandi europei e internazionali.</p>
+          </div>
           <SceltaLookup
             etichetta="Settori d'interesse"
             opzioni={lookups?.settori}
@@ -821,19 +725,19 @@ export function PartnerProfileForm({
         </Sezione>
       </fieldset>
 
-      {/* Barra di salvataggio: compare solo con modifiche, esito o errore. */}
+      {/* Barra di salvataggio: compare solo con modifiche, esito o errore. Su
+          desktop parte dal bordo della barra laterale (248px) per non
+          coprirne il fondo. */}
       {barraVisibile && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur">
-          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-            <div className="text-sm" role="status" aria-live="polite">
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-sheet lg:left-[248px]">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-10">
+            <div className="text-body" role="status" aria-live="polite">
               {erroreBarra ? (
-                <span className="text-red-600" role="alert">
-                  {erroreBarra}
-                </span>
+                <InlineError>{erroreBarra}</InlineError>
               ) : dirty ? (
-                <span className="font-medium text-slate-700">{PARTNER_COPY.modificheNonSalvate}</span>
+                <span className="text-ink-2">{PARTNER_COPY.modificheNonSalvate}</span>
               ) : (
-                <span className="font-medium text-emerald-600">{PARTNER_COPY.salvato}</span>
+                <span className="font-medium text-fit-ink">{PARTNER_COPY.salvato}</span>
               )}
             </div>
             {dirty && (

@@ -12,8 +12,9 @@ const giornoFormatter = new Intl.DateTimeFormat("it-IT", {
 });
 
 /** «31 lug 2026» dalla data di calendario (`new Date(anno, mese-1, giorno)`), come
- *  il giorno mostrato in grande: `formatDate` di `lib/format` passa da mezzanotte
- *  UTC e a ovest di UTC slitterebbe di un giorno rispetto a quello visibile. */
+ *  il giorno mostrato in grande. Si tagliano le prime dieci cifre: con un
+ *  datetime completo `formatDate` di `lib/format` lo convertirebbe nel fuso del
+ *  browser, e il mese potrebbe non coincidere con il giorno visibile. */
 function formatGiorno(data: string): string {
   const [anno, mese, giorno] = data.slice(0, 10).split("-").map(Number);
   if (![anno, mese, giorno].every(Number.isFinite)) return "—";
@@ -69,12 +70,16 @@ export interface DueProps {
   ora?: string | null;
   /** «Oggi» di riferimento; assente = oggi in Italia. */
   oggi?: Date;
+  /** Falso per un bando non in corso (chiuso, sospeso, revocato: `bandoInCorso`
+   *  di `components/bandi/stato`): resta solo la data, spenta, senza tempo
+   *  relativo né colore d'urgenza. Una data passata dice sempre «scaduto il…». */
+  conConto?: boolean;
   className?: string;
 }
 
 /** Il segno della scadenza: giorno grande, «mese anno», tempo relativo in parole.
  *  Stessa forma in elenco, scheda, calendario e Home. */
-export function Due({ data, ora, oggi, className }: DueProps) {
+export function Due({ data, ora, oggi, conConto = true, className }: DueProps) {
   const parti = data?.slice(0, 10).split("-").map(Number) ?? [];
   const [anno, mese, giorno] = parti;
   const valida = parti.length === 3 && parti.every((n) => Number.isFinite(n));
@@ -89,7 +94,9 @@ export function Due({ data, ora, oggi, className }: DueProps) {
   }
 
   const passata = stato === "passata";
-  const relativo = tempoRelativo(data, oggi);
+  // Senza conto (bando non in corso) e con la data ancora davanti: solo la data, spenta.
+  const spenta = passata || !conConto;
+  const relativo = passata || conConto ? tempoRelativo(data, oggi) : "";
   const dataIso = data.slice(0, 10);
   const oraBreve = ora ? formatTime(ora) : "";
 
@@ -99,17 +106,20 @@ export function Due({ data, ora, oggi, className }: DueProps) {
       className={cn("flex w-18 shrink-0 flex-col items-start gap-0.5", className)}
     >
       <span aria-hidden className="flex flex-col items-start gap-0.5">
-        <span className={cn("text-due-day", passata ? "text-ink-3" : "text-ink")}>{giorno}</span>
-        <span className={cn("text-small font-medium", passata ? "text-ink-3" : "text-ink-2")}>
+        <span className={cn("text-due-day", spenta ? "text-ink-3" : "text-ink")}>{giorno}</span>
+        <span className={cn("text-small font-medium", spenta ? "text-ink-3" : "text-ink-2")}>
           {meseAnnoFormatter.format(new Date(anno, mese - 1, giorno))}
         </span>
-        <span className={cn("whitespace-nowrap text-caption", coloreRelativo[stato])}>
-          {relativo}
-        </span>
+        {relativo && (
+          <span className={cn("whitespace-nowrap text-caption", coloreRelativo[stato])}>
+            {relativo}
+          </span>
+        )}
       </span>
       <span className="sr-only">
         Scadenza {formatGiorno(dataIso)}
-        {oraBreve ? `, ore ${oraBreve}` : ""}, {relativo}
+        {oraBreve ? `, ore ${oraBreve}` : ""}
+        {relativo ? `, ${relativo}` : ""}
       </span>
     </time>
   );

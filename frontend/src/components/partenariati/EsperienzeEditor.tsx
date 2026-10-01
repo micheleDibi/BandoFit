@@ -1,8 +1,9 @@
 import { Plus, Trash2 } from "lucide-react";
-import { useId, useRef } from "react";
+import { useId, useRef, useState } from "react";
 import type { EsperienzaPartner, LookupItem } from "../../types";
 import { Button } from "../ui/Button";
 import { SelectField, TextField } from "../ui/Field";
+import { InlineError } from "../ui/InlineError";
 
 /** Stessi limiti dello schema del server (`EsperienzaPartner`). */
 export const MAX_ESPERIENZE = 20;
@@ -38,9 +39,26 @@ export function erroreEsperienza(e: EsperienzaPartner, annoCorrente: number): st
 let prossimoId = 0;
 const nuovoId = () => `esp-${++prossimoId}`;
 
-/** Righe «esperienze nei programmi di finanziamento»: aggiungi e rimuovi,
- *  con il focus che segue l'azione (sulla riga nuova, o sul bottone
- *  «Aggiungi» dopo una rimozione). Il programma si scrive o si sceglie dal
+const RUOLI_ESPERIENZA: Record<NonNullable<EsperienzaPartner["ruolo"]>, string> = {
+  capofila: "Capofila",
+  partner: "Partner",
+};
+
+/** Riga aperta nell'editor: `originale` è la riga com'era all'apertura
+ *  (`null` = riga appena aggiunta), per «Annulla». */
+interface RigaAperta {
+  chiave: string;
+  originale: EsperienzaPartner | null;
+}
+
+/** Righe «esperienze nei programmi di finanziamento». Ogni riga si legge in
+ *  una linea (programma, anno, ruolo, esito, titolo) e si apre in linea con
+ *  «Modifica»; «Aggiungi un'esperienza» apre una riga nuova. Le modifiche
+ *  vanno subito nel profilo (la barra di salvataggio compare come per gli
+ *  altri campi): «Conferma l'esperienza» chiude l'editor se la riga è
+ *  completa, «Annulla» rimette la riga com'era (o toglie quella nuova). Il
+ *  focus segue l'azione: sul programma all'apertura, sulla riga (o su
+ *  «Aggiungi») alla chiusura. Il programma si scrive o si sceglie dal
  *  catalogo: se il nome coincide con un programma noto, ne salva l'id. */
 export function EsperienzeEditor({
   valore,
@@ -64,22 +82,63 @@ export function EsperienzeEditor({
   if (chiavi.current.length > valore.length) chiavi.current.length = valore.length;
   const aggiungiRef = useRef<HTMLButtonElement>(null);
   const daFocalizzare = useRef<string | null>(null);
+  const modificaRefs = useRef(new Map<string, HTMLButtonElement>());
+  const [aperta, setAperta] = useState<RigaAperta | null>(null);
+  // «Conferma» su una riga incompleta: mostra l'errore nell'editor.
+  const [confermaTentata, setConfermaTentata] = useState(false);
 
   const aggiorna = (indice: number, modifica: Partial<EsperienzaPartner>) =>
     onChange(valore.map((e, i) => (i === indice ? { ...e, ...modifica } : e)));
+
+  // Alla chiusura dell'editor il focus torna su «Modifica» della riga (montato
+  // al render successivo), altrimenti su «Aggiungi».
+  const focusDopo = (chiave: string) =>
+    requestAnimationFrame(() => {
+      const bottone = modificaRefs.current.get(chiave) ?? aggiungiRef.current;
+      bottone?.focus();
+    });
+
+  const apri = (chiave: string, originale: EsperienzaPartner | null) => {
+    daFocalizzare.current = chiave;
+    setConfermaTentata(false);
+    setAperta({ chiave, originale });
+  };
 
   const aggiungi = () => {
     if (valore.length >= MAX_ESPERIENZE) return;
     const chiave = nuovoId();
     chiavi.current.push(chiave);
-    daFocalizzare.current = chiave;
     onChange([...valore, esperienzaVuota()]);
+    apri(chiave, null);
   };
 
   const rimuovi = (indice: number) => {
     chiavi.current.splice(indice, 1);
     onChange(valore.filter((_, i) => i !== indice));
+    setAperta(null);
     requestAnimationFrame(() => aggiungiRef.current?.focus());
+  };
+
+  const conferma = (indice: number) => {
+    if (erroreEsperienza(valore[indice], annoCorrente)) {
+      setConfermaTentata(true);
+      return;
+    }
+    const chiave = chiavi.current[indice];
+    setAperta(null);
+    focusDopo(chiave);
+  };
+
+  const annulla = (indice: number) => {
+    if (!aperta) return;
+    if (aperta.originale === null) {
+      rimuovi(indice);
+      return;
+    }
+    const originale = aperta.originale;
+    onChange(valore.map((e, i) => (i === indice ? originale : e)));
+    setAperta(null);
+    focusDopo(chiavi.current[indice]);
   };
 
   const cambiaProgramma = (indice: number, testo: string) => {
@@ -89,7 +148,7 @@ export function EsperienzeEditor({
   };
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       <datalist id={idListaProgrammi}>
         {programmi.map((p) => (
           <option key={p.id} value={p.nome} />
@@ -97,110 +156,164 @@ export function EsperienzeEditor({
       </datalist>
 
       {valore.length === 0 && (
-        <p className="text-sm text-slate-500">
+        <p className="text-body text-ink-2">
           Nessuna esperienza indicata. Aggiungi i programmi in cui l'azienda ha già partecipato
           a un progetto finanziato, anche con altri.
         </p>
       )}
 
-      <ol className="space-y-3">
-        {valore.map((esperienza, indice) => {
-          const chiave = chiavi.current[indice];
-          const errore = mostraErrori ? erroreEsperienza(esperienza, annoCorrente) : null;
-          const numero = indice + 1;
-          return (
-            <li key={chiave} className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
-              <fieldset className="grid gap-3 sm:grid-cols-2">
-                <legend className="sr-only">Esperienza {numero}</legend>
-                <div className="sm:col-span-2">
-                  <TextField
-                    ref={(el) => {
-                      if (el && daFocalizzare.current === chiave) {
-                        daFocalizzare.current = null;
-                        el.focus();
+      {valore.length > 0 && (
+        <ol className="flex flex-col divide-y divide-line border-y border-line">
+          {valore.map((esperienza, indice) => {
+            const chiave = chiavi.current[indice];
+            const errore = erroreEsperienza(esperienza, annoCorrente);
+            const numero = indice + 1;
+            const programma = esperienza.programma.trim();
+            const nomeRiga = `l'esperienza ${numero}${programma ? ` (${programma})` : ""}`;
+
+            if (aperta?.chiave === chiave) {
+              const mostra = (mostraErrori || confermaTentata) && errore;
+              const erroreProgramma = mostra && !programma ? errore : undefined;
+              const erroreAnno = mostra && programma ? errore : undefined;
+              return (
+                <li key={chiave} className="py-3">
+                  <fieldset className="grid gap-4 rounded-panel bg-desk p-5 sm:grid-cols-2">
+                    <legend className="sr-only">Esperienza {numero}</legend>
+                    <div className="sm:col-span-2">
+                      <TextField
+                        ref={(el) => {
+                          if (el && daFocalizzare.current === chiave) {
+                            daFocalizzare.current = null;
+                            el.focus();
+                          }
+                        }}
+                        label="Programma"
+                        required
+                        list={idListaProgrammi}
+                        maxLength={MAX_PROGRAMMA}
+                        placeholder="Es. Horizon Europe, PNRR, POR FESR…"
+                        value={esperienza.programma}
+                        onChange={(e) => cambiaProgramma(indice, e.target.value)}
+                        error={erroreProgramma || undefined}
+                      />
+                    </div>
+                    <TextField
+                      label="Anno"
+                      type="number"
+                      inputMode="numeric"
+                      min={ANNO_MINIMO_ESPERIENZA}
+                      max={annoCorrente + 1}
+                      value={esperienza.anno ?? ""}
+                      onChange={(e) => {
+                        const n = Number.parseInt(e.target.value, 10);
+                        aggiorna(indice, { anno: Number.isFinite(n) ? n : null });
+                      }}
+                      error={erroreAnno || undefined}
+                    />
+                    <SelectField
+                      label="Ruolo"
+                      value={esperienza.ruolo ?? ""}
+                      onChange={(e) =>
+                        aggiorna(indice, {
+                          ruolo: (e.target.value || null) as EsperienzaPartner["ruolo"],
+                        })
                       }
+                    >
+                      <option value="">Non indicato</option>
+                      <option value="capofila">Capofila</option>
+                      <option value="partner">Partner</option>
+                    </SelectField>
+                    <div className="sm:col-span-2">
+                      <TextField
+                        label="Titolo del progetto (facoltativo)"
+                        maxLength={MAX_TITOLO_ESPERIENZA}
+                        value={esperienza.titolo ?? ""}
+                        onChange={(e) => aggiorna(indice, { titolo: e.target.value || null })}
+                      />
+                    </div>
+                    <SelectField
+                      label="Esito"
+                      value={esperienza.esito ?? ""}
+                      onChange={(e) =>
+                        aggiorna(indice, {
+                          esito: (e.target.value || null) as EsperienzaPartner["esito"],
+                        })
+                      }
+                    >
+                      <option value="">Non indicato</option>
+                      {Object.entries(ESITI_ESPERIENZA).map(([codice, etichetta]) => (
+                        <option key={codice} value={codice}>
+                          {etichetta}
+                        </option>
+                      ))}
+                    </SelectField>
+                    <div className="flex flex-wrap items-end justify-end gap-2 sm:col-span-2">
+                      <Button variant="ghost" onClick={() => annulla(indice)}>
+                        Annulla
+                      </Button>
+                      <Button variant="secondary" onClick={() => conferma(indice)}>
+                        Conferma l'esperienza
+                      </Button>
+                    </div>
+                  </fieldset>
+                </li>
+              );
+            }
+
+            const dettagli = [
+              esperienza.anno !== null ? String(esperienza.anno) : null,
+              esperienza.ruolo ? RUOLI_ESPERIENZA[esperienza.ruolo] : null,
+              esperienza.esito ? ESITI_ESPERIENZA[esperienza.esito] : null,
+            ].filter((d): d is string => d !== null);
+            return (
+              <li key={chiave} className="flex flex-wrap items-start justify-between gap-3 py-3">
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <p className="text-row-title text-ink">{programma || "Programma non indicato"}</p>
+                  {esperienza.titolo?.trim() && (
+                    <p className="text-body text-ink-2">{esperienza.titolo.trim()}</p>
+                  )}
+                  {dettagli.length > 0 && (
+                    <p className="flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-3 tabular-nums">
+                      {dettagli.map((d) => (
+                        <span key={d}>{d}</span>
+                      ))}
+                    </p>
+                  )}
+                  {mostraErrori && errore && <InlineError>{errore}</InlineError>}
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <Button
+                    ref={(el) => {
+                      if (el) modificaRefs.current.set(chiave, el);
+                      else modificaRefs.current.delete(chiave);
                     }}
-                    label="Programma"
-                    required
-                    list={idListaProgrammi}
-                    maxLength={MAX_PROGRAMMA}
-                    placeholder="Es. Horizon Europe, PNRR, POR FESR…"
-                    value={esperienza.programma}
-                    onChange={(e) => cambiaProgramma(indice, e.target.value)}
-                    error={errore ?? undefined}
-                  />
-                </div>
-                <TextField
-                  label="Anno"
-                  type="number"
-                  inputMode="numeric"
-                  min={ANNO_MINIMO_ESPERIENZA}
-                  max={annoCorrente + 1}
-                  value={esperienza.anno ?? ""}
-                  onChange={(e) => {
-                    const n = Number.parseInt(e.target.value, 10);
-                    aggiorna(indice, { anno: Number.isFinite(n) ? n : null });
-                  }}
-                />
-                <SelectField
-                  label="Ruolo"
-                  value={esperienza.ruolo ?? ""}
-                  onChange={(e) =>
-                    aggiorna(indice, {
-                      ruolo: (e.target.value || null) as EsperienzaPartner["ruolo"],
-                    })
-                  }
-                >
-                  <option value="">Non indicato</option>
-                  <option value="capofila">Capofila</option>
-                  <option value="partner">Partner</option>
-                </SelectField>
-                <div className="sm:col-span-2">
-                  <TextField
-                    label="Titolo del progetto (facoltativo)"
-                    maxLength={MAX_TITOLO_ESPERIENZA}
-                    value={esperienza.titolo ?? ""}
-                    onChange={(e) => aggiorna(indice, { titolo: e.target.value || null })}
-                  />
-                </div>
-                <SelectField
-                  label="Esito"
-                  value={esperienza.esito ?? ""}
-                  onChange={(e) =>
-                    aggiorna(indice, {
-                      esito: (e.target.value || null) as EsperienzaPartner["esito"],
-                    })
-                  }
-                >
-                  <option value="">Non indicato</option>
-                  {Object.entries(ESITI_ESPERIENZA).map(([codice, etichetta]) => (
-                    <option key={codice} value={codice}>
-                      {etichetta}
-                    </option>
-                  ))}
-                </SelectField>
-                <div className="flex items-end justify-end">
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => apri(chiave, esperienza)}
+                    aria-label={`Modifica ${nomeRiga}`}
+                  >
+                    Modifica
+                  </Button>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => rimuovi(indice)}
-                    aria-label={`Rimuovi l'esperienza ${numero}${esperienza.programma.trim() ? ` (${esperienza.programma.trim()})` : ""}`}
+                    aria-label={`Rimuovi ${nomeRiga}`}
                   >
                     <Trash2 className="size-4" aria-hidden />
                     Rimuovi
                   </Button>
                 </div>
-              </fieldset>
-            </li>
-          );
-        })}
-      </ol>
+              </li>
+            );
+          })}
+        </ol>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <Button
           ref={aggiungiRef}
-          variant="secondary"
-          size="sm"
+          variant="ghost"
           onClick={aggiungi}
           disabled={valore.length >= MAX_ESPERIENZE}
         >
@@ -208,7 +321,9 @@ export function EsperienzeEditor({
           Aggiungi un'esperienza
         </Button>
         {valore.length >= MAX_ESPERIENZE && (
-          <p className="text-xs text-slate-500">Puoi indicare al massimo {MAX_ESPERIENZE} esperienze.</p>
+          <p className="text-small text-ink-3">
+            Puoi indicare al massimo {MAX_ESPERIENZE} esperienze.
+          </p>
         )}
       </div>
     </div>

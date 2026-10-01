@@ -91,6 +91,7 @@ export default function Struttura() {
   const [schedaAbbonamento, setSchedaAbbonamento] = useState("piano");
   const [schedaPartenariati, setSchedaPartenariati] = useState("per-te");
   const [passo, setPasso] = useState(3);
+  const [passoBozza, setPassoBozza] = useState(1);
 
   return (
     <div className="flex flex-col gap-12">
@@ -313,6 +314,11 @@ export default function Struttura() {
         <SectionHeader titolo="Stepper" />
         <Esempio nome={`Con onVai (passi fatti cliccabili): passo ${passo + 1} di ${PASSI_WIZARD.length}`}>
           <Stepper passi={PASSI_WIZARD} corrente={passo} onVai={setPasso} />
+        </Esempio>
+        <Esempio
+          nome={`Con raggiunto (bozza ripresa): passo ${passoBozza + 1} di ${PASSI_WIZARD.length}, cliccabili fino al 5`}
+        >
+          <Stepper passi={PASSI_WIZARD} corrente={passoBozza} raggiunto={4} onVai={setPassoBozza} />
         </Esempio>
         <Esempio nome="Senza onVai, al primo passo">
           <Stepper passi={["Bando", "Regole del bando", "Requisiti"]} corrente={0} />

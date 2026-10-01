@@ -1,18 +1,19 @@
-import { Loader2, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { useAiChecksForBando, useRequestAiCheck } from "../../hooks/useAiCheck";
 import { useEntitlements } from "../../hooks/useEntitlements";
 import { apiErrorMessage } from "../../lib/api";
-import { scoreColorClasses } from "../../lib/scoreColor";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
-import { Dialog } from "../ui/Dialog";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { InlineError } from "../ui/InlineError";
+import { Spinner } from "../ui/Spinner";
 import { Skeleton } from "../ui/states";
+import { TextLink } from "../ui/TextLink";
 import { AiEsitoBadge } from "./badges";
 
-/** Card nella sidebar del dettaglio bando: avvio dell'AI-check, stato
- *  dell'analisi in corso ed esito sintetico dell'ultimo report. */
+/** AI-check nel pannello «Fa per te?» della scheda del bando: avvio
+ *  dell'analisi, stato dell'analisi in corso ed esito sintetico dell'ultimo
+ *  report, con il rimando al report completo in fondo alla pagina. */
 export function AiCheckCard({ slug }: { slug: string }) {
   const { data, isPending, isError, refetch } = useAiChecksForBando(slug);
   const requestCheck = useRequestAiCheck(slug);
@@ -27,7 +28,7 @@ export function AiCheckCard({ slug }: { slug: string }) {
 
   // WP6 (0031): anche un MEMBRO attivo avvia l'AI-check (sulle aziende a lui
   // visibili), entro il budget assegnato dal titolare. Il vincolo del singolo
-  // check è min(residuo membro, residuo pool): la card lo dice, non lo
+  // check è min(residuo membro, residuo dell'azienda): lo si dice, non lo si
   // nasconde — l'arbitro resta il server.
   const entitlements = useEntitlements();
   const membro =
@@ -58,174 +59,145 @@ export function AiCheckCard({ slug }: { slug: string }) {
     ? "C'è già un'analisi in corso."
     : quotaEsaurita && quota && quota.totale > 0
       ? membro
-        ? "L'Azienda ha esaurito gli AI-check del piano."
+        ? "L'azienda ha esaurito gli AI-check del piano."
         : "Hai esaurito gli AI-check del tuo piano."
       : budgetEsaurito
         ? "Hai esaurito il budget di AI-check assegnato dal titolare."
         : null;
 
-  return (
-    <Card className="border-brand-200 bg-gradient-to-b from-brand-50/70 to-white p-5">
-      <h2 className="inline-flex items-center gap-1.5 font-display text-sm font-semibold text-slate-900">
-        <Sparkles className="size-4 text-brand-500" aria-hidden />
-        AI-check di compatibilità
-      </h2>
+  const apriConferma = () => {
+    setActionError(null);
+    setConfirmOpen(true);
+  };
 
+  const fraseQuota = quota
+    ? quota.totale === 0
+      ? null
+      : membro
+        ? budgetResiduo === null
+          ? `Alla tua azienda restano ${quota.rimanenti} AI-check su ${quota.totale}; il tuo budget è senza limite.`
+          : `Puoi avviarne ancora ${Math.min(budgetResiduo, quota.rimanenti)} (il tuo budget: ${budgetResiduo}; all'azienda ne restano ${quota.rimanenti} su ${quota.totale}).`
+        : `Ti restano ${quota.rimanenti} AI-check su ${quota.totale} quest'anno.`
+    : null;
+
+  return (
+    <div className="flex flex-col gap-3">
       {isPending ? (
-        <div className="mt-3 space-y-2">
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-9 w-full" />
+        <div className="flex flex-col gap-2" aria-hidden>
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-4 w-3/4" />
         </div>
       ) : isError ? (
-        <div className="mt-3">
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-            Impossibile caricare lo stato dell'AI-check.
-          </p>
-          <Button variant="secondary" size="sm" className="mt-2 w-full" onClick={() => refetch()}>
-            Riprova
-          </Button>
-        </div>
+        <>
+          <InlineError>Non siamo riusciti a caricare lo stato dell'AI-check.</InlineError>
+          <div>
+            <Button type="button" variant="secondary" size="sm" onClick={() => refetch()}>
+              Riprova
+            </Button>
+          </div>
+        </>
       ) : latest?.status === "pending" ? (
-        <div className="mt-3">
-          <p className="inline-flex items-center gap-2 text-sm font-medium text-amber-700">
-            <Loader2 className="size-4 animate-spin" aria-hidden />
-            Analisi in corso…
+        <>
+          <p className="inline-flex items-center gap-2 text-body font-medium text-ink">
+            <Spinner size="sm" />
+            AI-check in corso…
           </p>
-          <p className="mt-1.5 text-xs text-slate-500">
+          <p className="text-small text-ink-3">
             Richiede uno o due minuti: confrontiamo i requisiti del bando con i dati della tua
             azienda. Puoi restare su questa pagina.
           </p>
-        </div>
+        </>
       ) : latest?.status === "ready" && latest.esito ? (
-        <div className="mt-3">
-          <div className="flex flex-wrap items-center gap-2">
+        <>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <AiEsitoBadge esito={latest.esito} />
             {latest.punteggio !== null && (
-              <span
-                className={`tabular font-display text-lg font-bold ${scoreColorClasses(latest.punteggio).text}`}
-              >
+              <span className="text-figure-sm text-ink">
                 {latest.punteggio}
-                <span className="text-xs font-medium text-slate-400">/100</span>
+                <span className="font-sans text-small font-normal text-ink-3">/100</span>
               </span>
             )}
           </div>
-          <a
-            href="#ai-check-report"
-            className="mt-2 inline-block text-sm font-medium text-brand-600 underline-offset-2 hover:underline"
-          >
-            Vedi il report completo ↓
-          </a>
-          {puoAvviare && (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="mt-2 w-full"
-                disabled={ctaDisabled}
-                onClick={() => {
-                  setActionError(null);
-                  setConfirmOpen(true);
-                }}
-              >
-                Nuova analisi
-              </Button>
-              {ctaDisabled && ctaHint && (
-                <p className="mt-1.5 text-xs text-slate-500">{ctaHint}</p>
-              )}
-            </>
-          )}
-        </div>
-      ) : (
-        <div className="mt-3">
-          {latest?.status === "error" && (
-            <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-              {latest.error_detail ?? "Analisi non riuscita: riprova"}
-            </p>
-          )}
-          <p className="text-sm text-slate-600">
-            Scopri se la tua azienda è ammissibile e quanto è compatibile con questo bando:
-            l'AI confronta ogni requisito con i tuoi dati, citando i passaggi del bando.
+          <p className="text-small text-ink-2">
+            <TextLink href="#ai-check-report">Vedi il report AI-check</TextLink>
           </p>
+          {puoAvviare && (
+            <div className="flex flex-col gap-1.5">
+              <div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={ctaDisabled}
+                  onClick={apriConferma}
+                >
+                  <Sparkles className="size-4" aria-hidden />
+                  Nuovo AI-check
+                </Button>
+              </div>
+              {ctaDisabled && ctaHint && <p className="text-small text-ink-3">{ctaHint}</p>}
+            </div>
+          )}
+          {/* La quota anche con un report pronto: quanti ne restano prima di
+              «Nuovo AI-check». */}
+          {fraseQuota && <p className="text-small text-ink-3">{fraseQuota}</p>}
+        </>
+      ) : (
+        <>
+          {latest?.status === "error" && (
+            <InlineError>{latest.error_detail ?? "Analisi non riuscita: riprova."}</InlineError>
+          )}
           {puoAvviare ? (
             <>
               <Button
-                className="mt-3 w-full"
+                type="button"
+                variant="secondary"
+                className="w-full"
                 disabled={ctaDisabled}
-                onClick={() => {
-                  setActionError(null);
-                  setConfirmOpen(true);
-                }}
+                onClick={apriConferma}
               >
                 <Sparkles className="size-4" aria-hidden />
-                Verifica compatibilità
+                Avvia AI-check
               </Button>
-              {ctaDisabled && ctaHint && (
-                <p className="mt-1.5 text-xs text-slate-500">{ctaHint}</p>
-              )}
+              {ctaDisabled && ctaHint && <p className="text-small text-ink-3">{ctaHint}</p>}
             </>
           ) : (
-            <p className="mt-3 text-xs text-slate-500">
-              L'AI-check lo avvia il titolare dell'azienda.
-            </p>
+            <p className="text-small text-ink-3">L'AI-check lo avvia il titolare dell'azienda.</p>
           )}
-        </div>
+          <p className="text-small text-ink-3">
+            L'AI confronta ogni requisito con i dati della tua azienda e cita i passaggi del
+            bando.
+            {fraseQuota ? ` ${fraseQuota}` : ""}
+          </p>
+        </>
       )}
 
-      {quota && (
-        <p className="mt-3 border-t border-brand-100 pt-2.5 text-xs text-slate-500">
-          {quota.totale === 0 ? (
-            <>
-              Il tuo piano non include AI-check:{" "}
-              <Link
-                to="/app/abbonamento"
-                className="font-medium text-brand-600 underline-offset-2 hover:underline"
-              >
-                passa a un piano superiore
-              </Link>{" "}
-              per usarli.
-            </>
-          ) : (
-            membro ? (
-              budgetResiduo === null
-                ? `Alla tua Azienda restano ${quota.rimanenti} AI-check su ${quota.totale}; il tuo budget è senza limite.`
-                : `Puoi avviarne ancora ${Math.min(budgetResiduo, quota.rimanenti)} (il tuo budget: ${budgetResiduo}; all'Azienda ne restano ${quota.rimanenti} su ${quota.totale}).`
-            ) : (
-              `Ti restano ${quota.rimanenti} AI-check su ${quota.totale} per quest'anno.`
-            )
-          )}
+      {quota && quota.totale === 0 && !isPending && !isError && (
+        <p className="text-small text-ink-3">
+          Il tuo piano non include AI-check:{" "}
+          <TextLink to="/app/abbonamento">passa a un piano superiore</TextLink> per usarli.
         </p>
       )}
 
-      <Dialog
+      <ConfirmDialog
         open={confirmOpen}
-        onClose={() => setConfirmOpen(false)}
-        title="Avvia l'AI-check"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setConfirmOpen(false)}>
-              Annulla
-            </Button>
-            <Button loading={requestCheck.isPending} onClick={handleRequest}>
-              Avvia l'analisi
-            </Button>
-          </>
-        }
+        titolo="Avviare l'AI-check?"
+        conferma="Avvia l'analisi"
+        inCorso={requestCheck.isPending}
+        onConferma={handleRequest}
+        onAnnulla={() => setConfirmOpen(false)}
       >
         <p>
           L'analisi confronta i requisiti e i criteri di questo bando con i dati della tua
           azienda (compreso il dossier certificato, se importato) e produce un report con
           esito di ammissibilità e punteggio di compatibilità.
         </p>
-        <p className="mt-2 text-xs text-slate-400">
-          Consuma 1 dei tuoi {quota?.totale ?? 0} AI-check annuali e richiede uno o due
-          minuti. Più i dati aziendali sono completi, più l'analisi è affidabile.
+        <p className="mt-2 text-small text-ink-3">
+          Consuma 1 dei tuoi {quota?.totale ?? 0} AI-check annuali e richiede uno o due minuti.
+          Più i dati aziendali sono completi, più l'analisi è affidabile.
         </p>
-        {actionError && (
-          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-            {actionError}
-          </p>
-        )}
-      </Dialog>
-    </Card>
+        {actionError && <InlineError className="mt-3">{actionError}</InlineError>}
+      </ConfirmDialog>
+    </div>
   );
 }

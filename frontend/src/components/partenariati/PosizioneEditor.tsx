@@ -9,8 +9,9 @@ import type {
   TerritorioModalitaCall,
   TipoSoggettoPartenariato,
 } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
-import { TextField } from "../ui/Field";
+import { SelectField, TextField } from "../ui/Field";
 import { SceltaCodici, SceltaDivisioni, SceltaPaesi, SceltaRadio, TestoLungo } from "./CampiCall";
 import { leggiPercentuale, LIMITI_CALL, mostraDecimale } from "./callDati";
 import { GruppoCheckbox, SceltaLookup } from "./PartnerProfileForm";
@@ -35,8 +36,9 @@ export const posizioneVuota = (): PosizioneInput => ({
   note: null,
 });
 
-/** Editor tipizzato di una posizione: lavora su una copia e la consegna solo
- *  con «Fatto», già valida per lo schema del server. */
+/** Editor tipizzato di una posizione, in linea nel passo: lavora su una copia
+ *  e la consegna solo con «Conferma la posizione», già valida per lo schema
+ *  del server. Il pulsante pieno del passo resta quello della barra. */
 export function PosizioneEditor({
   iniziale,
   requisiti,
@@ -56,6 +58,7 @@ export function PosizioneEditor({
   const [quota, setQuota] = useState(mostraDecimale(iniziale.quota_ipotizzata_pct));
   const [numero, setNumero] = useState(String(iniziale.numero));
   const [errori, setErrori] = useState<string[]>([]);
+  const nuova = iniziale.id === null && !iniziale.titolo;
 
   const tipi = useMemo(
     () => vocabolario.data?.tipi_soggetto.map((t) => ({ codice: t.codice, etichetta: t.etichetta })),
@@ -107,7 +110,8 @@ export function PosizioneEditor({
   };
 
   return (
-    <div className="space-y-4 rounded-lg border border-brand-200 bg-brand-50/30 p-4">
+    <div className="flex flex-col gap-6">
+      <h4 className="font-sans text-title-group text-ink">{nuova ? "Nuova posizione" : "Modifica la posizione"}</h4>
       <div className="grid gap-4 sm:grid-cols-[2fr_1fr_1fr]">
         <TextField
           label="Titolo della posizione"
@@ -135,57 +139,63 @@ export function PosizioneEditor({
         />
       </div>
 
-      <SceltaRadio
-        legenda="Ruolo"
-        nome={`${id}-ruolo`}
-        valore={p.ruolo}
-        onChange={(r) => set("ruolo", r)}
-        opzioni={[
-          { valore: "partner", etichetta: "Partner" },
-          { valore: "capofila", etichetta: "Capofila", nota: "Guida il progetto e tiene i rapporti con l'ente." },
-        ]}
-      />
+      <div className="grid gap-6 sm:grid-cols-2">
+        <SceltaRadio
+          legenda="Ruolo"
+          nome={`${id}-ruolo`}
+          valore={p.ruolo}
+          onChange={(r) => set("ruolo", r)}
+          opzioni={[
+            { valore: "partner", etichetta: "Partner" },
+            { valore: "capofila", etichetta: "Capofila", nota: "Guida il progetto e tiene i rapporti con l'ente." },
+          ]}
+        />
+        <GruppoCheckbox
+          legenda="Dimensioni ammesse"
+          nota="Se non scegli nulla, vale qualsiasi dimensione."
+          opzioni={DIMENSIONI.map((d) => ({ codice: d, etichetta: CALL_COPY.dimensioni[d] }))}
+          scelti={p.dimensioni}
+          onToggle={(d) =>
+            set(
+              "dimensioni",
+              DIMENSIONI.filter((x) => (x === d ? !p.dimensioni.includes(d) : p.dimensioni.includes(x))),
+            )
+          }
+        />
+      </div>
 
-      <SceltaCodici
-        etichetta="Tipi di soggetto"
-        aiuto={`Basta uno dei tipi indicati. Al massimo ${LIMITI_CALL.tipiPosizioneMax}.`}
-        opzioni={tipi}
-        scelti={p.tipi_soggetto}
-        onChange={(v) => set("tipi_soggetto", v as TipoSoggettoPartenariato[])}
-        massimo={LIMITI_CALL.tipiPosizioneMax}
-      />
-      <SceltaCodici
-        etichetta="Competenze cercate"
-        aiuto={`Al massimo ${LIMITI_CALL.competenzePosizioneMax}.`}
-        opzioni={competenze}
-        scelti={p.competenze}
-        onChange={(v) => set("competenze", v)}
-        massimo={LIMITI_CALL.competenzePosizioneMax}
-      />
-      <SceltaDivisioni
-        scelte={p.ateco_divisioni}
-        onChange={(v) => set("ateco_divisioni", v)}
-        massimo={LIMITI_CALL.atecoPosizioneMax}
-      />
+      <div className="grid gap-6 sm:grid-cols-2">
+        <SceltaCodici
+          etichetta="Tipi di soggetto"
+          aiuto={`Basta uno dei tipi indicati. Al massimo ${LIMITI_CALL.tipiPosizioneMax}.`}
+          opzioni={tipi}
+          scelti={p.tipi_soggetto}
+          onChange={(v) => set("tipi_soggetto", v as TipoSoggettoPartenariato[])}
+          massimo={LIMITI_CALL.tipiPosizioneMax}
+        />
+        <SceltaCodici
+          etichetta="Competenze cercate"
+          aiuto={`Al massimo ${LIMITI_CALL.competenzePosizioneMax}.`}
+          opzioni={competenze}
+          scelti={p.competenze}
+          onChange={(v) => set("competenze", v)}
+          massimo={LIMITI_CALL.competenzePosizioneMax}
+        />
+      </div>
 
-      <div className="space-y-3">
-        <div className="space-y-1.5">
-          <label htmlFor={`${id}-territorio`} className="block text-sm font-medium text-slate-700">
-            Dove deve avere sede
-          </label>
-          <select
-            id={`${id}-territorio`}
-            value={p.territorio_modalita}
-            onChange={(e) => set("territorio_modalita", e.target.value as TerritorioModalitaCall)}
-            className="h-10 w-full max-w-md cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-brand-500 focus:outline-2 focus:outline-offset-0 focus:outline-brand-500/30"
-          >
-            {TERRITORI.map((t) => (
-              <option key={t} value={t}>
-                {CALL_COPY.territorio[t]}
-              </option>
-            ))}
-          </select>
-        </div>
+      <div className="grid gap-6 sm:grid-cols-2">
+        <SelectField
+          id={`${id}-territorio`}
+          label="Dove deve avere sede"
+          value={p.territorio_modalita}
+          onChange={(e) => set("territorio_modalita", e.target.value as TerritorioModalitaCall)}
+        >
+          {TERRITORI.map((t) => (
+            <option key={t} value={t}>
+              {CALL_COPY.territorio[t]}
+            </option>
+          ))}
+        </SelectField>
         {p.territorio_modalita !== "qualsiasi" && (
           <SceltaLookup
             etichetta="Regioni"
@@ -197,25 +207,19 @@ export function PosizioneEditor({
         )}
       </div>
 
-      <SceltaPaesi
-        etichetta="Paesi (per i bandi europei)"
-        scelti={p.paesi}
-        onChange={(v) => set("paesi", v)}
-        massimo={LIMITI_CALL.paesiMax}
-      />
-
-      <GruppoCheckbox
-        legenda="Dimensioni ammesse"
-        nota="Nessuna scelta = qualsiasi dimensione."
-        opzioni={DIMENSIONI.map((d) => ({ codice: d, etichetta: CALL_COPY.dimensioni[d] }))}
-        scelti={p.dimensioni}
-        onToggle={(d) =>
-          set(
-            "dimensioni",
-            DIMENSIONI.filter((x) => (x === d ? !p.dimensioni.includes(d) : p.dimensioni.includes(x))),
-          )
-        }
-      />
+      <div className="grid gap-6 sm:grid-cols-2">
+        <SceltaDivisioni
+          scelte={p.ateco_divisioni}
+          onChange={(v) => set("ateco_divisioni", v)}
+          massimo={LIMITI_CALL.atecoPosizioneMax}
+        />
+        <SceltaPaesi
+          etichetta="Paesi (per i bandi europei)"
+          scelti={p.paesi}
+          onChange={(v) => set("paesi", v)}
+          massimo={LIMITI_CALL.paesiMax}
+        />
+      </div>
 
       {requisitiSalvati.length > 0 ? (
         <GruppoCheckbox
@@ -225,7 +229,7 @@ export function PosizioneEditor({
           massimo={LIMITI_CALL.requisitiPosizioneMax}
           opzioni={requisitiSalvati.map((r) => ({
             codice: r.id,
-            etichetta: `${r.etichetta ? `${r.etichetta} — ` : ""}${r.testo}`,
+            etichetta: `${r.etichetta ? `${r.etichetta}: ` : ""}${r.testo}`,
           }))}
           scelti={p.requisiti_ids}
           onToggle={(rid) =>
@@ -238,7 +242,7 @@ export function PosizioneEditor({
           }
         />
       ) : (
-        <p className="text-xs text-slate-500">
+        <p className="text-small text-ink-3">
           Quando salvi i requisiti puoi collegarli alle posizioni che li coprono.
         </p>
       )}
@@ -253,17 +257,21 @@ export function PosizioneEditor({
       />
 
       {errori.length > 0 && (
-        <ul className="list-disc space-y-0.5 rounded-lg bg-red-50 py-2 pl-8 pr-3 text-sm text-red-700" role="alert">
-          {errori.map((e) => (
-            <li key={e}>{e}</li>
-          ))}
-        </ul>
+        <Alert tono="errore">
+          <ul className="list-disc pl-5">
+            {errori.map((e) => (
+              <li key={e}>{e}</li>
+            ))}
+          </ul>
+        </Alert>
       )}
       <div className="flex flex-wrap justify-end gap-2">
         <Button variant="ghost" onClick={onAnnulla}>
           Annulla
         </Button>
-        <Button onClick={conferma}>Fatto</Button>
+        <Button variant="secondary" onClick={conferma}>
+          Conferma la posizione
+        </Button>
       </div>
     </div>
   );

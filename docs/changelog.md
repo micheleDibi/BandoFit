@@ -2,6 +2,23 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-10-01 — Redesign del frontend, ondate 2-4: tutte le pagine sul nuovo design
+
+Seconda e ultima tappa del redesign (la prima è l'ondata 1 del 30/09). Tutte le pagine passano ai modelli di `Page` e ai componenti di `src/components/ui/`; nessuna API, hook di dati o regola di business cambia, salvo dove indicato. Il redesign esce in un solo rilascio, insieme all'ondata 1.
+- **Home** (`/app`): cosa c'è da fare oggi (candidature, inviti, messaggi, proposte, notifiche), prossime scadenze dei bandi salvati, nuovi bandi adatti all'azienda, passi per completare il profilo, AI-check disponibili; per progettisti e admin le richieste e gli appuntamenti. Ogni blocco ha caricamento ed errore propri.
+- **Catalogo**: elenco a righe guidato dalla scadenza, barra con ricerca, «Tutti / Adatti alla tua azienda», ordinamento e filtri a menu, gli altri filtri in un cassetto; stessi parametri nell'URL. Scheda del bando con testata (stato, titolo, ente, fatti chiave), «Vai al bando» unico pulsante pieno, colonna laterale con «Fa per te?», «Partenariato» e «Documenti»; report AI-check e regole di partenariato sotto. Bandi salvati e AI-check a righe.
+- **Abbonamento**: una pagina con quattro schede (`?tab=piano|addon|pagamento|acquisti`): piani a confronto in tabella, add-on con «I tuoi add-on», pagamento e fatturazione, acquisti. I vecchi indirizzi `/app/addon`, `/app/fatturazione` e `/app/acquisti` portano alla scheda giusta, con query e ancora. Checkout ed esito su un percorso a passi; testi legali, IVA, reverse charge, VIES e dati del venditore invariati (alcune etichette di pulsanti e conferme sono state uniformate, per esempio «Disdire il rinnovo?», «Aggiungi un metodo»).
+- **Dati azienda**: schede (dati aziendali, dossier, bilanci, profilo partner) ricavate da `?tab=` o dall'ancora (`#bilanci`, `#partner`, `#identita` continuano a funzionare); dossier a sezioni richiudibili. «Aziende gestite» in tabella.
+- **Partenariati**: bacheca a schede (`?tab=`, `?vista=` resta valido) con call a righe; pagina della call, conversazione, segnalazione, procedura guidata di creazione, regole di partenariato e profilo partner sui nuovi componenti; consenso e informativa invariati.
+- **Area personale**: Profilo senza i rimandi ad altre pagine; Account collegati in tabella con le azioni in un menu; Preferenze a schede («Interessi sui bandi», «Avvisi email»); Notifiche a righe; Calendario con colori per ruolo e legenda in parole; inviti e invito a cambiare piano come avvisi.
+- **Consulenze e area progettista**: elenchi a righe, dettaglio con colonna laterale, conferme per annullare un appuntamento, rifiutare o ritirare una proposta; «consulenza» al posto di «consulto» nei testi dell'interfaccia (i testi di consenso restano com'erano).
+- **Amministrazione**: utenti, piani, add-on, pagamenti e partenariati su tabelle e schede (`?tab=`).
+- **Accesso e landing**: pagine di accesso su un'impaginazione a due colonne con un esempio del catalogo; dopo l'accesso si arriva alla Home e `?next=` accetta solo percorsi sotto `/app` (anche dopo la normalizzazione dell'indirizzo). Landing più sobria, senza gradienti né illustrazioni.
+- **Formati**: importi con il separatore delle migliaia anche sotto 10.000 («3.500 €»); le date senza ora si leggono come giorno locale (prima, a ovest di UTC, potevano slittare di un giorno).
+- **Elenchi**: una pagina oltre l'ultima (link vecchi, elementi tolti nel frattempo) riporta all'ultima pagina con risultati invece di mostrare un elenco vuoto, anche nei partenariati e nelle pagine admin. Con il catalogo non raggiungibile, i filtri vuoti si riprovano dopo un minuto invece di un'ora.
+- **Link nelle email e nelle notifiche** (backend, solo l'URL): la pagina dopo la disiscrizione dagli avvisi porta a `/app/preferenze?tab=avvisi`; i promemoria di rinnovo e di pagamento non riuscito a `/app/abbonamento?tab=pagamento`; l'accredito di un add-on a `/app/abbonamento?tab=addon`; la ricevuta a `/app/abbonamento?tab=acquisti`. Il link del pulsante delle email ha l'escape HTML in un solo punto (`_branded_html`).
+- Nessuna migration. **Azione manuale**: ricostruire e pubblicare il frontend insieme al backend del giro 1 del catalogo.
+
 ## 2026-09-30 — Catalogo, giro 1: allegati, AI-check, paginazione, calendario, separazioni dei fusi ⚠️ migration 0045
 
 Secondo giro di allineamento alla fase (c) del contratto del catalogo (dopo le correzioni del 30/09). Solo backend, più una migration additiva.

@@ -41,7 +41,7 @@ export const PARTENARIATO_COPY = {
  *  consenso e della revoca sono testi legali: non riformularle senza rivedere
  *  l'informativa (il testo dell'informativa arriva dal server, versionato). */
 export const PARTNER_COPY = {
-  titoloSezione: "Visibilità come partner",
+  titoloSezione: "Profilo partner",
   descrizioneSezione:
     "Fatti trovare dalle altre aziende che cercano con chi partecipare a un bando. Decidi tu cosa mostrare, e se mostrare il nome.",
   statoVisibile: "Visibile come partner",
@@ -195,5 +195,5 @@ export const PARTNER_COPY = {
   /** Barra di salvataggio del profilo. */
   modificheNonSalvate: "Hai modifiche non salvate al profilo partner",
   salva: "Salva il profilo",
-  salvato: "Profilo salvato ✓",
+  salvato: "Profilo salvato",
 } as const;

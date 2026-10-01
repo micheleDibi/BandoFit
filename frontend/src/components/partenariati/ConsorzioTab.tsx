@@ -1,11 +1,13 @@
-import { ChevronDown, UserPlus } from "lucide-react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useConsorzio } from "../../hooks/useConsorzio";
 import { apiErrorCode, apiErrorMessage } from "../../lib/api";
 import { CONSORZIO_COPY } from "../../lib/copy";
 import type { MembroConsorzio } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
+import { DefinitionList } from "../ui/Facts";
+import { Section, SectionHeader } from "../ui/SectionHeader";
 import { EmptyState, ErrorState, Skeleton } from "../ui/states";
 import { BudgetConsorzio } from "./BudgetConsorzio";
 import { mostraDecimale } from "./callDati";
@@ -14,6 +16,9 @@ import { EsternoDialog } from "./EsternoDialog";
 import { MatriceCopertura } from "./MatriceCopertura";
 import { MembroRiga, nomeMembro, RUOLI_MEMBRO, type PosizioneOpzione } from "./MembroRiga";
 import { ValidatoreChecklist } from "./ValidatoreChecklist";
+
+const SOMMARIO =
+  "inline-flex cursor-pointer items-center gap-1 rounded-mark text-small font-medium text-accent-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden";
 
 /** Somma delle quote indicate dai membri non usciti (centesimi interi per non
  *  sommare errori di virgola mobile) e quanti non l'hanno ancora. I partner
@@ -32,19 +37,19 @@ function quote(membri: MembroConsorzio[]) {
 
 function LegendaRuoli() {
   return (
-    <details className="group mt-3">
-      <summary className="inline-flex cursor-pointer items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700 [&::-webkit-details-marker]:hidden">
+    <details className="group">
+      <summary className={SOMMARIO}>
         Cosa vogliono dire i ruoli
         <ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden />
       </summary>
-      <dl className="mt-2 space-y-2 rounded-lg bg-slate-50 px-3.5 py-3 text-sm">
-        {RUOLI_MEMBRO.map((r) => (
-          <div key={r}>
-            <dt className="font-medium text-slate-800">{CONSORZIO_COPY.ruoli[r]}</dt>
-            <dd className="text-slate-600">{CONSORZIO_COPY.ruoliSpiegazione[r]}</dd>
-          </div>
-        ))}
-      </dl>
+      <div className="mt-3">
+        <DefinitionList
+          items={RUOLI_MEMBRO.map((r) => ({
+            etichetta: CONSORZIO_COPY.ruoli[r],
+            valore: CONSORZIO_COPY.ruoliSpiegazione[r],
+          }))}
+        />
+      </div>
     </details>
   );
 }
@@ -64,7 +69,6 @@ export function ConsorzioTab({
   /** Posizioni della call (solo per chi l'ha creata: le assegna ai membri). */
   posizioni?: PosizioneOpzione[];
 }) {
-  const idTitolo = useId();
   const consorzio = useConsorzio(callId);
   const [esterno, setEsterno] = useState<{ membro: MembroConsorzio | null; aperto: boolean }>({
     membro: null,
@@ -85,17 +89,11 @@ export function ConsorzioTab({
     [dati?.membri],
   );
 
-  const regioneAnnunci = (
-    <div role="status" aria-live="polite">
-      {annuncio && (
-        <p className="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{annuncio}</p>
-      )}
-    </div>
-  );
+  const regioneAnnunci = <div aria-live="polite">{annuncio && <Alert tono="ok">{annuncio}</Alert>}</div>;
 
   if (consorzio.isPending) {
     return (
-      <div className="space-y-4" aria-hidden>
+      <div className="flex flex-col gap-4" aria-hidden>
         <Skeleton className="h-48 w-full" />
         <Skeleton className="h-64 w-full" />
         <Skeleton className="h-40 w-full" />
@@ -135,66 +133,58 @@ export function ConsorzioTab({
   );
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-8">
       {regioneAnnunci}
-      {!consorzio.data.editable && (
-        <p className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">{CONSORZIO_COPY.soloTitolare}</p>
-      )}
+      {!consorzio.data.editable && <p className="text-small text-ink-3">{CONSORZIO_COPY.soloTitolare}</p>}
 
-      <Card className="p-5">
-        <section aria-labelledby={idTitolo}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 id={idTitolo} className="font-display text-base font-semibold text-slate-900">
-              Chi c'è nel consorzio{" "}
-              <span className="font-sans text-sm font-normal text-slate-500">
-                ({attivi.length === 1 ? "1 membro" : `${attivi.length} membri`})
-              </span>
-            </h2>
-            {puoAggiungere && (
+      <Section>
+        <SectionHeader
+          titolo={`Chi c'è nel consorzio (${attivi.length === 1 ? "1 membro" : `${attivi.length} membri`})`}
+          azione={
+            puoAggiungere ? (
               <Button
                 size="sm"
                 variant="secondary"
                 onClick={() => setEsterno({ membro: null, aperto: true })}
                 disabled={pieno}
               >
-                <UserPlus className="size-4" aria-hidden />
                 Aggiungi un membro esterno
               </Button>
-            )}
-          </div>
-          <p className="mt-1 text-sm text-slate-600">
-            {consorzio.data.sei_creatore
-              ? "La tua azienda, le aziende che hai accettato e i membri esterni che aggiungi tu. Decidi ruolo, posizione e quota di ciascuno: ogni azienda conferma la propria partecipazione, gli esterni li confermi tu."
-              : "Chi fa parte del consorzio di questa call. Delle altre aziende vedi solo i dati anonimi. Conferma la partecipazione della tua azienda quando ruolo e quota ti vanno bene."}
+            ) : undefined
+          }
+        />
+        <p className="text-body text-ink-2">
+          {consorzio.data.sei_creatore
+            ? "La tua azienda, le aziende che hai accettato e i membri esterni che aggiungi tu. Decidi ruolo, posizione e quota di ciascuno: ogni azienda conferma la propria partecipazione, gli esterni li confermi tu."
+            : "Chi fa parte del consorzio di questa call. Delle altre aziende vedi solo i dati anonimi. Conferma la partecipazione della tua azienda quando ruolo e quota ti vanno bene."}
+        </p>
+        {puoAggiungere && pieno && (
+          <p className="text-small text-ink-3">
+            Il consorzio ha già {consorzio.data.membri_max} membri: è il massimo.
           </p>
-          {puoAggiungere && pieno && (
-            <p className="mt-2 text-xs text-slate-500">
-              Il consorzio ha già {consorzio.data.membri_max} membri: è il massimo.
-            </p>
+        )}
+        <p className="text-body text-ink">
+          Quote indicate: <span className="font-semibold tabular-nums">{mostraDecimale(somma) || "0"}%</span> su
+          100%
+          {mancanti > 0 && (
+            <span className="text-ink-3">
+              {" "}
+              ({mancanti === 1 ? "manca la quota di 1 membro" : `mancano le quote di ${mancanti} membri`})
+            </span>
           )}
-          <p className="mt-3 text-sm text-slate-700">
-            Quote indicate: <span className="font-semibold tabular">{mostraDecimale(somma) || "0"}%</span> su
-            100%
-            {mancanti > 0 && (
-              <span className="text-slate-500">
-                {" "}
-                · {mancanti === 1 ? "manca la quota di 1 membro" : `mancano le quote di ${mancanti} membri`}
-              </span>
-            )}
-          </p>
-          <ul className="mt-3 space-y-2">{attivi.map(riga)}</ul>
-          {usciti.length > 0 && (
-            <details className="group mt-3">
-              <summary className="inline-flex cursor-pointer items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-800 [&::-webkit-details-marker]:hidden">
-                Usciti dal consorzio ({usciti.length})
-                <ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden />
-              </summary>
-              <ul className="mt-2 space-y-2">{usciti.map(riga)}</ul>
-            </details>
-          )}
-          <LegendaRuoli />
-        </section>
-      </Card>
+        </p>
+        <ul className="flex flex-col border-t border-line">{attivi.map(riga)}</ul>
+        {usciti.length > 0 && (
+          <details className="group">
+            <summary className={SOMMARIO}>
+              Usciti dal consorzio ({usciti.length})
+              <ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden />
+            </summary>
+            <ul className="mt-2 flex flex-col border-t border-line">{usciti.map(riga)}</ul>
+          </details>
+        )}
+        <LegendaRuoli />
+      </Section>
 
       <ValidatoreChecklist validazione={consorzio.data.validazione} nomi={nomi} />
       <MatriceCopertura matrice={consorzio.data.matrice} nomi={nomi} />

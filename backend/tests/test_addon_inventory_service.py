@@ -165,6 +165,8 @@ class TestGrant:
         assert params["p_motivazione"] == "Cortesia" and params["p_quantita"] == 3
         [n] = notify_calls
         assert n["user_ids"] == [USER] and n["dedup_key"] == "addon-grant:pur-1"
+        # La notifica apre la scheda «Add-on» dell'Abbonamento.
+        assert n["url"] == "/app/abbonamento?tab=addon"
 
     async def test_notifica_che_esplode_non_fa_fallire_il_grant(self, monkeypatch):
         # La RPC è già committata: un guasto nel lookup nome/notifica non deve

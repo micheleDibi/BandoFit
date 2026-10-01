@@ -1,72 +1,81 @@
-import { ArrowRight, Bookmark, CalendarCheck, CalendarPlus, Trash2 } from "lucide-react";
+import { CalendarCheck, CalendarPlus } from "lucide-react";
 import { useEffect, useState } from "react";
-import { SavableBandoCard } from "../components/bandi/SavableBandoCard";
+import { BandoRow, BandoRowSkeleton } from "../components/bandi/BandoRow";
 import { bandoInCorso, statoDelBando } from "../components/bandi/stato";
-import { Badge } from "../components/ui/Badge";
 import { Button, LinkButton } from "../components/ui/Button";
+import { Due } from "../components/ui/Due";
+import { InlineError } from "../components/ui/InlineError";
+import { Page } from "../components/ui/Page";
+import { PageHeader } from "../components/ui/PageHeader";
 import { Pagination } from "../components/ui/Pagination";
-import { BandoCardSkeleton, EmptyState, ErrorState } from "../components/ui/states";
+import { Status } from "../components/ui/Status";
+import { EmptyState, ErrorState } from "../components/ui/states";
 import { useAddBandoDeadline } from "../hooks/useCalendar";
 import { useSavedBandi, useToggleSaved } from "../hooks/useSavedBandi";
 import { apiErrorMessage } from "../lib/api";
+import { cn } from "../lib/cn";
 import { formatDate } from "../lib/format";
 import type { SavedBandoItem } from "../types";
 
-/** Card di ripiego per un bando salvato che il catalogo non restituisce: niente
- *  link al vecchio dettaglio (darebbe 404), solo lo snapshot e la rimozione. Testo
- *  neutro (il bando potrebbe tornare), tranne quando si conosce la scheda che lo
- *  sostituisce (`slug_aggiornato`): allora badge e testo lo dicono e c'è il link. */
-function UnavailableCard({ item }: { item: SavedBandoItem }) {
+/** Riga di ripiego per un bando salvato che il catalogo non restituisce:
+ *  niente link al vecchio dettaglio (darebbe 404), solo lo snapshot e la
+ *  rimozione. Testo neutro (il bando potrebbe tornare), tranne quando si
+ *  conosce la scheda che lo sostituisce (`slug_aggiornato`): allora lo stato e
+ *  il testo lo dicono e c'è il link. */
+function RigaNonDisponibile({ item }: { item: SavedBandoItem }) {
   const toggle = useToggleSaved();
   return (
-    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 p-5">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge tone="slate">
-          {item.slug_aggiornato ? "Unito a un'altra scheda" : "Scheda non disponibile"}
-        </Badge>
+    <li className="flex items-start gap-4 border-b border-line px-2 py-4 md:gap-6">
+      {/* Scheda non disponibile: solo la data, senza conto alla rovescia. */}
+      <Due data={item.bando.data_scadenza} conConto={false} />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="text-row-title text-ink-2">{item.bando.titolo ?? item.bando.slug}</p>
+        <p className="text-body text-ink-2">
+          {item.slug_aggiornato
+            ? "Questo bando è stato unito a un'altra scheda del catalogo. Qui trovi i dati che avevi salvato."
+            : "Al momento non riusciamo a mostrare la scheda aggiornata di questo bando. Qui trovi i dati che avevi salvato."}
+        </p>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <Status tono="neutro">
+            {item.slug_aggiornato ? "Unita a un'altra scheda" : "Scheda non disponibile"}
+          </Status>
+          <span className="text-caption text-ink-3">Salvato il {formatDate(item.salvato_il)}</span>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          {item.slug_aggiornato && (
+            <LinkButton to={`/app/bandi/${item.slug_aggiornato}`} variant="ghost" size="sm">
+              Apri la scheda aggiornata
+            </LinkButton>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            loading={toggle.isPending}
+            onClick={() =>
+              toggle.mutate({ bando: { id: item.bando.id, slug: item.bando.slug }, save: false })
+            }
+          >
+            Rimuovi dai bandi salvati
+          </Button>
+        </div>
       </div>
-      <h3 className="mt-3 font-display text-base font-semibold text-slate-500">
-        {item.bando.titolo ?? item.bando.slug}
-      </h3>
-      <p className="mt-1.5 text-sm text-slate-400">
-        {item.slug_aggiornato
-          ? "Questo bando è stato unito a un'altra scheda del catalogo. Qui trovi i dati che avevi salvato."
-          : "Al momento non riusciamo a mostrare la scheda aggiornata di questo bando. Qui trovi i dati che avevi salvato."}
-        {item.bando.data_scadenza && <> Scadenza: {formatDate(item.bando.data_scadenza)}.</>}
-      </p>
-      {item.slug_aggiornato && (
-        <LinkButton
-          to={`/app/bandi/${item.slug_aggiornato}`}
-          variant="secondary"
-          size="sm"
-          className="mt-3"
-        >
-          Apri la scheda aggiornata
-          <ArrowRight className="size-4" aria-hidden />
-        </LinkButton>
-      )}
-      <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-200 pt-3">
-        <span className="text-xs text-slate-400">Salvato il {formatDate(item.salvato_il)}</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-red-600 hover:bg-red-50"
-          loading={toggle.isPending}
-          onClick={() =>
-            toggle.mutate({ bando: { id: item.bando.id, slug: item.bando.slug }, save: false })
-          }
-        >
-          <Trash2 className="size-4" aria-hidden />
-          Rimuovi
-        </Button>
-      </div>
-    </div>
+    </li>
   );
 }
 
-/** Azione «scadenza in calendario» sotto la card di un bando salvato. Si
+/** C'è un'azione del calendario da mostrare? Con la scadenza, se il bando è già
+ *  nel calendario («Nel calendario») o se è in corso («Aggiungi…»). Si decide
+ *  qui, prima di passare `azioni` a `BandoRow`: un componente che restituisce
+ *  `null` lascerebbe comunque il contenitore vuoto della riga. */
+function haAzioneCalendario(item: SavedBandoItem): boolean {
+  if (!item.bando.data_scadenza) return false;
+  return item.in_calendario || bandoInCorso(statoDelBando(item.bando));
+}
+
+/** «Aggiungi la scadenza al calendario» sotto la riga di un bando salvato: si
  *  aggiunge solo a bando in corso; «Nel calendario» resta comunque visibile. */
-function CalendarAction({ item }: { item: SavedBandoItem }) {
+function AzioneCalendario({ item }: { item: SavedBandoItem }) {
   const addDeadline = useAddBandoDeadline();
   if (!item.bando.data_scadenza) return null;
 
@@ -77,7 +86,7 @@ function CalendarAction({ item }: { item: SavedBandoItem }) {
         variant="ghost"
         size="sm"
       >
-        <CalendarCheck className="size-4 text-emerald-600" aria-hidden />
+        <CalendarCheck className="size-4" aria-hidden />
         Nel calendario
       </LinkButton>
     );
@@ -93,13 +102,9 @@ function CalendarAction({ item }: { item: SavedBandoItem }) {
         onClick={() => addDeadline.mutate(item.bando.slug)}
       >
         <CalendarPlus className="size-4" aria-hidden />
-        Aggiungi scadenza al calendario
+        Aggiungi la scadenza al calendario
       </Button>
-      {addDeadline.isError && (
-        <span className="text-xs text-red-600" role="alert">
-          {apiErrorMessage(addDeadline.error)}
-        </span>
-      )}
+      {addDeadline.isError && <InlineError>{apiErrorMessage(addDeadline.error)}</InlineError>}
     </>
   );
 }
@@ -109,67 +114,67 @@ export default function Salvati() {
   const { data, isPending, isError, error, refetch, isPlaceholderData } = useSavedBandi(page);
 
   // Rimuovendo l'ultimo elemento di una pagina > 1 la pagina resterebbe
-  // fuori intervallo (empty state fuorviante): si rientra sull'ultima piena.
+  // fuori intervallo (stato vuoto fuorviante): si rientra sull'ultima piena.
   useEffect(() => {
     if (data && page > 1 && data.items.length === 0 && data.total > 0) {
       setPage(Math.max(1, data.total_pages));
     }
   }, [data, page]);
 
-  return (
-    <div>
-      <h1 className="inline-flex items-center gap-2 font-display text-2xl font-bold tracking-tight text-slate-900">
-        <Bookmark className="size-6 text-brand-500" aria-hidden />
-        Bandi salvati
-      </h1>
-      <p className="mt-1 text-sm text-slate-500">
-        {data ? (
-          <>
-            <span className="tabular font-medium text-slate-700">{data.total}</span>{" "}
-            {data.total === 1 ? "bando salvato" : "bandi salvati"}
-          </>
-        ) : (
-          "I bandi che hai messo da parte, sempre a portata di mano."
-        )}
-      </p>
+  const descrizione = data
+    ? `${data.total.toLocaleString("it-IT")} ${data.total === 1 ? "bando salvato" : "bandi salvati"}`
+    : "I bandi che hai messo da parte, sempre a portata di mano.";
 
-      <section className="mt-6" aria-busy={isPending || isPlaceholderData}>
+  return (
+    <Page variante="elenco">
+      <PageHeader titolo="Bandi salvati" descrizione={descrizione} />
+
+      <section aria-label="Bandi salvati" aria-busy={isPending || isPlaceholderData}>
         {isPending ? (
-          <div className="grid gap-4 xl:grid-cols-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <BandoCardSkeleton key={i} />
+          <ul className="flex flex-col border-t border-line">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <BandoRowSkeleton key={i} />
             ))}
-          </div>
+          </ul>
         ) : isError ? (
-          <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
+          <ErrorState
+            title="Non siamo riusciti a caricare i bandi salvati."
+            message={apiErrorMessage(error)}
+            onRetry={() => refetch()}
+          />
         ) : data && data.items.length === 0 ? (
           <EmptyState
-            title="Nessun bando salvato"
-            description="Sfoglia il catalogo e usa il segnalibro sulle card per mettere da parte i bandi che ti interessano."
-            action={<LinkButton to="/app/bandi">Esplora i bandi</LinkButton>}
+            title="Non hai ancora salvato nessun bando."
+            description="Sfoglia i bandi e usa il segnalibro per mettere da parte quelli che ti interessano: li ritrovi qui."
+            action={
+              <LinkButton to="/app/bandi" variant="secondary">
+                Cerca nei bandi
+              </LinkButton>
+            }
           />
         ) : (
           <>
-            <div
-              className={
-                "grid gap-4 xl:grid-cols-2" +
-                (isPlaceholderData ? " opacity-60 transition-opacity" : "")
-              }
+            <ul
+              className={cn(
+                "flex flex-col border-t border-line",
+                isPlaceholderData && "opacity-60 transition-opacity",
+              )}
             >
               {data?.items.map((item) =>
                 item.disponibile ? (
-                  <div key={item.bando.id} className="flex h-full flex-col gap-1.5">
-                    <SavableBandoCard bando={item.bando} className="flex-1" />
-                    <div className="flex flex-wrap items-center gap-2 px-1">
-                      <CalendarAction item={item} />
-                    </div>
-                  </div>
+                  <BandoRow
+                    key={item.bando.id}
+                    bando={item.bando}
+                    azioni={
+                      haAzioneCalendario(item) ? <AzioneCalendario item={item} /> : undefined
+                    }
+                  />
                 ) : (
-                  <UnavailableCard key={item.bando.id} item={item} />
+                  <RigaNonDisponibile key={item.bando.id} item={item} />
                 ),
               )}
-            </div>
-            <div className="mt-8">
+            </ul>
+            <div className="mt-6">
               <Pagination
                 page={page}
                 totalPages={data?.total_pages ?? 1}
@@ -182,6 +187,6 @@ export default function Salvati() {
           </>
         )}
       </section>
-    </div>
+    </Page>
   );
 }

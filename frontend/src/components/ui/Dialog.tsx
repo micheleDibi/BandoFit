@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { cn } from "../../lib/cn";
 import { IconButton } from "./IconButton";
 
@@ -30,6 +30,8 @@ export function Dialog({
   size = "md",
 }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
+  // Il titolo dà il nome accessibile alla finestra (vale anche per ConfirmDialog).
+  const titoloId = useId();
 
   useEffect(() => {
     const dialog = ref.current;
@@ -41,11 +43,17 @@ export function Dialog({
   return (
     <dialog
       ref={ref}
+      aria-labelledby={titoloId}
       onClose={onClose}
       // `cancel` precede `close` ed è ciò che l'Esc scatena: prevenendolo la
       // modale non si chiude. `close()` chiamato da noi non passa di qui.
       onCancel={(e) => {
         if (!dismissible) e.preventDefault();
+      }}
+      // Chrome ignora il `preventDefault` sul `cancel` a un secondo Esc ravvicinato
+      // (protezione anti-abuso dei close watcher): si ferma il tasto alla fonte.
+      onKeyDown={(e) => {
+        if (!dismissible && e.key === "Escape") e.preventDefault();
       }}
       onClick={(e) => {
         // click sul backdrop = chiusura
@@ -58,7 +66,9 @@ export function Dialog({
     >
       <div className="flex flex-col gap-4 p-6">
         <div className="flex items-start justify-between gap-4">
-          <h2 className="text-title-section text-ink">{title}</h2>
+          <h2 id={titoloId} className="text-title-section text-ink">
+            {title}
+          </h2>
           {dismissible && (
             <IconButton
               label="Chiudi"

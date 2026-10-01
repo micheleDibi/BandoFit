@@ -80,7 +80,7 @@ async def unsubscribe(
     if _token_valido(token):
         await bando_alert_service.unsubscribe_by_token(primary, token)
     if _vuole_html(request):
-        preferenze = f"{get_settings().frontend_url.rstrip('/')}/app/preferenze"
+        preferenze = f"{get_settings().frontend_url.rstrip('/')}/app/preferenze?tab=avvisi"
         link = (
             f'<a href="{html.escape(preferenze, quote=True)}" '
             'style="font-size:14px;color:#1E5EFF">Vai alle Preferenze</a>'

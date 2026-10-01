@@ -1,4 +1,3 @@
-import { X } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useLookups } from "../../hooks/useLookups";
@@ -6,7 +5,11 @@ import { usePartenariatiVocabolario } from "../../hooks/usePartenariatiVocabolar
 import { BACHECA_COPY } from "../../lib/copy";
 import type { FiltriBacheca as Filtri, FormaPrevistaCall, OrdineBacheca, RuoloPartner } from "../../types";
 import { Button } from "../ui/Button";
-import { SelectField } from "../ui/Field";
+import { Chip } from "../ui/Chip";
+import { Filter } from "../ui/Filter";
+import { usePopover } from "../ui/Popover";
+import { RadioGroup, type RadioOpzione } from "../ui/RadioGroup";
+import { Select } from "../ui/Select";
 import { etichettaForma } from "./PartenariatoRegole";
 
 const ORDINI: OrdineBacheca[] = ["affinita", "recenti", "scadenza"];
@@ -21,6 +24,8 @@ const FORME: FormaPrevistaCall[] = [
   "accordo_partenariato",
   "consorzio_ue",
 ];
+/** Id dell'opzione «nessun filtro» nei pannelli a scelta singola. */
+const TUTTI = "tutti";
 
 function interoPositivo(raw: string | null): number | null {
   if (!raw) return null;
@@ -92,9 +97,41 @@ export function useFiltriBacheca() {
   return { filtri, aggiorna, azzera, attivi };
 }
 
-/** Filtri della bacheca («Tutte le call»): regione, forma, ruolo e ordine in
- *  select con etichetta; il bando (arriva da un link della scheda del bando)
- *  come voce rimovibile. */
+/** Pannello di un filtro a scelta singola: la scelta si applica subito e il
+ *  pannello si chiude. La prima opzione è «nessun filtro». */
+function SceltaFiltro({
+  nome,
+  legend,
+  opzioni,
+  valore,
+  onScegli,
+}: {
+  nome: string;
+  legend: string;
+  opzioni: readonly RadioOpzione[];
+  valore: string;
+  onScegli: (id: string) => void;
+}) {
+  const { chiudi } = usePopover();
+  return (
+    <RadioGroup
+      nome={nome}
+      legend={legend}
+      opzioni={opzioni}
+      valore={valore}
+      onChange={(id) => {
+        onScegli(id);
+        chiudi();
+      }}
+      className="min-w-56"
+    />
+  );
+}
+
+/** Filtri della bacheca («Tutte le call»): regione, forma e ruolo come
+ *  pulsanti-filtro che aprono un pannello a scelta singola; l'ordine in un
+ *  `Select`; il bando (arriva da un link della scheda del bando) come filtro
+ *  attivo rimovibile. */
 export function FiltriBacheca({
   filtri,
   aggiorna,
@@ -108,85 +145,85 @@ export function FiltriBacheca({
   const { data: lookups } = useLookups();
   const { data: vocabolario } = usePartenariatiVocabolario();
 
+  const regioni = lookups?.regioni ?? [];
+  const nomeRegione = regioni.find((r) => r.id === filtri.regione)?.nome;
+
   return (
-    <form
-      role="search"
-      aria-label="Filtri delle call"
-      className="space-y-3 rounded-xl border border-slate-200 bg-white p-4"
-      onSubmit={(e) => e.preventDefault()}
-    >
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <SelectField
-          label="Regione"
-          value={filtri.regione ?? ""}
-          onChange={(e) => aggiorna({ regione: interoPositivo(e.target.value) })}
-        >
-          <option value="">Tutte le regioni</option>
-          {(lookups?.regioni ?? []).map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.nome}
-            </option>
-          ))}
-        </SelectField>
-        <SelectField
+    <div role="search" aria-label="Filtri delle call" className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Filter label="Regione" attivo={filtri.regione !== null} valore={nomeRegione}>
+          <SceltaFiltro
+            nome="regione"
+            legend="Regione"
+            opzioni={[
+              { id: TUTTI, label: "Tutte le regioni" },
+              ...regioni.map((r) => ({ id: String(r.id), label: r.nome })),
+            ]}
+            valore={filtri.regione === null ? TUTTI : String(filtri.regione)}
+            onScegli={(id) => aggiorna({ regione: id === TUTTI ? null : interoPositivo(id) })}
+          />
+        </Filter>
+        <Filter
           label="Forma prevista"
-          value={filtri.forma ?? ""}
-          onChange={(e) => aggiorna({ forma: tra(e.target.value, FORME) })}
+          attivo={filtri.forma !== null}
+          valore={filtri.forma ? etichettaForma(filtri.forma, vocabolario) : undefined}
         >
-          <option value="">Tutte le forme</option>
-          {FORME.map((f) => (
-            <option key={f} value={f}>
-              {etichettaForma(f, vocabolario)}
-            </option>
-          ))}
-        </SelectField>
-        <SelectField
+          <SceltaFiltro
+            nome="forma"
+            legend="Forma prevista"
+            opzioni={[
+              { id: TUTTI, label: "Tutte le forme" },
+              ...FORME.map((f) => ({ id: f, label: etichettaForma(f, vocabolario) })),
+            ]}
+            valore={filtri.forma ?? TUTTI}
+            onScegli={(id) => aggiorna({ forma: tra(id, FORME) })}
+          />
+        </Filter>
+        <Filter
           label="Il tuo ruolo"
-          value={filtri.ruolo ?? ""}
-          onChange={(e) => aggiorna({ ruolo: tra(e.target.value, RUOLI) })}
-          helper="Il ruolo che avresti nel partenariato."
+          attivo={filtri.ruolo !== null}
+          valore={filtri.ruolo ? BACHECA_COPY.ruoli[filtri.ruolo] : undefined}
         >
-          <option value="">Qualsiasi ruolo</option>
-          {RUOLI.map((r) => (
-            <option key={r} value={r}>
-              {BACHECA_COPY.ruoli[r]}
-            </option>
-          ))}
-        </SelectField>
-        <SelectField
-          label="Ordina per"
-          value={filtri.ordine}
-          onChange={(e) => aggiorna({ ordine: tra(e.target.value, ORDINI) ?? ORDINE_PREDEFINITO })}
-        >
-          {ORDINI.map((o) => (
-            <option key={o} value={o}>
-              {BACHECA_COPY.ordini[o]}
-            </option>
-          ))}
-        </SelectField>
+          <SceltaFiltro
+            nome="ruolo"
+            legend="Il ruolo che avresti nel partenariato"
+            opzioni={[
+              { id: TUTTI, label: "Qualsiasi ruolo" },
+              ...RUOLI.map((r) => ({ id: r, label: BACHECA_COPY.ruoli[r] })),
+            ]}
+            valore={filtri.ruolo ?? TUTTI}
+            onScegli={(id) => aggiorna({ ruolo: tra(id, RUOLI) })}
+          />
+        </Filter>
+        {attivi > 0 && (
+          <Button type="button" variant="ghost" size="sm" onClick={azzera}>
+            Azzera i filtri
+          </Button>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-small text-ink-3" aria-hidden>
+            Ordina per
+          </span>
+          <Select
+            label="Ordina per"
+            value={filtri.ordine}
+            onChange={(e) => aggiorna({ ordine: tra(e.target.value, ORDINI) ?? ORDINE_PREDEFINITO })}
+          >
+            {ORDINI.map((o) => (
+              <option key={o} value={o}>
+                {BACHECA_COPY.ordini[o]}
+              </option>
+            ))}
+          </Select>
+        </div>
       </div>
-      {(filtri.bando || attivi > 0) && (
+      {filtri.bando && (
         <div className="flex flex-wrap items-center gap-2">
-          {filtri.bando && (
-            <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-brand-50 py-1 pl-3 pr-1 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200">
-              <span className="truncate">Bando: {titoloBando || filtri.bando}</span>
-              <button
-                type="button"
-                onClick={() => aggiorna({ bando: null })}
-                className="inline-flex size-5 cursor-pointer items-center justify-center rounded-full hover:bg-brand-100 focus-visible:outline-2 focus-visible:outline-brand-500"
-                aria-label="Togli il filtro sul bando"
-              >
-                <X className="size-3" aria-hidden />
-              </button>
-            </span>
-          )}
-          {attivi > 0 && (
-            <Button type="button" variant="ghost" size="sm" onClick={azzera}>
-              Azzera i filtri
-            </Button>
-          )}
+          <Chip onRemove={() => aggiorna({ bando: null })} label="Togli il filtro sul bando">
+            Bando: {titoloBando || filtri.bando}
+          </Chip>
         </div>
       )}
-    </form>
+    </div>
   );
 }

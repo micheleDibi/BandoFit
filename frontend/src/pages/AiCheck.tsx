@@ -1,18 +1,21 @@
-import { ArrowUpRight, Gauge, Loader2, Sparkles } from "lucide-react";
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { QuotaUpgradeBanner } from "../components/aicheck/QuotaUpgradeBanner";
 import { AiEsitoBadge } from "../components/bandi/badges";
-import { Badge } from "../components/ui/Badge";
-import { buttonClasses } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
+import { LinkButton } from "../components/ui/Button";
+import { Page } from "../components/ui/Page";
+import { PageHeader } from "../components/ui/PageHeader";
+import { ProgressBar } from "../components/ui/ProgressBar";
+import { Section, SectionHeader } from "../components/ui/SectionHeader";
+import { Spinner } from "../components/ui/Spinner";
+import { Status } from "../components/ui/Status";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
+import { TextLink } from "../components/ui/TextLink";
 import { useAiChecks } from "../hooks/useAiCheck";
 import { useMe } from "../hooks/useMe";
 import { usePlans } from "../hooks/usePlans";
 import { apiErrorMessage } from "../lib/api";
 import { formatDateTime } from "../lib/format";
-import { scoreColorClasses } from "../lib/scoreColor";
 import type { AiCheck } from "../types";
 
 /** Un gruppo per bando: l'analisi più recente in evidenza + numero versioni. */
@@ -35,80 +38,47 @@ function groupBySlug(items: AiCheck[]): CheckGroup[] {
   return [...groups.values()];
 }
 
-function StatTile({
-  icon: Icon,
-  label,
-  children,
-}: {
-  icon: typeof Gauge;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Card className="p-5">
-      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400">
-        <Icon className="size-3.5" aria-hidden />
-        {label}
-      </div>
-      <div className="mt-2">{children}</div>
-    </Card>
-  );
-}
-
-function ScoreBar({ punteggio }: { punteggio: number }) {
-  const colori = scoreColorClasses(punteggio);
-  return (
-    <div className="flex w-28 items-center gap-2">
-      <div className="h-1.5 flex-1 rounded-full bg-slate-100">
-        <div className={`h-1.5 rounded-full ${colori.bar}`} style={{ width: `${punteggio}%` }} />
-      </div>
-      <span className={`tabular shrink-0 font-display text-sm font-bold ${colori.text}`}>
-        {punteggio}
-        <span className="text-[10px] font-medium text-slate-400">/100</span>
-      </span>
-    </div>
-  );
-}
-
-function GroupRow({ group }: { group: CheckGroup }) {
+/** Riga dello storico: il bando, la data dell'ultima analisi, lo stato o
+ *  l'esito con il punteggio, e «Apri il report». */
+function RigaCheck({ group }: { group: CheckGroup }) {
   const { latest } = group;
   return (
-    <li className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
-      <div className="min-w-0 flex-1 basis-64">
+    <li className="flex flex-col gap-2 border-b border-line px-2 py-4 md:flex-row md:items-center md:gap-6">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <Link
           to={`/app/bandi/${group.slug}`}
-          className="line-clamp-2 font-medium text-slate-800 underline-offset-2 hover:text-brand-600 hover:underline"
-          title={latest.bando_titolo}
+          className="self-start rounded-mark text-row-title text-ink hover:text-accent-hover"
         >
           {latest.bando_titolo}
         </Link>
-        <p className="mt-0.5 text-xs text-slate-400">
+        <p className="text-small text-ink-3">
           {formatDateTime(latest.ready_at ?? latest.created_at)}
-          {group.count > 1 && ` · ${group.count} analisi`}
+          {group.count > 1 && `, ${group.count} AI-check`}
         </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {latest.status === "pending" ? (
-          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-amber-700">
-            <Loader2 className="size-4 animate-spin" aria-hidden />
-            Analisi in corso…
+          <span className="inline-flex items-center gap-2 text-small font-medium text-ink">
+            <Spinner size="sm" />
+            AI-check in corso…
           </span>
         ) : latest.status === "error" ? (
-          <Badge tone="red">Non riuscita</Badge>
+          <Status tono="attenzione">Non riuscita</Status>
         ) : (
           <>
             {latest.esito && <AiEsitoBadge esito={latest.esito} />}
-            {latest.punteggio !== null && <ScoreBar punteggio={latest.punteggio} />}
+            {latest.punteggio !== null && (
+              <span className="text-figure-sm text-ink">
+                {latest.punteggio}
+                <span className="font-sans text-small font-normal text-ink-3">/100</span>
+              </span>
+            )}
           </>
         )}
-        <Link
-          to={`/app/bandi/${group.slug}#ai-check-report`}
-          className={buttonClasses("secondary", "sm")}
-        >
-          Apri report
-          <ArrowUpRight className="size-3.5" aria-hidden />
-        </Link>
+        <TextLink to={`/app/bandi/${group.slug}#ai-check-report`} className="text-small font-medium">
+          Apri il report
+        </TextLink>
       </div>
     </li>
   );
@@ -116,100 +86,85 @@ function GroupRow({ group }: { group: CheckGroup }) {
 
 export default function AiCheck() {
   const { data, isPending, isError, error, refetch } = useAiChecks();
-  // Servono al banner per capire se un upgrade è davvero possibile: entrambe
-  // sono già in cache TanStack (navbar e pagina Abbonamento).
+  // Servono all'avviso per capire se un upgrade è davvero possibile: entrambe
+  // sono già in cache TanStack (barra laterale e pagina Abbonamento).
   const { data: me } = useMe();
   const { data: plans } = usePlans();
 
   const groups = useMemo(() => groupBySlug(data?.items ?? []), [data]);
   const quota = data?.quota;
-  const quotaPct =
-    quota && quota.totale > 0 ? Math.min(100, Math.round((quota.usati / quota.totale) * 100)) : 0;
 
   return (
-    <div className="mx-auto max-w-5xl">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="inline-flex items-center gap-2 font-display text-2xl font-bold tracking-tight text-slate-900">
-            <Sparkles className="size-6 text-brand-500" aria-hidden />
-            AI-check
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Le analisi di compatibilità tra la tua azienda e i bandi: l'AI verifica ogni
-            requisito citando il testo del bando e i tuoi dati.
-          </p>
-        </div>
-      </div>
+    <Page variante="elenco">
+      <PageHeader
+        titolo="AI-check"
+        descrizione="Gli AI-check tra la tua azienda e i bandi: l'AI verifica ogni requisito citando il testo del bando e i tuoi dati."
+      />
 
       {isPending ? (
-        <div className="mt-6 space-y-4">
-          <Skeleton className="h-24 w-full sm:max-w-sm" />
-          <Skeleton className="h-48 w-full" />
+        <div className="flex flex-col gap-6" aria-hidden>
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-40 w-full" />
         </div>
       ) : isError ? (
-        <div className="mt-6">
-          <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
-        </div>
+        <ErrorState
+          title="Non siamo riusciti a caricare gli AI-check."
+          message={apiErrorMessage(error)}
+          onRetry={() => refetch()}
+        />
       ) : (
         <>
           {/* Quota del piano */}
-          <div className="mt-6 sm:max-w-sm">
-            <StatTile icon={Gauge} label="Disponibili quest'anno">
-              {quota && quota.totale > 0 ? (
-                <>
-                  <p className="tabular font-display text-2xl font-bold text-slate-900">
-                    {quota.rimanenti}
-                    <span className="text-sm font-medium text-slate-400"> di {quota.totale}</span>
-                  </p>
-                  <div className="mt-2 h-1.5 rounded-full bg-slate-100">
-                    <div
-                      className="h-1.5 rounded-full bg-brand-500"
-                      style={{ width: `${100 - quotaPct}%` }}
-                    />
-                  </div>
-                </>
-              ) : (
-                <p className="text-sm text-slate-500">
-                  Non inclusi nel tuo piano.{" "}
-                  <Link to="/app/abbonamento" className="font-medium text-brand-600 hover:underline">
-                    Vedi i piani
-                  </Link>
+          <div className="flex flex-col gap-2">
+            {quota && quota.totale > 0 ? (
+              <>
+                <p className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="text-figure text-ink">{quota.rimanenti}</span>
+                  <span className="text-body text-ink-2">
+                    su {quota.totale} disponibili quest'anno
+                  </span>
                 </p>
-              )}
-            </StatTile>
+                <ProgressBar
+                  valore={quota.rimanenti}
+                  massimo={quota.totale}
+                  label="AI-check disponibili quest'anno"
+                />
+              </>
+            ) : (
+              <p className="text-body text-ink-2">
+                Non inclusi nel tuo piano. <TextLink to="/app/abbonamento">Vedi i piani</TextLink>
+              </p>
+            )}
           </div>
 
           <QuotaUpgradeBanner quota={quota} me={me} plans={plans} />
 
-          {/* Elenco */}
-          {groups.length === 0 ? (
-            <div className="mt-6">
+          <Section>
+            <SectionHeader titolo="I tuoi AI-check" />
+            {groups.length === 0 ? (
               <EmptyState
-                title="Nessun AI-check ancora"
-                description="Apri un bando che ti interessa e avvia la verifica di compatibilità: troverai qui tutti i report."
+                title="Nessun AI-check ancora."
+                description="Apri un bando che ti interessa e avvia l'AI-check: troverai qui tutti i report."
                 action={
-                  <Link to="/app/bandi" className={buttonClasses("primary", "md")}>
-                    Esplora i bandi
-                  </Link>
+                  <LinkButton to="/app/bandi" variant="secondary">
+                    Cerca nei bandi
+                  </LinkButton>
                 }
               />
-            </div>
-          ) : (
-            <Card className="mt-6 overflow-hidden p-0">
-              <ul className="divide-y divide-slate-100">
+            ) : (
+              <ul className="flex flex-col">
                 {groups.map((group) => (
-                  <GroupRow key={group.slug} group={group} />
+                  <RigaCheck key={group.slug} group={group} />
                 ))}
               </ul>
-            </Card>
-          )}
-
-          <p className="mt-4 text-xs text-slate-400">
-            Report generati con l'AI a scopo orientativo: verifica sempre il testo ufficiale
-            del bando prima di candidarti. Ogni nuova analisi consuma 1 AI-check del piano.
-          </p>
+            )}
+            <p className="text-small text-ink-3">
+              Report generati con l'AI a scopo orientativo: verifica sempre il testo ufficiale
+              del bando prima di candidarti. Ogni nuovo AI-check ne consuma uno dal tuo piano.
+            </p>
+          </Section>
         </>
       )}
-    </div>
+    </Page>
   );
 }

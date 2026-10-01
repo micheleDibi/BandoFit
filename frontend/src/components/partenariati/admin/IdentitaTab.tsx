@@ -6,18 +6,26 @@ import {
   useRevocaIdentita,
 } from "../../../hooks/useAdminPartenariati";
 import { apiErrorMessage } from "../../../lib/api";
-import { cn } from "../../../lib/cn";
 import { ADMIN_PARTENARIATI_COPY, IDENTITA_COPY, PARTNER_COPY } from "../../../lib/copy";
 import { formatDate } from "../../../lib/format";
 import type { FiltroIdentitaAdmin, IdentitaAdmin, MetodoVerificaIdentita } from "../../../types";
-import { Badge } from "../../ui/Badge";
+import { Alert } from "../../ui/Alert";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 import { SelectField } from "../../ui/Field";
 import { Pagination } from "../../ui/Pagination";
+import { Td, Th } from "../../ui/Table";
 import { SceltaRadio, TestoLungo } from "../CampiCall";
 import { StatoIdentitaBadge } from "../IdentitaAziendaBox";
-import { Annuncio, Filtro, MotivazioneDialog, StatiLista, TabellaCard, thClass } from "./comuni";
+import {
+  Annuncio,
+  Filtro,
+  MotivazioneDialog,
+  StatiLista,
+  TabellaCard,
+  thRigaClass,
+} from "./comuni";
+import { useRientroPagina } from "../useRientroPagina";
 
 const METODI = Object.keys(IDENTITA_COPY.metodi) as MetodoVerificaIdentita[];
 
@@ -34,11 +42,13 @@ function RecapitiRegistro({ riga }: { riga: IdentitaAdmin }) {
   ].filter(Boolean);
   if (voci.length === 0) return null;
   return (
+    // `<details>` nativo e piccolo: dentro una cella l'`Accordion` (con i
+    // filetti di sezione) sarebbe fuori scala.
     <details className="mt-1.5">
-      <summary className="cursor-pointer text-xs font-medium text-slate-600">
+      <summary className="cursor-pointer rounded-mark text-small font-medium text-accent-hover">
         Recapiti dal Registro Imprese
       </summary>
-      <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
+      <ul className="mt-1 flex flex-col gap-0.5 text-small text-ink-2">
         {voci.map((v) => (
           <li key={v}>{v}</li>
         ))}
@@ -114,7 +124,7 @@ function DecidiIdentitaDialog({
       dismissible={!decidi.isPending}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={decidi.isPending}>
+          <Button variant="secondary" onClick={onClose} disabled={decidi.isPending}>
             Annulla
           </Button>
           <Button loading={decidi.isPending} onClick={() => void conferma()}>
@@ -123,16 +133,18 @@ function DecidiIdentitaDialog({
         </>
       }
     >
-      <div className="space-y-4">
-        <p className="text-sm text-slate-700">
-          <span className="font-medium">{riga.denominazione_registro ?? riga.ragione_sociale ?? "Azienda"}</span>
-          {riga.partita_iva ? ` · P.IVA ${riga.partita_iva}` : ""}
+      <div className="flex flex-col gap-4">
+        <p className="flex flex-wrap gap-x-3">
+          <span className="font-medium text-ink">
+            {riga.denominazione_registro ?? riga.ragione_sociale ?? "Azienda"}
+          </span>
+          {riga.partita_iva && <span className="tabular-nums">P.IVA {riga.partita_iva}</span>}
         </p>
         {!riga.registro_ok && (
-          <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="note">
+          <Alert tono="attenzione" ruolo="none">
             I dati dell'azienda non corrispondono più al Registro Imprese: la verifica non si può
             confermare finché il titolare non li aggiorna.
-          </p>
+          </Alert>
         )}
         <SceltaRadio<"verificata" | "rifiutata">
           legenda="Esito"
@@ -175,11 +187,7 @@ function DecidiIdentitaDialog({
           massimo={NOTA_MAX}
           righe={3}
         />
-        {errore && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-            {errore}
-          </p>
-        )}
+        {errore && <Alert tono="errore">{errore}</Alert>}
       </div>
     </Dialog>
   );
@@ -196,17 +204,15 @@ export function IdentitaTab() {
   const revoca = useRevocaIdentita();
   useEffect(() => setPage(1), [stato]);
   const lista = useAdminIdentita(stato, page);
+  const fuoriPagina = useRientroPagina(lista.data, page, lista.isPlaceholderData, setPage);
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-900">
-        <p className="font-medium">Come verificare</p>
-        <p className="mt-1">
-          Usa un canale che l'utente non controlla: il telefono della sede o la PEC presi dal
-          Registro Imprese, oppure un documento del legale rappresentante indicato nel registro. Non
-          usare i recapiti scritti dall'utente nella nota o nel profilo.
-        </p>
-      </div>
+    <div className="flex flex-col gap-4">
+      <Alert tono="info" titolo="Come verificare">
+        Usa un canale che l'utente non controlla: il telefono della sede o la PEC presi dal
+        Registro Imprese, oppure un documento del legale rappresentante indicato nel registro. Non
+        usare i recapiti scritti dall'utente nella nota o nel profilo.
+      </Alert>
       <div className="flex flex-wrap items-end gap-3">
         <Filtro<FiltroIdentitaAdmin>
           etichetta="Stato"
@@ -223,7 +229,7 @@ export function IdentitaTab() {
       </div>
       <Annuncio testo={annuncio} />
       <StatiLista
-        isPending={lista.isPending}
+        isPending={lista.isPending || fuoriPagina}
         isError={lista.isError}
         error={lista.error}
         onRetry={() => void lista.refetch()}
@@ -233,56 +239,59 @@ export function IdentitaTab() {
       >
         <TabellaCard caption="Verifiche dell'identità delle aziende" attenuata={lista.isPlaceholderData}>
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50/70 text-xs uppercase tracking-wide text-slate-500">
-              <th scope="col" className={thClass}>Azienda</th>
-              <th scope="col" className={thClass}>Titolare</th>
-              <th scope="col" className={thClass}>Stato</th>
-              <th scope="col" className={thClass}>Nota del titolare</th>
-              <th scope="col" className={cn(thClass, "text-right")}>Azioni</th>
+            <tr>
+              <Th>Azienda</Th>
+              <Th>Titolare</Th>
+              <Th>Stato</Th>
+              <Th>Nota del titolare</Th>
+              <Th numerica>Azioni</Th>
             </tr>
           </thead>
           <tbody>
             {lista.data?.items.map((r) => (
-              <tr key={r.company_profile_id} className="border-b border-slate-100 align-top last:border-b-0">
-                <th scope="row" className="px-4 py-3 text-left font-normal">
-                  <p className="font-medium text-slate-900">
+              <tr key={r.company_profile_id}>
+                <th scope="row" className={thRigaClass}>
+                  <p className="font-medium text-ink">
                     {r.denominazione_registro ?? r.ragione_sociale ?? "—"}
                   </p>
-                  {r.partita_iva && <p className="tabular text-xs text-slate-500">P.IVA {r.partita_iva}</p>}
-                  <p className="mt-1">
-                    {r.registro_ok ? (
-                      <Badge tone="emerald">Registro Imprese coerente</Badge>
-                    ) : (
-                      <Badge tone="amber">Registro Imprese da aggiornare</Badge>
-                    )}
-                  </p>
+                  {r.partita_iva && (
+                    <p className="text-small text-ink-3 tabular-nums">P.IVA {r.partita_iva}</p>
+                  )}
+                  {/* In parole e senza punto: lo stato della riga è quello della verifica. */}
+                  {r.registro_ok ? (
+                    <p className="mt-1 text-small text-ink-3">Registro Imprese coerente</p>
+                  ) : (
+                    <p className="mt-1 text-small font-medium text-warning-ink">
+                      Registro Imprese da aggiornare
+                    </p>
+                  )}
                   {!r.registro_ok && r.registro_motivo && (
-                    <p className="mt-1 max-w-64 text-xs text-amber-800">
+                    <p className="max-w-64 text-small text-warning-ink">
                       {PARTNER_COPY.motiviIdentita[r.registro_motivo] ?? r.registro_motivo}
                     </p>
                   )}
                   <RecapitiRegistro riga={r} />
                 </th>
-                <td className="px-4 py-3 text-slate-700">
+                <Td className="text-ink-2">
                   <p>{r.titolare?.nome ?? "—"}</p>
-                  {r.titolare?.email && <p className="text-xs text-slate-500">{r.titolare.email}</p>}
-                </td>
-                <td className="px-4 py-3">
+                  {r.titolare?.email && <p className="text-small text-ink-3">{r.titolare.email}</p>}
+                </Td>
+                <Td>
                   <StatoIdentitaBadge stato={r.stato} />
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 text-small text-ink-3">
                     {r.stato === "verificata" && r.verificata_at
-                      ? `Dal ${formatDate(r.verificata_at)}${r.metodo ? ` · ${IDENTITA_COPY.metodi[r.metodo]}` : ""}`
+                      ? `Dal ${formatDate(r.verificata_at)}${r.metodo ? `, ${IDENTITA_COPY.metodi[r.metodo]}` : ""}`
                       : r.richiesta_at
                         ? `Richiesta del ${formatDate(r.richiesta_at)}`
                         : null}
                   </p>
-                </td>
-                <td className="max-w-64 px-4 py-3 text-slate-700">
-                  {r.nota ? <p className="whitespace-pre-line">{r.nota}</p> : <span className="text-slate-400">—</span>}
-                </td>
-                <td className="px-4 py-3 text-right">
+                </Td>
+                <Td className="max-w-64 text-ink-2">
+                  {r.nota ? <p className="whitespace-pre-line">{r.nota}</p> : <span className="text-ink-3">—</span>}
+                </Td>
+                <Td className="text-right">
                   {r.stato === "richiesta" && (
-                    <Button size="sm" onClick={() => setDaDecidere(r)}>
+                    <Button variant="secondary" size="sm" onClick={() => setDaDecidere(r)}>
                       <BadgeCheck className="size-4" aria-hidden />
                       Decidi
                     </Button>
@@ -291,7 +300,6 @@ export function IdentitaTab() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="text-red-700 hover:bg-red-50 hover:text-red-800"
                       onClick={() => {
                         revoca.reset();
                         setDaRevocare(r);
@@ -301,15 +309,13 @@ export function IdentitaTab() {
                       Revoca
                     </Button>
                   )}
-                </td>
+                </Td>
               </tr>
             ))}
           </tbody>
         </TabellaCard>
         {lista.data && (
-          <div className="mt-4">
-            <Pagination page={lista.data.page} totalPages={lista.data.total_pages} onChange={setPage} />
-          </div>
+          <Pagination page={lista.data.page} totalPages={lista.data.total_pages} onChange={setPage} />
         )}
       </StatiLista>
 

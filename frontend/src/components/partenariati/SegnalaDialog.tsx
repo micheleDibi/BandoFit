@@ -1,12 +1,14 @@
-import { useEffect, useId, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { useSegnala } from "../../hooks/useCallPartenariato";
 import { apiErrorMessage } from "../../lib/api";
 import { CALL_COPY } from "../../lib/copy";
 import type { MotivoSegnalazione, OggettoSegnalazione } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
+import { Checkbox } from "../ui/Checkbox";
 import { Dialog } from "../ui/Dialog";
 import { SelectField } from "../ui/Field";
+import { TextLink } from "../ui/TextLink";
 import { TestoLungo } from "./CampiCall";
 import { LIMITI_CALL } from "./callDati";
 
@@ -14,7 +16,7 @@ const MOTIVI = Object.keys(CALL_COPY.segnalaMotivi) as MotivoSegnalazione[];
 
 /** Segnalazione di una call o di un profilo (DSA art. 16): motivo,
  *  descrizione e dichiarazione di buona fede (non preselezionata); la
- *  conferma di ricezione compare in `role="status"`. */
+ *  conferma di ricezione compare nella regione live. */
 export function SegnalaDialog({
   open,
   onClose,
@@ -26,7 +28,6 @@ export function SegnalaDialog({
   oggettoTipo: OggettoSegnalazione;
   oggettoId: string;
 }) {
-  const id = useId();
   const segnala = useSegnala();
   const [motivo, setMotivo] = useState<MotivoSegnalazione | "">("");
   const [descrizione, setDescrizione] = useState("");
@@ -80,35 +81,40 @@ export function SegnalaDialog({
       dismissible={!segnala.isPending}
       footer={
         ricevuta ? (
-          <Button onClick={onClose}>Chiudi</Button>
+          <Button type="button" onClick={onClose}>
+            Chiudi
+          </Button>
         ) : (
           <>
-            <Button variant="ghost" onClick={onClose} disabled={segnala.isPending}>
+            <Button type="button" variant="secondary" onClick={onClose} disabled={segnala.isPending}>
               Annulla
             </Button>
-            <Button variant="danger" onClick={() => void invia()} loading={segnala.isPending} disabled={!valida}>
+            <Button
+              type="button"
+              variant="danger"
+              onClick={() => void invia()}
+              loading={segnala.isPending}
+              disabled={!valida}
+            >
               Invia la segnalazione
             </Button>
           </>
         )
       }
     >
-      <div role="status" aria-live="polite">
+      <div aria-live="polite">
         {ricevuta && (
-          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-            {CALL_COPY.segnalaRicevuta}{" "}
-            {/* Stato, decisione ed eventuale ricorso (WP9). */}
-            <Link
-              to={`/app/partenariati/segnalazioni/${ricevuta}`}
-              className="font-medium text-emerald-900 underline underline-offset-2"
-            >
-              Segui la segnalazione
-            </Link>
-          </p>
+          <Alert
+            tono="ok"
+            // Stato, decisione ed eventuale ricorso (WP9).
+            azione={<TextLink to={`/app/partenariati/segnalazioni/${ricevuta}`}>Segui la segnalazione</TextLink>}
+          >
+            {CALL_COPY.segnalaRicevuta}
+          </Alert>
         )}
       </div>
       {!ricevuta && (
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
           <SelectField
             label="Motivo"
             required
@@ -131,21 +137,12 @@ export function SegnalaDialog({
             righe={4}
             required
           />
-          <label htmlFor={`${id}-bf`} className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-            <input
-              id={`${id}-bf`}
-              type="checkbox"
-              className="mt-0.5 size-4 shrink-0 cursor-pointer accent-brand-500"
-              checked={buonaFede}
-              onChange={(e) => setBuonaFede(e.target.checked)}
-            />
-            <span>{CALL_COPY.segnalaBuonaFede}</span>
-          </label>
-          {errore && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-              {errore}
-            </p>
-          )}
+          <Checkbox
+            label={CALL_COPY.segnalaBuonaFede}
+            checked={buonaFede}
+            onChange={(e) => setBuonaFede(e.target.checked)}
+          />
+          {errore && <Alert tono="errore">{errore}</Alert>}
         </div>
       )}
     </Dialog>

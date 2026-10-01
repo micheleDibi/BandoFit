@@ -62,7 +62,7 @@ function RecuperaBilanciButton({
         {inCorso ? "Recupero in corso…" : BILANCI_COPY.recupera}
       </Button>
       {inAttesa && recuperabileDa && (
-        <p id={notaId} className="text-xs text-slate-500">
+        <p id={notaId} className="text-small text-ink-3">
           Potrai riprovare dalle {formatSlotOra(recuperabileDa)}.
         </p>
       )}
@@ -162,12 +162,12 @@ export function BilanciNonDisponibili({
         : " Recupera lo storico per vedere anche gli anni precedenti.";
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 rounded-control border border-accent-line bg-accent-soft px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-start gap-2.5">
-        <Info className="mt-0.5 size-4 shrink-0 text-brand-500" aria-hidden />
+        <Info className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
         <div>
-          <p className="text-sm font-medium text-slate-900">{titolo}</p>
-          <p className="mt-0.5 text-sm text-slate-600">
+          <p className="text-body font-medium text-ink">{titolo}</p>
+          <p className="mt-0.5 text-body text-ink-2">
             {spiegazione}
             {invito}
           </p>

@@ -1,156 +1,163 @@
-import { CalendarClock, Handshake } from "lucide-react";
+import { CalendarClock } from "lucide-react";
 import { Link } from "react-router-dom";
-import { ConsulenzaStatoBadge } from "../Consulenze";
+import { ConsulenzaStatoBadge, PropostaStatoBadge } from "../Consulenze";
 import { AiEsitoBadge } from "../../components/bandi/badges";
+import { inizioAppuntamento } from "../../components/consulenze/formato";
 import { Badge } from "../../components/ui/Badge";
-import { Card } from "../../components/ui/Card";
+import { Page } from "../../components/ui/Page";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Section, SectionHeader } from "../../components/ui/SectionHeader";
 import { EmptyState, ErrorState, Skeleton } from "../../components/ui/states";
 import { useFunzioni } from "../../hooks/useFunzioni";
 import { useRichiestePool } from "../../hooks/useProgettistaRichieste";
 import { apiErrorMessage } from "../../lib/api";
-import { PROPOSTA_STATO_LABELS } from "../../lib/copy";
-import { formatDate, formatSlotGiorno, formatSlotOra } from "../../lib/format";
-import { scoreColorClasses } from "../../lib/scoreColor";
+import { formatDate } from "../../lib/format";
 import type { RichiestaPool } from "../../types";
 
-/** Titolo della richiesta: per un consulto chiesto dalla call di
- *  partenariato non ancora assegnato a chi guarda il server non manda i dati
+/** Titolo della richiesta: per una consulenza chiesta dalla call di
+ *  partenariato non ancora assegnata a chi guarda il server non manda i dati
  *  dell'azienda (solo il bando). */
 export function titoloRichiesta(richiesta: RichiestaPool): string {
   if (richiesta.da_call && !richiesta.assegnata_a_me && !richiesta.ragione_sociale) {
-    return "Consulto su call di partenariato";
+    return "Consulenza su una call di partenariato";
   }
   return richiesta.ragione_sociale ?? richiesta.denominazione_utente;
 }
 
-/** Badge «Call di partenariato» (icona e testo). */
+/** Etichetta «Call di partenariato». */
 export function BadgeDaCall() {
-  return (
-    <Badge tone="brand">
-      <Handshake className="size-3.5" aria-hidden />
-      Call di partenariato
-    </Badge>
-  );
+  return <Badge>Call di partenariato</Badge>;
 }
 
-function RichiestaCard({ richiesta }: { richiesta: RichiestaPool }) {
+/** Riga della richiesta: il titolo è il link al dettaglio; un solo stato
+ *  (della consulenza se è assegnata a chi guarda, altrimenti della sua
+ *  proposta); a destra esito e punteggio dell'AI-check e l'appuntamento. */
+function RigaRichiesta({ richiesta }: { richiesta: RichiestaPool }) {
+  const conAiCheck = !!richiesta.esito || richiesta.punteggio !== null;
   return (
-    <Link
-      to={`/app/progettista/richieste/${richiesta.id}`}
-      className="block rounded-2xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
-    >
-      <Card className="p-5 transition-shadow hover:shadow-md">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="font-medium text-slate-900">{titoloRichiesta(richiesta)}</p>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {richiesta.partita_iva && (
-                <span className="tabular">P.IVA {richiesta.partita_iva} · </span>
-              )}
-              richiesta del {formatDate(richiesta.created_at)}
-            </p>
-          </div>
+    <li className="flex flex-col gap-2 border-b border-line px-2 py-4 md:flex-row md:items-start md:gap-6">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <Link
+          to={`/app/progettista/richieste/${richiesta.id}`}
+          className="self-start rounded-mark text-row-title text-ink hover:text-accent-hover"
+        >
+          {titoloRichiesta(richiesta)}
+        </Link>
+        <p className="text-body text-ink-2">{richiesta.bando_titolo}</p>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-ink-2">
           {richiesta.assegnata_a_me ? (
             <ConsulenzaStatoBadge stato={richiesta.stato} />
           ) : richiesta.mia_proposta_stato ? (
-            <Badge tone={richiesta.mia_proposta_stato === "inviata" ? "brand" : "slate"}>
-              Proposta: {PROPOSTA_STATO_LABELS[richiesta.mia_proposta_stato].toLowerCase()}
-            </Badge>
+            <PropostaStatoBadge stato={richiesta.mia_proposta_stato} prefisso="Proposta" />
           ) : null}
+          {richiesta.partita_iva && (
+            <span className="tabular-nums">P.IVA {richiesta.partita_iva}</span>
+          )}
+          <span>Richiesta del {formatDate(richiesta.created_at)}</span>
+          {richiesta.da_call && <BadgeDaCall />}
         </div>
-        <p className="mt-2 text-sm text-slate-700">{richiesta.bando_titolo}</p>
-        {richiesta.da_call && (
-          <div className="mt-2">
-            <BadgeDaCall />
-          </div>
-        )}
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
-          {richiesta.esito && <AiEsitoBadge esito={richiesta.esito} />}
-          {richiesta.punteggio !== null && (
-            <span
-              className={`tabular font-display font-bold ${scoreColorClasses(richiesta.punteggio).text}`}
-            >
-              {richiesta.punteggio}
-              <span className="text-xs font-medium text-slate-400">/100</span>
-            </span>
+      </div>
+
+      {(conAiCheck || richiesta.appuntamento) && (
+        <div className="flex shrink-0 flex-col gap-1.5 text-small md:w-64 md:items-end md:text-right">
+          {conAiCheck && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 md:justify-end">
+              {richiesta.esito && <AiEsitoBadge esito={richiesta.esito} />}
+              {richiesta.punteggio !== null && (
+                <span className="text-figure-sm text-ink">
+                  <span className="sr-only">Punteggio dell'AI-check: </span>
+                  {richiesta.punteggio}
+                  <span className="font-sans text-small font-normal text-ink-3">/100</span>
+                </span>
+              )}
+            </div>
           )}
           {richiesta.appuntamento && (
-            <span className="inline-flex items-center gap-1.5 text-slate-600">
-              <CalendarClock className="size-4 text-slate-400" aria-hidden />
-              {formatSlotGiorno(richiesta.appuntamento.inizio)},{" "}
-              {formatSlotOra(richiesta.appuntamento.inizio)}
+            <span className="inline-flex items-center gap-1.5 text-ink tabular-nums">
+              <CalendarClock className="size-4 shrink-0 text-ink-3" aria-hidden />
+              <time dateTime={richiesta.appuntamento.inizio}>
+                {inizioAppuntamento(richiesta.appuntamento.inizio)}
+              </time>
             </span>
           )}
         </div>
-      </Card>
-    </Link>
+      )}
+    </li>
   );
 }
 
-/** Pool delle richieste di consulto: quelle aperte a tutti i progettisti e
- *  quelle assegnate a chi guarda. */
+function RigaSkeleton() {
+  return (
+    <li className="flex flex-col gap-2 border-b border-line px-2 py-4" aria-hidden>
+      <Skeleton className="h-5 w-2/5" />
+      <Skeleton className="h-4 w-3/5" />
+      <div className="flex gap-3">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-3 w-28" />
+      </div>
+    </li>
+  );
+}
+
+/** Le richieste di consulenza: quelle aperte a tutti i progettisti e quelle
+ *  assegnate a chi guarda (progettista e admin, con gli stessi poteri). */
 export default function Richieste() {
   const { data, isPending, isError, error, refetch } = useRichiestePool();
   const { partenariatiAttivo } = useFunzioni();
 
   return (
-    <div className="mx-auto max-w-4xl">
-      <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
-        Richieste di consulto
-      </h1>
-      <p className="mt-1 text-sm text-slate-500">
-        {partenariatiAttivo
-          ? "Le aziende che hanno chiesto un consulto su un bando, dopo un AI-check o dalla loro call di partenariato."
-          : "Le aziende che hanno chiesto un consulto dopo un AI-check."}{" "}
-        Invia una proposta: se il titolare la accetta, la consulenza è assegnata a te.
-      </p>
+    <Page variante="elenco">
+      <PageHeader
+        titolo="Richieste di consulenza"
+        descrizione={`${
+          partenariatiAttivo
+            ? "Le aziende che hanno chiesto una consulenza su un bando, dopo un AI-check o dalla loro call di partenariato."
+            : "Le aziende che hanno chiesto una consulenza dopo un AI-check."
+        } Invia una proposta: se il titolare la accetta, la consulenza è assegnata a te.`}
+      />
 
       {isPending ? (
-        <div className="mt-6 space-y-3">
+        <ul className="flex flex-col border-t border-line">
           {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-28 w-full" />
+            <RigaSkeleton key={i} />
           ))}
-        </div>
+        </ul>
       ) : isError ? (
-        <div className="mt-6">
-          <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
-        </div>
+        <ErrorState
+          title="Non siamo riusciti a caricare le richieste di consulenza."
+          message={apiErrorMessage(error)}
+          onRetry={() => refetch()}
+        />
       ) : (
         <>
           {data && data.assegnate.length > 0 && (
-            <section className="mt-6" aria-label="Consulenze assegnate a te">
-              <h2 className="font-display text-lg font-bold tracking-tight text-slate-900">
-                Assegnate a te
-              </h2>
-              <div className="mt-3 space-y-3">
+            <Section aria-label="Consulenze assegnate a te">
+              <SectionHeader titolo="Assegnate a te" />
+              <ul className="flex flex-col">
                 {data.assegnate.map((r) => (
-                  <RichiestaCard key={r.id} richiesta={r} />
+                  <RigaRichiesta key={r.id} richiesta={r} />
                 ))}
-              </div>
-            </section>
+              </ul>
+            </Section>
           )}
 
-          <section className="mt-6" aria-label="Richieste aperte">
-            <h2 className="font-display text-lg font-bold tracking-tight text-slate-900">
-              Richieste aperte
-            </h2>
+          <Section aria-label="Richieste aperte">
+            <SectionHeader titolo="Richieste aperte" />
             {!data || data.aperte.length === 0 ? (
-              <div className="mt-3">
-                <EmptyState
-                  title="Nessuna richiesta aperta"
-                  description="Quando un'azienda attiverà il consulto esperto la troverai qui (e riceverai una notifica)."
-                />
-              </div>
+              <EmptyState
+                title="Nessuna richiesta aperta"
+                description="Quando un'azienda chiederà una consulenza la troverai qui (e riceverai una notifica)."
+              />
             ) : (
-              <div className="mt-3 space-y-3">
+              <ul className="flex flex-col">
                 {data.aperte.map((r) => (
-                  <RichiestaCard key={r.id} richiesta={r} />
+                  <RigaRichiesta key={r.id} richiesta={r} />
                 ))}
-              </div>
+              </ul>
             )}
-          </section>
+          </Section>
         </>
       )}
-    </div>
+    </Page>
   );
 }

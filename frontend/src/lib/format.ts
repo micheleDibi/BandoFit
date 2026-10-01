@@ -1,7 +1,15 @@
+// Importi sempre con il separatore delle migliaia: l'it-IT di serie non
+// raggruppa sotto 10.000 («3500 €» accanto a «3.500 euro» nei testi).
+// `"always"` è di Intl.NumberFormat v3: la lib ES2021 di TypeScript conosce
+// solo il booleano, e un motore che non lo conosce lo legge come `true` (il
+// comportamento di prima).
+const RAGGRUPPA_SEMPRE = "always" as unknown as boolean;
+
 const eurFormatter = new Intl.NumberFormat("it-IT", {
   style: "currency",
   currency: "EUR",
   maximumFractionDigits: 0,
+  useGrouping: RAGGRUPPA_SEMPRE,
 });
 
 const eurWithCentsFormatter = new Intl.NumberFormat("it-IT", {
@@ -9,6 +17,7 @@ const eurWithCentsFormatter = new Intl.NumberFormat("it-IT", {
   currency: "EUR",
   minimumFractionDigits: 0,
   maximumFractionDigits: 2,
+  useGrouping: RAGGRUPPA_SEMPRE,
 });
 
 const dateFormatter = new Intl.DateTimeFormat("it-IT", {
@@ -38,6 +47,7 @@ const eurCentsFormatter = new Intl.NumberFormat("it-IT", {
   currency: "EUR",
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
+  useGrouping: RAGGRUPPA_SEMPRE,
 });
 
 export function eurFromCents(cents: number | null | undefined): string {
@@ -59,27 +69,44 @@ export function formatPrezzo(value: number | string | null | undefined): string 
   return eurWithCentsFormatter.format(num);
 }
 
+const SOLO_DATA = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Una data senza ora (`AAAA-MM-GG`, data di calendario) diventa la mezzanotte
+ *  LOCALE di quel giorno: `new Date("2026-07-31")` sarebbe la mezzanotte UTC
+ *  e a ovest di UTC mostrerebbe il giorno prima. Le date con l'ora restano
+ *  come prima. Null se non è una data valida. */
+function leggiData(iso: string): Date | null {
+  const soloData = SOLO_DATA.exec(iso);
+  if (soloData) {
+    const [anno, mese, giorno] = soloData.slice(1).map(Number);
+    const date = new Date(anno, mese - 1, giorno);
+    // «2026-02-30» non esiste: il costruttore lo sposterebbe al 2 marzo.
+    return date.getFullYear() === anno && date.getMonth() === mese - 1 && date.getDate() === giorno
+      ? date
+      : null;
+  }
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
-  return dateFormatter.format(date);
+  const date = leggiData(iso);
+  return date ? dateFormatter.format(date) : "—";
 }
 
 /** Data e ora ("7 lug 2026, 14:32") — per distinguere versioni nello stesso giorno. */
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
-  return dateTimeFormatter.format(date);
+  const date = leggiData(iso);
+  return date ? dateTimeFormatter.format(date) : "—";
 }
 
 /** Data in formato numerico gg/mm/aaaa. */
 export function formatDateNumeric(iso: string | null | undefined): string {
   if (!iso) return "—";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
-  return numericDateFormatter.format(date);
+  const date = leggiData(iso);
+  return date ? numericDateFormatter.format(date) : "—";
 }
 
 // "Oggi" nel fuso italiano (formato YYYY-MM-DD): le scadenze dei bandi sono

@@ -14,7 +14,7 @@ export function Pagination({
   if (totalPages <= 1) return null;
   return (
     <nav className="flex items-center justify-between gap-4" aria-label="Paginazione">
-      <p className="text-small text-ink-2 tabular-nums">
+      <p className="text-small text-ink-2 tabular-nums" aria-live="polite">
         Pagina {page} di {totalPages}
       </p>
       <div className="flex gap-2">

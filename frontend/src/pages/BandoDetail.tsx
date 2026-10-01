@@ -1,24 +1,12 @@
 import axios from "axios";
-import {
-  ArrowLeft,
-  ArrowUpRight,
-  Banknote,
-  Building2,
-  CalendarCheck,
-  CalendarDays,
-  CalendarPlus,
-  ExternalLink,
-  FileText,
-  Landmark,
-} from "lucide-react";
+import { CalendarCheck, CalendarPlus, FileText } from "lucide-react";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { AiCheckCard } from "../components/bandi/AiCheckCard";
 import { AiCheckReport } from "../components/bandi/AiCheckReport";
-import { ConsultoCard } from "../components/bandi/ConsultoCard";
-import { ScadenzaBadge, StatoBadge } from "../components/bandi/badges";
-import { CompatibilitaBadge } from "../components/bandi/CompatibilitaBadge";
+import { BandoTestata } from "../components/bandi/BandoTestata";
 import { CompatibilitaCard } from "../components/bandi/CompatibilitaCard";
+import { ConsultoCard } from "../components/bandi/ConsultoCard";
 import { ContenutoRenderer } from "../components/bandi/ContenutoRenderer";
 import { SaveBandoButton } from "../components/bandi/SaveBandoButton";
 import { bandoInCorso, dataConOra, statoDelBando } from "../components/bandi/stato";
@@ -26,38 +14,29 @@ import { vaiASezionePartenariato } from "../components/partenariati/ancora";
 import { PartenariatoCard } from "../components/partenariati/PartenariatoCard";
 import { PartenariatoSection } from "../components/partenariati/PartenariatoSection";
 import { Badge } from "../components/ui/Badge";
-import { Button, buttonClasses, LinkButton } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
+import { Button, LinkButton } from "../components/ui/Button";
+import { tempoRelativo } from "../components/ui/Due";
+import type { Fatto } from "../components/ui/Facts";
+import { Fit } from "../components/ui/Fit";
+import { InlineError } from "../components/ui/InlineError";
+import { Page } from "../components/ui/Page";
+import { Panel } from "../components/ui/Panel";
+import { Section, SectionHeader } from "../components/ui/SectionHeader";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
+import { TextLink } from "../components/ui/TextLink";
 import { useBando } from "../hooks/useBandi";
 import { useAddBandoDeadline } from "../hooks/useCalendar";
+import { useFunzioni } from "../hooks/useFunzioni";
 import { useSlugCanonico } from "../hooks/useSlugCanonico";
 import { apiErrorCode, apiErrorMessage } from "../lib/api";
 import { formatEur } from "../lib/format";
 
-function MetaTile({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof Banknote;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-card">
-      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400">
-        <Icon className="size-3.5" aria-hidden />
-        {label}
-      </div>
-      <p className="tabular mt-1.5 font-display text-lg font-semibold text-slate-900">{value}</p>
-    </div>
-  );
-}
+const INDIETRO = { label: "Bandi", to: "/app/bandi" };
 
 export default function BandoDetail() {
   const { slug } = useParams<{ slug: string }>();
   const { data: bando, isPending, isError, error, refetch } = useBando(slug);
+  const { partenariatiAttivo } = useFunzioni();
   const addDeadline = useAddBandoDeadline();
   // Sezione «Regole di partenariato» aperta per QUESTO bando: la pagina resta
   // montata passando da un bando all'altro, e la sezione riparte chiusa.
@@ -67,16 +46,27 @@ export default function BandoDetail() {
 
   if (isPending) {
     return (
-      <div className="mx-auto max-w-5xl">
-        <Skeleton className="h-5 w-40" />
-        <Skeleton className="mt-6 h-8 w-3/4" />
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 w-full" />
-          ))}
+      <Page
+        variante="dettaglio"
+        intestazione={
+          <div className="flex flex-col gap-4" aria-hidden>
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-9 w-3/4" />
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-16 w-full" />
+          </div>
+        }
+        laterale={<Skeleton className="h-64 w-full" />}
+      >
+        <div className="flex flex-col gap-3" aria-hidden>
+          <Skeleton className="h-5 w-full" />
+          <Skeleton className="h-5 w-11/12" />
+          <Skeleton className="h-5 w-4/5" />
+          <Skeleton className="mt-4 h-5 w-full" />
+          <Skeleton className="h-5 w-2/3" />
         </div>
-        <Skeleton className="mt-8 h-64 w-full" />
-      </div>
+      </Page>
     );
   }
 
@@ -86,27 +76,36 @@ export default function BandoDetail() {
     const codice = apiErrorCode(error);
     const nonTrovato =
       codice === "not_found" || (axios.isAxiosError(error) && error.response?.status === 404);
+    const tornaAiBandi = (
+      <LinkButton to="/app/bandi" variant="secondary">
+        Torna ai bandi
+      </LinkButton>
+    );
     return (
-      <div className="mx-auto max-w-3xl">
+      <Page variante="sezioni">
         {codice === "bando_ritirato" ? (
           <EmptyState
             title="Questo bando non è più disponibile."
-            description="Puoi cercarne altri nell'elenco dei bandi."
+            description="L'ente che lo aveva pubblicato lo ha ritirato: puoi cercarne altri nell'elenco."
+            action={tornaAiBandi}
           />
         ) : nonTrovato ? (
-          <EmptyState title="Bando non trovato." />
-        ) : (
-          <ErrorState
-            message={apiErrorMessage(error, "Bando non trovato.")}
-            onRetry={() => refetch()}
+          <EmptyState
+            title="Bando non trovato."
+            description="L'indirizzo non corrisponde a nessun bando del catalogo."
+            action={tornaAiBandi}
           />
+        ) : (
+          <>
+            <ErrorState
+              title="Non siamo riusciti a caricare il bando."
+              message={apiErrorMessage(error, "Riprova tra qualche istante.")}
+              onRetry={() => refetch()}
+            />
+            <div>{tornaAiBandi}</div>
+          </>
         )}
-        <div className="mt-4 text-center">
-          <Link to="/app/bandi" className="text-sm font-medium text-brand-600 hover:underline">
-            ← Torna all'elenco bandi
-          </Link>
-        </div>
-      </div>
+      </Page>
     );
   }
 
@@ -120,250 +119,182 @@ export default function BandoDetail() {
   const fonte =
     bando.link_fonte && bando.link_fonte.url !== cta?.url ? bando.link_fonte : null;
 
-  // Solo i riquadri con un dato reale: niente box con "—".
-  const metaTiles: { icon: typeof Banknote; label: string; value: string }[] = [];
-  if (bando.importo_totale_eur !== null) {
-    metaTiles.push({
-      icon: Banknote,
-      label: "Dotazione totale",
-      value: formatEur(bando.importo_totale_eur),
+  // Solo i fatti con un dato reale: niente «—».
+  const fatti: Fatto[] = [];
+  if (bando.data_scadenza) {
+    fatti.push({
+      etichetta: "Scadenza",
+      valore: dataConOra(bando.data_scadenza, bando.ora_scadenza),
+      nota: inCorso ? tempoRelativo(bando.data_scadenza) : undefined,
     });
   }
+  if (bando.importo_totale_eur !== null) {
+    fatti.push({ etichetta: "Dotazione", valore: formatEur(bando.importo_totale_eur) });
+  }
   if (bando.importo_max_per_progetto_eur !== null) {
-    metaTiles.push({
-      icon: Landmark,
-      label: "Max per progetto",
-      value: formatEur(bando.importo_max_per_progetto_eur),
+    fatti.push({
+      etichetta: "Contributo massimo",
+      valore: formatEur(bando.importo_max_per_progetto_eur),
     });
   }
   if (bando.data_apertura) {
-    metaTiles.push({
-      icon: CalendarDays,
-      label: "Apertura",
-      value: dataConOra(bando.data_apertura, bando.ora_apertura),
-    });
-  }
-  if (bando.data_scadenza) {
-    metaTiles.push({
-      icon: CalendarDays,
-      label: "Scadenza",
-      value: dataConOra(bando.data_scadenza, bando.ora_scadenza),
+    fatti.push({
+      etichetta: "Apertura",
+      valore: dataConOra(bando.data_apertura, bando.ora_apertura),
     });
   }
 
-  return (
-    <div className="mx-auto max-w-6xl">
-      <Link
-        to="/app/bandi"
-        className="inline-flex items-center gap-1.5 rounded-lg text-sm font-medium text-slate-500 transition-colors hover:text-brand-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
+  // «Aggiungi la scadenza al calendario»: solo a bando in corso, con una data.
+  const azioneCalendario =
+    bando.data_scadenza && inCorso ? (
+      <div className="flex flex-col items-start gap-1 sm:items-end">
+        {addDeadline.isSuccess ? (
+          <LinkButton
+            to={`/app/calendario?m=${bando.data_scadenza.slice(0, 7)}`}
+            variant="ghost"
+            size="sm"
+          >
+            <CalendarCheck className="size-4" aria-hidden />
+            Nel calendario
+          </LinkButton>
+        ) : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            loading={addDeadline.isPending}
+            onClick={() => addDeadline.mutate(bando.slug)}
+          >
+            <CalendarPlus className="size-4" aria-hidden />
+            Aggiungi la scadenza al calendario
+          </Button>
+        )}
+        {addDeadline.isError && <InlineError>{apiErrorMessage(addDeadline.error)}</InlineError>}
+      </div>
+    ) : undefined;
+
+  const laterale = (
+    <>
+      {/* Su mobile il pannello sta sopra il testo (tavola MobileBando). */}
+      <Panel
+        titolo="Fa per te?"
+        azione={
+          bando.compatibilita && (
+            <Fit soddisfatti={bando.compatibilita.matched} totale={bando.compatibilita.totale} />
+          )
+        }
+        className="order-first lg:order-none"
       >
-        <ArrowLeft className="size-4" aria-hidden />
-        Tutti i bandi
-      </Link>
-
-      {/* Header */}
-      <header className="mt-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <StatoBadge stato={stato} />
-          {bando.tipologia && <Badge tone="brand">{bando.tipologia.nome}</Badge>}
-          {bando.modalita_erogazione && <Badge tone="slate">{bando.modalita_erogazione.nome}</Badge>}
-          {bando.programma && <Badge tone="slate">{bando.programma.nome}</Badge>}
-          {bando.compatibilita && <CompatibilitaBadge compatibilita={bando.compatibilita} />}
+        <CompatibilitaCard bando={bando} />
+        <div className="border-t border-line pt-3">
+          <AiCheckCard slug={bando.slug} />
         </div>
-        <h1 className="mt-3 font-display text-2xl font-bold leading-tight tracking-tight text-slate-900 sm:text-3xl">
-          {titolo}
-        </h1>
-        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm text-slate-500">
-          {bando.ente_erogatore && (
-            <span className="inline-flex items-center gap-1.5">
-              <Building2 className="size-4" aria-hidden />
-              {bando.ente_erogatore}
-            </span>
-          )}
-          <ScadenzaBadge
-            dataScadenza={bando.data_scadenza}
-            oraScadenza={bando.ora_scadenza}
-            conConto={inCorso}
-          />
-        </div>
+        <ConsultoCard slug={bando.slug} />
+      </Panel>
 
-        {/* Azioni: salva + scadenza in calendario (solo a bando in corso) */}
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <SaveBandoButton bando={{ id: bando.id, slug: bando.slug }} variant="inline" />
-          {bando.data_scadenza &&
-            inCorso &&
-            (addDeadline.isSuccess ? (
-              <LinkButton
-                to={`/app/calendario?m=${bando.data_scadenza.slice(0, 7)}`}
-                variant="secondary"
-                size="sm"
+      {(fonte || bando.allegati.length > 0) && (
+        <Panel titolo="Documenti" className="lg:order-last">
+          <ul className="flex flex-col">
+            {fonte && (
+              <li className="border-b border-line py-2.5 last:border-b-0">
+                <TextLink href={fonte.url} esterno>
+                  {fonte.origine === "fonte_ufficiale" && fonte.host
+                    ? `Fonte ufficiale, ${fonte.host}`
+                    : "Fonte ufficiale"}
+                </TextLink>
+              </li>
+            )}
+            {bando.allegati.map((allegato) => (
+              <li
+                key={allegato.url}
+                className="flex items-start gap-2 border-b border-line py-2.5 last:border-b-0"
               >
-                <CalendarCheck className="size-4 text-emerald-600" aria-hidden />
-                Nel calendario
-              </LinkButton>
-            ) : (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                loading={addDeadline.isPending}
-                onClick={() => addDeadline.mutate(bando.slug)}
-              >
-                <CalendarPlus className="size-4" aria-hidden />
-                Aggiungi scadenza al calendario
-              </Button>
+                <FileText className="mt-0.5 size-4 shrink-0 text-ink-3" aria-hidden />
+                <TextLink href={allegato.url} esterno>
+                  {allegato.etichetta}
+                  {allegato.formato ? ` (${allegato.formato.toUpperCase()})` : ""}
+                </TextLink>
+              </li>
             ))}
-          {addDeadline.isError && (
-            <span className="text-sm text-red-600" role="alert">
-              {apiErrorMessage(addDeadline.error)}
-            </span>
-          )}
-        </div>
-      </header>
-
-      {/* Meta tiles (solo quelli valorizzati) */}
-      {metaTiles.length > 0 && (
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {metaTiles.map((tile) => (
-            <MetaTile key={tile.label} icon={tile.icon} label={tile.label} value={tile.value} />
-          ))}
-        </div>
+          </ul>
+        </Panel>
       )}
 
-      <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_320px]">
-        {/* Contenuto */}
-        <article className="min-w-0">
-          {bando.descrizione_breve && (
-            <p className="rounded-xl border border-brand-100 bg-brand-50/60 px-5 py-4 text-[15px] leading-relaxed text-slate-700">
-              {bando.descrizione_breve}
-            </p>
-          )}
-          <div className="mt-6">
-            {bando.contenuto?.sections?.length ? (
-              <ContenutoRenderer sections={bando.contenuto.sections} />
-            ) : (
-              <p className="text-slate-500">
-                {cta || fonte
-                  ? "La scheda dettagliata non è ancora disponibile: consulta il bando ufficiale dal link a fianco."
-                  : "La scheda dettagliata non è ancora disponibile."}
-              </p>
-            )}
+      {/* Modulo partenariati: il pannello «Partenariato» lo rende la card, che
+          sparisce del tutto a modulo spento o con il 404 del server. */}
+      {partenariatiAttivo && (
+        <PartenariatoCard
+          key={bando.slug}
+          slug={bando.slug}
+          onVediRegole={() => {
+            setPartenariatoApertoPer(bando.slug);
+            vaiASezionePartenariato();
+          }}
+        />
+      )}
+    </>
+  );
+
+  return (
+    <Page
+      variante="dettaglio"
+      intestazione={
+        <BandoTestata
+          indietro={INDIETRO}
+          titolo={titolo}
+          stato={stato}
+          tipologia={bando.tipologia?.nome}
+          modalita={bando.modalita_erogazione?.nome}
+          programma={bando.programma?.nome}
+          ente={bando.ente_erogatore}
+          cta={cta}
+          notaSenzaCta={
+            inCorso ? undefined : "Il bando non è aperto: la candidatura non è disponibile."
+          }
+          azioni={<SaveBandoButton bando={{ id: bando.id, slug: bando.slug }} variant="inline" />}
+          fatti={fatti}
+          azioneFatti={azioneCalendario}
+        />
+      }
+      laterale={laterale}
+      sotto={
+        <>
+          <Section id="ai-check-report" aria-label="Report AI-check" className="scroll-mt-16 pt-6">
+            <SectionHeader titolo="Report AI-check" />
+            <AiCheckReport slug={bando.slug} />
+          </Section>
+          {/* key=slug: guardia dell'avvio automatico ed errori ripartono per bando. */}
+          <PartenariatoSection
+            key={bando.slug}
+            slug={bando.slug}
+            open={partenariatoApertoPer === bando.slug}
+            onOpenChange={(aperta) => setPartenariatoApertoPer(aperta ? bando.slug : null)}
+          />
+        </>
+      }
+    >
+      <article className="flex max-w-lettura flex-col gap-4">
+        {bando.descrizione_breve && (
+          <p className="text-prose font-semibold text-ink">{bando.descrizione_breve}</p>
+        )}
+        {bando.contenuto?.sections?.length ? (
+          <ContenutoRenderer sections={bando.contenuto.sections} />
+        ) : (
+          <p className="text-body text-ink-2">
+            {cta || fonte
+              ? "La scheda dettagliata non è ancora disponibile: consulta il bando ufficiale."
+              : "La scheda dettagliata non è ancora disponibile."}
+          </p>
+        )}
+        {bando.tematica.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 pt-2">
+            <span className="text-small text-ink-3">Temi</span>
+            {bando.tematica.map((t) => (
+              <Badge key={t}>{t}</Badge>
+            ))}
           </div>
-        </article>
-
-        {/* Sidebar */}
-        <aside>
-          <div className="sticky top-20 space-y-4">
-            {/* Pre-check prima dell'AI-check: è il confronto immediato e gratuito,
-                e assorbe la vecchia card «A chi si rivolge» (stesse liste, ma con
-                l'esito) — tenerle entrambe sarebbe un doppione. */}
-            <CompatibilitaCard bando={bando} />
-            <AiCheckCard slug={bando.slug} />
-            <ConsultoCard slug={bando.slug} />
-            {/* Modulo partenariati: la card non si rende a modulo spento. */}
-            <PartenariatoCard
-              key={bando.slug}
-              slug={bando.slug}
-              onVediRegole={() => {
-                setPartenariatoApertoPer(bando.slug);
-                vaiASezionePartenariato();
-              }}
-            />
-
-            {(cta || fonte) && (
-              <Card className="p-5">
-                <h2 className="font-display text-sm font-semibold text-slate-900">
-                  {cta ? "Candidatura" : "Link al bando"}
-                </h2>
-                <div className="mt-3 space-y-2">
-                  {!inCorso && (
-                    <p className="text-sm text-slate-500">
-                      Il bando non è aperto: la candidatura non è disponibile.
-                    </p>
-                  )}
-                  {cta && (
-                    <a
-                      href={cta.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={buttonClasses("primary", "md", "w-full")}
-                    >
-                      Vai al bando
-                      <ArrowUpRight className="size-4" aria-hidden />
-                    </a>
-                  )}
-                  {cta?.origine === "fonte_ufficiale" && cta.host && (
-                    <p className="break-all text-center text-xs text-slate-500">
-                      Sito ufficiale: {cta.host}
-                    </p>
-                  )}
-                  {fonte && (
-                    <a
-                      href={fonte.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={buttonClasses("secondary", "md", "w-full")}
-                    >
-                      <span className="min-w-0 truncate">
-                        {fonte.origine === "fonte_ufficiale" && fonte.host
-                          ? `Fonte ufficiale · ${fonte.host}`
-                          : "Fonte ufficiale"}
-                      </span>
-                      <ExternalLink className="size-4 shrink-0" aria-hidden />
-                    </a>
-                  )}
-                </div>
-              </Card>
-            )}
-
-            {bando.allegati.length > 0 && (
-              <Card className="p-5">
-                <h2 className="font-display text-sm font-semibold text-slate-900">Allegati</h2>
-                <ul className="mt-3 space-y-2">
-                  {bando.allegati.map((allegato, i) => (
-                    <li key={allegato.url}>
-                      <a
-                        href={allegato.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 text-sm text-brand-600 underline-offset-2 hover:underline"
-                      >
-                        <FileText className="size-4 shrink-0" aria-hidden />
-                        {(allegato.etichetta || `Allegato ${i + 1}`) +
-                          (allegato.formato ? ` · ${allegato.formato.toUpperCase()}` : "")}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </Card>
-            )}
-
-            {/* Regioni/settori/beneficiari/ATECO vivono ora nella sezione
-                «Compatibilità»: qui restano solo le tematiche. */}
-            {bando.tematica.length > 0 && (
-              <Card className="p-5">
-                <h2 className="font-display text-sm font-semibold text-slate-900">Tematiche</h2>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {bando.tematica.map((t) => (
-                    <Badge key={t} tone="brand">
-                      {t}
-                    </Badge>
-                  ))}
-                </div>
-              </Card>
-            )}
-          </div>
-        </aside>
-      </div>
-
-      <AiCheckReport slug={bando.slug} />
-      {/* key=slug: guardia dell'avvio automatico ed errori ripartono per bando. */}
-      <PartenariatoSection
-        key={bando.slug}
-        slug={bando.slug}
-        open={partenariatoApertoPer === bando.slug}
-        onOpenChange={(aperta) => setPartenariatoApertoPer(aperta ? bando.slug : null)}
-      />
-    </div>
+        )}
+      </article>
+    </Page>
   );
 }

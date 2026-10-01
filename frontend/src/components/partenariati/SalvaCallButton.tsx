@@ -1,14 +1,18 @@
-import { Bookmark, BookmarkCheck } from "lucide-react";
+import { Bookmark } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSalvaCall } from "../../hooks/usePartenariati";
 import { apiErrorMessage } from "../../lib/api";
+import { cn } from "../../lib/cn";
 import { BACHECA_COPY } from "../../lib/copy";
-import { Button } from "../ui/Button";
+import { IconButton } from "../ui/IconButton";
+import { useToast } from "../ui/Toast";
+import { Tooltip } from "../ui/Tooltip";
 
 /** «Salva» una call di un'altra azienda (vale anche come «segui»: avvisi se
- *  cambia o si chiude). Solo per il titolare: chi la mostra decide. Lo stato
- *  cambia subito al click (micro-interazione) e torna quello del server se la
- *  richiesta fallisce o quando arriva il dato aggiornato. */
+ *  cambia o si chiude). Solo per il titolare: chi la mostra decide. Segnalibro
+ *  di sola icona con `aria-pressed`; lo stato cambia subito al click e torna
+ *  quello del server se la richiesta fallisce (con una notifica) o quando
+ *  arriva il dato aggiornato. */
 export function SalvaCallButton({
   id,
   titolo,
@@ -20,6 +24,7 @@ export function SalvaCallButton({
   salvata: boolean;
 }) {
   const salva = useSalvaCall();
+  const { mostra } = useToast();
   const [locale, setLocale] = useState<boolean | null>(null);
   // Il dato del server ha l'ultima parola appena cambia.
   useEffect(() => setLocale(null), [salvata]);
@@ -29,32 +34,28 @@ export function SalvaCallButton({
     if (salva.isPending) return;
     const nuovo = !attuale;
     setLocale(nuovo);
-    salva.mutate({ id, salva: nuovo }, { onError: () => setLocale(null) });
+    salva.mutate(
+      { id, salva: nuovo },
+      {
+        onError: (errore) => {
+          setLocale(null);
+          mostra({
+            testo: apiErrorMessage(errore, "Non siamo riusciti a salvare la call."),
+            tono: "errore",
+          });
+        },
+      },
+    );
   };
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
+    <Tooltip testo={attuale ? BACHECA_COPY.salvata : BACHECA_COPY.salvaAiuto}>
+      <IconButton
+        label={`${BACHECA_COPY.salva} la call «${titolo}»`}
+        icon={<Bookmark className={cn(attuale && "fill-current text-accent")} />}
         aria-pressed={attuale}
-        title={BACHECA_COPY.salvaAiuto}
         onClick={onClick}
-      >
-        {attuale ? (
-          <BookmarkCheck className="size-4 text-brand-600" aria-hidden />
-        ) : (
-          <Bookmark className="size-4" aria-hidden />
-        )}
-        {attuale ? BACHECA_COPY.salvata : BACHECA_COPY.salva}
-        <span className="sr-only"> la call «{titolo}»</span>
-      </Button>
-      {salva.isError && (
-        <p className="max-w-56 text-right text-xs text-red-700" role="alert">
-          {apiErrorMessage(salva.error, "Non siamo riusciti a salvare la call.")}
-        </p>
-      )}
-    </div>
+      />
+    </Tooltip>
   );
 }

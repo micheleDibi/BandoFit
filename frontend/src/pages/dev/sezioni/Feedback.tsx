@@ -79,6 +79,12 @@ function DemoAlert() {
         <Alert tono="info" titolo="Con un titolo">
           La prima riga in grassetto, il resto sotto. Da usare quando l'avviso ha più di una frase.
         </Alert>
+        <div role="status" aria-live="polite">
+          <Alert tono="ok" ruolo="none">
+            Con ruolo «none»: dentro una regione aria-live già montata (questa), che annuncia da
+            sé. Senza, le due regioni annidate rischiano il doppio annuncio.
+          </Alert>
+        </div>
       </div>
     </Blocco>
   );

@@ -1,20 +1,37 @@
-import { X } from "lucide-react";
 import type { BandiFilterState, FacetKey } from "../../hooks/useBandiFilters";
+import { cn } from "../../lib/cn";
 import { PARTENARIATO_COPY } from "../../lib/copy";
-import { formatEur } from "../../lib/format";
 import type { Lookups } from "../../types";
+import { Button } from "../ui/Button";
+import { Chip } from "../ui/Chip";
+import { STATI, valoreImporto } from "./FiltriBandi";
 
-interface Chip {
+interface ChipAttivo {
   key: string;
   label: string;
   onRemove: () => void;
+  /** Filtro che ha un pulsante nella barra (visibile da `lg`): il chip serve
+   *  solo sotto `lg`, dove la barra è nascosta. */
+  inBarra?: boolean;
 }
 
-const FACET_LOOKUP: Array<{ facet: FacetKey; lookup: keyof Lookups; prefix?: string }> = [
-  { facet: "tipologie", lookup: "tipologie_bando" },
+/** Faccette numeriche con un pulsante nella barra dei filtri (da `lg`). */
+const FACET_BARRA: Array<{
+  facet: FacetKey;
+  lookup: "regioni" | "tipologie_bando" | "beneficiari";
+}> = [
   { facet: "regioni", lookup: "regioni" },
-  { facet: "settori", lookup: "settori" },
+  { facet: "tipologie", lookup: "tipologie_bando" },
   { facet: "beneficiari", lookup: "beneficiari" },
+];
+
+/** Faccette che stanno solo nel cassetto «Filtri», senza un pulsante nella
+ *  barra: per queste il chip c'è sempre, così si vede che cosa è attivo senza
+ *  aprire il cassetto. Quelle della barra (stato, regione, tipologia,
+ *  beneficiari, importo, scadenza) hanno il chip solo sotto `lg`, dove la
+ *  barra è nascosta; la ricerca si vede nel suo campo. */
+const FACET_LOOKUP: Array<{ facet: FacetKey; lookup: keyof Lookups }> = [
+  { facet: "settori", lookup: "settori" },
   { facet: "modalita", lookup: "modalita_erogazione" },
   { facet: "programmi", lookup: "programmi" },
 ];
@@ -32,22 +49,54 @@ export function ActiveFilterChips({
   onToggleFacet: (key: FacetKey, id: number) => void;
   onToggleStato: (stato: string) => void;
   onUpdate: (changes: Partial<BandiFilterState>) => void;
-  onReset: () => void;
+  /** «Azzera tutto» dopo i chip, solo sotto `lg`: da `lg` c'è «Azzera i filtri»
+   *  nella barra. */
+  onReset?: () => void;
 }) {
   if (!lookups) return null;
 
-  const chips: Chip[] = [];
+  const chips: ChipAttivo[] = [];
 
-  if (filters.q) {
-    chips.push({ key: "q", label: `“${filters.q}”`, onRemove: () => onUpdate({ q: "" }) });
-  }
-  for (const stato of filters.stato) {
+  // Prima i filtri della barra, nello stesso ordine dei pulsanti.
+  for (const id of filters.stato) {
     chips.push({
-      key: `stato-${stato}`,
-      label: stato === "in apertura prossimamente" ? "In apertura" : stato[0].toUpperCase() + stato.slice(1),
-      onRemove: () => onToggleStato(stato),
+      key: `stato-${id}`,
+      label: STATI.find((s) => s.id === id)?.label ?? id,
+      onRemove: () => onToggleStato(id),
+      inBarra: true,
     });
   }
+  for (const { facet, lookup } of FACET_BARRA) {
+    for (const id of filters[facet]) {
+      const item = lookups[lookup].find((x) => x.id === id);
+      if (item) {
+        chips.push({
+          key: `${facet}-${id}`,
+          label: item.nome,
+          onRemove: () => onToggleFacet(facet, id),
+          inBarra: true,
+        });
+      }
+    }
+  }
+  const importo = valoreImporto(filters.importo_min, filters.importo_max);
+  if (importo) {
+    chips.push({
+      key: "importo",
+      label: `Importo ${importo}`,
+      onRemove: () => onUpdate({ importo_min: null, importo_max: null }),
+      inBarra: true,
+    });
+  }
+  if (filters.scade_entro_giorni !== null) {
+    chips.push({
+      key: "scadenza",
+      label: `Scadenza entro ${filters.scade_entro_giorni} giorni`,
+      onRemove: () => onUpdate({ scade_entro_giorni: null }),
+      inBarra: true,
+    });
+  }
+
   for (const { facet, lookup } of FACET_LOOKUP) {
     for (const id of filters[facet]) {
       const item = lookups[lookup].find((x) => x.id === id);
@@ -70,27 +119,6 @@ export function ActiveFilterChips({
       });
     }
   }
-  if (filters.importo_min !== null) {
-    chips.push({
-      key: "importo_min",
-      label: `Da ${formatEur(filters.importo_min)}`,
-      onRemove: () => onUpdate({ importo_min: null }),
-    });
-  }
-  if (filters.importo_max !== null) {
-    chips.push({
-      key: "importo_max",
-      label: `Fino a ${formatEur(filters.importo_max)}`,
-      onRemove: () => onUpdate({ importo_max: null }),
-    });
-  }
-  if (filters.scade_entro_giorni !== null) {
-    chips.push({
-      key: "scade",
-      label: `Scade entro ${filters.scade_entro_giorni} gg`,
-      onRemove: () => onUpdate({ scade_entro_giorni: null }),
-    });
-  }
   // Null anche a modulo partenariati spento (lo decide useBandiFilters).
   if (filters.partenariato !== null) {
     chips.push({
@@ -103,33 +131,28 @@ export function ActiveFilterChips({
   if (chips.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2" role="list" aria-label="Filtri attivi">
-      {chips.map((chip) => (
-        <span
-          key={chip.key}
-          role="listitem"
-          className="inline-flex items-center gap-1 rounded-full bg-brand-50 py-1 pl-3 pr-1.5 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200"
-        >
-          {chip.label}
-          <button
-            type="button"
-            onClick={chip.onRemove}
-            aria-label={`Rimuovi filtro ${chip.label}`}
-            className="cursor-pointer rounded-full p-0.5 transition-colors hover:bg-brand-100 focus-visible:outline-2 focus-visible:outline-brand-500"
-          >
-            <X className="size-3" aria-hidden />
-          </button>
-        </span>
-      ))}
-      {chips.length > 1 && (
-        <button
-          type="button"
-          onClick={onReset}
-          className="cursor-pointer text-xs font-medium text-slate-500 underline-offset-2 transition-colors hover:text-brand-600 hover:underline focus-visible:outline-2 focus-visible:outline-brand-500"
-        >
-          Azzera tutto
-        </button>
+    <ul
+      aria-label="Filtri attivi"
+      // Da `lg`, con solo filtri della barra, l'elenco non deve occupare spazio vuoto.
+      className={cn(
+        "flex flex-wrap items-center gap-2",
+        chips.every((chip) => chip.inBarra) && "lg:hidden",
       )}
-    </div>
+    >
+      {chips.map((chip) => (
+        <li key={chip.key} className={chip.inBarra ? "lg:hidden" : undefined}>
+          <Chip onRemove={chip.onRemove} label={`Rimuovi il filtro ${chip.label}`}>
+            {chip.label}
+          </Chip>
+        </li>
+      ))}
+      {onReset && (
+        <li className="lg:hidden">
+          <Button type="button" variant="ghost" size="sm" onClick={onReset}>
+            Azzera tutto
+          </Button>
+        </li>
+      )}
+    </ul>
   );
 }

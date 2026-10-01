@@ -19,6 +19,9 @@ export interface RadioGroupProps {
   onChange: (id: string) => void;
   /** Titolo del gruppo (la `legend`). */
   legend: string;
+  /** Spiegazione del gruppo sotto la `legend`, in `ink-3`, collegata al
+   *  `fieldset` con `aria-describedby` (insieme all'eventuale errore). */
+  descrizione?: ReactNode;
   /** Errore sotto il gruppo, con `InlineError`. */
   error?: string;
   /** Disattiva tutte le opzioni. */
@@ -34,18 +37,27 @@ export function RadioGroup({
   valore,
   onChange,
   legend,
+  descrizione,
   error,
   disabled,
   className,
 }: RadioGroupProps) {
   const base = useId();
   const erroreId = `${base}-errore`;
+  const aiutoId = `${base}-aiuto`;
+  const descrittoDa =
+    [descrizione ? aiutoId : undefined, error ? erroreId : undefined].filter(Boolean).join(" ") ||
+    undefined;
   return (
-    <fieldset
-      className={cn("flex flex-col gap-2", className)}
-      aria-describedby={error ? erroreId : undefined}
-    >
-      <legend className="mb-2 text-small font-medium text-ink">{legend}</legend>
+    <fieldset className={cn("flex flex-col gap-2", className)} aria-describedby={descrittoDa}>
+      <legend className={cn("text-small font-medium text-ink", descrizione ? "mb-1" : "mb-2")}>
+        {legend}
+      </legend>
+      {descrizione && (
+        <p id={aiutoId} className="text-small text-ink-3">
+          {descrizione}
+        </p>
+      )}
       {opzioni.map((opzione) => {
         const id = `${base}-${opzione.id}`;
         const descrizioneId = `${id}-descrizione`;

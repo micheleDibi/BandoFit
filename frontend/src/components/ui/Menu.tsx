@@ -207,14 +207,14 @@ export function MenuItem({ children, onSelect, disabled, title, danger, icon }: 
       className={cn(
         "flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-body font-medium",
         "transition-colors duration-150",
-        // Focus roving (programmatico): lo sfondo È l'indicatore di focus —
-        // un outline verrebbe tagliato dal pannello.
-        "focus:outline-none",
+        // Focus roving (programmatico): fondo `sunken` più un anello interno
+        // (non sporge dal pannello), così il segno non è il solo colore.
+        "focus:outline-2 focus:-outline-offset-2",
         disabled
           ? "cursor-not-allowed text-ink-3"
           : danger
-            ? "cursor-pointer text-danger hover:bg-danger-soft focus:bg-danger-soft"
-            : "cursor-pointer text-ink hover:bg-desk focus:bg-desk",
+            ? "cursor-pointer text-danger hover:bg-danger-soft focus:bg-danger-soft focus:outline-danger"
+            : "cursor-pointer text-ink hover:bg-sunken focus:bg-sunken focus:outline-accent",
       )}
     >
       {icon && (

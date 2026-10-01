@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Download, Eye, EyeOff, Handshake, Loader2, Sparkles } from "lucide-react";
+import { Download, Eye, EyeOff, Handshake } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { useCompany } from "../../hooks/useCompany";
@@ -11,15 +11,20 @@ import {
   usePartnerProfile,
 } from "../../hooks/usePartnerProfile";
 import { apiErrorCode, apiErrorMessage } from "../../lib/api";
-import { cn } from "../../lib/cn";
 import { PARTNER_COPY } from "../../lib/copy";
 import { formatDate } from "../../lib/format";
 import type { PartnerProfile, PartnerProfileInput } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
-import { Dialog } from "../ui/Dialog";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { Panel } from "../ui/Panel";
+import { ProgressBar } from "../ui/ProgressBar";
+import { Section, SectionHeader } from "../ui/SectionHeader";
+import { Spinner } from "../ui/Spinner";
 import { EmptyState, ErrorState, Skeleton } from "../ui/states";
+import { Status } from "../ui/Status";
+import { TextLink } from "../ui/TextLink";
 import { AnteprimaPartnerCard } from "./AnteprimaPartnerCard";
 import { BozzaAiDialog, type SceltaBozza } from "./BozzaAiDialog";
 import { ConsensoPartnerDialog } from "./ConsensoPartnerDialog";
@@ -30,65 +35,23 @@ import { ReferenteMembro, ReferentePartner } from "./ReferentePartner";
 const ANCORA = "partner";
 const TITOLO_ID = "partner-titolo";
 
-/** Barra della completezza: la percentuale è anche in parole (il colore e la
- *  lunghezza della barra non bastano da soli). */
+/** Completezza del profilo: la percentuale è anche in parole. Il testo ripete
+ *  la barra per chi vede; ai lettori di schermo la percentuale arriva una
+ *  volta sola, dalla barra (`aria-valuenow` su 100). */
 function Completezza({ valore }: { valore: number }) {
   const n = Math.max(0, Math.min(100, Math.round(valore)));
   return (
-    <div>
-      <div className="flex items-baseline justify-between gap-2">
-        {/* Il testo ripete la barra per chi vede; ai lettori di schermo la
-            percentuale arriva una volta sola, dall'aria-label della barra. */}
-        <p className="text-sm font-medium text-slate-700" aria-hidden>
-          {PARTNER_COPY.completezza(n)}
-        </p>
-      </div>
-      <div
-        role="img"
-        aria-label={PARTNER_COPY.completezza(n)}
-        className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-slate-100"
-      >
-        <div
-          className={cn(
-            "h-full rounded-full transition-[width]",
-            n >= 70 ? "bg-emerald-500" : n >= 40 ? "bg-brand-500" : "bg-amber-500",
-          )}
-          style={{ width: `${n}%` }}
-        />
-      </div>
-      <p className="mt-1 text-xs text-slate-500">{PARTNER_COPY.completezzaNota}</p>
-    </div>
-  );
-}
-
-function Avviso({
-  tono,
-  titolo,
-  children,
-  azione,
-}: {
-  tono: "amber" | "brand" | "red";
-  titolo: string;
-  children?: ReactNode;
-  azione?: ReactNode;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex flex-wrap items-start justify-between gap-3 rounded-lg border px-4 py-3",
-        tono === "amber" && "border-amber-200 bg-amber-50 text-amber-900",
-        tono === "brand" && "border-brand-200 bg-brand-50 text-brand-900",
-        tono === "red" && "border-red-200 bg-red-50 text-red-900",
-      )}
-    >
-      <div className="flex min-w-0 items-start gap-2">
-        <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-        <div className="text-sm">
-          <p className="font-medium">{titolo}</p>
-          {children && <div className="mt-0.5">{children}</div>}
-        </div>
-      </div>
-      {azione}
+    <div className="flex flex-col gap-1.5">
+      <p className="text-body font-medium text-ink tabular-nums" aria-hidden>
+        {PARTNER_COPY.completezza(n)}
+      </p>
+      <ProgressBar
+        valore={n}
+        massimo={100}
+        label="Completezza del profilo"
+        tono={n >= 100 ? "fit" : "accent"}
+      />
+      <p className="text-small text-ink-3">{PARTNER_COPY.completezzaNota}</p>
     </div>
   );
 }
@@ -141,13 +104,13 @@ function StatoVisibilita({
   const puoAttivare = identita.verificata && !profilo.sospeso;
 
   return (
-    <Card className="p-5">
-      <div className="grid gap-5 md:grid-cols-[1fr_1fr]">
+    <Panel>
+      <div className="grid gap-6 md:grid-cols-2">
         <Completezza valore={profilo.completezza} />
-        <div className="space-y-3">
+        <div className="flex flex-col items-start gap-3">
           {profilo.visibile ? (
             <>
-              <p className="text-sm text-slate-700">
+              <p className="text-body text-ink-2">
                 {profilo.consenso
                   ? `Visibile dal ${formatDate(profilo.consenso.at)}.`
                   : "Visibile come partner."}{" "}
@@ -190,28 +153,22 @@ function StatoVisibilita({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-red-700 hover:bg-red-50 hover:text-red-800"
                   onClick={() => setRevocaAperta(true)}
                   disabled={consenso.isPending}
                 >
                   {PARTNER_COPY.revoca}
                 </Button>
               </div>
-              <p className="text-xs text-slate-500">{PARTNER_COPY.revocaSuCambioAzienda}</p>
+              <p className="text-small text-ink-3">{PARTNER_COPY.revocaSuCambioAzienda}</p>
               {profilo.anonimo && !identita.puo_essere_nominativo && identita.motivo_nominativo && (
-                <p id="partner-motivo-nome" className="text-xs text-slate-500">
+                <p id="partner-motivo-nome" className="text-small text-ink-3">
                   {PARTNER_COPY.motiviNominativo[identita.motivo_nominativo] ??
                     PARTNER_COPY.motiviNominativo.identita_non_verificata_admin}
                   {identita.motivo_nominativo !== "non_disponibile" && (
                     <>
                       {" "}
                       {/* Il riquadro della verifica è in questa stessa sezione. */}
-                      <a
-                        href={`#${ANCORA_IDENTITA}`}
-                        className="font-medium text-brand-600 hover:text-brand-700"
-                      >
-                        {PARTNER_COPY.chiediVerifica} →
-                      </a>
+                      <TextLink href={`#${ANCORA_IDENTITA}`}>{PARTNER_COPY.chiediVerifica}</TextLink>
                     </>
                   )}
                 </p>
@@ -219,7 +176,7 @@ function StatoVisibilita({
             </>
           ) : (
             <>
-              <p className="text-sm text-slate-700">
+              <p className="text-body text-ink-2">
                 Oggi l'azienda non compare tra i partner suggeriti. Compila il profilo, poi attiva
                 la visibilità: sei tu a scegliere se mostrare il nome.
               </p>
@@ -230,59 +187,34 @@ function StatoVisibilita({
             </>
           )}
           {errore && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+            <Alert tono="errore" className="self-stretch">
               {errore}
-            </p>
+            </Alert>
           )}
         </div>
       </div>
 
-      <Dialog
+      <ConfirmDialog
         open={revocaAperta}
-        onClose={() => setRevocaAperta(false)}
-        title={PARTNER_COPY.revocaTitolo}
-        dismissible={!consenso.isPending}
-        footer={
-          <>
-            <Button
-              variant="ghost"
-              onClick={() => setRevocaAperta(false)}
-              disabled={consenso.isPending}
-            >
-              {PARTNER_COPY.annulla}
-            </Button>
-            <Button
-              variant="danger"
-              loading={consenso.isPending}
-              onClick={() => void invia("revoca", null)}
-            >
-              {PARTNER_COPY.revocaConferma}
-            </Button>
-          </>
-        }
+        titolo={PARTNER_COPY.revocaTitolo}
+        conferma={PARTNER_COPY.revocaConferma}
+        annulla={PARTNER_COPY.annulla}
+        distruttiva
+        inCorso={consenso.isPending}
+        onConferma={() => void invia("revoca", null)}
+        onAnnulla={() => setRevocaAperta(false)}
       >
         <p>{PARTNER_COPY.revocaTesto}</p>
-      </Dialog>
+      </ConfirmDialog>
 
-      <Dialog
+      <ConfirmDialog
         open={nomeAperto}
-        onClose={() => setNomeAperto(false)}
-        title="Mostrare il nome dell'azienda?"
-        dismissible={!consenso.isPending}
-        footer={
-          <>
-            <Button
-              variant="ghost"
-              onClick={() => setNomeAperto(false)}
-              disabled={consenso.isPending}
-            >
-              {PARTNER_COPY.annulla}
-            </Button>
-            <Button loading={consenso.isPending} onClick={() => void invia("anonimato", false)}>
-              {PARTNER_COPY.anonimatoCambiaInNome}
-            </Button>
-          </>
-        }
+        titolo="Mostrare il nome dell'azienda?"
+        conferma={PARTNER_COPY.anonimatoCambiaInNome}
+        annulla={PARTNER_COPY.annulla}
+        inCorso={consenso.isPending}
+        onConferma={() => void invia("anonimato", false)}
+        onAnnulla={() => setNomeAperto(false)}
       >
         <p>
           Le altre aziende vedranno il nome registrato al Registro Imprese
@@ -290,12 +222,12 @@ function StatoVisibilita({
           più dettagli del profilo: tutte le fasce dei bilanci, anno e ruolo delle esperienze,
           le certificazioni e le infrastrutture. Puoi tornare anonima quando vuoi.
         </p>
-      </Dialog>
-    </Card>
+      </ConfirmDialog>
+    </Panel>
   );
 }
 
-/** Sezione «Visibilità come partner» della pagina Azienda (ancora
+/** Sezione «Profilo partner» della pagina Azienda (ancora
  *  `#partner`): stato e consenso, referente, bozza AI, editor del profilo e
  *  anteprima «come ti vedono». Esiste solo a modulo acceso: un 404 del
  *  server (modulo spento) la fa sparire. */
@@ -372,9 +304,9 @@ export function PartnerSection({ onImporta }: { onImporta?: () => void }) {
   let corpo: ReactNode;
   if (isPending) {
     corpo = (
-      <div className="space-y-3" aria-hidden>
+      <div className="flex flex-col gap-6" aria-hidden>
         <Skeleton className="h-28 w-full" />
-        <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
+        <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
           <Skeleton className="h-96 w-full" />
           <Skeleton className="h-64 w-full" />
         </div>
@@ -399,16 +331,16 @@ export function PartnerSection({ onImporta }: { onImporta?: () => void }) {
     const bozza = data.bozza_ai;
     const bozzaInCorso = bozza?.stato === "in_corso";
     corpo = (
-      <div className="space-y-4">
+      <div className="flex flex-col gap-6">
         {data.sospeso && (
-          <Avviso tono="red" titolo={PARTNER_COPY.statoSospeso}>
+          <Alert tono="errore" titolo={PARTNER_COPY.statoSospeso}>
             {PARTNER_COPY.sospeso}
-          </Avviso>
+          </Alert>
         )}
 
         {!identita.verificata && (
-          <Avviso
-            tono="amber"
+          <Alert
+            tono="attenzione"
             titolo={PARTNER_COPY.identitaTitolo}
             azione={
               data.editable && onImporta ? (
@@ -420,12 +352,12 @@ export function PartnerSection({ onImporta }: { onImporta?: () => void }) {
             }
           >
             {identita.motivo ? PARTNER_COPY.motiviIdentita[identita.motivo] : null}
-          </Avviso>
+          </Alert>
         )}
 
         {data.editable && data.visibile && data.riconsenso_suggerito && (
-          <Avviso
-            tono="brand"
+          <Alert
+            tono="info"
             titolo={PARTNER_COPY.riconsensoTitolo}
             azione={
               <Button variant="secondary" size="sm" onClick={() => setConsensoAperto(true)}>
@@ -434,7 +366,7 @@ export function PartnerSection({ onImporta }: { onImporta?: () => void }) {
             }
           >
             {PARTNER_COPY.riconsensoTesto}
-          </Avviso>
+          </Alert>
         )}
 
         <ReferenteMembro profilo={data} />
@@ -446,10 +378,10 @@ export function PartnerSection({ onImporta }: { onImporta?: () => void }) {
             onAnnuncio={setAnnuncio}
           />
         ) : (
-          <Card className="p-5">
+          <Panel>
             <Completezza valore={data.completezza} />
-            <p className="mt-3 text-sm text-slate-500">{PARTNER_COPY.soloTitolare}</p>
-          </Card>
+            <p className="text-body text-ink-2">{PARTNER_COPY.soloTitolare}</p>
+          </Panel>
         )}
 
         {/* Verifica dell'identità da parte della piattaforma (WP9): sblocca il
@@ -462,12 +394,11 @@ export function PartnerSection({ onImporta }: { onImporta?: () => void }) {
         {data.editable && <ReferentePartner profilo={data} />}
 
         {data.editable && (
-          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-brand-200 bg-brand-50/40 px-4 py-3">
-            <Sparkles className="size-4 shrink-0 text-brand-500" aria-hidden />
-            <p className="min-w-0 flex-1 text-sm text-slate-700" aria-live="polite">
+          <div className="flex flex-wrap items-center gap-3 rounded-panel bg-desk p-5">
+            <p className="min-w-0 flex-1 text-body text-ink-2" aria-live="polite">
               {bozzaInCorso && bozzaInCorsoRecente(data) ? (
-                <span className="inline-flex items-center gap-1.5">
-                  <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                <span className="inline-flex items-center gap-2">
+                  <Spinner size="sm" />
                   {PARTNER_COPY.bozzaInCorso}
                 </span>
               ) : bozza?.stato === "pronta" && bozza.proposta ? (
@@ -484,7 +415,7 @@ export function PartnerSection({ onImporta }: { onImporta?: () => void }) {
           </div>
         )}
 
-        <div className="grid items-start gap-4 lg:grid-cols-[3fr_2fr]">
+        <div className="grid items-start gap-6 lg:grid-cols-[3fr_2fr]">
           {form && salvato ? (
             <PartnerProfileForm
               valore={form}
@@ -500,7 +431,9 @@ export function PartnerSection({ onImporta }: { onImporta?: () => void }) {
           )}
           {/* Anche prima del primo salvataggio: il server mostra i soli dati
               del registro. */}
-          <AnteprimaPartnerCard visibile={data.visibile} className="lg:sticky lg:top-20" />
+          {/* Su desktop non c'è la barra in alto: stesso scarto della colonna
+              laterale fissa di `Page`. */}
+          <AnteprimaPartnerCard visibile={data.visibile} className="lg:sticky lg:top-8" />
         </div>
 
         {data.editable && (
@@ -527,56 +460,37 @@ export function PartnerSection({ onImporta }: { onImporta?: () => void }) {
     );
   }
 
+  // Lo stato in parole: uno solo («Sospeso», «Visibile come partner», «Non
+  // visibile»); il modo (anonima o con il nome) è un'etichetta neutra.
+  const stato = data ? (
+    <div className="flex flex-wrap items-center gap-2">
+      {data.sospeso ? (
+        <Status tono="attenzione">{PARTNER_COPY.statoSospeso}</Status>
+      ) : data.visibile ? (
+        <Status tono="aperto">{PARTNER_COPY.statoVisibile}</Status>
+      ) : (
+        <Status tono="chiuso">{PARTNER_COPY.statoNonVisibile}</Status>
+      )}
+      {data.visibile && <Badge>{data.anonimo ? PARTNER_COPY.anonima : PARTNER_COPY.conNome}</Badge>}
+    </div>
+  ) : undefined;
+
   return (
-    <section id={ANCORA} aria-labelledby={TITOLO_ID} className="mt-10 scroll-mt-24">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2
-            id={TITOLO_ID}
-            className="inline-flex items-center gap-2 font-display text-xl font-bold tracking-tight text-slate-900"
-          >
-            <Handshake className="size-5 text-brand-500" aria-hidden />
-            {PARTNER_COPY.titoloSezione}
-          </h2>
-          {data ? (
-            <div className="mt-1.5 flex flex-wrap items-center gap-2">
-              {data.sospeso ? (
-                <Badge tone="red">{PARTNER_COPY.statoSospeso}</Badge>
-              ) : data.visibile ? (
-                <Badge tone="emerald">
-                  <Eye className="size-3" aria-hidden />
-                  {PARTNER_COPY.statoVisibile}
-                </Badge>
-              ) : (
-                <Badge tone="slate">
-                  <EyeOff className="size-3" aria-hidden />
-                  {PARTNER_COPY.statoNonVisibile}
-                </Badge>
-              )}
-              {data.visibile && (
-                <Badge tone={data.anonimo ? "slate" : "brand"}>
-                  {data.anonimo ? PARTNER_COPY.anonima : PARTNER_COPY.conNome}
-                </Badge>
-              )}
-            </div>
-          ) : null}
-          <p className="mt-1.5 max-w-2xl text-sm text-slate-500">
-            {PARTNER_COPY.descrizioneSezione}
-          </p>
-        </div>
-      </div>
+    <Section id={ANCORA} aria-labelledby={TITOLO_ID} className="scroll-mt-16">
+      <SectionHeader id={TITOLO_ID} titolo={PARTNER_COPY.titoloSezione} azione={stato} />
+      <p className="max-w-lettura text-body text-ink-2">{PARTNER_COPY.descrizioneSezione}</p>
 
       {/* Sempre montata: gli esiti (consenso, revoca, bozza applicata) vanno
           annunciati anche quando il blocco che li ha causati sparisce. */}
       <div role="status" aria-live="polite">
         {annuncio && (
-          <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          <Alert tono="ok" ruolo="none">
             {annuncio}
-          </p>
+          </Alert>
         )}
       </div>
 
-      <div className="mt-4">{corpo}</div>
-    </section>
+      {corpo}
+    </Section>
   );
 }

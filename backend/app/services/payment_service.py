@@ -428,7 +428,7 @@ async def _invia_ricevuta(primary, purchase: dict) -> None:
         return
     from app.core.config import get_settings
 
-    url = f"{get_settings().frontend_url.rstrip('/')}/app/acquisti"
+    url = f"{get_settings().frontend_url.rstrip('/')}/app/abbonamento?tab=acquisti"
     try:
         await email_service.send_ricevuta_pagamento_email(
             resp.data[0]["email"], purchase["descrizione"],

@@ -1,4 +1,3 @@
-import { Lock } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   useAggiornaCall,
@@ -8,9 +7,10 @@ import {
 import { apiErrorMessage } from "../../lib/api";
 import { CALL_COPY } from "../../lib/copy";
 import type { CallAggiornaInput } from "../../types";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
 import { TextField } from "../ui/Field";
+import { Section, SectionHeader } from "../ui/SectionHeader";
 import { BarraPasso } from "./CallStepper";
 import { LIMITI_CALL } from "./callDati";
 import { TestoLungo } from "./CampiCall";
@@ -86,7 +86,7 @@ export function PassoTesti({ call, onAvanti, onIndietro, onDirty }: PassoProps) 
   };
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-6">
       {bozza && (
         <JobAiStato
           job={job}
@@ -98,22 +98,24 @@ export function PassoTesti({ call, onAvanti, onIndietro, onDirty }: PassoProps) 
           erroreAvvio={proponi.isError ? apiErrorMessage(proponi.error) : null}
         >
           {proposta && (
-            <div className="mt-3 space-y-3">
+            <div className="flex flex-col gap-3">
               {proposta.avvisi.length > 0 && (
-                <ul className="list-disc space-y-0.5 rounded-lg bg-amber-50 py-2 pl-8 pr-3 text-sm text-amber-900">
-                  {proposta.avvisi.map((a) => (
-                    <li key={a}>{a}</li>
-                  ))}
-                </ul>
+                <Alert tono="attenzione">
+                  <ul className="list-disc pl-5">
+                    {proposta.avvisi.map((a) => (
+                      <li key={a}>{a}</li>
+                    ))}
+                  </ul>
+                </Alert>
               )}
               <RilieviCall rilievi={proposta.rilievi} titolo="Nella bozza è rimasto qualcosa da togliere" />
-              {(["titolo", "descrizione_pubblica", "profilo_partner_ideale"] as const).map((campo) =>
-                proposta[campo] ? (
-                  <div key={campo} className="rounded-lg border border-slate-200 bg-white px-3.5 py-3">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{NOMI[campo]}</p>
-                        <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{proposta[campo]}</p>
+              <ul className="flex flex-col border-t border-line">
+                {(["titolo", "descrizione_pubblica", "profilo_partner_ideale"] as const).map((campo) =>
+                  proposta[campo] ? (
+                    <li key={campo} className="flex flex-wrap items-start justify-between gap-3 border-b border-line py-3">
+                      <div className="min-w-0 flex-1 flex flex-col gap-1">
+                        <p className="text-small font-medium text-ink-3">{NOMI[campo]}</p>
+                        <p className="whitespace-pre-line text-body text-ink">{proposta[campo]}</p>
                       </div>
                       <Button
                         variant="secondary"
@@ -123,86 +125,73 @@ export function PassoTesti({ call, onAvanti, onIndietro, onDirty }: PassoProps) 
                       >
                         Usa questo testo
                       </Button>
-                    </div>
-                  </div>
-                ) : null,
-              )}
+                    </li>
+                  ) : null,
+                )}
+              </ul>
             </div>
           )}
         </JobAiStato>
       )}
 
-      <Card className="space-y-5 p-5">
-        <div role="status" aria-live="polite">
-          {annuncio && <p className="text-sm text-emerald-700">{annuncio}</p>}
-        </div>
-        <p className="text-sm text-slate-600">{CALL_COPY.rilieviNota}</p>
-        <div>
-          <TextField
-            label="Titolo della call"
-            required
-            maxLength={LIMITI_CALL.titoloMax}
-            value={valori.titolo}
-            disabled={!bozza}
-            onChange={(e) => setValori((v) => ({ ...v, titolo: e.target.value }))}
-            helper={
-              bozza
-                ? `Tra ${LIMITI_CALL.titoloMin} e ${LIMITI_CALL.titoloMax} caratteri: si legge nella bacheca.`
-                : "Dopo la pubblicazione il titolo non si cambia."
-            }
-          />
-        </div>
+      <div aria-live="polite">{annuncio && <Alert tono="ok">{annuncio}</Alert>}</div>
+      <p className="text-small text-ink-3">{CALL_COPY.rilieviNota}</p>
+      <TextField
+        label="Titolo della call"
+        required
+        maxLength={LIMITI_CALL.titoloMax}
+        value={valori.titolo}
+        disabled={!bozza}
+        onChange={(e) => setValori((v) => ({ ...v, titolo: e.target.value }))}
+        helper={
+          bozza
+            ? `Tra ${LIMITI_CALL.titoloMin} e ${LIMITI_CALL.titoloMax} caratteri: si legge nella bacheca.`
+            : "Dopo la pubblicazione il titolo non si cambia."
+        }
+      />
+      <TestoLungo
+        etichetta="Descrizione del progetto"
+        aiuto="Cosa volete fare e perché cercate partner. Visibile a tutte le aziende che vedono la call."
+        valore={valori.descrizione_pubblica}
+        onChange={(v) => setValori((x) => ({ ...x, descrizione_pubblica: v }))}
+        massimo={LIMITI_CALL.descrizioneMax}
+        righe={7}
+        required
+      />
+      <TestoLungo
+        etichetta="Il partner ideale (facoltativo)"
+        aiuto="Chi cerchi, in parole: competenze, esperienze, modo di lavorare."
+        valore={valori.profilo_partner_ideale}
+        onChange={(v) => setValori((x) => ({ ...x, profilo_partner_ideale: v }))}
+        massimo={LIMITI_CALL.profiloMax}
+        righe={4}
+      />
+      <Section>
+        <SectionHeader titolo="Dettagli riservati" livello={3} />
         <TestoLungo
-          etichetta="Descrizione del progetto"
-          aiuto="Cosa volete fare e perché cercate partner. Visibile a tutte le aziende che vedono la call."
-          valore={valori.descrizione_pubblica}
-          onChange={(v) => setValori((x) => ({ ...x, descrizione_pubblica: v }))}
-          massimo={LIMITI_CALL.descrizioneMax}
-          righe={7}
-          required
-        />
-        <TestoLungo
-          etichetta="Il partner ideale (facoltativo)"
-          aiuto="Chi cerchi, in parole: competenze, esperienze, modo di lavorare."
-          valore={valori.profilo_partner_ideale}
-          onChange={(v) => setValori((x) => ({ ...x, profilo_partner_ideale: v }))}
-          massimo={LIMITI_CALL.profiloMax}
+          etichetta="Dettagli per le aziende che accetti (facoltativi)"
+          aiuto="Li vede solo chi accetti nel partenariato. Qui puoi nominare l'azienda, ma niente email, telefoni o siti: i contatti si scambiano in chat."
+          valore={valori.dettagli_riservati}
+          onChange={(v) => setValori((x) => ({ ...x, dettagli_riservati: v }))}
+          massimo={LIMITI_CALL.riservatiMax}
           righe={4}
         />
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-          <p className="mb-2 inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">
-            <Lock className="size-4 text-slate-400" aria-hidden />
-            Dettagli riservati
-          </p>
-          <TestoLungo
-            etichetta="Dettagli per le aziende che accetti (facoltativi)"
-            aiuto="Li vede solo chi accetti nel partenariato. Qui puoi nominare l'azienda, ma niente email, telefoni o siti: i contatti si scambiano in chat."
-            valore={valori.dettagli_riservati}
-            onChange={(v) => setValori((x) => ({ ...x, dettagli_riservati: v }))}
-            massimo={LIMITI_CALL.riservatiMax}
-            righe={4}
-          />
+      </Section>
+
+      {!dirty && anteprima.data && anteprima.data.rilievi.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-small font-medium text-ink">Controllo dei testi salvati</p>
+          <RilieviCall rilievi={anteprima.data.rilievi} />
         </div>
+      )}
 
-        {!dirty && anteprima.data && anteprima.data.rilievi.length > 0 && (
-          <div className="space-y-1.5">
-            <p className="text-sm font-medium text-slate-700">Controllo dei testi salvati</p>
-            <RilieviCall rilievi={anteprima.data.rilievi} />
-          </div>
-        )}
-
-        {errori.length > 0 && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-            {errori.join(" ")}
-          </p>
-        )}
-        <BarraPasso
-          onIndietro={onIndietro}
-          onAvanti={() => void salva()}
-          inCorso={aggiorna.isPending}
-          errore={aggiorna.isError ? apiErrorMessage(aggiorna.error) : null}
-        />
-      </Card>
+      {errori.length > 0 && <Alert tono="errore">{errori.join(" ")}</Alert>}
+      <BarraPasso
+        onIndietro={onIndietro}
+        onAvanti={() => void salva()}
+        inCorso={aggiorna.isPending}
+        errore={aggiorna.isError ? apiErrorMessage(aggiorna.error) : null}
+      />
     </div>
   );
 }

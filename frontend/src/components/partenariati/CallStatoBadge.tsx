@@ -1,23 +1,23 @@
-import type { ComponentProps } from "react";
 import { CALL_COPY } from "../../lib/copy";
 import type { StatoCall } from "../../types";
-import { Badge } from "../ui/Badge";
+import { Status, type TonoStatus } from "../ui/Status";
 
-const TONI: Record<StatoCall, ComponentProps<typeof Badge>["tone"]> = {
-  bozza: "amber",
-  pubblicata: "emerald",
-  chiusa_completata: "brand",
-  chiusa_annullata: "slate",
-  scaduta: "slate",
-  sospesa_moderazione: "red",
+const TONI: Record<StatoCall, TonoStatus> = {
+  bozza: "neutro",
+  pubblicata: "aperto",
+  chiusa_completata: "chiuso",
+  chiusa_annullata: "chiuso",
+  scaduta: "chiuso",
+  sospesa_moderazione: "attenzione",
 };
 
-/** Stato della call, sempre in parole (il colore da solo non basta). */
+/** Stato della call, sempre in parole con il punto di `Status` (il colore da
+ *  solo non basta). Stesse props di prima: lo usano anche il wizard e l'admin. */
 export function CallStatoBadge({ stato, className }: { stato: StatoCall; className?: string }) {
   return (
-    <Badge tone={TONI[stato] ?? "slate"} className={className}>
+    <Status tono={TONI[stato] ?? "neutro"} className={className}>
       <span className="sr-only">Stato: </span>
       {CALL_COPY.stati[stato] ?? stato}
-    </Badge>
+    </Status>
   );
 }

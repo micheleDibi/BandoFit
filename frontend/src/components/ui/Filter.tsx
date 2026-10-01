@@ -23,11 +23,15 @@ export interface FilterProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
  *  del `<button>`. */
 export const Filter = forwardRef<HTMLButtonElement, FilterProps>(
   ({ label, attivo = false, valore, children, align, className, type = "button", ...props }, ref) => {
+    const haPannello = !(children === undefined || children === null || children === false);
     const trigger = (
       <button
         ref={ref}
         type={type}
-        aria-pressed={attivo}
+        // Con il pannello il pulsante apre (il suo stato è `aria-expanded`, dal
+        // `Popover`) e la scelta la dice l'etichetta «Regione: Piemonte»:
+        // `aria-pressed` solo per il filtro che è un interruttore.
+        aria-pressed={haPannello ? undefined : attivo}
         className={cn(
           "inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-control border px-3",
           "text-body font-medium whitespace-nowrap transition-colors",
@@ -44,7 +48,7 @@ export const Filter = forwardRef<HTMLButtonElement, FilterProps>(
         <ChevronDown className="size-4" aria-hidden />
       </button>
     );
-    if (children === undefined || children === null || children === false) return trigger;
+    if (!haPannello) return trigger;
     return (
       <Popover trigger={trigger} align={align} label={`Filtro ${label}`} className="p-3">
         {children}

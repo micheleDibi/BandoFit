@@ -1,6 +1,5 @@
 import { Play, RefreshCw } from "lucide-react";
-import { useEffect, useId, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
 import {
   runGiaEseguita,
   useAdminEstrazioni,
@@ -8,20 +7,32 @@ import {
   useRunPartenariati,
 } from "../../../hooks/useAdminPartenariati";
 import { apiErrorMessage } from "../../../lib/api";
-import { cn } from "../../../lib/cn";
 import { PARTENARIATO_COPY } from "../../../lib/copy";
 import { formatDateTime } from "../../../lib/format";
 import type { EstrazioneAdmin } from "../../../types";
-import { Badge, type BadgeProps } from "../../ui/Badge";
+import { Alert } from "../../ui/Alert";
 import { Button } from "../../ui/Button";
+import { Checkbox } from "../../ui/Checkbox";
 import { Dialog } from "../../ui/Dialog";
 import { Pagination } from "../../ui/Pagination";
-import { Annuncio, Filtro, importoCents, numero, StatiLista, TabellaCard, thClass } from "./comuni";
+import { Status, type TonoStatus } from "../../ui/Status";
+import { Td, Th } from "../../ui/Table";
+import { TextLink } from "../../ui/TextLink";
+import {
+  Annuncio,
+  Filtro,
+  importoCents,
+  numero,
+  StatiLista,
+  TabellaCard,
+  thRigaClass,
+} from "./comuni";
+import { useRientroPagina } from "../useRientroPagina";
 
-const STATI: Record<EstrazioneAdmin["stato"], { etichetta: string; tono: BadgeProps["tone"] }> = {
-  in_corso: { etichetta: "In corso", tono: "amber" },
-  pronta: { etichetta: "Pronta", tono: "emerald" },
-  errore: { etichetta: "Errore", tono: "red" },
+const STATI: Record<EstrazioneAdmin["stato"], { etichetta: string; tono: TonoStatus }> = {
+  in_corso: { etichetta: "In corso", tono: "in-apertura" },
+  pronta: { etichetta: "Pronta", tono: "aperto" },
+  errore: { etichetta: "Errore", tono: "attenzione" },
 };
 const ESITI: Record<"estratta" | "nessun_segnale", string> = {
   estratta: "Regole estratte",
@@ -39,7 +50,6 @@ function RianalizzaDialog({
   onClose: () => void;
   onFatto: (annuncio: string) => void;
 }) {
-  const id = useId();
   const forza = useForzaEstrazione();
   const [ignora, setIgnora] = useState(false);
   useEffect(() => {
@@ -58,7 +68,7 @@ function RianalizzaDialog({
       dismissible={!forza.isPending}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={forza.isPending}>
+          <Button variant="secondary" onClick={onClose} disabled={forza.isPending}>
             Annulla
           </Button>
           <Button
@@ -82,26 +92,17 @@ function RianalizzaDialog({
         </>
       }
     >
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         <p>
           «{estrazione.bando_titolo}»: la nuova analisi usa il modello e il budget giornaliero delle
           estrazioni.
         </p>
-        <label htmlFor={id} className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-          <input
-            id={id}
-            type="checkbox"
-            className="mt-0.5 size-4 shrink-0 cursor-pointer accent-brand-500"
-            checked={ignora}
-            onChange={(e) => setIgnora(e.target.checked)}
-          />
-          <span>Ignora l'attesa tra due analisi dello stesso bando</span>
-        </label>
-        {forza.isError && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-            {apiErrorMessage(forza.error)}
-          </p>
-        )}
+        <Checkbox
+          label="Ignora l'attesa tra due analisi dello stesso bando"
+          checked={ignora}
+          onChange={(e) => setIgnora(e.target.checked)}
+        />
+        {forza.isError && <Alert tono="errore">{apiErrorMessage(forza.error)}</Alert>}
       </div>
     </Dialog>
   );
@@ -126,7 +127,7 @@ function RunDialog({ open, onClose, onFatto }: { open: boolean; onClose: () => v
       dismissible={!run.isPending}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={run.isPending}>
+          <Button variant="secondary" onClick={onClose} disabled={run.isPending}>
             Annulla
           </Button>
           <Button
@@ -142,30 +143,24 @@ function RunDialog({ open, onClose, onFatto }: { open: boolean; onClose: () => v
         </>
       }
     >
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         <p>
           Esegue subito i passi giornalieri del modulo (estrazioni, chiusure, notifiche, verifiche
           dei consorzi). Le estrazioni restano nel budget del giorno. Può richiedere qualche minuto.
         </p>
         {giaEseguita ? (
-          <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert">
+          <Alert tono="attenzione">
             La run di oggi è già stata eseguita: puoi ripeterla (i passi sono idempotenti).
-          </p>
+          </Alert>
         ) : run.isError ? (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-            {apiErrorMessage(run.error)}
-          </p>
+          <Alert tono="errore">{apiErrorMessage(run.error)}</Alert>
         ) : null}
         {!giaEseguita && (
-          <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              className="mt-0.5 size-4 shrink-0 cursor-pointer accent-brand-500"
-              checked={ripeti}
-              onChange={(e) => setRipeti(e.target.checked)}
-            />
-            <span>Ripetila anche se è già stata eseguita oggi</span>
-          </label>
+          <Checkbox
+            label="Ripetila anche se è già stata eseguita oggi"
+            checked={ripeti}
+            onChange={(e) => setRipeti(e.target.checked)}
+          />
         )}
       </div>
     </Dialog>
@@ -183,9 +178,10 @@ export function EstrazioniTab() {
   const [runAperta, setRunAperta] = useState(false);
   useEffect(() => setPage(1), [stato, esito]);
   const lista = useAdminEstrazioni({ stato, esito }, page);
+  const fuoriPagina = useRientroPagina(lista.data, page, lista.isPlaceholderData, setPage);
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-end gap-3">
           <Filtro<EstrazioneAdmin["stato"]>
@@ -218,7 +214,7 @@ export function EstrazioniTab() {
       </div>
       <Annuncio testo={annuncio} />
       <StatiLista
-        isPending={lista.isPending}
+        isPending={lista.isPending || fuoriPagina}
         isError={lista.isError}
         error={lista.error}
         onRetry={() => void lista.refetch()}
@@ -228,55 +224,54 @@ export function EstrazioniTab() {
       >
         <TabellaCard caption="Estrazioni delle regole di partenariato" attenuata={lista.isPlaceholderData}>
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50/70 text-xs uppercase tracking-wide text-slate-500">
-              <th scope="col" className={thClass}>Bando</th>
-              <th scope="col" className={thClass}>Stato</th>
-              <th scope="col" className={thClass}>Esito</th>
-              <th scope="col" className={cn(thClass, "text-right")}>Costo</th>
-              <th scope="col" className={thClass}>Ultima esecuzione</th>
-              <th scope="col" className={cn(thClass, "text-right")}>Azioni</th>
+            <tr>
+              <Th>Bando</Th>
+              <Th>Stato</Th>
+              <Th>Esito</Th>
+              <Th numerica>Costo</Th>
+              <Th>Ultima esecuzione</Th>
+              <Th numerica>Azioni</Th>
             </tr>
           </thead>
           <tbody>
             {lista.data?.items.map((e) => (
-              <tr key={e.bando_id} className="border-b border-slate-100 align-top last:border-b-0">
-                <th scope="row" className="max-w-72 px-4 py-3 text-left font-normal">
-                  <Link
-                    to={`/app/bandi/${e.bando_slug}`}
-                    className="font-medium text-brand-600 hover:text-brand-700"
-                  >
+              <tr key={e.bando_id}>
+                <th scope="row" className={`${thRigaClass} max-w-72`}>
+                  <TextLink to={`/app/bandi/${e.bando_slug}`} className="font-medium">
                     {e.bando_titolo}
-                  </Link>
+                  </TextLink>
                   {e.modalita_effettiva && (
-                    <p className="text-xs text-slate-500">
+                    <p className="text-small text-ink-3">
                       {PARTENARIATO_COPY.modalita[e.modalita_effettiva] ?? e.modalita_effettiva}
                     </p>
                   )}
                 </th>
-                <td className="px-4 py-3">
-                  <Badge tone={STATI[e.stato]?.tono ?? "slate"}>{STATI[e.stato]?.etichetta ?? e.stato}</Badge>
+                <Td>
+                  <Status tono={STATI[e.stato]?.tono ?? "neutro"}>
+                    {STATI[e.stato]?.etichetta ?? e.stato}
+                  </Status>
                   {e.errore_codice && (
-                    <p className="mt-1 font-mono text-xs text-red-700">{e.errore_codice}</p>
+                    <p className="mt-1 font-mono text-small text-danger">{e.errore_codice}</p>
                   )}
                   {e.tentativi_falliti > 0 && (
-                    <p className="text-xs text-slate-500">
+                    <p className="text-small text-ink-3">
                       {numero(e.tentativi_falliti)} tentativi falliti
                       {e.prossimo_tentativo_at ? `, prossimo il ${formatDateTime(e.prossimo_tentativo_at)}` : ""}
                     </p>
                   )}
-                </td>
-                <td className="px-4 py-3 text-slate-700">{e.esito ? ESITI[e.esito] : "—"}</td>
-                <td className="px-4 py-3 text-right tabular text-slate-700">
+                </Td>
+                <Td className="text-ink-2">{e.esito ? ESITI[e.esito] : "—"}</Td>
+                <Td numerica className="text-ink-2">
                   {importoCents(e.cost_cents, "USD")}
-                  <p className="text-xs text-slate-400">
+                  <p className="text-small text-ink-3">
                     {numero(e.input_tokens)} + {numero(e.output_tokens)} token
                   </p>
-                </td>
-                <td className="px-4 py-3 text-slate-700">
+                </Td>
+                <Td className="text-ink-2">
                   {e.ultima_esecuzione_at ? formatDateTime(e.ultima_esecuzione_at) : "—"}
-                  {e.model && <p className="text-xs text-slate-400">{e.model}</p>}
-                </td>
-                <td className="px-4 py-3 text-right">
+                  {e.model && <p className="text-small text-ink-3">{e.model}</p>}
+                </Td>
+                <Td className="text-right">
                   <Button
                     variant="secondary"
                     size="sm"
@@ -287,15 +282,13 @@ export function EstrazioniTab() {
                     <RefreshCw className="size-4" aria-hidden />
                     Rianalizza
                   </Button>
-                </td>
+                </Td>
               </tr>
             ))}
           </tbody>
         </TabellaCard>
         {lista.data && (
-          <div className="mt-4">
-            <Pagination page={lista.data.page} totalPages={lista.data.total_pages} onChange={setPage} />
-          </div>
+          <Pagination page={lista.data.page} totalPages={lista.data.total_pages} onChange={setPage} />
         )}
       </StatiLista>
       <RianalizzaDialog

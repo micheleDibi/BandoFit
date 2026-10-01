@@ -1,19 +1,29 @@
-import { Search, ShieldOff, Undo2 } from "lucide-react";
-import { useEffect, useId, useState } from "react";
-import { Link } from "react-router-dom";
+import { ShieldOff, Undo2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useAdminCall, useRipristinaOggetto, useSospendiOggetto } from "../../../hooks/useAdminPartenariati";
 import { useDebounce } from "../../../hooks/useDebounce";
 import { apiErrorMessage } from "../../../lib/api";
-import { cn } from "../../../lib/cn";
 import { ADMIN_PARTENARIATI_COPY, CALL_COPY } from "../../../lib/copy";
 import { formatDate } from "../../../lib/format";
 import type { CallAdmin, StatoCall } from "../../../types";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Pagination } from "../../ui/Pagination";
+import { SearchInput } from "../../ui/SearchInput";
+import { Td, Th } from "../../ui/Table";
+import { TextLink } from "../../ui/TextLink";
 import { CallStatoBadge } from "../CallStatoBadge";
 import { EsitoVoceBadge } from "../ValidatoreChecklist";
-import { Annuncio, Filtro, MotivazioneDialog, numero, StatiLista, TabellaCard, thClass } from "./comuni";
+import {
+  Annuncio,
+  Filtro,
+  MotivazioneDialog,
+  numero,
+  StatiLista,
+  TabellaCard,
+  thRigaClass,
+} from "./comuni";
+import { useRientroPagina } from "../useRientroPagina";
 
 const STATI = Object.keys(CALL_COPY.stati) as StatoCall[];
 
@@ -24,7 +34,6 @@ type Azione = { tipo: "sospendi" | "ripristina"; call: CallAdmin };
  *  allo stato precedente, o la chiude come scaduta se nel frattempo è passata
  *  la scadenza (lo decide il server). */
 export function CallAdminTab() {
-  const idRicerca = useId();
   const [stato, setStato] = useState<StatoCall | "">("");
   const [testo, setTesto] = useState("");
   const q = useDebounce(testo.trim(), 400);
@@ -33,6 +42,7 @@ export function CallAdminTab() {
   const [azione, setAzione] = useState<Azione | null>(null);
   useEffect(() => setPage(1), [stato, q]);
   const lista = useAdminCall({ stato, q, page });
+  const fuoriPagina = useRientroPagina(lista.data, page, lista.isPlaceholderData, setPage);
   const sospendi = useSospendiOggetto();
   const ripristina = useRipristinaOggetto();
   const mutazione = azione?.tipo === "ripristina" ? ripristina : sospendi;
@@ -69,7 +79,7 @@ export function CallAdminTab() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end gap-3">
         <Filtro<StatoCall>
           etichetta="Stato"
@@ -80,29 +90,17 @@ export function CallAdminTab() {
             ...STATI.map((s) => ({ valore: s, etichetta: CALL_COPY.stati[s] })),
           ]}
         />
-        <div className="flex min-w-64 flex-1 flex-col gap-1">
-          <label htmlFor={idRicerca} className="text-sm font-medium text-slate-700">
-            Cerca
-          </label>
-          <div className="relative max-w-md">
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"
-              aria-hidden
-            />
-            <input
-              id={idRicerca}
-              type="search"
-              value={testo}
-              onChange={(e) => setTesto(e.target.value)}
-              placeholder="Titolo della call o del bando, nome dell'azienda, oppure l'id della call"
-              className="h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-2 focus:outline-offset-0 focus:outline-brand-500/30"
-            />
-          </div>
-        </div>
+        <SearchInput
+          label="Cerca"
+          value={testo}
+          onChange={setTesto}
+          placeholder="Titolo della call o del bando, nome dell'azienda, oppure l'id della call"
+          className="min-w-64 max-w-md flex-1"
+        />
       </div>
       <Annuncio testo={annuncio} />
       <StatiLista
-        isPending={lista.isPending}
+        isPending={lista.isPending || fuoriPagina}
         isError={lista.isError}
         error={lista.error}
         onRetry={() => void lista.refetch()}
@@ -110,7 +108,7 @@ export function CallAdminTab() {
         titoloVuoto="Nessuna call"
         descrizioneVuoto={stato || q ? "Con questi filtri non c'è nulla." : "Non è stata ancora creata nessuna call."}
       >
-        <p className="text-sm text-slate-500" role="status" aria-live="polite">
+        <p className="text-small text-ink-3 tabular-nums" role="status" aria-live="polite">
           {lista.isPlaceholderData
             ? "Aggiornamento…"
             : lista.data?.total === 1
@@ -119,80 +117,80 @@ export function CallAdminTab() {
         </p>
         <TabellaCard caption="Call di partenariato" attenuata={lista.isPlaceholderData}>
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50/70 text-xs uppercase tracking-wide text-slate-500">
-              <th scope="col" className={thClass}>Call</th>
-              <th scope="col" className={thClass}>Azienda</th>
-              <th scope="col" className={thClass}>Stato</th>
-              <th scope="col" className={cn(thClass, "text-right")}>Candidature</th>
-              <th scope="col" className={cn(thClass, "text-right")}>Membri</th>
-              <th scope="col" className={thClass}>Consorzio</th>
-              <th scope="col" className={cn(thClass, "text-right")}>Segnalazioni aperte</th>
-              <th scope="col" className={cn(thClass, "text-right")}>Azioni</th>
+            <tr>
+              <Th>Call</Th>
+              <Th>Azienda</Th>
+              <Th>Stato</Th>
+              <Th numerica>Candidature</Th>
+              <Th numerica>Membri</Th>
+              <Th>Consorzio</Th>
+              <Th numerica>Segnalazioni aperte</Th>
+              <Th numerica>Azioni</Th>
             </tr>
           </thead>
           <tbody>
             {lista.data?.items.map((c) => (
-              <tr key={c.id} className="border-b border-slate-100 align-top last:border-b-0">
-                <th scope="row" className="max-w-72 px-4 py-3 text-left font-normal">
+              <tr key={c.id}>
+                <th scope="row" className={`${thRigaClass} max-w-72`}>
                   {c.stato === "pubblicata" ? (
-                    <Link
-                      to={`/app/partenariati/call/${c.id}`}
-                      className="font-medium text-brand-600 hover:text-brand-700"
-                    >
+                    <TextLink to={`/app/partenariati/call/${c.id}`} className="font-medium">
                       {c.titolo || "Call senza titolo"}
-                    </Link>
+                    </TextLink>
                   ) : (
-                    <p className="font-medium text-slate-900">{c.titolo || "Call senza titolo"}</p>
+                    <p className="font-medium text-ink">{c.titolo || "Call senza titolo"}</p>
                   )}
-                  <p className="text-xs text-slate-500">{c.bando.titolo ?? "Bando non più nel catalogo"}</p>
-                  <p className="mt-0.5 text-xs text-slate-400">
-                    {c.pubblicata_at ? `Pubblicata il ${formatDate(c.pubblicata_at)}` : "Mai pubblicata"}
-                    {c.scadenza_call ? ` · fino al ${formatDate(c.scadenza_call)}` : ""}
+                  <p className="text-small text-ink-2">{c.bando.titolo ?? "Bando non più nel catalogo"}</p>
+                  <p className="flex flex-wrap gap-x-3 text-small text-ink-3">
+                    <span>
+                      {c.pubblicata_at ? `Pubblicata il ${formatDate(c.pubblicata_at)}` : "Mai pubblicata"}
+                    </span>
+                    {c.scadenza_call && <span>Fino al {formatDate(c.scadenza_call)}</span>}
                   </p>
                 </th>
-                <td className="px-4 py-3 text-slate-700">
+                <Td className="text-ink-2">
                   <p>{c.creatore.ragione_sociale ?? "—"}</p>
-                  <p className="mt-0.5 flex flex-wrap gap-1">
-                    {c.anonima === false && <Badge tone="brand">Con il nome</Badge>}
-                    {c.visibilita === "solo_invitati" && <Badge tone="slate">Solo invitati</Badge>}
+                  <p className="mt-1 flex flex-wrap gap-1">
+                    {c.anonima === false && <Badge>Con il nome</Badge>}
+                    {c.visibilita === "solo_invitati" && <Badge>Solo invitati</Badge>}
                   </p>
-                </td>
-                <td className="px-4 py-3">
+                </Td>
+                <Td>
                   <CallStatoBadge stato={c.stato} />
                   {c.stato === "sospesa_moderazione" && (
-                    <p className="mt-1 max-w-48 text-xs text-slate-500">
+                    <p className="mt-1 max-w-48 text-small text-ink-3">
                       {c.sospesa_at ? `Dal ${formatDate(c.sospesa_at)}` : ""}
                       {c.sospeso_motivo ? `: ${c.sospeso_motivo}` : ""}
                     </p>
                   )}
-                </td>
-                <td className="px-4 py-3 text-right tabular text-slate-700">
+                </Td>
+                <Td numerica className="text-ink-2">
                   {numero(c.candidature)}
-                  <p className="text-xs text-slate-400">
+                  <p className="text-small text-ink-3">
                     {c.inviti === 1 ? "1 invito" : `${numero(c.inviti)} inviti`}
                   </p>
-                </td>
-                <td className="px-4 py-3 text-right tabular text-slate-700">{numero(c.membri)}</td>
-                <td className="px-4 py-3">
+                </Td>
+                <Td numerica className="text-ink-2">
+                  {numero(c.membri)}
+                </Td>
+                <Td>
                   {c.validazione_esito ? (
                     <EsitoVoceBadge esito={c.validazione_esito} />
                   ) : (
-                    <span className="text-xs text-slate-400">Non verificato</span>
+                    <span className="text-small text-ink-3">Non verificato</span>
                   )}
-                </td>
-                <td className="px-4 py-3 text-right tabular">
+                </Td>
+                <Td numerica>
                   {c.segnalazioni_aperte > 0 ? (
-                    <Badge tone="red">{numero(c.segnalazioni_aperte)}</Badge>
+                    <span className="font-semibold text-danger">{numero(c.segnalazioni_aperte)}</span>
                   ) : (
-                    <span className="text-slate-400">0</span>
+                    <span className="text-ink-3">0</span>
                   )}
-                </td>
-                <td className="px-4 py-3 text-right">
+                </Td>
+                <Td className="text-right">
                   {(c.stato === "bozza" || c.stato === "pubblicata") && (
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="text-red-700 hover:bg-red-50 hover:text-red-800"
                       aria-label={`Sospendi la call ${c.titolo || "senza titolo"}`}
                       onClick={() => {
                         sospendi.reset();
@@ -217,15 +215,13 @@ export function CallAdminTab() {
                       Ripristina
                     </Button>
                   )}
-                </td>
+                </Td>
               </tr>
             ))}
           </tbody>
         </TabellaCard>
         {lista.data && (
-          <div className="mt-4">
-            <Pagination page={lista.data.page} totalPages={lista.data.total_pages} onChange={setPage} />
-          </div>
+          <Pagination page={lista.data.page} totalPages={lista.data.total_pages} onChange={setPage} />
         )}
       </StatiLista>
 
@@ -255,7 +251,7 @@ export function CallAdminTab() {
         onConferma={esegui}
       >
         {azione?.tipo === "sospendi" && (
-          <p className="text-xs text-slate-500">
+          <p className="text-small text-ink-3">
             {ADMIN_PARTENARIATI_COPY.motivazioneSospensioneAiuto}
           </p>
         )}

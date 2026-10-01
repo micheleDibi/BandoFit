@@ -64,7 +64,7 @@ async def unsubscribe(
     if tipo in _TESTI and _token_valido(token):
         await partenariato_notifiche.unsubscribe_by_token(primary, token, tipo)
     if _vuole_html(request):
-        preferenze = f"{get_settings().frontend_url.rstrip('/')}/app/preferenze"
+        preferenze = f"{get_settings().frontend_url.rstrip('/')}/app/preferenze?tab=avvisi"
         link = (
             f'<a href="{html.escape(preferenze, quote=True)}" '
             'style="font-size:14px;color:#1E5EFF">Vai alle Preferenze</a>'

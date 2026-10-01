@@ -1,4 +1,3 @@
-import { Handshake, Loader2 } from "lucide-react";
 import { useMieCall } from "../../hooks/useCallPartenariato";
 import { useCompany } from "../../hooks/useCompany";
 import { useFunzioni } from "../../hooks/useFunzioni";
@@ -8,7 +7,9 @@ import { PARTENARIATO_COPY } from "../../lib/copy";
 import type { PartenariatoBando } from "../../types";
 import { statoDelBando } from "../bandi/stato";
 import { Button, LinkButton } from "../ui/Button";
-import { Card } from "../ui/Card";
+import { InlineError } from "../ui/InlineError";
+import { Panel } from "../ui/Panel";
+import { Spinner } from "../ui/Spinner";
 import { Skeleton } from "../ui/states";
 import { PARTENARIATO_CONTENUTO_ID } from "./ancora";
 import { bandoAperto, callAperta, linkCall } from "./callDati";
@@ -18,47 +19,49 @@ function Stato({ dati }: { dati: PartenariatoBando }) {
   if (dati.regole) {
     const modalita = dati.regole.modalita_effettiva;
     return (
-      <>
-        <ModalitaBadge modalita={modalita} />
-        <p className="mt-1.5 text-xs text-slate-500">
-          {PARTENARIATO_COPY.modalitaSpiegazione[modalita]}
-        </p>
+      <div className="flex flex-col gap-1.5">
+        <div>
+          <ModalitaBadge modalita={modalita} />
+        </div>
+        <p className="text-body text-ink-2">{PARTENARIATO_COPY.modalitaSpiegazione[modalita]}</p>
         {dati.aggiornamento_in_corso && (
-          <p className="mt-1.5 inline-flex items-center gap-1.5 text-xs text-amber-700">
-            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+          <p className="inline-flex items-center gap-2 text-small text-ink-3">
+            <Spinner size="sm" />
             Aggiornamento in corso…
           </p>
         )}
-      </>
+      </div>
     );
   }
   if (analisiInCorso(dati)) {
     return (
-      <p className="inline-flex items-center gap-2 text-sm font-medium text-amber-700">
-        <Loader2 className="size-4 animate-spin" aria-hidden />
+      <p className="inline-flex items-center gap-2 text-body font-medium text-ink">
+        <Spinner size="sm" />
         Analisi in corso…
       </p>
     );
   }
   if (dati.stato === "nessun_segnale") {
     return (
-      <p className="text-sm text-slate-600">
+      <p className="text-body text-ink-2">
         Nel testo che abbiamo letto non ci sono riferimenti a partenariati.
       </p>
     );
   }
   if (dati.stato === "errore") {
-    return <p className="text-sm text-slate-600">L'ultima analisi delle regole non è riuscita.</p>;
+    return (
+      <p className="text-body text-ink-2">L'ultima analisi delle regole non è riuscita.</p>
+    );
   }
   return (
-    <p className="text-sm text-slate-600">
+    <p className="text-body text-ink-2">
       Scopri se questo bando ammette o richiede partner: leggiamo per te i documenti ufficiali.
     </p>
   );
 }
 
-/** «Crea call» per il titolare (bando aperto), oppure «Vai alla tua call» se
- *  l'azienda attiva ne ha già una non chiusa su questo bando. */
+/** «Crea una call» per il titolare (bando aperto), oppure «Vai alla tua call»
+ *  se l'azienda attiva ne ha già una non chiusa su questo bando. */
 function CtaCall({ slug, dati }: { slug: string; dati: PartenariatoBando }) {
   const mie = useMieCall();
   const { data: azienda } = useCompany();
@@ -67,7 +70,7 @@ function CtaCall({ slug, dati }: { slug: string; dati: PartenariatoBando }) {
   );
   if (esistente) {
     return (
-      <LinkButton to={linkCall(esistente)} size="sm" className="mt-2 w-full">
+      <LinkButton to={linkCall(esistente)} variant="ghost" size="sm">
         Vai alla tua call
       </LinkButton>
     );
@@ -79,17 +82,18 @@ function CtaCall({ slug, dati }: { slug: string; dati: PartenariatoBando }) {
   return (
     <LinkButton
       to={`/app/partenariati/call/nuova?bando=${encodeURIComponent(slug)}`}
+      variant="ghost"
       size="sm"
-      className="mt-2 w-full"
     >
-      Crea call
+      Crea una call
     </LinkButton>
   );
 }
 
-/** Card compatta nella sidebar di BandoDetail: modalità di partecipazione in
- *  una parola, rimando alla sezione completa e CTA della call (WP5). Non
- *  esiste a modulo spento. «Cerca partner» arriva con il WP6. */
+/** Pannello «Partenariato» nella colonna laterale della scheda del bando
+ *  (rende il suo `Panel`): modalità di partecipazione in una parola, rimando
+ *  alla sezione completa e la call (WP5). Rende `null` a modulo spento e con
+ *  il 404 del server, così non resta un pannello vuoto. */
 export function PartenariatoCard({
   slug,
   onVediRegole,
@@ -101,53 +105,60 @@ export function PartenariatoCard({
   const { partenariatiAttivo } = useFunzioni();
   const { data, isPending, isError, error, refetch } = usePartenariatoBando(slug);
 
-  // 404 = modulo spento lato server (o /me non ancora aggiornato): la card
+  // 404 = modulo spento lato server (o /me non ancora aggiornato): il blocco
   // sparisce invece di mostrare un errore che l'utente non può risolvere.
   if (!partenariatiAttivo || (isError && apiErrorCode(error) === "not_found")) return null;
 
-  return (
-    <Card className="border-brand-200 bg-gradient-to-b from-brand-50/70 to-white p-5">
-      <h2 className="inline-flex items-center gap-1.5 font-display text-sm font-semibold text-slate-900">
-        <Handshake className="size-4 text-brand-500" aria-hidden />
-        Partenariato
-      </h2>
-
-      {isPending ? (
-        <div className="mt-3 space-y-2">
+  if (isPending) {
+    return (
+      <Panel titolo="Partenariato">
+        <div className="flex flex-col gap-2" aria-hidden>
           <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-8 w-32" />
         </div>
-      ) : isError ? (
-        <div className="mt-3">
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-            Impossibile caricare le regole di partenariato.
+      </Panel>
+    );
+  }
+
+  if (isError) {
+    return (
+      <Panel titolo="Partenariato">
+        <div className="flex flex-col gap-2">
+          <InlineError>Non siamo riusciti a caricare le regole di partenariato.</InlineError>
+          <div>
+            <Button type="button" variant="secondary" size="sm" onClick={() => refetch()}>
+              Riprova
+            </Button>
+          </div>
+        </div>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel titolo="Partenariato">
+      <div className="flex flex-col gap-3">
+        <Stato dati={data} />
+        {data.calls_aperte > 0 && (
+          <p className="text-small text-ink-3">
+            {data.calls_aperte === 1
+              ? "1 call di partenariato aperta su questo bando"
+              : `${data.calls_aperte} call di partenariato aperte su questo bando`}
           </p>
-          <Button variant="secondary" size="sm" className="mt-2 w-full" onClick={() => refetch()}>
-            Riprova
-          </Button>
-        </div>
-      ) : (
-        <div className="mt-3">
-          <Stato dati={data} />
-          {data.calls_aperte > 0 && (
-            <p className="mt-1.5 text-xs text-slate-500">
-              {data.calls_aperte === 1
-                ? "1 call di partenariato aperta su questo bando"
-                : `${data.calls_aperte} call di partenariato aperte su questo bando`}
-            </p>
-          )}
+        )}
+        <div className="flex flex-wrap items-center gap-2">
           <Button
+            type="button"
             variant="secondary"
             size="sm"
-            className="mt-3 w-full"
             aria-controls={PARTENARIATO_CONTENUTO_ID}
             onClick={onVediRegole}
           >
-            Vedi regole
+            Vedi le regole
           </Button>
           <CtaCall slug={slug} dati={data} />
         </div>
-      )}
-    </Card>
+      </div>
+    </Panel>
   );
 }

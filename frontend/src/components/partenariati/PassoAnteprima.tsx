@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { useAggiornaCall, useAnteprimaCall } from "../../hooks/useCallPartenariato";
 import { apiErrorMessage } from "../../lib/api";
-import { Card } from "../ui/Card";
 import { ErrorState, Skeleton } from "../ui/states";
 import { CallPubblicaCard } from "./CallPubblicaCard";
 import { BarraPasso } from "./CallStepper";
@@ -27,14 +26,12 @@ export function PassoAnteprima({ call, onAvanti, onIndietro, onDirty }: PassoPro
   };
 
   return (
-    <div className="space-y-4">
-      <Card className="space-y-3 p-5">
-        <p className="text-sm text-slate-700">
-          Così vedranno la call le altre aziende: niente nome, niente budget esatto, niente dettagli
-          riservati e niente di quello che sai sulla tua copertura dei requisiti.
-        </p>
-        <NotaAnonima anonima={call.anonima} />
-      </Card>
+    <div className="flex flex-col gap-6">
+      <p className="text-body text-ink-2">
+        Così vedranno la call le altre aziende: niente nome, niente budget esatto, niente dettagli
+        riservati e niente di quello che sai sulla tua copertura dei requisiti.
+      </p>
+      <NotaAnonima anonima={call.anonima} />
       {anteprima.isPending ? (
         <Skeleton className="h-96 w-full" />
       ) : anteprima.isError || !anteprima.data ? (

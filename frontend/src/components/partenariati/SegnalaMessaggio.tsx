@@ -1,9 +1,10 @@
 import { Flag } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Button } from "../ui/Button";
 import { SegnalaDialog } from "./SegnalaDialog";
 
 /** «Segnala» accanto a un messaggio dell'altra azienda. `descrizione` dà il
- *  nome accessibile al bottone («Segnala il messaggio delle 14:32»). */
+ *  nome accessibile al pulsante («Segnala il messaggio delle 14:32»). */
 export function BottoneSegnalaMessaggio({
   descrizione,
   onClick,
@@ -12,15 +13,17 @@ export function BottoneSegnalaMessaggio({
   onClick: () => void;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="sm"
       onClick={onClick}
       aria-label={`Segnala ${descrizione}`}
-      className="inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-xs text-slate-400 transition-colors hover:text-red-700 focus-visible:outline-2 focus-visible:outline-brand-500"
+      className="h-7 px-2 text-small text-ink-3 hover:text-danger"
     >
-      <Flag className="size-3" aria-hidden />
+      <Flag className="size-3.5" aria-hidden />
       Segnala
-    </button>
+    </Button>
   );
 }
 

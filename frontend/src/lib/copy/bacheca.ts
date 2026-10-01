@@ -4,12 +4,13 @@ import type { OrdineBacheca, RuoloPartner, VistaPartenariati } from "../../types
  *  confronto tra call e azienda è calcolato con regole fisse, senza AI: le
  *  frasi di spiegazione arrivano già pronte dal server. */
 export const BACHECA_COPY = {
+  /** Etichette delle schede (glossario: «Le tue call», «Call salvate», «Candidature e inviti»). */
   viste: {
     "per-te": "Per te",
     tutte: "Tutte le call",
-    mie: "Le mie call",
-    salvate: "Salvate",
-    candidature: "Candidature",
+    mie: "Le tue call",
+    salvate: "Call salvate",
+    candidature: "Candidature e inviti",
     conversazioni: "Conversazioni",
   } satisfies Record<VistaPartenariati, string>,
   ordini: {

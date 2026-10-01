@@ -11,6 +11,7 @@ const twMerge = extendTailwindMerge({
       "font-size": [
         {
           text: [
+            "title-hero",
             "title-bando",
             "title-page",
             "title-section",
@@ -27,7 +28,7 @@ const twMerge = extendTailwindMerge({
         },
       ],
       rounded: [{ rounded: ["mark", "control", "panel", "pill"] }],
-      shadow: [{ shadow: ["overlay", "card", "card-hover"] }],
+      shadow: [{ shadow: ["overlay"] }],
     },
   },
 });

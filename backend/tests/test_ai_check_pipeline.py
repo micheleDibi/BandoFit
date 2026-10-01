@@ -176,7 +176,9 @@ class TestAllegatiNelMeta:
 
     @pytest.mark.parametrize(
         ("effettivo", "atteso"),
-        [(None, "aperto"), ("", "aperto"), ("chiuso", "chiuso"), ("sospeso", "sospeso")],
+        # Ripiego su `stato_bando` solo se `stato_effettivo` manca (come il
+        # pulsante della scheda): un valore vuoto non diventa «aperto».
+        [(None, "aperto"), ("", "non indicato"), ("chiuso", "chiuso"), ("sospeso", "sospeso")],
     )
     def test_stato_da_stato_effettivo_con_ripiego_su_stato_bando(self, effettivo, atteso):
         bando = {**load_bando("bando_flash"), "stato_effettivo": effettivo}
@@ -190,6 +192,18 @@ class TestAllegatiNelMeta:
         assert build_bando_input(con, con["contenuto"])[0] == (
             build_bando_input(bando, bando["contenuto"])[0]
         )
+
+    @pytest.mark.parametrize("nome", ["bando_flash", "bando_guida_faq", "bando_double_encoded"])
+    def test_stato_assente_o_none_stesso_testo_e_hash(self, nome):
+        # I casi normali non cambiano testo né hash (chiave della cache delle
+        # estrazioni): senza `stato_effettivo`, con None o con lo stesso valore.
+        bando = load_bando(nome)
+        senza = {k: v for k, v in bando.items() if k != "stato_effettivo"}
+        testo = build_bando_input(senza, senza.get("contenuto"))[0]
+        for variante in ({**senza, "stato_effettivo": None},
+                         {**senza, "stato_effettivo": senza.get("stato_bando")}):
+            altro = build_bando_input(variante, variante.get("contenuto"))[0]
+            assert compute_content_hash(variante, altro) == compute_content_hash(senza, testo)
 
 
 PROFILE = {"nome": "Michele", "cognome": "Rossi", "codice_fiscale": "RSSMRA80A01H501U",

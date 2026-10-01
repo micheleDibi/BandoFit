@@ -795,7 +795,8 @@ async def avvia(primary, secondary, ai, active, user: dict, call_id: Any, tipo: 
                 includi_nome_azienda: bool = False) -> BozzaOut:
     """202: prenota (fail-closed) e avvia in background la bozza. Errori:
     403 `forbidden` (non titolare), 404 (call fuori partecipazione), 400
-    (tipo), 503 `ai_not_configured`, 409 `funzione_non_inclusa` /
+    (tipo), 503 `ai_not_configured` / `catalogo_non_disponibile` (lookup del
+    catalogo non leggibili), 409 `funzione_non_inclusa` /
     `bozze_esaurite` / `bozza_in_corso`, 429 `ai_limite_giornaliero` (tetto
     giornaliero del titolare) / `ai_sospesa_oggi`."""
     if not active.editable:

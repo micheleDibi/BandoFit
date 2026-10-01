@@ -482,7 +482,8 @@ export default function AdminUtenti() {
         }
       />
 
-      {/* Indicatore: il totale della query (lo stesso numero della descrizione). */}
+      {/* Indicatore: il totale della query (lo stesso numero della descrizione);
+          attenuato come la tabella finché mostra i dati della ricerca precedente. */}
       {data && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <KpiCard
@@ -490,6 +491,7 @@ export default function AdminUtenti() {
             valore={data.total}
             icon={Users}
             area="admin"
+            className={cn(isPlaceholderData && "opacity-60 transition-opacity")}
           />
         </div>
       )}

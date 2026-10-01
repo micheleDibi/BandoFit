@@ -1,5 +1,5 @@
 """Rimappatura dei bandi fusi nel DB primario (fase c del contratto DB bandi,
-§6.2; migration 0043) e rilevazione delle separazioni (migration 0045).
+§6.2; migration 0043) e rilevazione delle separazioni (migration 0045 e 0046).
 
 Il catalogo fonde i doppioni in un bando master: il doppione esce da
 `bando_pubblico` e `bando_fusione` indica il master corrente (le catene sono
@@ -8,24 +8,30 @@ partenariato conservano un `bando_id` senza FK fra i due database, quindi
 vanno spostati sul master. Un passo è una riconciliazione idempotente, non un
 cursore sugli eventi:
 
-1. `fn_bandi_in_uso` → gli id dei bandi referenziati nel primario, in un solo
+1. le separazioni, PRIMA della rimappatura: `fn_doppioni_rimappati` (0045,
+   0046) → i doppioni con righe rimappate non ancora ripristinate né marcate.
+   Chi manca da `bando_fusione` è stato separato: se è di nuovo in
+   `bando_pubblico` si chiama `fn_ripristina_rimappatura_voci` (0046) nel
+   percorso automatico, con `p_prova` pari alla modalità; altrimenti tutto
+   resta sul master e si riprova al passo dopo. Mai verso un id assente dalla
+   vista, e la funzione non cancella righe. Prima della rimappatura perché, se
+   nello stesso aggiornamento del catalogo il doppione si separa e il suo
+   master viene fuso in un altro, le righe tornano al doppione invece di
+   seguire il master. Le righe in conflitto si contano e non fermano il passo;
+   un doppione che resta in conflitto oltre `PASSI_CONFLITTO_TOLLERATI` passi
+   consecutivi va nel log a WARNING una volta al giorno. I conflitti che la
+   funzione rende definitivi (doppione già nello stesso ambito, per scelta
+   dell'utente) si contano a parte e non si riprovano;
+2. `fn_bandi_in_uso` → gli id dei bandi referenziati nel primario, in un solo
    array (il max-rows di PostgREST non tronca un valore unico);
-2. `bando_fusione?select=bando_id,master_id,master_slug&bando_id=in.(…)` a
+3. `bando_fusione?select=bando_id,master_id,master_slug&bando_id=in.(…)` a
    blocchi di 100: i doppioni fra quegli id;
-3. per ogni coppia (doppione, master) `fn_rimappa_bando_fuso`; con
+4. per ogni coppia (doppione, master) `fn_rimappa_bando_fuso`; con
    `prova=True` la RPC conta senza scrivere;
-4. il conteggio delle righe di `bando_fusione` (`coppie_catalogo`: una sola
+5. il conteggio delle righe di `bando_fusione` (`coppie_catalogo`: una sola
    richiesta a conteggio esatto con `limit=1`, mai per `fuso_at` che non
    segnala i cambiamenti): il totale delle fusioni del catalogo, da
-   confrontare con `fusi`, che conta solo i doppioni fra gli id in uso;
-5. `fn_doppioni_rimappati` (0045) → i doppioni con righe rimappate non ancora
-   ripristinate. Chi manca da `bando_fusione` è stato separato: se è di nuovo
-   in `bando_pubblico` si chiama `fn_ripristina_rimappatura` (0044) con
-   `p_prova` pari alla modalità; altrimenti tutto resta sul master e si
-   riprova al passo dopo. Mai verso un id assente dalla vista, e la funzione
-   non cancella righe. Le righe in conflitto si contano e non fermano il
-   passo; un doppione che resta in conflitto oltre `PASSI_CONFLITTO_TOLLERATI`
-   passi consecutivi va nel log a WARNING una volta al giorno.
+   confrontare con `fusi`, che conta solo i doppioni fra gli id in uso.
 
 `passo` non solleva mai: gli errori vanno nel log (solo id e codici, mai i
 messaggi di PostgREST) e nel contatore `errori` del report; se `fn_bandi_in_uso`
@@ -60,7 +66,9 @@ _CHIAVI_CONTEGGI = {
     "calendar_events": ("aggiornati", "eliminati", "convertiti"),
     "partner_calls": ("aggiornate", "in_collisione"),
 }
-_CHIAVI_RIPRISTINO = ("ripristinate", "in_conflitto")
+# `definitivi` (0046, percorso automatico): conflitti resi definitivi nella
+# chiamata, già compresi in `in_conflitto`.
+_CHIAVI_RIPRISTINO = ("ripristinate", "in_conflitto", "definitivi")
 
 # Stato in memoria dei doppioni separati con sole righe in conflitto: passi
 # consecutivi e istante dell'ultimo avviso. Per worker; si azzera al riavvio.
@@ -113,8 +121,8 @@ def _conteggi(data: Any) -> dict[str, dict[str, int]]:
 
 
 def _conteggi_ripristino(data: Any) -> dict[str, int]:
-    """`ripristinate` e `in_conflitto` della 0044 sommati sulle tre tabelle;
-    un valore mancante o strano vale 0."""
+    """`ripristinate`, `in_conflitto` e `definitivi` (0046) sommati sulle tre
+    tabelle; un valore mancante o strano vale 0."""
     totale = dict.fromkeys(_CHIAVI_RIPRISTINO, 0)
     for tabella in _CHIAVI_CONTEGGI:
         voce = data.get(tabella) if isinstance(data, dict) else None
@@ -268,8 +276,9 @@ def _dimentica_conflitto(doppione: int) -> None:
 
 
 async def _separazioni(primary, secondary, report: dict, *, prova: bool) -> None:
-    """Separazioni dei doppioni già rimappati (0045) e loro ripristino (0044):
-    `separazioni_rilevate`, `ripristinate` e `in_conflitto` nel report."""
+    """Separazioni dei doppioni già rimappati (0045) e loro ripristino nel
+    percorso automatico (0046): `separazioni_rilevate`, `ripristinate`,
+    `in_conflitto` e `conflitti_definitivi` nel report."""
     try:
         resp = await primary.rpc("fn_doppioni_rimappati", {}).execute()
     except Exception as exc:  # noqa: BLE001 — il resto del report resta valido
@@ -307,17 +316,20 @@ async def _separazioni(primary, secondary, report: dict, *, prova: bool) -> None
         if not prova and await _ancora_fuso(secondary, doppione, report):
             continue
         try:
-            resp = await primary.rpc("fn_ripristina_rimappatura", {
+            # Percorso automatico: le voci marcate come conflitto definitivo
+            # non si riprovano e i nuovi conflitti di quel tipo si marcano.
+            resp = await primary.rpc("fn_ripristina_rimappatura_voci", {
                 "p_doppione": doppione,
                 "p_dal": "-infinity",
                 "p_prova": prova,
+                "p_automatico": True,
             }).execute()
         except Exception as exc:  # noqa: BLE001 — un doppione non ferma gli altri
             codice = _codice(exc)
             report["errori"] += 1
             if codice in _FUNZIONE_ASSENTE:
-                logger.error("rimappatura fusi: fn_ripristina_rimappatura assente (%s): la "
-                             "migration 0044 va applicata", codice)
+                logger.error("rimappatura fusi: fn_ripristina_rimappatura_voci assente (%s): la "
+                             "migration 0046 va applicata", codice)
             elif codice in _ERRORI_TRANSITORI:
                 logger.warning("rimappatura fusi: ripristino del bando %s rinviato al passo "
                                "successivo (%s)", doppione, codice)
@@ -328,18 +340,27 @@ async def _separazioni(primary, secondary, report: dict, *, prova: bool) -> None
         conteggi = _conteggi_ripristino(resp.data)
         report["ripristinate"] += conteggi["ripristinate"]
         report["in_conflitto"] += conteggi["in_conflitto"]
+        report["conflitti_definitivi"] += conteggi["definitivi"]
+        # I conflitti definitivi non tornano al passo dopo: non contano per
+        # l'avviso dei conflitti ripetuti.
+        aperti = max(conteggi["in_conflitto"] - conteggi["definitivi"], 0)
+        if conteggi["definitivi"]:
+            logger.info("rimappatura fusi: bando %s separato, %d conflitti %s definitivi "
+                        "(doppione già nello stesso ambito): righe lasciate sul master",
+                        doppione, conteggi["definitivi"], "da rendere" if prova else "resi")
         if conteggi["ripristinate"]:
             _dimentica_conflitto(doppione)
             logger.warning("rimappatura fusi: bando %s separato, %d righe %s (%d in conflitto)",
                            doppione, conteggi["ripristinate"],
                            "da ripristinare" if prova else "ripristinate",
                            conteggi["in_conflitto"])
-        elif conteggi["in_conflitto"]:
-            _avvisa_conflitto(doppione, conteggi["in_conflitto"])
+        elif aperti:
+            _avvisa_conflitto(doppione, aperti)
         else:
             _dimentica_conflitto(doppione)
-            logger.info("rimappatura fusi: bando %s separato, nessuna riga da ripristinare",
-                        doppione)
+            if not conteggi["definitivi"]:
+                logger.info("rimappatura fusi: bando %s separato, nessuna riga da ripristinare",
+                            doppione)
 
 
 async def passo(primary, secondary, *, prova: bool) -> dict:
@@ -348,7 +369,9 @@ async def passo(primary, secondary, *, prova: bool) -> dict:
     coppie fuse trovate fra gli id in uso (`fusi`) e nel catalogo intero
     (`coppie_catalogo`, None se non leggibile), scartate, errori, totali per
     tabella, l'elenco delle coppie con i loro conteggi (o il codice
-    d'errore), e le separazioni: rilevate, righe ripristinate e in conflitto."""
+    d'errore), e le separazioni: rilevate, righe ripristinate, in conflitto e
+    conflitti resi definitivi (compresi in `in_conflitto`). Le separazioni si
+    trattano prima della rimappatura (docstring del modulo)."""
     report: dict = {
         "modalita": "prova" if prova else "attiva",
         "in_uso": 0,
@@ -359,9 +382,11 @@ async def passo(primary, secondary, *, prova: bool) -> dict:
         "separazioni_rilevate": 0,
         "ripristinate": 0,
         "in_conflitto": 0,
+        "conflitti_definitivi": 0,
         "totali": totali_vuoti(),
         "coppie": [],
     }
+    await _separazioni(primary, secondary, report, prova=prova)
     try:
         resp = await primary.rpc("fn_bandi_in_uso", {}).execute()
     except Exception as exc:  # noqa: BLE001 — mai un'eccezione al chiamante
@@ -409,7 +434,6 @@ async def passo(primary, secondary, *, prova: bool) -> dict:
                             "master %s, non spostate", in_collisione, doppione, master)
         report["coppie"].append(voce)
     await _coppie_catalogo(secondary, report)
-    await _separazioni(primary, secondary, report, prova=prova)
     return report
 
 

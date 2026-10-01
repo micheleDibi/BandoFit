@@ -39,7 +39,9 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(
             "relative mt-0.25 inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-pill transition-colors duration-150 ease-uscita",
             "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
             "disabled:cursor-not-allowed disabled:opacity-50",
-            checked ? "bg-accent hover:bg-accent-hover" : "bg-line-control hover:bg-ink-3",
+            checked
+              ? "bg-accent enabled:hover:bg-accent-hover"
+              : "bg-line-control enabled:hover:bg-ink-3",
           )}
           {...props}
         >

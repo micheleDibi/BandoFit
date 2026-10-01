@@ -34,9 +34,23 @@ function contaBandi(n: number): string {
 
 /** Il conteggio dei risultati sopra l'elenco: il numero in evidenza, poi la
  *  stessa frase dell'intestazione. */
-function ConteggioRisultati({ totale, conFiltri }: { totale: number; conFiltri: boolean }) {
+function ConteggioRisultati({
+  totale,
+  conFiltri,
+  attenuato,
+}: {
+  totale: number;
+  conFiltri: boolean;
+  /** Dati della ricerca precedente mentre arriva la nuova: attenuato come l'elenco. */
+  attenuato: boolean;
+}) {
   return (
-    <p className="flex flex-wrap items-baseline gap-x-2 text-body text-ink-2">
+    <p
+      className={cn(
+        "flex flex-wrap items-baseline gap-x-2 text-body text-ink-2",
+        attenuato && "opacity-60 transition-opacity",
+      )}
+    >
       <span className="text-figure-sm text-ink">{totale.toLocaleString("it-IT")}</span>
       <span>
         {totale === 1 ? "bando" : "bandi"} {conFiltri ? "con i filtri scelti" : "nel catalogo"}
@@ -231,7 +245,13 @@ export default function BandiList() {
           />
         ) : (
           <>
-            {data && <ConteggioRisultati totale={data.total} conFiltri={activeCount > 0} />}
+            {data && (
+              <ConteggioRisultati
+                totale={data.total}
+                conFiltri={activeCount > 0}
+                attenuato={isPlaceholderData}
+              />
+            )}
             <ul
               className={cn(
                 "flex flex-col gap-3",

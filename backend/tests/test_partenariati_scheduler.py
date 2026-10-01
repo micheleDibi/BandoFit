@@ -374,6 +374,112 @@ class TestBatch:
         assert esito["motivo"] == "completato"
 
 
+def _intervallo_non_soddisfacibile(codice: str) -> APIError:
+    return APIError({"message": "Requested range not satisfiable", "code": codice,
+                     "hint": None, "details": None})
+
+
+class CatalogoOltreLaFine(FakeCatalogo):
+    """Come il catalogo vero quando il segmento cala fra due pagine: un
+    intervallo oltre l'ultima riga risponde `codice` (PGRST103) invece di una
+    pagina vuota."""
+
+    def __init__(self, righe, codice: str = "PGRST103"):
+        super().__init__(righe)
+        self.codice = codice
+
+    def table(self, nome):
+        query = super().table(nome)
+        esegui = query.execute
+        catalogo = self
+
+        async def execute():
+            if query.intervallo[0] >= len(catalogo.righe):
+                raise _intervallo_non_soddisfacibile(catalogo.codice)
+            return await esegui()
+
+        query.execute = execute
+        return query
+
+
+class CallOltreLaFine:
+    """Primario finto per `_call_aperte`: call a pagine, `codice` (PGRST103)
+    per un intervallo oltre l'ultima riga."""
+
+    def __init__(self, righe, codice: str = "PGRST103"):
+        self.righe, self.codice, self.intervalli = righe, codice, []
+
+    def table(self, nome):
+        assert nome == "partner_calls"
+        primario = self
+
+        class _Q:
+            intervallo = (0, 0)
+
+            def select(self, *a, **k):
+                return self
+
+            def in_(self, *a):
+                return self
+
+            def order(self, *a, **k):
+                return self
+
+            def range(self, inizio, fine):
+                self.intervallo = (inizio, fine)
+                return self
+
+            async def execute(self):
+                inizio, fine = self.intervallo
+                primario.intervalli.append(self.intervallo)
+                if inizio >= len(primario.righe):
+                    raise _intervallo_non_soddisfacibile(primario.codice)
+                return SimpleNamespace(data=primario.righe[inizio: fine + 1])
+
+        return _Q()
+
+
+class TestIntervalloOltreLaFine:
+    """Paginazione a offset: un intervallo oltre la fine (PGRST103, 416) è la
+    fine della scansione, con un log INFO col solo offset; ogni altro errore
+    risale."""
+
+    def _log(self, caplog) -> list[logging.LogRecord]:
+        return [r for r in caplog.records if "calat" in r.getMessage()]
+
+    async def test_bandi_con_segnali(self, monkeypatch, caplog):
+        monkeypatch.setattr(sched, "BATCH_PAGINA", 2)
+        catalogo = CatalogoOltreLaFine([riga_bando(i, True) for i in range(1, 5)])
+        with caplog.at_level(logging.INFO, logger="bandofit.partenariati_scheduler"):
+            trovati = await sched._bandi_con_segnali(catalogo, OGGI)
+        assert [r["id"] for r in trovati] == [1, 2, 3, 4]
+        assert [q.intervallo for q in catalogo.query] == [(0, 1), (2, 3), (4, 5)]
+        [record] = self._log(caplog)
+        assert record.levelno == logging.INFO and record.args == (4,)
+
+    async def test_bandi_con_segnali_altri_errori_risalgono(self, monkeypatch):
+        monkeypatch.setattr(sched, "BATCH_PAGINA", 2)
+        catalogo = CatalogoOltreLaFine([riga_bando(i, True) for i in (1, 2)], codice="57014")
+        with pytest.raises(APIError):
+            await sched._bandi_con_segnali(catalogo, OGGI)
+
+    async def test_call_aperte(self, monkeypatch, caplog):
+        monkeypatch.setattr(sched, "CALL_PAGINA", 2)
+        righe = [{"id": f"c{i}", "stato": "pubblicata"} for i in range(4)]
+        primario = CallOltreLaFine(righe)
+        with caplog.at_level(logging.INFO, logger="bandofit.partenariati_scheduler"):
+            assert await sched._call_aperte(primario) == righe
+        assert primario.intervalli == [(0, 1), (2, 3), (4, 5)]
+        [record] = self._log(caplog)
+        assert record.levelno == logging.INFO and record.args == (4,)
+
+    async def test_call_aperte_altri_errori_risalgono(self, monkeypatch):
+        monkeypatch.setattr(sched, "CALL_PAGINA", 2)
+        primario = CallOltreLaFine([{"id": "c0"}, {"id": "c1"}], codice="57014")
+        with pytest.raises(APIError):
+            await sched._call_aperte(primario)
+
+
 class TestLifespan:
     async def _avvia(self, monkeypatch, attivo: bool, scheduler: bool):
         imposta(

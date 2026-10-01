@@ -42,7 +42,7 @@ from app.schemas.partenariato_vocabolario import FormaAggregazione, TipoSoggetto
 from app.schemas.partner_call import (
     BudgetFascia,
     CallAggiornaIn,
-    CitazioneIn,
+    CitazioneSnapshot,
     paese_iso2,
     senza_invisibili,
 )
@@ -320,10 +320,12 @@ class MembroOut(_Uscita):
 class RegolaOrigineOut(_Uscita):
     """Da dove viene la regola di una voce: `citazione` solo per le voci del
     bando confermate con il passaggio ritrovato su una pagina di un documento
-    ufficiale."""
+    ufficiale. L'URL del documento esce solo se ammesso dal filtro dei link
+    della scheda (`CitazioneSnapshot`), anche per un requisito salvato prima
+    del filtro: altrimenti None, mai un errore."""
 
     fonte: FonteRegola
-    citazione: CitazioneIn | None = None
+    citazione: CitazioneSnapshot | None = None
 
 
 class EsitoMembroOut(_Uscita):

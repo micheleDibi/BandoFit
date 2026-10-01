@@ -6,6 +6,7 @@ import { InviteBanner } from "../shared/InviteBanner";
 import { UpgradeBanner } from "../shared/UpgradeBanner";
 import { Drawer } from "../ui/Drawer";
 import { IconButton } from "../ui/IconButton";
+import { BannerGlobaliProvider } from "../ui/Page";
 import { Logo } from "./Logo";
 import { NotificationBell } from "./NotificationBell";
 import { Sidebar } from "./Sidebar";
@@ -27,6 +28,15 @@ const cassettoNavy = cn(
   "bg-navy-900 text-white",
   "[&_[aria-label=Chiudi]]:text-white/80 [&_[aria-label=Chiudi]:hover]:bg-white/10",
   "[&_[aria-label=Chiudi]:hover]:text-white [&_[aria-label=Chiudi]:focus-visible]:outline-white",
+);
+
+/** Banner globali: li monta `Page` in cima al suo contenitore, larghi quanto la
+ *  pagina (1280, 1040 o 760). Le regole per mostrarli stanno nei banner. */
+const BANNER_GLOBALI = (
+  <>
+    <InviteBanner />
+    <UpgradeBanner />
+  </>
 );
 
 /** Cornice dell'app: barra laterale navy da 248px (da `lg`) e contenuto sul
@@ -92,17 +102,10 @@ export function AppShell() {
           {menuAperto && <Sidebar conLogo={false} onNavigate={chiudiMenu} />}
         </Drawer>
 
-        {/* Banner globali con i margini e la larghezza di `Page` (elenco e
-            dettaglio: 1280px di contenuto, centrati; 1360 = 1280 + i 40px di
-            padding per lato da `lg`); senza banner il contenitore è vuoto e
-            sparisce (`empty:hidden`). */}
-        <div className="mx-auto flex w-full max-w-[1360px] flex-col gap-3 px-4 pt-6 sm:px-6 lg:px-10 lg:pt-8 empty:hidden">
-          <InviteBanner />
-          <UpgradeBanner />
-        </div>
-
         <main className="flex flex-1 flex-col">
-          <Outlet />
+          <BannerGlobaliProvider banner={BANNER_GLOBALI}>
+            <Outlet />
+          </BannerGlobaliProvider>
         </main>
       </div>
     </div>

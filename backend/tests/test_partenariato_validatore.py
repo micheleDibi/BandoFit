@@ -35,8 +35,9 @@ from app.schemas.partenariato_consorzio import (
     EsternoIn,
     MembroAggiornaIn,
     MembroOut,
+    RegolaOrigineOut,
 )
-from app.schemas.partner_call import CitazioneIn, RegoleCallSnapshot
+from app.schemas.partner_call import CitazioneIn, CitazioneSnapshotOut, RegoleCallSnapshot
 from app.services import partenariato_validatore as pv
 from app.services.partenariato_collegamenti import ChiaveCollegamento
 from app.services.partenariato_criteri import profilo_candidato_da
@@ -992,6 +993,47 @@ def test_origine_dei_requisiti():
                      citazione={**CIT, "sezione": "[D2-P7]"}).regola.fonte == "bando"
     # Criterio illeggibile → manuale (mai contato in automatico).
     assert requisito(mid(63), {"tipo": "sconosciuto"}).criterio.tipo == "manuale"
+
+
+# Un URL https che il filtro dei link della scheda non ammette (porta non
+# valida, carattere di controllo).
+URL_NON_AMMESSI = ["https://x.it:99999/a.pdf", "https://x.it/a\x01.pdf"]
+
+
+@pytest.mark.parametrize("url", URL_NON_AMMESSI)
+def test_regola_del_bando_con_url_non_ammesso_esce_senza_link(url):
+    """Un requisito salvato prima del filtro dei link in ingresso: la regola
+    resta del bando con il suo passaggio, il link esce come None, mai un
+    errore."""
+    req = requisito(mid(80), CALABRIA_OGNI, origine="bando_partenariato",
+                    citazione={**CIT, "url_documento": url})
+    assert req.regola.fonte == "bando"
+    v = valida(None, coppia(), call=pv.CallConsorzio(id="c", requisiti=(req,)))
+    out = vista(v, f"vincolo_membro:{mid(80)}", A, True)
+    assert out.regola.fonte == "bando"
+    assert isinstance(out.regola.citazione, CitazioneSnapshotOut)
+    assert out.regola.citazione.url_documento is None
+    assert out.regola.citazione.testo == CIT["testo"]
+    assert out.model_dump()["regola"]["citazione"]["url_documento"] is None
+
+
+@pytest.mark.parametrize("url", URL_NON_AMMESSI)
+def test_regola_origine_out_filtra_l_url_in_uscita(url):
+    da_dati = RegolaOrigineOut(fonte="bando", citazione={**CIT, "url_documento": url})
+    assert da_dati.citazione.url_documento is None
+    # Anche una citazione costruita senza convalida si filtra in uscita.
+    grezza = CitazioneIn.model_construct(**CIT, url_documento=url)
+    out = RegolaOrigineOut(fonte="bando", citazione=grezza)
+    assert isinstance(out.citazione, CitazioneSnapshotOut)
+    assert out.citazione.url_documento is None
+    assert out.citazione.testo == CIT["testo"]
+
+
+def test_regola_origine_out_con_url_ammesso():
+    cit = CitazioneIn(**CIT, url_documento="https://regione.example.it/Avviso pubblico.pdf")
+    out = RegolaOrigineOut(fonte="bando", citazione=cit)
+    assert out.citazione.url_documento == "https://regione.example.it/Avviso%20pubblico.pdf"
+    assert RegolaOrigineOut(fonte="creatore").citazione is None
 
 
 # ------------------------------------------------------ membri non più attivi

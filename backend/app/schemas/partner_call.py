@@ -248,12 +248,25 @@ def budget_nella_fascia(fascia: str, importo: Decimal) -> bool:
 
 # ------------------------------------------------------------ citazioni
 
+_URL_CITAZIONE_MAX = 2048
+
+
+def _url_citazione(valore: str | None) -> str | None:
+    """L'URL di una citazione ammesso dal filtro dei link della scheda
+    (`url_documento_pubblicabile`), altrimenti None. None anche se, con gli
+    spazi codificati, supera `_URL_CITAZIONE_MAX`: una citazione già filtrata
+    si riconvalida sempre (`CitazioneSnapshot`), senza errori."""
+    ammesso = url_documento_pubblicabile(valore)
+    return ammesso if ammesso is not None and len(ammesso) <= _URL_CITAZIONE_MAX else None
+
 
 class CitazioneIn(BaseModel):
     """Ancoraggio al testo del bando di un requisito o di una voce delle
     regole. Stessa forma di `CitazioneRegolaOut` (WP3), con `fonte_etichetta`
     facoltativa per le citazioni dell'AI-check. Solo testo semplice: l'URL
-    solo https."""
+    solo https (altrimenti errore) e, già in ingresso (`RequisitoIn`),
+    ammesso dal filtro dei link della scheda: un URL https non ammesso
+    diventa None, mai un errore."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -261,7 +274,7 @@ class CitazioneIn(BaseModel):
     testo: str = Field(max_length=MAX_TESTO_VOCE)
     verificata: StrictBool = False
     fonte_etichetta: str | None = Field(default=None, max_length=300)
-    url_documento: str | None = Field(default=None, max_length=2048)
+    url_documento: str | None = Field(default=None, max_length=_URL_CITAZIONE_MAX)
     pagina: int | None = Field(default=None, ge=1)
 
     @field_validator("url_documento")
@@ -269,26 +282,25 @@ class CitazioneIn(BaseModel):
     def _https(cls, valore: str | None) -> str | None:
         if valore is not None and not valore.lower().startswith("https://"):
             raise ValueError("url_documento deve essere https")
-        return valore
+        return _url_citazione(valore)
 
 
 class CitazioneSnapshotOut(CitazioneIn):
     """`CitazioneIn` come esce dall'API: requisiti, voci e regole finanziarie
-    dello snapshot. L'URL del documento passa anche dal filtro dei link
-    della scheda (`url_documento_pubblicabile`), che vale pure per le righe
-    salvate prima del filtro: un URL non ammesso diventa None, mai un
-    errore. Il solo controllo https di `CitazioneIn` resta per l'ingresso
-    dei requisiti (`RequisitoIn`)."""
+    dello snapshot, regole di origine del validatore del consorzio. L'URL del
+    documento ripassa dal filtro dei link della scheda
+    (`url_documento_pubblicabile`), che vale pure per le righe salvate prima
+    del filtro: un URL non ammesso diventa None, mai un errore."""
 
     @field_validator("url_documento")
     @classmethod
     def _ammesso(cls, valore: str | None) -> str | None:
-        return url_documento_pubblicabile(valore)
+        return _url_citazione(valore)
 
 
 def _come_snapshot(valore: Any) -> Any:
-    """Accetta anche una `CitazioneIn` già costruita (gap analysis): si
-    riconvalida come `CitazioneSnapshotOut`."""
+    """Accetta anche una `CitazioneIn` già costruita (gap analysis, regole del
+    validatore del consorzio): si riconvalida come `CitazioneSnapshotOut`."""
     if isinstance(valore, CitazioneIn) and not isinstance(valore, CitazioneSnapshotOut):
         return valore.model_dump()
     return valore

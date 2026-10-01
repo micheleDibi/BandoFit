@@ -235,7 +235,8 @@ async def send_account_exists_email(to_email: str, login_url: str, recovery_url:
             "Qualcuno — probabilmente tu — ha appena provato a creare un account con "
             "questo indirizzo. Non ne abbiamo creato uno nuovo: ne hai già uno.",
             "Se sei stato tu, accedi pure dal pulsante qui sotto. Non ricordi la "
-            f'password? <a href="{recovery_url}" style="color:#1E5EFF">Puoi reimpostarla</a>.',
+            f'password? <a href="{html.escape(recovery_url, quote=True)}" '
+            'style="color:#1E5EFF">Puoi reimpostarla</a>.',
         ],
         "Vai al login",
         login_url,
@@ -579,10 +580,10 @@ async def send_ricevuta_pagamento_email(
         [
             f"Abbiamo registrato il tuo pagamento di <strong>{_euro_da_cents(totale_cents)}</strong> "
             f"per <strong>{html.escape(descrizione)}</strong>.",
-            "Trovi il dettaglio nella sezione «I tuoi acquisti». La fattura "
+            "Trovi il dettaglio nella sezione «Acquisti» del tuo abbonamento. La fattura "
             "ti verrà recapitata separatamente.",
         ],
-        "Vedi i tuoi acquisti",
+        "Vedi gli acquisti",
         cta_url,
         "Conserva questa email come promemoria del tuo acquisto.",
     )

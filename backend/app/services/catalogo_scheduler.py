@@ -1,6 +1,6 @@
 """Scheduler in-process del catalogo bandi: rimappatura periodica dei bandi
 fusi nel DB primario e ripristino dopo una separazione (`rimappatura_fusi.passo`,
-contratto DB bandi §6.2, migration 0043, 0044 e 0045).
+contratto DB bandi §6.2, migration 0043, 0044, 0045 e 0046).
 
 Stesso stampo degli altri scheduler: un task asyncio avviato nel lifespan,
 SOLO con `rimappatura_fusi_modalita` diversa da `spenta` (default).
@@ -8,7 +8,8 @@ SOLO con `rimappatura_fusi_modalita` diversa da `spenta` (default).
 - `attiva`: il passo scrive (e il riassunto va comunque nel log).
 Il riassunto va a WARNING se il passo ha errori, coppie scartate o righe
 ripristinate (in prova: da ripristinare), altrimenti a INFO: le separazioni
-in attesa della vista e le righe in conflitto non lo alzano. Il primo passo
+in attesa della vista, le righe in conflitto e i conflitti resi definitivi
+(scelte dell'utente) non lo alzano. Il primo passo
 parte all'avvio, poi uno ogni
 `rimappatura_fusi_intervallo_minuti` (minimo 5). Nessun claim a DB: il passo
 è idempotente e le scritture si serializzano nella RPC. Il loop non muore

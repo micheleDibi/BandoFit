@@ -15,6 +15,7 @@ from app.schemas.bando import AllegatoScheda
 from app.services.bando_scheda_link import (
     BANDO_LINK_SELECT,
     ETICHETTA_RIPIEGO,
+    MAX_ETICHETTA,
     calcola_allegati,
     calcola_cta,
     calcola_link_fonte,
@@ -551,6 +552,34 @@ class TestEtichettaDiRipiego:
         assert etichette == ["scarica", "scarica (2)", "scarica (3)", "scarica (4)", "scarica (5)"]
         assert len(set(etichette)) == len(etichette)
 
+    def test_etichetta_reale_numerata_non_si_rinumera(self):
+        # Prima si riservano le etichette distinte, poi si numerano le
+        # ripetute: «scarica (2)» del catalogo resta alla sua riga e la
+        # seconda «scarica» prende il primo numero libero.
+        link = [
+            _link(1, "allegato", "https://x.it/a.pdf", etichetta="scarica"),
+            _link(2, "allegato", "https://x.it/b.pdf", etichetta="scarica"),
+            _link(3, "allegato", "https://x.it/c.pdf", etichetta="scarica (2)"),
+            _link(4, "allegato", "https://x.it/d.pdf", etichetta="scarica"),
+        ]
+        assert [(u, e) for u, e, _, _ in _allegati(_riga(), link)] == [
+            ("https://x.it/a.pdf", "scarica"),
+            ("https://x.it/b.pdf", "scarica (3)"),
+            ("https://x.it/c.pdf", "scarica (2)"),
+            ("https://x.it/d.pdf", "scarica (4)"),
+        ]
+
+    def test_numerata_non_scavalca_un_etichetta_reale_successiva(self):
+        # Il ripiego ripetuto non prende «Allegato (2)», che il catalogo
+        # usa più avanti.
+        riga = _riga(allegati=[
+            {"url": "https://x.it/"},
+            {"url": "https://x.it/?v=2"},
+            {"label": "Allegato (2)", "url": "https://x.it/b.pdf"},
+        ])
+        etichette = [e for _, e, _, _ in _allegati(riga)]
+        assert etichette == [ETICHETTA_RIPIEGO, f"{ETICHETTA_RIPIEGO} (3)", "Allegato (2)"]
+
     def test_nome_del_file_lungo_troncato(self):
         url = "https://x.it/" + "a" * 300 + ".pdf"
         [(_, etichetta, _, _)] = _allegati(_riga(allegati=[{"url": url}]))
@@ -580,6 +609,41 @@ class TestEtichettaDiRipiego:
             _riga(allegati=[{"url": "https://x.it/"}, {"url": "https://x.it/b.pdf"}]),
             [_link(1, "allegato", "https://x.it/c.pdf")],
         ))
+
+
+class TestEtichettaDelCatalogo:
+    """Etichette del catalogo (`etichetta` della riga, `label`/`nome`/
+    `titolo` del jsonb): escono dall'API ed entrano nel prompt dell'AI-check,
+    quindi senza caratteri di controllo e di direzione del testo (Cc, Cf),
+    spazi compressi, al massimo `MAX_ETICHETTA` caratteri."""
+
+    CASI = [
+        ("Avviso\u202epubblico", "Avvisopubblico"),
+        ("Avviso\x00 pubblico\x07", "Avviso pubblico"),
+        ("Avviso\u200b \ufeffpubblico", "Avviso pubblico"),
+        ("  Avviso\n\tpubblico\r\n ", "Avviso pubblico"),
+        ("x" * 5000, "x" * MAX_ETICHETTA),
+        ("\u202e\x00\u200b", "a"),  # non resta nulla: vale il nome del file
+    ]
+
+    @pytest.mark.parametrize(("grezza", "attesa"), CASI)
+    def test_dalla_riga(self, grezza, attesa):
+        link = [_link(1, "allegato", "https://x.it/a.pdf", etichetta=grezza)]
+        assert [e for _, e, _, _ in _allegati(_riga(), link)] == [attesa]
+
+    @pytest.mark.parametrize("chiave", ["label", "nome", "titolo"])
+    @pytest.mark.parametrize(("grezza", "attesa"), CASI)
+    def test_dal_jsonb(self, chiave, grezza, attesa):
+        riga = _riga(allegati=[{chiave: grezza, "url": "https://x.it/a.pdf"}])
+        assert [e for _, e, _, _ in _allegati(riga)] == [attesa]
+
+    def test_spazi_compressi_prima_del_taglio(self):
+        grezza = "parola   " * 1000
+        [(_, etichetta, _, _)] = _allegati(
+            _riga(), [_link(1, "atto", "https://x.it/a.pdf", etichetta=grezza)]
+        )
+        assert etichetta == " ".join(["parola"] * 1000)[:MAX_ETICHETTA].strip()
+        assert len(etichetta) <= MAX_ETICHETTA and "  " not in etichetta
 
 
 class TestAllegatiEPulsante:

@@ -11,11 +11,15 @@ import { InlineError } from "./InlineError";
 /** Classi comuni dei controlli: bordo `line-control` (più scuro al passaggio),
  *  altezza 40, raggio `control`; a fuoco il bordo diventa `accent` con un alone
  *  tenue intorno (l'anello lo dà la regola globale, qui senza scarto per non
- *  staccarsi dal bordo). Colore, bordo e alone in 150 ms. */
+ *  staccarsi dal bordo). Colore, bordo e alone in 150 ms.
+ *  Il bordo scurisce al passaggio solo se il campo è attivo e NON a fuoco (a
+ *  fuoco resta `accent`); il `:where` tiene la specificità a quella di `hover:`,
+ *  così il bordo degli errori (`enabled:hover:border-danger`, anche in
+ *  `PasswordField` e `Combobox`) continua a vincere. */
 export const inputClasses =
   "h-10 w-full rounded-control border border-line-control bg-sheet px-3 text-body text-ink " +
   "placeholder:text-ink-3 transition-[color,background-color,border-color,box-shadow] duration-150 ease-uscita " +
-  "enabled:hover:border-ink-3 " +
+  "hover:[&:where(:enabled:not(:focus))]:border-ink-3 " +
   "focus:border-accent focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-accent " +
   "focus-visible:ring-4 focus-visible:ring-accent/15 " +
   "disabled:cursor-not-allowed disabled:bg-sunken disabled:text-ink-3";

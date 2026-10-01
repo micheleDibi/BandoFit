@@ -4,10 +4,12 @@
 coppia. Prova contro attiva, coppie scartate, errori isolati per coppia
 (23505, 40P01), migration assente, call in collisione a livello INFO, e mai
 un'eccezione al chiamante. Poi il conteggio del catalogo (`coppie_catalogo`)
-e le separazioni (migration 0045): doppione ancora fuso, separato e tornato
-nella vista (ripristino con `p_prova` pari alla modalità), separato ma fuori
-dalla vista, letture in errore mai trattate come assenze, conflitti ripetuti
-con un solo WARNING al giorno. Primario e catalogo finti."""
+e le separazioni (migration 0045 e 0046), trattate PRIMA della rimappatura:
+doppione ancora fuso, separato e tornato nella vista (ripristino nel percorso
+automatico con `p_prova` pari alla modalità), separato ma fuori dalla vista,
+letture in errore mai trattate come assenze, conflitti ripetuti con un solo
+WARNING al giorno, conflitti resi definitivi contati a parte e mai avvisati
+come ripetuti. Primario e catalogo finti."""
 
 import logging
 from types import SimpleNamespace
@@ -28,8 +30,10 @@ def conteggi(**valori) -> dict:
 
 
 def ripristino(**valori) -> dict:
-    """Ritorno di fn_ripristina_rimappatura (tutte le chiavi, come la 0044)."""
-    esito = {t: {"ripristinate": 0, "in_conflitto": 0} for t in rf._CHIAVI_CONTEGGI}
+    """Ritorno di fn_ripristina_rimappatura_voci nel percorso automatico (tutte
+    le chiavi, come la 0046)."""
+    esito = {t: {"ripristinate": 0, "in_conflitto": 0, "definitivi": 0}
+             for t in rf._CHIAVI_CONTEGGI}
     for chiave, valore in valori.items():
         tabella, campo = chiave.split("__")
         esito[tabella][campo] = valore
@@ -71,7 +75,7 @@ class FakePrimary:
                     if db.guasto_doppioni is not None:
                         raise db.guasto_doppioni
                     return SimpleNamespace(data=db.doppioni)
-                if nome == "fn_ripristina_rimappatura":
+                if nome == "fn_ripristina_rimappatura_voci":
                     esito = db.ripristini.get(params["p_doppione"], ripristino())
                     if isinstance(esito, Exception):
                         raise esito
@@ -84,7 +88,10 @@ class FakePrimary:
         return [p for nome, p in self.chiamate if nome == "fn_rimappa_bando_fuso"]
 
     def ripristinate(self) -> list[dict]:
-        return [p for nome, p in self.chiamate if nome == "fn_ripristina_rimappatura"]
+        return [p for nome, p in self.chiamate if nome == "fn_ripristina_rimappatura_voci"]
+
+    def nomi(self) -> list[str]:
+        return [nome for nome, _ in self.chiamate]
 
 
 class FakeSecondary:
@@ -198,7 +205,7 @@ class TestPasso:
             "modalita": "prova" if prova else "attiva", "in_uso": 4, "fusi": 1,
             "coppie_catalogo": 1, "scartate": 0, "errori": 0,
             "separazioni_rilevate": 0, "ripristinate": 0, "in_conflitto": 0,
-            "totali": esito,
+            "conflitti_definitivi": 0, "totali": esito,
             "coppie": [{"doppione": 2, "master": 900, "conteggi": esito}],
         }
         # colonne per nome, mai select=*
@@ -283,8 +290,7 @@ class TestPasso:
         assert (report["errori"], report["in_uso"], report["coppie"]) == (1, 0, [])
         assert secondary.blocchi == [] and secondary.conteggi == [1]
         assert report["coppie_catalogo"] == 1
-        assert [nome for nome, _ in primary.chiamate] == ["fn_bandi_in_uso",
-                                                          "fn_doppioni_rimappati"]
+        assert primary.nomi() == ["fn_doppioni_rimappati", "fn_bandi_in_uso"]
         [record] = caplog.records
         assert "0043" in record.getMessage() and codice in record.getMessage()
 
@@ -388,7 +394,7 @@ class TestSeparazioni:
         with caplog.at_level(logging.INFO, logger="bandofit.rimappatura_fusi"):
             report = await rf.passo(primary, secondary, prova=prova)
         assert primary.ripristinate() == [
-            {"p_doppione": 2, "p_dal": "-infinity", "p_prova": prova}]
+            {"p_doppione": 2, "p_dal": "-infinity", "p_prova": prova, "p_automatico": True}]
         assert (report["separazioni_rilevate"], report["ripristinate"],
                 report["in_conflitto"], report["errori"]) == (1, 3, 1, 0)
         assert secondary.blocchi_vista == [[2]]
@@ -478,6 +484,8 @@ class TestSeparazioni:
         assert (report["errori"], report["ripristinate"]) == (1, 1)
         record = next(r for r in caplog.records if codice in r.getMessage())
         assert record.levelno == (logging.WARNING if codice == "23505" else logging.ERROR)
+        # funzione assente: è la 0046 a doverla aggiungere
+        assert ("0046" in record.getMessage()) is (codice == "PGRST202")
         assert "messaggio che non va nel log" not in caplog.text
 
     async def test_conflitto_ripetuto_info_poi_un_warning_al_giorno(self, monkeypatch, caplog):
@@ -526,4 +534,77 @@ class TestSeparazioni:
         with caplog.at_level(logging.INFO, logger="bandofit.rimappatura_fusi"):
             report = await rf.passo(primary, FakeSecondary([], pubblici={2}), prova=False)
         assert (report["ripristinate"], report["in_conflitto"], report["errori"]) == (0, 0, 0)
+        assert report["conflitti_definitivi"] == 0
         assert any("nessuna riga" in r.getMessage() for r in caplog.records)
+
+
+class TestOrdineNelPasso:
+    async def test_separazioni_prima_della_rimappatura(self):
+        primary = FakePrimary(in_uso=[3], doppioni=[2], esiti={3: conteggi()})
+        secondary = FakeSecondary([fusione(3)], pubblici={2})
+        await rf.passo(primary, secondary, prova=False)
+        assert primary.nomi() == ["fn_doppioni_rimappati", "fn_ripristina_rimappatura_voci",
+                                  "fn_bandi_in_uso", "fn_rimappa_bando_fuso"]
+
+    async def test_doppione_separato_e_master_fuso_nello_stesso_aggiornamento(self):
+        """D (2) era fuso in M (900): le sue righe stanno su M. Il catalogo
+        separa D e fonde M in M2 (901) insieme. Il ripristino gira prima: le
+        righe tornano a D e M non è più in uso, quindi non si sposta nulla su
+        M2 (nell'ordine precedente sarebbero passate su M2 prima del
+        ripristino)."""
+        class Primario(FakePrimary):
+            def rpc(self, nome, params):
+                if nome == "fn_ripristina_rimappatura_voci":
+                    self.in_uso = [2]  # le righe tornano da M a D
+                return super().rpc(nome, params)
+
+        primary = Primario(in_uso=[900], doppioni=[2],
+                           ripristini={2: ripristino(saved_bandi__ripristinate=1)})
+        secondary = FakeSecondary([fusione(900, 901, "master-901")], pubblici={2})
+        report = await rf.passo(primary, secondary, prova=False)
+        assert (report["ripristinate"], report["in_uso"], report["fusi"]) == (1, 1, 0)
+        assert primary.rimappate() == []
+
+
+class TestConflittiDefinitivi:
+    @pytest.mark.parametrize("prova", [True, False])
+    async def test_contati_a_parte_e_mai_avvisati_come_ripetuti(self, prova, caplog):
+        # Tutti i conflitti del doppione diventano definitivi: si contano, un
+        # INFO per passo e nessun conteggio verso il WARNING dei conflitti
+        # ripetuti (in attiva il doppione non torna più nell'elenco).
+        esito = ripristino(saved_bandi__in_conflitto=1, saved_bandi__definitivi=1,
+                           calendar_events__in_conflitto=1, calendar_events__definitivi=1)
+        primary = FakePrimary(doppioni=[2], ripristini={2: esito})
+        with caplog.at_level(logging.INFO, logger="bandofit.rimappatura_fusi"):
+            for _ in range(rf.PASSI_CONFLITTO_TOLLERATI + 2):
+                report = await rf.passo(primary, FakeSecondary([], pubblici={2}), prova=prova)
+        assert (report["in_conflitto"], report["conflitti_definitivi"], report["errori"]) == (
+            2, 2, 0)
+        assert rf._conflitti == {}
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+        messaggi = [r.getMessage() for r in caplog.records]
+        attesa = "2 conflitti da rendere definitivi" if prova else "2 conflitti resi definitivi"
+        assert all(attesa in m for m in messaggi)
+        assert len(messaggi) == rf.PASSI_CONFLITTO_TOLLERATI + 2
+
+    async def test_solo_i_conflitti_aperti_contano_per_l_avviso(self, caplog):
+        esito = ripristino(saved_bandi__in_conflitto=2, saved_bandi__definitivi=1,
+                           partner_calls__in_conflitto=1)
+        primary = FakePrimary(doppioni=[2], ripristini={2: esito})
+        with caplog.at_level(logging.INFO, logger="bandofit.rimappatura_fusi"):
+            report = await rf.passo(primary, FakeSecondary([], pubblici={2}), prova=False)
+        assert (report["in_conflitto"], report["conflitti_definitivi"]) == (3, 1)
+        assert rf._conflitti == {2: 1}
+        assert any("2 righe in conflitto" in r.getMessage() for r in caplog.records)
+        assert any("1 conflitti resi definitivi" in r.getMessage() for r in caplog.records)
+
+    async def test_ripristino_con_definitivi_resta_a_warning(self, caplog):
+        esito = ripristino(saved_bandi__ripristinate=1, calendar_events__in_conflitto=1,
+                           calendar_events__definitivi=1)
+        primary = FakePrimary(doppioni=[2], ripristini={2: esito})
+        with caplog.at_level(logging.INFO, logger="bandofit.rimappatura_fusi"):
+            report = await rf.passo(primary, FakeSecondary([], pubblici={2}), prova=False)
+        assert (report["ripristinate"], report["conflitti_definitivi"]) == (1, 1)
+        [avviso] = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert "1 righe ripristinate" in avviso.getMessage()
+        assert rf._conflitti == {}

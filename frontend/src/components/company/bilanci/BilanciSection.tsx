@@ -72,12 +72,23 @@ function esitoRecupero(data: BilanciOut): Esito {
   return { testo: `Nessun bilancio recuperato.${motivo}`, riuscito: false };
 }
 
-function SintesiFasce({ fasce }: { fasce: FasceBilancio }) {
-  const voci = ORDINE_FASCE.map((tipo) => ({
+/** Le voci della sintesi per fasce che hanno un valore, nell'ordine fisso. */
+function vociFasce(fasce: FasceBilancio) {
+  return ORDINE_FASCE.map((tipo) => ({
     tipo,
     valore: etichettaFascia(tipo, fasce[tipo]),
   })).filter((v) => v.valore !== null);
-  if (voci.length === 0) return null;
+}
+
+/** Il chiamante la monta (con la sua card) solo se c'è almeno una voce: una
+ *  card vuota resterebbe a occupare la colonna accanto all'andamento. */
+function SintesiFasce({
+  fasce,
+  voci,
+}: {
+  fasce: FasceBilancio;
+  voci: ReturnType<typeof vociFasce>;
+}) {
   return (
     <Section>
       <SectionHeader livello={3} titolo="Sintesi per fasce" />
@@ -126,6 +137,8 @@ export function BilanciSection() {
   const disponibili = data?.stato === "disponibili" && data.esercizi.length > 0;
   const anni = disponibili ? data.esercizi.map((e) => e.anno) : [];
   const conTrend = disponibili && data.esercizi.filter((e) => e.fatturato !== null).length >= 2;
+  const vociSintesi = disponibili && data.fasce ? vociFasce(data.fasce) : [];
+  const conSintesi = vociSintesi.length > 0;
 
   let corpo: ReactNode;
   if (isPending) {
@@ -164,21 +177,25 @@ export function BilanciSection() {
           recuperoInCorso={recupera.isPending}
         />
         <BilanciTabella esercizi={data.esercizi} />
-        <div className={cn("grid gap-6", conTrend && data.fasce && "lg:grid-cols-[3fr_2fr]")}>
-          {conTrend && (
-            <Card>
-              <Section>
-                <SectionHeader livello={3} titolo="Fatturato negli anni" />
-                <TrendFatturato esercizi={data.esercizi} />
-              </Section>
-            </Card>
-          )}
-          {data.fasce && (
-            <Card>
-              <SintesiFasce fasce={data.fasce} />
-            </Card>
-          )}
-        </div>
+        {/* Griglia, colonne e card solo per ciò che ha contenuto: senza voci
+            nelle fasce l'andamento prende tutta la larghezza. */}
+        {(conTrend || conSintesi) && (
+          <div className={cn("grid gap-6", conTrend && conSintesi && "lg:grid-cols-[3fr_2fr]")}>
+            {conTrend && (
+              <Card>
+                <Section>
+                  <SectionHeader livello={3} titolo="Fatturato negli anni" />
+                  <TrendFatturato esercizi={data.esercizi} />
+                </Section>
+              </Card>
+            )}
+            {conSintesi && data.fasce && (
+              <Card>
+                <SintesiFasce fasce={data.fasce} voci={vociSintesi} />
+              </Card>
+            )}
+          </div>
+        )}
         {data.indicatori.length > 0 && (
           <Section>
             <SectionHeader livello={3} titolo="Indicatori" />

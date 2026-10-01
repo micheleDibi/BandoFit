@@ -23,8 +23,8 @@ from app.schemas.saved_bando import SavedBandoItem, SavedIdsOut
 from app.services import company_scope
 from app.services.bandi_risoluzione import VISTA_BANDI, carica_per_slug, risolvi_fusioni
 from app.services.bandi_service import LIST_SELECT, map_list_item
-from app.services.lookup_service import errore_di_contratto
 from app.services.paginazione import pagina
+from app.services.postgrest_errori import errore_di_contratto
 
 logger = logging.getLogger("bandofit.saved_bandi")
 

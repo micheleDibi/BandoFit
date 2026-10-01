@@ -1956,7 +1956,8 @@ async def _avvia_job(primary, secondary, ai, active, user: dict, call_id: Any, s
                      ) -> datetime:
     """Prenota (fail-closed) e avvia in background una proposta AI. Errori:
     403, 404, 409 `stato_call_non_valido` / `ai_in_corso`, 503
-    `ai_not_configured`, 429 `ai_limite_giornaliero` / `ai_sospesa_oggi`."""
+    `ai_not_configured` / `catalogo_non_disponibile` (lookup del catalogo non
+    leggibili), 429 `ai_limite_giornaliero` / `ai_sospesa_oggi`."""
     call = await _carica_scrittura(primary, active, user, call_id)
     if call.get("stato") != "bozza":
         raise AppError(409, "stato_call_non_valido",

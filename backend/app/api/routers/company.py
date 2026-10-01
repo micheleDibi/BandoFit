@@ -76,8 +76,11 @@ async def company_facets(
     funzione che alimenta il badge di compatibilità e l'AI-check.
 
     Un figlio attivo vede i facet della famiglia, come per i dati aziendali.
-    Solo lettura: in degrado dei lookup, liste vuote invece di un errore."""
+    Solo lettura: in degrado dei lookup senza cache, facet vuoti invece di un
+    errore, senza calcolarli né metterli in cache (sarebbero parziali)."""
     lookups = await lookup_service.get_lookups(secondary, degrada=True)
+    if lookup_service.vuoti_in_degrado(lookups):
+        return CompanyFacetsOut()
     facets = await compatibility.load_company_facets(primary, active, lookups)
     if facets is None:
         return CompanyFacetsOut()

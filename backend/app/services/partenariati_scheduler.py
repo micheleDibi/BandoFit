@@ -98,6 +98,7 @@ from app.services import (
 )
 from app.services.ai_check_prompts import serializza_sezioni
 from app.services.alert_scheduler import prossima_esecuzione
+from app.services.paginazione import CODICE_INTERVALLO_NON_SODDISFACIBILE
 from app.services.partenariato_preclassificatore import preclassifica
 from app.services.partenariato_prompts import PARTENARIATO_PROMPT_VERSION, SCHEMA_VERSION
 
@@ -183,14 +184,25 @@ async def _call_aperte(primary) -> list[dict]:
     righe: list[dict] = []
     offset = 0
     while True:
-        resp = (
-            await primary.table("partner_calls")
-            .select(CALL_SELECT_SCHEDULER)
-            .in_("stato", ["bozza", "pubblicata"])
-            .order("id")
-            .range(offset, offset + CALL_PAGINA - 1)
-            .execute()
-        )
+        try:
+            resp = (
+                await primary.table("partner_calls")
+                .select(CALL_SELECT_SCHEDULER)
+                .in_("stato", ["bozza", "pubblicata"])
+                .order("id")
+                .range(offset, offset + CALL_PAGINA - 1)
+                .execute()
+            )
+        except APIError as exc:
+            if exc.code != CODICE_INTERVALLO_NON_SODDISFACIBILE:
+                raise
+            # Le righe sono calate fra una pagina e l'altra: l'intervallo
+            # oltre la fine vale come pagina vuota, la lettura è finita.
+            logger.info(
+                "partenariati scheduler: call aperte calate fra due pagine (offset %s), "
+                "lettura chiusa", offset,
+            )
+            return righe
         dati = [r for r in resp.data or [] if isinstance(r, dict)]
         righe.extend(dati)
         if len(resp.data or []) < CALL_PAGINA:
@@ -345,7 +357,19 @@ async def _bandi_con_segnali(secondary, oggi: date) -> list[dict]:
             "id,slug,titolo,titolo_breve,descrizione_breve,contenuto"
         )
         query = bandi_service.apply_open_tier(query.not_.is_("slug", "null"), oggi)
-        resp = await query.order("id").range(offset, offset + BATCH_PAGINA - 1).execute()
+        try:
+            resp = await query.order("id").range(offset, offset + BATCH_PAGINA - 1).execute()
+        except APIError as exc:
+            if exc.code != CODICE_INTERVALLO_NON_SODDISFACIBILE:
+                raise
+            # Il segmento si è ristretto fra una pagina e l'altra: per il
+            # catalogo l'intervallo non è soddisfacibile, per il batch è la
+            # fine della scansione.
+            logger.info(
+                "partenariati scheduler: bandi aperti calati fra due pagine (offset %s), "
+                "lettura chiusa", offset,
+            )
+            break
         righe = [r for r in (resp.data or []) if isinstance(r, dict) and r.get("slug")]
         # Regex su centinaia di schede: fuori dall'event loop.
         trovati.extend(await asyncio.to_thread(_forti, righe))

@@ -41,7 +41,10 @@ from tests.test_partenariato_indice import (  # noqa: F401 — fixture autouse
     ambiente_wp6,
 )
 
-TESTO_Y = "Ciao, sono Laura del laboratorio: il mio numero è 333 1234567."
+# Il numero intero (con lo spazio): una sua parte, come «333», può comparire
+# per caso nel token di disiscrizione dell'email.
+TELEFONO_Y = "333 1234567"
+TESTO_Y = f"Ciao, sono Laura del laboratorio: il mio numero è {TELEFONO_Y}."
 
 
 async def conversazione(fondo, *, rivela: bool = False, monkeypatch=None):
@@ -121,8 +124,8 @@ class TestMessaggi:
                    for n in notifiche)
         assert {e["to"] for e in fondo.email} == {EMAIL["X"], EMAIL_MEMBRO_X}
         for email in fondo.email:
-            assert "333" not in email["text"] and "Laura" not in email["text"]
-            assert "333" not in email["html"]
+            assert TELEFONO_Y not in email["text"] and "Laura" not in email["text"]
+            assert TELEFONO_Y not in email["html"] and "Laura" not in email["html"]
             assert pseudo("Y") in email["text"]  # al creatore: lo pseudonimo della candidata
             assert RAGIONE["Y"] not in email["text"] and PIVA["Y"] not in email["text"]
         # seconda raffica senza lettura: nessun nuovo avviso

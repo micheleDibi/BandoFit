@@ -562,14 +562,15 @@ def test_api_buona_fede(client):
     assert client.post("/segnalazioni", json={**base, "buona_fede": 1}).status_code == 422
 
 
-# ---------------------------------------- citazioni in uscita (filtro dei link)
+# ------------------------------ citazioni in ingresso e in uscita (filtro dei link)
 
 
 class TestCitazioneSnapshotOut:
     """In uscita (requisiti, voci e regole finanziarie dello snapshot) l'URL
     del documento passa dal filtro dei link della scheda, anche sulle righe
     salvate prima del filtro: un URL non ammesso diventa None, mai un errore.
-    `RequisitoIn` resta con il solo controllo https."""
+    Lo stesso filtro vale in ingresso (`RequisitoIn`): un URL https non
+    ammesso diventa None (nessun 422), `http` resta un errore."""
 
     NON_AMMESSI = ["https://www.fasi.eu/a.pdf", "https://x.it/a\x01.pdf",
                    "https://x.it/a.pdf https://fasi.eu/b.pdf", "https://x.it:99999/a.pdf"]
@@ -596,25 +597,69 @@ class TestCitazioneSnapshotOut:
 
     @pytest.mark.parametrize("url", NON_AMMESSI)
     def test_requisito_out_accetta_una_citazione_in_e_la_filtra(self, url):
-        # La gap analysis costruisce `RequisitoOut` con una `CitazioneIn`.
-        cit = pcs.CitazioneIn(**citazione(), url_documento=url)
-        out = pcs.RequisitoOut(testo="Testo", origine="manuale", citazione=cit)
-        assert isinstance(out.citazione, pcs.CitazioneSnapshotOut)
-        assert out.citazione.url_documento is None
-        assert out.citazione.sezione == "D1-p3"
-        assert out.model_dump()["citazione"]["url_documento"] is None
+        # La gap analysis costruisce `RequisitoOut` con una `CitazioneIn`;
+        # anche una costruita senza convalida si filtra in uscita.
+        for cit in (pcs.CitazioneIn(**citazione(), url_documento=url),
+                    pcs.CitazioneIn.model_construct(**citazione(), url_documento=url)):
+            out = pcs.RequisitoOut(testo="Testo", origine="manuale", citazione=cit)
+            assert isinstance(out.citazione, pcs.CitazioneSnapshotOut)
+            assert out.citazione.url_documento is None
+            assert out.citazione.sezione == "D1-p3"
+            assert out.model_dump()["citazione"]["url_documento"] is None
 
     def test_requisito_out_con_url_ammesso_invariato(self):
         cit = pcs.CitazioneIn(**citazione(), url_documento="https://regione.example.it/a.pdf")
         out = pcs.RequisitoOut(testo="Testo", origine="manuale", citazione=cit)
         assert out.citazione.url_documento == "https://regione.example.it/a.pdf"
 
-    def test_requisito_in_invariato(self):
+    def test_requisito_in_http_resta_un_errore(self):
         with pytest.raises(ValidationError):
             pcs.RequisitoIn(testo="Testo valido",
                             citazione={**citazione(), "url_documento": "http://x.it/a.pdf"})
         dentro = pcs.RequisitoIn(testo="Testo valido", citazione=citazione())
         assert type(dentro.citazione) is pcs.CitazioneIn
+        assert dentro.citazione.url_documento is None
+
+    @pytest.mark.parametrize("url", NON_AMMESSI)
+    def test_requisito_in_con_url_non_ammesso_lo_scarta(self, url):
+        dentro = pcs.RequisitoIn(testo="Testo valido",
+                                 citazione={**citazione(), "url_documento": url})
+        assert type(dentro.citazione) is pcs.CitazioneIn
+        assert dentro.citazione.url_documento is None
+        # Il resto della citazione resta (come riferimento del requisito).
+        assert dentro.citazione.testo == citazione()["testo"]
+        assert dentro.citazione.sezione == "D1-p3"
+        assert dentro.citazione.verificata is True
+
+    def test_requisito_in_con_url_ammesso(self):
+        dentro = pcs.RequisitoIn(testo="Testo valido", citazione={
+            **citazione(), "url_documento": "https://regione.example.it/Avviso pubblico.pdf"})
+        assert dentro.citazione.url_documento == (
+            "https://regione.example.it/Avviso%20pubblico.pdf"
+        )
+
+    def test_url_che_codificato_supera_il_massimo_si_scarta_senza_errori(self):
+        base = "https://regione.example.it/"
+        lungo = base + "a b" * ((2048 - len(base)) // 3)  # 2046 caratteri, 3390 codificato
+        assert len(lungo) <= 2048
+        cit = pcs.CitazioneIn(**citazione(), url_documento=lungo)
+        assert cit.url_documento is None
+        out = snapshot(modalita={**MODALITA, "citazione": {**citazione(), "url_documento": lungo}})
+        assert out.modalita.citazione.url_documento is None
+        # Al massimo esatto resta, e la citazione filtrata si riconvalida.
+        limite = base + "a" * (2048 - len(base))
+        cit = pcs.CitazioneIn(**citazione(), url_documento=limite)
+        out = pcs.RequisitoOut(testo="Testo", origine="manuale", citazione=cit)
+        assert out.citazione.url_documento == limite
+
+    def test_api_requisiti_url_non_ammesso_200_http_422(self, client):
+        def put(url):
+            return client.put("/requisiti", json={"requisiti": [
+                {"testo": "Sede", "citazione": {**citazione(), "url_documento": url}},
+            ]})
+
+        assert put(self.NON_AMMESSI[0]).status_code == 200
+        assert put("http://x.it/a.pdf").status_code == 422
 
     def test_regola_finanziaria_dello_snapshot(self):
         s = snapshot(regole_finanziarie=[

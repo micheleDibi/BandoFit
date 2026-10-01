@@ -19,6 +19,16 @@ async def get_lookups(secondary) -> LookupsOut:
     di un errore."""
     return await lookup_service.get_lookups(secondary, degrada=True)
 
+
+async def _facets_per_il_badge(primary, active, lookups: LookupsOut):
+    """Facet dell'azienda per il badge di compatibilità. Con le liste vuote
+    del degrado nessun badge (None), senza leggere né mettere in cache i
+    facet: perderebbero le divisioni ATECO secondarie e il punteggio
+    uscirebbe sottostimato."""
+    if lookup_service.vuoti_in_degrado(lookups):
+        return None
+    return await get_company_facets(primary, active, lookups)
+
 router = APIRouter(prefix="/bandi", tags=["bandi"])
 
 _VALID_STATI = {"aperto", "chiuso", "in apertura prossimamente", "sospeso", "revocato"}
@@ -109,7 +119,7 @@ async def list_bandi(
                 # SENZA interrogare il catalogo.
                 return Page.build([], 0, page, page_size)
     lookups = await get_lookups(secondary)
-    facets = await get_company_facets(primary, active, lookups)
+    facets = await _facets_per_il_badge(primary, active, lookups)
     return await bandi_service.fetch_bandi(
         secondary,
         filters,
@@ -126,7 +136,7 @@ async def get_bando(
     active: ActiveCompanyDep, primary: PrimaryClient, secondary: SecondaryClient, slug: str
 ) -> BandoDetail:
     lookups = await get_lookups(secondary)
-    facets = await get_company_facets(primary, active, lookups)
+    facets = await _facets_per_il_badge(primary, active, lookups)
     return await bandi_service.fetch_bando_by_slug(
         secondary, slug, company_facets=facets, totale_regioni=len(lookups.regioni)
     )

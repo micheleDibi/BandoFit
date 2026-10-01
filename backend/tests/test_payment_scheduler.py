@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services import email_service, payment_scheduler, pricing
+from app.services import email_service, payment_scheduler
 
 OGGI = date(2027, 3, 1)
 

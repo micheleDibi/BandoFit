@@ -21,29 +21,17 @@ from postgrest.exceptions import APIError
 
 from app.core.errors import CatalogoNonDisponibileError
 from app.schemas.bando import LookupsOut
+from app.services.postgrest_errori import errore_di_contratto
 
 logger = logging.getLogger("bandofit.lookups")
 
 _CACHE_TTL_SECONDS = 3600
 _RINVIO_ERRORE_SECONDS = 60
-# Codici PostgREST di un cambio di contratto del catalogo: colonna assente,
-# permesso negato; la famiglia PGRST2xx (cache dello schema: tabella, funzione
-# o relazione assenti) si riconosce dal prefisso.
-_CODICI_CONTRATTO = frozenset({"42703", "42501"})
 
 _cache: LookupsOut | None = None
 _cache_at: float = 0.0
 _errore_at: float | None = None
 _lock = asyncio.Lock()
-
-
-def errore_di_contratto(exc: BaseException) -> bool:
-    """Vero se l'errore è un cambio di contratto del catalogo (`42703`,
-    `42501`, `PGRST2xx`) e non un guasto (rete, timeout, altri codici)."""
-    codice = getattr(exc, "code", None)
-    return isinstance(codice, str) and (
-        codice in _CODICI_CONTRATTO or codice.startswith("PGRST2")
-    )
 
 
 def _vuoti() -> LookupsOut:
@@ -103,6 +91,17 @@ def in_degrado() -> bool:
     """Vero dall'ultimo errore di contratto fino alla prima lettura riuscita:
     si stanno servendo la cache scaduta o liste vuote."""
     return _errore_at is not None
+
+
+def vuoti_in_degrado(lookups: LookupsOut) -> bool:
+    """Vero se `lookups` sono le liste vuote del degrado (catalogo non
+    leggibile e nessuna cache). Va chiamata subito dopo `get_lookups`, senza
+    `await` in mezzo. Con questi lookup i facet dell'azienda perderebbero le
+    divisioni ATECO secondarie: chi li usa non li calcola (nessun badge,
+    facet vuoti) invece di mostrarli parziali."""
+    return in_degrado() and not any(
+        getattr(lookups, campo, None) for campo in LookupsOut.model_fields
+    )
 
 
 def _senza_cache(degrada: bool, codice: str | None) -> LookupsOut:

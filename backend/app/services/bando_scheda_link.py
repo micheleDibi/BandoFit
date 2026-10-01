@@ -106,9 +106,25 @@ def _testo(valore: Any) -> str | None:
     return valore or None
 
 
+def _senza_controlli(testo: str) -> str:
+    """Il testo senza caratteri di controllo e di direzione del testo
+    (categorie Cc e Cf): l'etichetta esce dall'API ed entra nel prompt. Quelli
+    di spaziatura (a capo, tabulazione) diventano uno spazio, per non unire
+    le parole."""
+    return "".join(
+        " " if c.isspace() else c
+        for c in testo
+        if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf")
+    )
+
+
 def _etichetta(valore: Any) -> str | None:
-    """Etichetta da mostrare, senza menzioni dei domini esclusi."""
-    return _testo(scrub_text_mentions(valore)) if isinstance(valore, str) else None
+    """Etichetta da mostrare: senza caratteri Cc/Cf, senza menzioni dei
+    domini esclusi, spazi compressi, al massimo `MAX_ETICHETTA` caratteri."""
+    if not isinstance(valore, str):
+        return None
+    testo = scrub_text_mentions(_senza_controlli(valore))
+    return _testo(" ".join(testo.split())[:MAX_ETICHETTA])
 
 
 def _id_riga(riga: dict) -> float:
@@ -162,21 +178,20 @@ def chiave_url_catalogo(url: str) -> str:
 def _nome_file(url: str) -> str | None:
     """Nome del file dal percorso dell'URL, come etichetta di ripiego: ultimo
     segmento decodificato, senza query né estensione nota (il formato la
-    scheda lo mostra a parte), spazi compressi, senza menzioni dei domini
-    esclusi, al massimo `MAX_ETICHETTA` caratteri. None se non resta nulla."""
+    scheda lo mostra a parte), poi ripulito come ogni etichetta
+    (`_etichetta`). None se non resta nulla."""
     try:
         percorso = unquote(urlsplit(url).path)
     except ValueError:
         return None
     # La decodifica fa ricomparire caratteri di controllo e di direzione
-    # del testo (categorie Cc e Cf): via, l'etichetta esce dall'API e entra
-    # nel prompt.
-    percorso = "".join(c for c in percorso if unicodedata.category(c) not in ("Cc", "Cf"))
+    # del testo (categorie Cc e Cf): via, prima di cercare l'estensione.
+    percorso = _senza_controlli(percorso)
     nome = percorso.rstrip("/").rsplit("/", 1)[-1]
     base, punto, estensione = nome.rpartition(".")
     if punto and estensione.lower() in _FORMATI_ESTENSIONE:
         nome = base
-    return _etichetta(" ".join(nome.split())[:MAX_ETICHETTA])
+    return _etichetta(nome)
 
 
 def _formato_dichiarato(valore: Any) -> str | None:
@@ -341,18 +356,25 @@ def calcola_allegati(
             "url": url_ok, "etichetta": etichetta, "tipo": tipo,
             "formato": _formato(url_ok, content_type, formato),
         }
-    # Etichette sempre distinte nella scheda: una ripetuta (del catalogo o
-    # di ripiego) prende il primo «(n)» libero, contando anche quelle già
-    # numerate.
-    usate: set[str] = set()
+    # Etichette sempre distinte nella scheda, in due passate: prima ogni
+    # etichetta distinta resta alla sua prima voce (così un'etichetta reale
+    # come «scarica (2)» non viene mai rinumerata), poi ogni ripetuta (del
+    # catalogo o di ripiego) prende il primo «(n)» libero.
+    etichette = [
+        voce["etichetta"] or _nome_file(voce["url"]) or ETICHETTA_RIPIEGO
+        for voce in visti.values()
+    ]
+    usate = set(etichette)
+    prime: set[str] = set()
     allegati: list[AllegatoScheda] = []
-    for voce in visti.values():
-        etichetta = voce["etichetta"] or _nome_file(voce["url"]) or ETICHETTA_RIPIEGO
-        if etichetta in usate:
+    for voce, etichetta in zip(visti.values(), etichette, strict=True):
+        if etichetta in prime:
             n = 2
             while f"{etichetta} ({n})" in usate:
                 n += 1
             etichetta = f"{etichetta} ({n})"
-        usate.add(etichetta)
+            usate.add(etichetta)
+        else:
+            prime.add(etichetta)
         allegati.append(AllegatoScheda(**{**voce, "etichetta": etichetta}))
     return allegati

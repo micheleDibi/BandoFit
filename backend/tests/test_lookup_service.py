@@ -18,6 +18,7 @@ from app.schemas.company import CompanyIn
 from app.schemas.preferences import PreferencesPayload
 from app.services import company_service, openapi_service, preferences_service
 from app.services import lookup_service as ls
+from app.services.postgrest_errori import errore_di_contratto
 from tests.test_company_service import VALID
 from tests.test_openapi_service import PIVA, USER, FakePrimary, fake_openapi
 
@@ -86,14 +87,21 @@ class TestCache:
 
 
 class TestErroreDiContratto:
+    # La classificazione sta in `postgrest_errori`, comune a lookup e bandi salvati.
     @pytest.mark.parametrize("codice", ["42703", "42501", "PGRST205", "PGRST200"])
     async def test_riconosciuto(self, codice):
-        assert ls.errore_di_contratto(errore(codice)) is True
+        assert errore_di_contratto(errore(codice)) is True
 
     @pytest.mark.parametrize("guasto", [errore("57014"), errore("PGRST000"), errore("PGRST103"),
                                         httpx.ReadTimeout("t"), RuntimeError("x")])
     async def test_guasti_veri_esclusi(self, guasto):
-        assert ls.errore_di_contratto(guasto) is False
+        assert errore_di_contratto(guasto) is False
+
+    def test_stessa_funzione_per_lookup_e_bandi_salvati(self):
+        from app.services import saved_bandi_service
+
+        assert ls.errore_di_contratto is errore_di_contratto
+        assert saved_bandi_service.errore_di_contratto is errore_di_contratto
 
     @pytest.mark.parametrize("codice", ["42703", "42501", "PGRST205"])
     async def test_cache_scaduta_servita_e_nuovo_tentativo_rinviato(self, monkeypatch, caplog,
@@ -175,6 +183,27 @@ class TestErroreDiContratto:
         secondary.guasto = None
         await ls.get_lookups(secondary)
         assert ls.in_degrado() is False
+
+
+class TestVuotiInDegrado:
+    """Le liste vuote del degrado si riconoscono: chi calcola i facet
+    dell'azienda li salta invece di produrli parziali."""
+
+    async def test_liste_vuote_del_degrado(self):
+        lookups = await ls.get_lookups(FakeSecondary(guasto=errore("42703")), degrada=True)
+        assert ls.vuoti_in_degrado(lookups) is True
+
+    async def test_in_salute_no(self):
+        assert ls.vuoti_in_degrado(await ls.get_lookups(FakeSecondary())) is False
+
+    async def test_cache_scaduta_servita_no(self, monkeypatch):
+        vecchi = await ls.get_lookups(FakeSecondary())
+        cache_scaduta(monkeypatch, vecchi)
+        lookups = await ls.get_lookups(FakeSecondary(guasto=errore("42501")), degrada=True)
+        assert ls.in_degrado() is True and ls.vuoti_in_degrado(lookups) is False
+
+    def test_liste_vuote_fuori_dal_degrado_no(self):
+        assert ls.vuoti_in_degrado(ls._vuoti()) is False
 
 
 class PrimarioIntoccabile:

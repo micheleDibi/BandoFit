@@ -112,11 +112,15 @@ class TestModalita:
         ({"separazioni_rilevate": 1, "ripristinate": 3, "in_conflitto": 0}, logging.WARNING),
         ({"separazioni_rilevate": 2, "ripristinate": 0, "in_conflitto": 2}, logging.INFO),
         ({"separazioni_rilevate": 1, "ripristinate": 0, "in_conflitto": 0}, logging.INFO),
+        # conflitti resi definitivi (0046): scelte dell'utente, non anomalie
+        ({"separazioni_rilevate": 1, "ripristinate": 0, "in_conflitto": 2,
+          "conflitti_definitivi": 2}, logging.INFO),
         ({}, logging.INFO),  # report di una versione senza le chiavi nuove
     ])
     async def test_riassunto_con_le_separazioni(self, monkeypatch, caplog, separazioni, livello):
         # Righe ripristinate (in prova: da ripristinare) vanno guardate; le
-        # separazioni in attesa della vista e i conflitti no.
+        # separazioni in attesa della vista, i conflitti e i conflitti resi
+        # definitivi no.
         imposta(monkeypatch, RIMAPPATURA_FUSI_MODALITA="attiva")
 
         async def passo(primary, secondary, *, prova):

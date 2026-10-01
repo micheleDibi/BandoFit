@@ -38,8 +38,8 @@ export const Filter = forwardRef<HTMLButtonElement, FilterProps>(
           "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
           "disabled:cursor-not-allowed disabled:text-ink-3",
           attivo
-            ? "border-accent bg-accent-soft text-accent-hover hover:border-accent-hover"
-            : "border-line-control bg-sheet text-ink hover:border-ink-3 hover:bg-desk",
+            ? "border-accent bg-accent-soft text-accent-hover enabled:hover:border-accent-hover"
+            : "border-line-control bg-sheet text-ink enabled:hover:border-ink-3 enabled:hover:bg-desk",
           className,
         )}
         {...props}

@@ -2,6 +2,18 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-10-01 — Rilievi minori: rimappatura a catena, catalogo, partenariati, ritocchi della veste ⚠️ migration 0046
+
+Chiusura dei rilievi minori aperti dalle revisioni del giro 1 del catalogo e della nuova veste.
+- **Rimappatura dei bandi fusi** (migration 0046, sostituisce solo funzioni): il passo orario controlla le separazioni prima di rimappare; il ripristino segue la catena delle fusioni (un doppione fuso in un bando poi fuso in un altro torna al suo posto); un doppione che l'utente aveva risalvato e poi tolto non viene più riportato dal ripristino automatico (il conflitto diventa definitivo). Il riassunto conta anche i conflitti definitivi.
+- **Catalogo non raggiungibile**: elenco, scheda e filtri «per te» non mostrano una compatibilità sottostimata; i facet dell'azienda tornano vuoti e non vanno in cache.
+- **Allegati**: etichette del catalogo senza caratteri di controllo e tagliate a 200 caratteri (più l'eventuale numero di ripetizione); numerazione delle etichette ripetute che non rinumera mai un'etichetta originale.
+- **AI-check**: lo stato del prompt ripiega su quello del bando solo se lo stato effettivo manca. Il testo del prompt cambia per i bandi con etichette degli allegati sporche, lunghe o ripetute (o con stato vuoto): per quei bandi la cache delle estrazioni si rinnova una volta, al primo AI-check dopo il deploy (consuma credito Anthropic).
+- **Partenariati**: URL delle citazioni filtrati anche in ingresso e nelle regole del consorzio (un URL non ammesso diventa vuoto, senza errori); lo scheduler chiude il giro senza errori anche se una pagina andasse oltre la fine (controllo difensivo: con le query attuali il caso non si presenta).
+- **Email**: link di recupero escapato nell'email «Hai già un account»; la ricevuta rimanda ad «Acquisti» dell'abbonamento.
+- **Interfaccia**: bordo blu dei campi anche con il mouse sopra; interruttori e filtri disabilitati senza effetto al passaggio; niente riquadro vuoto nei bilanci; pallini del calendario mobile più contrastati e anello sugli eventi personali; numeri grandi attenuati durante il caricamento; avvisi globali larghi quanto la pagina.
+- **Azione manuale**: applicare la 0046 sul primario (poi `notify pgrst, 'reload schema'`) PRIMA del deploy del backend; senza, il passo della rimappatura registra un errore per ogni doppione separato e non ripristina nulla (rimappa lo stesso). Poi deploy di backend e frontend.
+
 ## 2026-10-01 — Nuova veste «Navy deciso»: colori per area, card, grafici, animazioni
 
 Il redesign uscito in mattinata risultava piatto e con poco colore. Stessa struttura e stesse funzioni; cambia la veste. Unico indirizzo diverso: il link ai bandi adatti della Home aggiunge il filtro dello stato (aperti e in apertura), così il numero mostrato coincide con l'elenco.

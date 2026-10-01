@@ -119,13 +119,16 @@ export function itemChipClasses(item: CalendarItem): string {
   return `${RUOLI[ruolo]} ${HOVER[ruolo]}`;
 }
 
-/** Pallino presentazionale (celle mobile), 8px: pieno nel colore del ruolo,
- *  vuoto per le disponibilità. */
+/** Pallino presentazionale (celle mobile), 8px. Scadenze e appuntamenti pieni
+ *  nell'ink del ruolo: il base del corallo e quello delle consulenze sul
+ *  bianco e sul `desk` stanno sotto il 3:1 dei segni grafici. Personali tenui
+ *  con l'anello `accent` (la forma li distingue dai pieni anche senza colore),
+ *  disponibilità vuote con l'anello `ink-3`. */
 const PALLINI: Record<RuoloCalendario, string> = {
-  personale: "bg-accent",
-  bando: "bg-warm",
+  personale: "bg-accent-soft ring-1 ring-inset ring-accent",
+  bando: "bg-warm-ink",
   slot: "bg-sheet ring-1 ring-inset ring-ink-3",
-  appuntamento: "bg-area-consulenze",
+  appuntamento: "bg-area-consulenze-ink",
 };
 
 export function itemDotClass(item: CalendarItem): string {

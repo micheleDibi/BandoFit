@@ -1,16 +1,19 @@
-import { Pencil, RotateCcw, Send, Trash2, UserPlus } from "lucide-react";
+import { CircleUser, Pencil, RotateCcw, Send, Sparkles, Trash2, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { Alert } from "../components/ui/Alert";
 import { Avatar } from "../components/ui/Avatar";
 import { Button, LinkButton } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { Checkbox } from "../components/ui/Checkbox";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { Dialog } from "../components/ui/Dialog";
 import { SelectField, TextField } from "../components/ui/Field";
 import { InlineError } from "../components/ui/InlineError";
+import { KpiCard } from "../components/ui/KpiCard";
 import { Menu, MenuItem, MenuSeparator } from "../components/ui/Menu";
 import { Page } from "../components/ui/Page";
 import { PageHeader } from "../components/ui/PageHeader";
+import { ProgressRing } from "../components/ui/ProgressRing";
 import { RadioGroup } from "../components/ui/RadioGroup";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
 import { Status } from "../components/ui/Status";
@@ -152,22 +155,25 @@ export default function Collegati() {
     const membro = me?.family?.role === "child";
     return (
       <Page variante="elenco">
-        <PageHeader titolo="Account collegati" />
-        <EmptyState
-          title="Gestione riservata al titolare"
-          description={
-            membro
-              ? "Gli account collegati si gestiscono dall'account titolare della tua Azienda."
-              : "Il tuo piano non prevede account aggiuntivi: passa a un piano superiore per invitarne."
-          }
-          action={
-            membro ? undefined : (
-              <LinkButton to="/app/abbonamento" variant="secondary">
-                Vedi i piani
-              </LinkButton>
-            )
-          }
-        />
+        <PageHeader titolo="Account collegati" area="account" />
+        <Card>
+          <EmptyState
+            title="Gestione riservata al titolare"
+            area="account"
+            description={
+              membro
+                ? "Gli account collegati si gestiscono dall'account titolare della tua Azienda."
+                : "Il tuo piano non prevede account aggiuntivi: passa a un piano superiore per invitarne."
+            }
+            action={
+              membro ? undefined : (
+                <LinkButton to="/app/abbonamento" variant="secondary">
+                  Vedi i piani
+                </LinkButton>
+              )
+            }
+          />
+        </Card>
       </Page>
     );
   }
@@ -175,6 +181,8 @@ export default function Collegati() {
   const data = family.data;
   const slotsFree = !!data && data.used < data.limit;
   const poolResiduo = entitlements.data?.ai_checks.residuo ?? null;
+  // Come l'indicatore della Home: senza AI-check nel piano (né add-on) si dice.
+  const aiCheckNelPiano = (entitlements.data?.ai_checks.effettivo ?? 0) > 0;
   // Overbooking (permesso per scelta: lo scalo è al consumo): la somma dei
   // tetti assegnati supera il residuo del pool: avviso, non blocco.
   const attivi = (data?.members ?? []).filter((m) => m.status === "active");
@@ -186,6 +194,7 @@ export default function Collegati() {
     poolResiduo !== null &&
     attivi.some((m) => m.ai_check_budget !== null) &&
     sommaBudget > poolResiduo;
+  const inAttesa = (data?.members ?? []).filter((m) => m.status === "pending").length;
 
   const apriInvito = () => {
     setActionError(null);
@@ -304,10 +313,11 @@ export default function Collegati() {
       <div className="flex flex-col">
         <PageHeader
           titolo="Account collegati"
+          area="account"
           descrizione={
             data ? (
               <>
-                <span className="font-semibold tabular-nums text-ink">
+                <span className="font-semibold tabular-nums text-white">
                   {data.used} di {data.limit}
                 </span>{" "}
                 account usati (incluso il tuo).
@@ -317,7 +327,7 @@ export default function Collegati() {
             )
           }
           azioni={
-            <Button type="button" onClick={apriInvito} disabled={!slotsFree}>
+            <Button type="button" variant="inverse" onClick={apriInvito} disabled={!slotsFree}>
               <UserPlus className="size-4" aria-hidden />
               Invita un account
             </Button>
@@ -353,6 +363,51 @@ export default function Collegati() {
         )}
       </div>
 
+      {/* Indicatori: solo i numeri già in pagina (posti, inviti, AI-check del piano). */}
+      {data && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <KpiCard
+            etichetta="Account usati"
+            valore={data.used}
+            nota={`su ${data.limit}, incluso il tuo`}
+            className="relative pr-28"
+          >
+            <ProgressRing
+              value={data.used}
+              max={data.limit}
+              size={72}
+              tono="account"
+              label={`Account usati: ${data.used} su ${data.limit}`}
+              className="absolute top-1/2 right-5 -translate-y-1/2"
+            >
+              <CircleUser className="size-6 text-area-account-ink" aria-hidden />
+            </ProgressRing>
+          </KpiCard>
+          {inAttesa > 0 && (
+            <KpiCard
+              etichetta="Inviti in attesa"
+              valore={inAttesa}
+              nota="Occupano già un posto"
+              icon={Send}
+              area="account"
+            />
+          )}
+          {poolResiduo !== null && (
+            <KpiCard
+              etichetta="AI-check disponibili"
+              valore={aiCheckNelPiano ? poolResiduo : 0}
+              nota={
+                aiCheckNelPiano
+                  ? "Ancora da usare quest'anno, per tutti gli account"
+                  : "Non inclusi nel piano"
+              }
+              icon={Sparkles}
+              area="aicheck"
+            />
+          )}
+        </div>
+      )}
+
       {family.isPending ? (
         <div className="flex flex-col gap-3" aria-hidden>
           <Skeleton className="h-10 w-full" />
@@ -362,140 +417,149 @@ export default function Collegati() {
       ) : family.isError ? (
         <ErrorState message={apiErrorMessage(family.error)} onRetry={() => family.refetch()} />
       ) : (data?.members.length ?? 0) === 0 ? (
-        <EmptyState
-          title="Nessun account collegato"
-          description="Invita le persone che lavorano con te: useranno il tuo stesso abbonamento, sulle aziende che decidi tu."
-          action={
-            <Button type="button" variant="secondary" onClick={apriInvito} disabled={!slotsFree}>
-              <UserPlus className="size-4" aria-hidden />
-              Invita un account
-            </Button>
-          }
-        />
+        <Card>
+          <EmptyState
+            title="Nessun account collegato"
+            icon={UserPlus}
+            area="account"
+            description="Invita le persone che lavorano con te: useranno il tuo stesso abbonamento, sulle aziende che decidi tu."
+            action={
+              <Button type="button" variant="secondary" onClick={apriInvito} disabled={!slotsFree}>
+                <UserPlus className="size-4" aria-hidden />
+                Invita un account
+              </Button>
+            }
+          />
+        </Card>
       ) : (
-        <Table className="min-w-[760px]">
-          <caption className="sr-only">
-            Account collegati: stato, azienda, visibilità, budget AI-check e azioni
-          </caption>
-          <thead>
-            <tr>
-              <Th>Account</Th>
-              <Th>Stato</Th>
-              <Th>Azienda</Th>
-              {multiAziende && <Th>Visibilità</Th>}
-              <Th>AI-check</Th>
-              <Th>Invitato il</Th>
-              <Th>
-                <span className="sr-only">Azioni</span>
-              </Th>
-            </tr>
-          </thead>
-          <tbody>
-            {data?.members.map((member) => {
-              const nomiVisibili = aziende
-                .filter((a) => member.aziende_visibili.includes(a.id))
-                .map((a) => a.ragione_sociale)
-                .join(", ");
-              return (
-                <tr key={member.id}>
-                  <Td>
-                    <div className="flex items-center gap-3">
-                      {/* Il nome è già scritto accanto: l'avatar non si annuncia. */}
-                      <span aria-hidden className="flex">
-                        <Avatar nome={member.denominazione || member.email} />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="truncate font-semibold text-ink">{member.denominazione}</p>
-                        <p className="truncate text-small text-ink-2">{member.email}</p>
-                      </div>
-                    </div>
-                  </Td>
-                  <Td>
-                    <MemberStatus status={member.status} />
-                  </Td>
-                  <Td>
-                    {member.company_nome ? (
-                      <span className="block text-ink">
-                        {member.company_nome}
-                      </span>
-                    ) : (
-                      <span className="text-ink-3">—</span>
-                    )}
-                  </Td>
-                  {multiAziende && (
+        <Card className="overflow-hidden p-0">
+          <Table
+            className="min-w-[760px] [&_tbody_tr:last-child_td]:border-b-0"
+            classNameContenitore="px-2"
+          >
+            <caption className="sr-only">
+              Account collegati: stato, azienda, visibilità, budget AI-check e azioni
+            </caption>
+            <thead>
+              <tr>
+                <Th>Account</Th>
+                <Th>Stato</Th>
+                <Th>Azienda</Th>
+                {multiAziende && <Th>Visibilità</Th>}
+                <Th>AI-check</Th>
+                <Th>Invitato il</Th>
+                <Th>
+                  <span className="sr-only">Azioni</span>
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {data?.members.map((member) => {
+                const nomiVisibili = aziende
+                  .filter((a) => member.aziende_visibili.includes(a.id))
+                  .map((a) => a.ragione_sociale)
+                  .join(", ");
+                return (
+                  <tr key={member.id}>
                     <Td>
-                      <span className="block tabular-nums text-ink">
-                        {member.aziende_visibili.length}{" "}
-                        {member.aziende_visibili.length === 1 ? "azienda" : "aziende"}
-                      </span>
-                      {nomiVisibili && (
-                        <span className="block text-small text-ink-3">
-                          {nomiVisibili}
+                      <div className="flex items-center gap-3">
+                        {/* Il nome è già scritto accanto: l'avatar non si annuncia. */}
+                        <span aria-hidden className="flex">
+                          <Avatar nome={member.denominazione || member.email} />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-ink">{member.denominazione}</p>
+                          <p className="truncate text-small text-ink-2">{member.email}</p>
+                        </div>
+                      </div>
+                    </Td>
+                    <Td>
+                      <MemberStatus status={member.status} />
+                    </Td>
+                    <Td>
+                      {member.company_nome ? (
+                        <span className="block text-ink">
+                          {member.company_nome}
+                        </span>
+                      ) : (
+                        <span className="text-ink-3">—</span>
+                      )}
+                    </Td>
+                    {multiAziende && (
+                      <Td>
+                        <span className="block tabular-nums text-ink">
+                          {member.aziende_visibili.length}{" "}
+                          {member.aziende_visibili.length === 1 ? "azienda" : "aziende"}
+                        </span>
+                        {nomiVisibili && (
+                          <span className="block text-small text-ink-3">
+                            {nomiVisibili}
+                          </span>
+                        )}
+                      </Td>
+                    )}
+                    <Td>
+                      {member.ai_check_budget === null ? (
+                        <span className="text-ink">Senza limite</span>
+                      ) : member.ai_check_budget === 0 ? (
+                        <span className="text-ink-3">Nessuno</span>
+                      ) : (
+                        <span className="tabular-nums text-ink">
+                          {member.ai_check_usati} di {member.ai_check_budget} usati
                         </span>
                       )}
                     </Td>
-                  )}
-                  <Td>
-                    {member.ai_check_budget === null ? (
-                      <span className="text-ink">Senza limite</span>
-                    ) : member.ai_check_budget === 0 ? (
-                      <span className="text-ink-3">Nessuno</span>
-                    ) : (
-                      <span className="tabular-nums text-ink">
-                        {member.ai_check_usati} di {member.ai_check_budget} usati
-                      </span>
-                    )}
-                  </Td>
-                  <Td className="tabular-nums text-ink-2">{formatDate(member.invited_at)}</Td>
-                  <Td className="py-2.5 text-right">
-                    <Menu label={`Azioni per ${member.denominazione}`}>
-                      <MenuItem
-                        icon={<Pencil className="size-4" aria-hidden />}
-                        onSelect={() => apriModifica(member)}
-                      >
-                        Modifica…
-                      </MenuItem>
-                      {member.status === "pending" && (
+                    <Td className="tabular-nums text-ink-2">{formatDate(member.invited_at)}</Td>
+                    <Td className="py-2.5 text-right">
+                      <Menu label={`Azioni per ${member.denominazione}`}>
                         <MenuItem
-                          icon={<Send className="size-4" aria-hidden />}
-                          onSelect={() =>
-                            azione(() => resend.mutateAsync(member.id), "Invito reinviato")
-                          }
+                          icon={<Pencil className="size-4" aria-hidden />}
+                          onSelect={() => apriModifica(member)}
                         >
-                          Reinvia invito
+                          Modifica…
                         </MenuItem>
-                      )}
-                      {member.status === "demoted" && (
+                        {member.status === "pending" && (
+                          <MenuItem
+                            icon={<Send className="size-4" aria-hidden />}
+                            onSelect={() =>
+                              azione(() => resend.mutateAsync(member.id), "Invito reinviato")
+                            }
+                          >
+                            Reinvia invito
+                          </MenuItem>
+                        )}
+                        {member.status === "demoted" && (
+                          <MenuItem
+                            icon={<RotateCcw className="size-4" aria-hidden />}
+                            disabled={!slotsFree}
+                            title={!slotsFree ? "Non ci sono posti liberi nel tuo piano" : undefined}
+                            onSelect={() =>
+                              azione(() => reactivate.mutateAsync(member.id), "Account riattivato")
+                            }
+                          >
+                            Riattiva
+                          </MenuItem>
+                        )}
+                        <MenuSeparator />
                         <MenuItem
-                          icon={<RotateCcw className="size-4" aria-hidden />}
-                          disabled={!slotsFree}
-                          title={!slotsFree ? "Non ci sono posti liberi nel tuo piano" : undefined}
-                          onSelect={() =>
-                            azione(() => reactivate.mutateAsync(member.id), "Account riattivato")
-                          }
+                          danger
+                          icon={<Trash2 className="size-4" aria-hidden />}
+                          onSelect={() => {
+                            setActionError(null);
+                            setAvviso(null);
+                            setRemoving(member);
+                          }}
                         >
-                          Riattiva
+                          {member.status === "pending" ? "Revoca invito" : "Rimuovi"}
                         </MenuItem>
-                      )}
-                      <MenuSeparator />
-                      <MenuItem
-                        danger
-                        icon={<Trash2 className="size-4" aria-hidden />}
-                        onSelect={() => {
-                          setActionError(null);
-                          setAvviso(null);
-                          setRemoving(member);
-                        }}
-                      >
-                        {member.status === "pending" ? "Revoca invito" : "Rimuovi"}
-                      </MenuItem>
-                    </Menu>
-                  </Td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </Table>
+                      </Menu>
+                    </Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        </Card>
       )}
 
       {/* ------------------------------------------------------ finestra invito */}

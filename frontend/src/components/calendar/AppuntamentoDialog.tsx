@@ -77,7 +77,7 @@ export function AppuntamentoDialog({
         {appuntamento && (
           <div className="flex flex-col gap-3">
             <p className="inline-flex items-center gap-2 font-medium text-ink">
-              <CalendarClock className="size-4 shrink-0 text-ink-2" aria-hidden />
+              <CalendarClock className="size-4 shrink-0 text-area-consulenze-ink" aria-hidden />
               <span>
                 <span className="capitalize">{formatSlotGiorno(appuntamento.inizio)}</span>
                 {", "}
@@ -86,7 +86,7 @@ export function AppuntamentoDialog({
                 </span>
               </span>
             </p>
-            <div className="flex flex-col gap-0.5 rounded-control bg-desk px-3 py-2.5">
+            <div className="flex flex-col gap-0.5 rounded-control border-l-4 border-l-area-consulenze bg-area-consulenze-soft px-3 py-2.5">
               <p className="font-semibold text-ink">{appuntamento.ragione_sociale ?? "Azienda"}</p>
               <p className="text-ink-2">{appuntamento.bando_titolo}</p>
               {appuntamento.email && (

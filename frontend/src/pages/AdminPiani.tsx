@@ -2,6 +2,7 @@ import { Plus } from "lucide-react";
 import { useId, useState, type FormEvent } from "react";
 import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { Checkbox } from "../components/ui/Checkbox";
 import { Dialog } from "../components/ui/Dialog";
 import { inputClasses, SelectField, TextareaField, TextField } from "../components/ui/Field";
@@ -424,30 +425,32 @@ function PlanEditor({ plan }: { plan: Plan }) {
   // Un piano per sezione: titolo con il filetto e lo stato in parole; il
   // pulsante pieno della pagina è «Nuovo piano», qui «Salva» è secondario.
   return (
-    <Section aria-labelledby={idTitolo}>
-      <SectionHeader
-        id={idTitolo}
-        titolo={plan.nome}
-        azione={
-          form.is_active ? (
-            <Status tono="aperto">Attivo</Status>
-          ) : (
-            <Status tono="chiuso">Disattivato</Status>
-          )
-        }
-      />
-      <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-        <PlanFormFields form={form} setForm={setForm} />
-        <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" variant="secondary" loading={updatePlan.isPending}>
-            Salva piano
-          </Button>
-          {(validationError || updatePlan.isError) && (
-            <InlineError>{validationError ?? apiErrorMessage(updatePlan.error)}</InlineError>
-          )}
-        </div>
-      </form>
-    </Section>
+    <Card className="sm:p-6">
+      <Section aria-labelledby={idTitolo}>
+        <SectionHeader
+          id={idTitolo}
+          titolo={plan.nome}
+          azione={
+            form.is_active ? (
+              <Status tono="aperto">Attivo</Status>
+            ) : (
+              <Status tono="chiuso">Disattivato</Status>
+            )
+          }
+        />
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+          <PlanFormFields form={form} setForm={setForm} />
+          <div className="flex flex-wrap items-center gap-3">
+            <Button type="submit" variant="secondary" loading={updatePlan.isPending}>
+              Salva piano
+            </Button>
+            {(validationError || updatePlan.isError) && (
+              <InlineError>{validationError ?? apiErrorMessage(updatePlan.error)}</InlineError>
+            )}
+          </div>
+        </form>
+      </Section>
+    </Card>
   );
 }
 
@@ -477,8 +480,10 @@ export default function AdminPiani() {
       <PageHeader
         titolo="Piani"
         descrizione="Modifica parametri e prezzi dei piani. I piani non si eliminano: si disattivano."
+        area="admin"
         azioni={
           <Button
+            variant="inverse"
             onClick={() => {
               setCreateError(null);
               setNewForm(EMPTY_FORM);
@@ -494,13 +499,13 @@ export default function AdminPiani() {
       {isPending ? (
         <div className="flex flex-col gap-6" aria-hidden>
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-72 w-full" />
+            <Skeleton key={i} className="h-72 w-full rounded-panel" />
           ))}
         </div>
       ) : isError ? (
         <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
       ) : (
-        <div className="flex flex-col gap-12">
+        <div className="flex flex-col gap-6">
           {(plans ?? []).map((plan) => (
             <PlanEditor key={plan.id} plan={plan} />
           ))}

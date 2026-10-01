@@ -294,7 +294,7 @@ export function Popover({
             onKeyDown={onPanelKeyDown}
             style={stile}
             className={cn(
-              "z-50 min-w-56 overflow-auto rounded-panel border border-line bg-sheet p-1.5 text-body text-ink shadow-overlay outline-none",
+              "z-50 min-w-56 overflow-auto rounded-panel border border-line bg-sheet p-1.5 text-body text-ink shadow-overlay outline-none motion-safe:animate-entrata",
               className,
             )}
           >

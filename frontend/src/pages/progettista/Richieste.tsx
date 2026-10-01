@@ -1,9 +1,11 @@
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, Inbox } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ConsulenzaStatoBadge, PropostaStatoBadge } from "../Consulenze";
 import { AiEsitoBadge } from "../../components/bandi/badges";
 import { inizioAppuntamento } from "../../components/consulenze/formato";
 import { Badge } from "../../components/ui/Badge";
+import { Card } from "../../components/ui/Card";
+import { LINK_ESTESO } from "../../components/shared/linkEsteso";
 import { Page } from "../../components/ui/Page";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Section, SectionHeader } from "../../components/ui/SectionHeader";
@@ -26,75 +28,84 @@ export function titoloRichiesta(richiesta: RichiestaPool): string {
 
 /** Etichetta «Call di partenariato». */
 export function BadgeDaCall() {
-  return <Badge>Call di partenariato</Badge>;
+  return <Badge area="partenariati">Call di partenariato</Badge>;
 }
 
-/** Riga della richiesta: il titolo è il link al dettaglio; un solo stato
+/** Card della richiesta (tutta cliccabile, bordo dell'area consulenze): il
+ *  titolo è il link al dettaglio; un solo stato
  *  (della consulenza se è assegnata a chi guarda, altrimenti della sua
  *  proposta); a destra esito e punteggio dell'AI-check e l'appuntamento. */
 function RigaRichiesta({ richiesta }: { richiesta: RichiestaPool }) {
   const conAiCheck = !!richiesta.esito || richiesta.punteggio !== null;
   return (
-    <li className="flex flex-col gap-2 border-b border-line px-2 py-4 md:flex-row md:items-start md:gap-6">
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <Link
-          to={`/app/progettista/richieste/${richiesta.id}`}
-          className="self-start rounded-mark text-row-title text-ink hover:text-accent-hover"
-        >
-          {titoloRichiesta(richiesta)}
-        </Link>
-        <p className="text-body text-ink-2">{richiesta.bando_titolo}</p>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-ink-2">
-          {richiesta.assegnata_a_me ? (
-            <ConsulenzaStatoBadge stato={richiesta.stato} />
-          ) : richiesta.mia_proposta_stato ? (
-            <PropostaStatoBadge stato={richiesta.mia_proposta_stato} prefisso="Proposta" />
-          ) : null}
-          {richiesta.partita_iva && (
-            <span className="tabular-nums">P.IVA {richiesta.partita_iva}</span>
-          )}
-          <span>Richiesta del {formatDate(richiesta.created_at)}</span>
-          {richiesta.da_call && <BadgeDaCall />}
+    <li>
+      <Card
+        interattiva
+        area="consulenze"
+        className="relative flex flex-col gap-2 md:flex-row md:items-start md:gap-6"
+      >
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <Link
+            to={`/app/progettista/richieste/${richiesta.id}`}
+            className={`self-start rounded-mark text-row-title text-ink hover:text-accent-hover ${LINK_ESTESO}`}
+          >
+            {titoloRichiesta(richiesta)}
+          </Link>
+          <p className="text-body text-ink-2">{richiesta.bando_titolo}</p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-ink-2">
+            {richiesta.assegnata_a_me ? (
+              <ConsulenzaStatoBadge stato={richiesta.stato} />
+            ) : richiesta.mia_proposta_stato ? (
+              <PropostaStatoBadge stato={richiesta.mia_proposta_stato} prefisso="Proposta" />
+            ) : null}
+            {richiesta.partita_iva && (
+              <span className="tabular-nums">P.IVA {richiesta.partita_iva}</span>
+            )}
+            <span>Richiesta del {formatDate(richiesta.created_at)}</span>
+            {richiesta.da_call && <BadgeDaCall />}
+          </div>
         </div>
-      </div>
 
-      {(conAiCheck || richiesta.appuntamento) && (
-        <div className="flex shrink-0 flex-col gap-1.5 text-small md:w-64 md:items-end md:text-right">
-          {conAiCheck && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 md:justify-end">
-              {richiesta.esito && <AiEsitoBadge esito={richiesta.esito} />}
-              {richiesta.punteggio !== null && (
-                <span className="text-figure-sm text-ink">
-                  <span className="sr-only">Punteggio dell'AI-check: </span>
-                  {richiesta.punteggio}
-                  <span className="font-sans text-small font-normal text-ink-3">/100</span>
-                </span>
-              )}
-            </div>
-          )}
-          {richiesta.appuntamento && (
-            <span className="inline-flex items-center gap-1.5 text-ink tabular-nums">
-              <CalendarClock className="size-4 shrink-0 text-ink-3" aria-hidden />
-              <time dateTime={richiesta.appuntamento.inizio}>
-                {inizioAppuntamento(richiesta.appuntamento.inizio)}
-              </time>
-            </span>
-          )}
-        </div>
-      )}
+        {(conAiCheck || richiesta.appuntamento) && (
+          <div className="flex shrink-0 flex-col gap-1.5 text-small md:w-64 md:items-end md:text-right">
+            {conAiCheck && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 md:justify-end">
+                {richiesta.esito && <AiEsitoBadge esito={richiesta.esito} />}
+                {richiesta.punteggio !== null && (
+                  <span className="text-figure-sm text-ink">
+                    <span className="sr-only">Punteggio dell'AI-check: </span>
+                    {richiesta.punteggio}
+                    <span className="font-sans text-small font-normal text-ink-3">/100</span>
+                  </span>
+                )}
+              </div>
+            )}
+            {richiesta.appuntamento && (
+              <span className="inline-flex items-center gap-1.5 text-ink tabular-nums">
+                <CalendarClock className="size-4 shrink-0 text-area-consulenze-ink" aria-hidden />
+                <time dateTime={richiesta.appuntamento.inizio}>
+                  {inizioAppuntamento(richiesta.appuntamento.inizio)}
+                </time>
+              </span>
+            )}
+          </div>
+        )}
+      </Card>
     </li>
   );
 }
 
 function RigaSkeleton() {
   return (
-    <li className="flex flex-col gap-2 border-b border-line px-2 py-4" aria-hidden>
-      <Skeleton className="h-5 w-2/5" />
-      <Skeleton className="h-4 w-3/5" />
-      <div className="flex gap-3">
-        <Skeleton className="h-3 w-24" />
-        <Skeleton className="h-3 w-28" />
-      </div>
+    <li aria-hidden>
+      <Card className="flex flex-col gap-2">
+        <Skeleton className="h-5 w-2/5" />
+        <Skeleton className="h-4 w-3/5" />
+        <div className="flex gap-3">
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-3 w-28" />
+        </div>
+      </Card>
     </li>
   );
 }
@@ -108,6 +119,7 @@ export default function Richieste() {
   return (
     <Page variante="elenco">
       <PageHeader
+        area="consulenze"
         titolo="Richieste di consulenza"
         descrizione={`${
           partenariatiAttivo
@@ -117,7 +129,7 @@ export default function Richieste() {
       />
 
       {isPending ? (
-        <ul className="flex flex-col border-t border-line">
+        <ul className="flex flex-col gap-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <RigaSkeleton key={i} />
           ))}
@@ -133,7 +145,7 @@ export default function Richieste() {
           {data && data.assegnate.length > 0 && (
             <Section aria-label="Consulenze assegnate a te">
               <SectionHeader titolo="Assegnate a te" />
-              <ul className="flex flex-col">
+              <ul className="flex flex-col gap-3">
                 {data.assegnate.map((r) => (
                   <RigaRichiesta key={r.id} richiesta={r} />
                 ))}
@@ -145,11 +157,13 @@ export default function Richieste() {
             <SectionHeader titolo="Richieste aperte" />
             {!data || data.aperte.length === 0 ? (
               <EmptyState
+                icon={Inbox}
+                area="consulenze"
                 title="Nessuna richiesta aperta"
                 description="Quando un'azienda chiederà una consulenza la troverai qui (e riceverai una notifica)."
               />
             ) : (
-              <ul className="flex flex-col">
+              <ul className="flex flex-col gap-3">
                 {data.aperte.map((r) => (
                   <RigaRichiesta key={r.id} richiesta={r} />
                 ))}

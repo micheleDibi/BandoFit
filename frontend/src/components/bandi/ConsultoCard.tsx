@@ -1,3 +1,4 @@
+import { MessageSquare } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAddons } from "../../hooks/useAddons";
@@ -9,6 +10,7 @@ import { CONSULTO_ADDON_SLUG } from "../../lib/consulenza";
 import { CONSULENZE_COPY } from "../../lib/copy";
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { IconChip } from "../ui/IconChip";
 import { InlineError } from "../ui/InlineError";
 import { TextLink } from "../ui/TextLink";
 
@@ -77,7 +79,10 @@ export function ConsultoCard({ slug }: { slug: string }) {
   return (
     // Il filetto è qui e non nel pannello: il blocco spesso non c'è.
     <div className="flex flex-col gap-2 border-t border-line pt-3">
-      <h4 className="font-sans text-title-group text-ink">Consulenza</h4>
+      <h4 className="flex items-center gap-2.5 font-sans text-title-group text-ink">
+        <IconChip icon={MessageSquare} area="consulenze" size="sm" />
+        Consulenza
+      </h4>
       {esistente ? (
         <>
           <p className="text-body text-ink-2">

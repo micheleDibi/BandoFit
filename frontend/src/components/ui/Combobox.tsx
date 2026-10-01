@@ -132,7 +132,8 @@ export function Combobox({
           className={cn(
             inputClasses,
             "pr-16",
-            error && "border-danger focus:border-danger focus-visible:outline-danger",
+            error &&
+              "border-danger enabled:hover:border-danger focus:border-danger focus-visible:outline-danger focus-visible:ring-danger/15",
           )}
         />
         <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5">

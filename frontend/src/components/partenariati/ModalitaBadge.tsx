@@ -6,7 +6,7 @@ const TONI: Record<ModalitaPartenariato, TonoStatus> = {
   obbligatorio: "aperto",
   ammesso: "aperto",
   non_ammesso: "chiuso",
-  non_determinabile: "in-apertura",
+  non_determinabile: "attenzione",
 };
 
 /** Modalità di partecipazione del bando, sempre in parole con il punto di

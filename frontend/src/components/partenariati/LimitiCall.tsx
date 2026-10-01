@@ -2,6 +2,7 @@ import { useEntitlements } from "../../hooks/useEntitlements";
 import { CALL_COPY } from "../../lib/copy";
 import type { PartenariatiLimite } from "../../types";
 import { Alert } from "../ui/Alert";
+import { ProgressRing } from "../ui/ProgressRing";
 import { TextLink } from "../ui/TextLink";
 
 /** Limite delle call attive dal piano (`/me/entitlements.partenariati`), con
@@ -47,15 +48,33 @@ export function AvvisoLimiteCall({
   );
 }
 
-/** Riga di riepilogo «Call attive: 1 di 3». */
+/** Riga di riepilogo «Call attive: 1 di 3», con l'anello dell'uso quando il
+ *  piano ha un limite (il numero sta scritto anche in parole accanto). */
 export function RiepilogoLimiteCall({ limite }: { limite: PartenariatiLimite | null }) {
   if (!limite || limite.limite === 0) return null;
+  const massimo = limite.limite;
   return (
-    <p className="text-small text-ink-2 tabular-nums">
-      {CALL_COPY.limiteCall(limite.usate, limite.limite)}
-      <span className="block text-ink-3">
-        Contano le call pubblicate di tutte le tue aziende; le bozze no.
-      </span>
-    </p>
+    <div className="flex items-center gap-3">
+      {massimo !== null && (
+        // Decorativo: la frase accanto dice già «N di M».
+        <span aria-hidden className="flex shrink-0">
+          <ProgressRing
+            value={limite.usate}
+            max={massimo}
+            size={44}
+            tono={limite.residuo !== null && limite.residuo <= 0 ? "warm" : "partenariati"}
+            label={CALL_COPY.limiteCall(limite.usate, massimo)}
+          >
+            {limite.usate}
+          </ProgressRing>
+        </span>
+      )}
+      <p className="text-small text-ink-2 tabular-nums">
+        {CALL_COPY.limiteCall(limite.usate, limite.limite)}
+        <span className="block text-ink-3">
+          Contano le call pubblicate di tutte le tue aziende; le bozze no.
+        </span>
+      </p>
+    </div>
   );
 }

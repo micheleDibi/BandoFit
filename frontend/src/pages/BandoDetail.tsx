@@ -1,10 +1,20 @@
 import axios from "axios";
-import { CalendarCheck, CalendarPlus, FileText } from "lucide-react";
+import {
+  CalendarCheck,
+  CalendarClock,
+  CalendarPlus,
+  Coins,
+  FileText,
+  FolderOpen,
+  HandCoins,
+  ListChecks,
+  Sparkles,
+} from "lucide-react";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { AiCheckCard } from "../components/bandi/AiCheckCard";
 import { AiCheckReport } from "../components/bandi/AiCheckReport";
-import { BandoTestata } from "../components/bandi/BandoTestata";
+import { BandoTestata, type FattoTestata } from "../components/bandi/BandoTestata";
 import { CompatibilitaCard } from "../components/bandi/CompatibilitaCard";
 import { ConsultoCard } from "../components/bandi/ConsultoCard";
 import { ContenutoRenderer } from "../components/bandi/ContenutoRenderer";
@@ -15,9 +25,10 @@ import { PartenariatoCard } from "../components/partenariati/PartenariatoCard";
 import { PartenariatoSection } from "../components/partenariati/PartenariatoSection";
 import { Badge } from "../components/ui/Badge";
 import { Button, LinkButton } from "../components/ui/Button";
-import { tempoRelativo } from "../components/ui/Due";
-import type { Fatto } from "../components/ui/Facts";
+import { Card } from "../components/ui/Card";
+import { statoScadenza, tempoRelativo, type StatoScadenza } from "../components/ui/Due";
 import { Fit } from "../components/ui/Fit";
+import { IconChip } from "../components/ui/IconChip";
 import { InlineError } from "../components/ui/InlineError";
 import { Page } from "../components/ui/Page";
 import { Panel } from "../components/ui/Panel";
@@ -32,6 +43,14 @@ import { apiErrorCode, apiErrorMessage } from "../lib/api";
 import { formatEur } from "../lib/format";
 
 const INDIETRO = { label: "Bandi", to: "/app/bandi" };
+
+/** Colore del tempo relativo della scadenza, come nella tessera di `Due`. */
+const coloreRelativo: Record<StatoScadenza, string> = {
+  passata: "text-ink-3",
+  urgente: "font-semibold text-warm-ink",
+  vicina: "font-semibold text-warning-ink",
+  lontana: "text-ink-3",
+};
 
 export default function BandoDetail() {
   const { slug } = useParams<{ slug: string }>();
@@ -50,22 +69,23 @@ export default function BandoDetail() {
         variante="dettaglio"
         intestazione={
           <div className="flex flex-col gap-4" aria-hidden>
-            <Skeleton className="h-4 w-16" />
-            <Skeleton className="h-5 w-40" />
-            <Skeleton className="h-9 w-3/4" />
-            <Skeleton className="h-4 w-40" />
-            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-44 w-full rounded-panel" />
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-20 w-full rounded-panel" />
+              ))}
+            </div>
           </div>
         }
-        laterale={<Skeleton className="h-64 w-full" />}
+        laterale={<Skeleton className="h-64 w-full rounded-panel" />}
       >
-        <div className="flex flex-col gap-3" aria-hidden>
+        <Card className="flex flex-col gap-3 p-6 sm:p-8" aria-hidden>
           <Skeleton className="h-5 w-full" />
           <Skeleton className="h-5 w-11/12" />
           <Skeleton className="h-5 w-4/5" />
           <Skeleton className="mt-4 h-5 w-full" />
           <Skeleton className="h-5 w-2/3" />
-        </div>
+        </Card>
       </Page>
     );
   }
@@ -87,12 +107,14 @@ export default function BandoDetail() {
           <EmptyState
             title="Questo bando non è più disponibile."
             description="L'ente che lo aveva pubblicato lo ha ritirato: puoi cercarne altri nell'elenco."
+            area="bandi"
             action={tornaAiBandi}
           />
         ) : nonTrovato ? (
           <EmptyState
             title="Bando non trovato."
             description="L'indirizzo non corrisponde a nessun bando del catalogo."
+            area="bandi"
             action={tornaAiBandi}
           />
         ) : (
@@ -119,35 +141,53 @@ export default function BandoDetail() {
   const fonte =
     bando.link_fonte && bando.link_fonte.url !== cta?.url ? bando.link_fonte : null;
 
-  // Solo i fatti con un dato reale: niente «—».
-  const fatti: Fatto[] = [];
+  // Solo i fatti con un dato reale: niente «—». Ognuno in una piccola card con
+  // l'icona colorata: la scadenza nel corallo delle scadenze, il resto nel blu
+  // dell'area bandi.
+  const fatti: FattoTestata[] = [];
   if (bando.data_scadenza) {
+    const urgenza = statoScadenza(bando.data_scadenza);
     fatti.push({
       etichetta: "Scadenza",
       valore: dataConOra(bando.data_scadenza, bando.ora_scadenza),
-      nota: inCorso ? tempoRelativo(bando.data_scadenza) : undefined,
+      nota: inCorso ? (
+        <span className={urgenza ? coloreRelativo[urgenza] : undefined}>
+          {tempoRelativo(bando.data_scadenza)}
+        </span>
+      ) : undefined,
+      icon: CalendarClock,
+      area: "scadenze",
     });
   }
   if (bando.importo_totale_eur !== null) {
-    fatti.push({ etichetta: "Dotazione", valore: formatEur(bando.importo_totale_eur) });
+    fatti.push({
+      etichetta: "Dotazione",
+      valore: formatEur(bando.importo_totale_eur),
+      icon: Coins,
+      area: "bandi",
+    });
   }
   if (bando.importo_max_per_progetto_eur !== null) {
     fatti.push({
       etichetta: "Contributo massimo",
       valore: formatEur(bando.importo_max_per_progetto_eur),
+      icon: HandCoins,
+      area: "bandi",
     });
   }
   if (bando.data_apertura) {
     fatti.push({
       etichetta: "Apertura",
       valore: dataConOra(bando.data_apertura, bando.ora_apertura),
+      icon: CalendarPlus,
+      area: "bandi",
     });
   }
 
   // «Aggiungi la scadenza al calendario»: solo a bando in corso, con una data.
   const azioneCalendario =
     bando.data_scadenza && inCorso ? (
-      <div className="flex flex-col items-start gap-1 sm:items-end">
+      <div className="flex flex-col items-end gap-1">
         {addDeadline.isSuccess ? (
           <LinkButton
             to={`/app/calendario?m=${bando.data_scadenza.slice(0, 7)}`}
@@ -178,6 +218,8 @@ export default function BandoDetail() {
       {/* Su mobile il pannello sta sopra il testo (tavola MobileBando). */}
       <Panel
         titolo="Fa per te?"
+        icon={ListChecks}
+        area="bandi"
         azione={
           bando.compatibilita && (
             <Fit soddisfatti={bando.compatibilita.matched} totale={bando.compatibilita.totale} />
@@ -193,7 +235,7 @@ export default function BandoDetail() {
       </Panel>
 
       {(fonte || bando.allegati.length > 0) && (
-        <Panel titolo="Documenti" className="lg:order-last">
+        <Panel titolo="Documenti" icon={FolderOpen} area="bandi" className="lg:order-last">
           <ul className="flex flex-col">
             {fonte && (
               <li className="border-b border-line py-2.5 last:border-b-0">
@@ -251,7 +293,7 @@ export default function BandoDetail() {
           notaSenzaCta={
             inCorso ? undefined : "Il bando non è aperto: la candidatura non è disponibile."
           }
-          azioni={<SaveBandoButton bando={{ id: bando.id, slug: bando.slug }} variant="inline" />}
+          azioni={<SaveBandoButton bando={{ id: bando.id, slug: bando.slug }} variant="fascia" />}
           fatti={fatti}
           azioneFatti={azioneCalendario}
         />
@@ -259,10 +301,20 @@ export default function BandoDetail() {
       laterale={laterale}
       sotto={
         <>
-          <Section id="ai-check-report" aria-label="Report AI-check" className="scroll-mt-16 pt-6">
-            <SectionHeader titolo="Report AI-check" />
-            <AiCheckReport slug={bando.slug} />
-          </Section>
+          <Card className="p-6 sm:p-8">
+            <Section id="ai-check-report" aria-label="Report AI-check" className="scroll-mt-16">
+              <SectionHeader
+                className="items-center"
+                titolo={
+                  <span className="flex items-center gap-3">
+                    <IconChip icon={Sparkles} area="aicheck" size="sm" />
+                    Report AI-check
+                  </span>
+                }
+              />
+              <AiCheckReport slug={bando.slug} />
+            </Section>
+          </Card>
           {/* key=slug: guardia dell'avvio automatico ed errori ripartono per bando. */}
           <PartenariatoSection
             key={bando.slug}
@@ -273,28 +325,32 @@ export default function BandoDetail() {
         </>
       }
     >
-      <article className="flex max-w-lettura flex-col gap-4">
-        {bando.descrizione_breve && (
-          <p className="text-prose font-semibold text-ink">{bando.descrizione_breve}</p>
-        )}
-        {bando.contenuto?.sections?.length ? (
-          <ContenutoRenderer sections={bando.contenuto.sections} />
-        ) : (
-          <p className="text-body text-ink-2">
-            {cta || fonte
-              ? "La scheda dettagliata non è ancora disponibile: consulta il bando ufficiale."
-              : "La scheda dettagliata non è ancora disponibile."}
-          </p>
-        )}
-        {bando.tematica.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 pt-2">
-            <span className="text-small text-ink-3">Temi</span>
-            {bando.tematica.map((t) => (
-              <Badge key={t}>{t}</Badge>
-            ))}
-          </div>
-        )}
-      </article>
+      <Card className="p-6 sm:p-8">
+        <article className="flex max-w-lettura flex-col gap-4">
+          {bando.descrizione_breve && (
+            <p className="text-prose font-semibold text-ink">{bando.descrizione_breve}</p>
+          )}
+          {bando.contenuto?.sections?.length ? (
+            <ContenutoRenderer sections={bando.contenuto.sections} />
+          ) : (
+            <p className="text-body text-ink-2">
+              {cta || fonte
+                ? "La scheda dettagliata non è ancora disponibile: consulta il bando ufficiale."
+                : "La scheda dettagliata non è ancora disponibile."}
+            </p>
+          )}
+          {bando.tematica.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 pt-2">
+              <span className="text-small text-ink-3">Temi</span>
+              {bando.tematica.map((t) => (
+                <Badge key={t} area="bandi">
+                  {t}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </article>
+      </Card>
     </Page>
   );
 }

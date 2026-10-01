@@ -1,8 +1,9 @@
-import { CalendarCheck, CalendarPlus } from "lucide-react";
+import { Bookmark, CalendarCheck, CalendarPlus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { BandoRow, BandoRowSkeleton } from "../components/bandi/BandoRow";
 import { bandoInCorso, statoDelBando } from "../components/bandi/stato";
 import { Button, LinkButton } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { Due } from "../components/ui/Due";
 import { InlineError } from "../components/ui/InlineError";
 import { Page } from "../components/ui/Page";
@@ -25,41 +26,43 @@ import type { SavedBandoItem } from "../types";
 function RigaNonDisponibile({ item }: { item: SavedBandoItem }) {
   const toggle = useToggleSaved();
   return (
-    <li className="flex items-start gap-4 border-b border-line px-2 py-4 md:gap-6">
-      {/* Scheda non disponibile: solo la data, senza conto alla rovescia. */}
-      <Due data={item.bando.data_scadenza} conConto={false} />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <p className="text-row-title text-ink-2">{item.bando.titolo ?? item.bando.slug}</p>
-        <p className="text-body text-ink-2">
-          {item.slug_aggiornato
-            ? "Questo bando è stato unito a un'altra scheda del catalogo. Qui trovi i dati che avevi salvato."
-            : "Al momento non riusciamo a mostrare la scheda aggiornata di questo bando. Qui trovi i dati che avevi salvato."}
-        </p>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <Status tono="neutro">
-            {item.slug_aggiornato ? "Unita a un'altra scheda" : "Scheda non disponibile"}
-          </Status>
-          <span className="text-caption text-ink-3">Salvato il {formatDate(item.salvato_il)}</span>
+    <li>
+      <Card className="flex items-start gap-4 border-l-4 border-l-ink-off p-4 md:gap-6 md:p-5">
+        {/* Scheda non disponibile: solo la data, senza conto alla rovescia. */}
+        <Due data={item.bando.data_scadenza} conConto={false} />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <p className="text-row-title text-ink-2">{item.bando.titolo ?? item.bando.slug}</p>
+          <p className="text-body text-ink-2">
+            {item.slug_aggiornato
+              ? "Questo bando è stato unito a un'altra scheda del catalogo. Qui trovi i dati che avevi salvato."
+              : "Al momento non riusciamo a mostrare la scheda aggiornata di questo bando. Qui trovi i dati che avevi salvato."}
+          </p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <Status tono="neutro">
+              {item.slug_aggiornato ? "Unita a un'altra scheda" : "Scheda non disponibile"}
+            </Status>
+            <span className="text-caption text-ink-3">Salvato il {formatDate(item.salvato_il)}</span>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            {item.slug_aggiornato && (
+              <LinkButton to={`/app/bandi/${item.slug_aggiornato}`} variant="ghost" size="sm">
+                Apri la scheda aggiornata
+              </LinkButton>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              loading={toggle.isPending}
+              onClick={() =>
+                toggle.mutate({ bando: { id: item.bando.id, slug: item.bando.slug }, save: false })
+              }
+            >
+              Rimuovi dai bandi salvati
+            </Button>
+          </div>
         </div>
-        <div className="mt-1 flex flex-wrap items-center gap-2">
-          {item.slug_aggiornato && (
-            <LinkButton to={`/app/bandi/${item.slug_aggiornato}`} variant="ghost" size="sm">
-              Apri la scheda aggiornata
-            </LinkButton>
-          )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            loading={toggle.isPending}
-            onClick={() =>
-              toggle.mutate({ bando: { id: item.bando.id, slug: item.bando.slug }, save: false })
-            }
-          >
-            Rimuovi dai bandi salvati
-          </Button>
-        </div>
-      </div>
+      </Card>
     </li>
   );
 }
@@ -127,11 +130,11 @@ export default function Salvati() {
 
   return (
     <Page variante="elenco">
-      <PageHeader titolo="Bandi salvati" descrizione={descrizione} />
+      <PageHeader area="bandi" icon={Bookmark} titolo="Bandi salvati" descrizione={descrizione} />
 
       <section aria-label="Bandi salvati" aria-busy={isPending || isPlaceholderData}>
         {isPending ? (
-          <ul className="flex flex-col border-t border-line">
+          <ul className="flex flex-col gap-3">
             {Array.from({ length: 3 }).map((_, i) => (
               <BandoRowSkeleton key={i} />
             ))}
@@ -146,6 +149,8 @@ export default function Salvati() {
           <EmptyState
             title="Non hai ancora salvato nessun bando."
             description="Sfoglia i bandi e usa il segnalibro per mettere da parte quelli che ti interessano: li ritrovi qui."
+            icon={Bookmark}
+            area="bandi"
             action={
               <LinkButton to="/app/bandi" variant="secondary">
                 Cerca nei bandi
@@ -156,7 +161,7 @@ export default function Salvati() {
           <>
             <ul
               className={cn(
-                "flex flex-col border-t border-line",
+                "flex flex-col gap-3",
                 isPlaceholderData && "opacity-60 transition-opacity",
               )}
             >

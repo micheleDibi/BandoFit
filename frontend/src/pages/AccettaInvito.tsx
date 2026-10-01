@@ -1,9 +1,11 @@
+import { CircleCheck, Link2Off } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AccessoLaterale } from "../components/landing/AccessoLaterale";
 import { Alert } from "../components/ui/Alert";
 import { AuthLayout } from "../components/ui/AuthLayout";
 import { Button } from "../components/ui/Button";
+import { IconChip } from "../components/ui/IconChip";
 import { PasswordField } from "../components/ui/PasswordField";
 import { PasswordStrengthMeter } from "../components/ui/PasswordStrengthMeter";
 import { Spinner } from "../components/ui/Spinner";
@@ -98,6 +100,7 @@ export default function AccettaInvito() {
 
       {step === "invalid" && (
         <div className="flex flex-col items-start gap-2">
+          <IconChip icon={Link2Off} size="lg" className="mb-2" />
           <h1 className="text-title-page text-ink">Invito scaduto o non valido</h1>
           <p className="text-body text-ink-2">
             Il link che hai aperto non è più utilizzabile. Chiedi al titolare dell'azienda di
@@ -158,6 +161,7 @@ export default function AccettaInvito() {
 
       {step === "done" && (
         <div className="flex flex-col items-start gap-2" role="status">
+          <IconChip icon={CircleCheck} size="lg" className="mb-2" />
           <h1 className="text-title-page text-ink">
             Sei dentro{invite ? `, con ${invite.parent_display_name}` : ""}!
           </h1>

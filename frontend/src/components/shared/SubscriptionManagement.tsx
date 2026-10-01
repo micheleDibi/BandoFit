@@ -16,6 +16,7 @@ import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { InlineError } from "../ui/InlineError";
+import { IconChip } from "../ui/IconChip";
 import { Section, SectionHeader } from "../ui/SectionHeader";
 import { Spinner } from "../ui/Spinner";
 import { Skeleton } from "../ui/states";
@@ -153,7 +154,14 @@ export function SubscriptionManagement({
 
   return (
     <Section aria-label="Pagamento e rinnovo">
-      <SectionHeader titolo="Pagamento e rinnovo" />
+      <SectionHeader
+        titolo={
+          <span className="flex items-center gap-3">
+            <IconChip icon={CreditCard} area="account" size="sm" />
+            Pagamento e rinnovo
+          </span>
+        }
+      />
       {/* Prima il piano: a chi non paga un errore della lettura non riguarda
           nulla (come in HEAD, dove la sezione non compariva). */}
       {!pianoAPagamento && management.isError ? (
@@ -213,7 +221,7 @@ export function SubscriptionManagement({
             <div className="flex flex-col gap-0.5">
               <p className="text-body font-semibold text-ink">Metodo di pagamento</p>
               <p className="inline-flex items-center gap-1.5 text-body text-ink-2">
-                <CreditCard className="size-4 shrink-0 text-ink-3" aria-hidden />
+                <CreditCard className="size-4 shrink-0 text-area-account-ink" aria-hidden />
                 {metodoPresente ? (data.metodo.label ?? "Metodo salvato") : "Nessun metodo salvato"}
               </p>
             </div>

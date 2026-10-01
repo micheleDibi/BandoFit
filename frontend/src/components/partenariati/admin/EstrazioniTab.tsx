@@ -32,7 +32,7 @@ import { useRientroPagina } from "../useRientroPagina";
 const STATI: Record<EstrazioneAdmin["stato"], { etichetta: string; tono: TonoStatus }> = {
   in_corso: { etichetta: "In corso", tono: "in-apertura" },
   pronta: { etichetta: "Pronta", tono: "aperto" },
-  errore: { etichetta: "Errore", tono: "attenzione" },
+  errore: { etichetta: "Errore", tono: "errore" },
 };
 const ESITI: Record<"estratta" | "nessun_segnale", string> = {
   estratta: "Regole estratte",

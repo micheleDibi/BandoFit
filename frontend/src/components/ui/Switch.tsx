@@ -36,17 +36,18 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(
             if (!e.defaultPrevented) onChange(!checked);
           }}
           className={cn(
-            "relative mt-0.25 inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-pill transition-colors",
+            "relative mt-0.25 inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-pill transition-colors duration-150 ease-uscita",
             "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
             "disabled:cursor-not-allowed disabled:opacity-50",
-            checked ? "bg-accent" : "bg-line-control",
+            checked ? "bg-accent hover:bg-accent-hover" : "bg-line-control hover:bg-ink-3",
           )}
           {...props}
         >
           <span
             aria-hidden
             className={cn(
-              "absolute top-0.5 left-0.5 size-4 rounded-pill bg-sheet transition-transform",
+              "absolute top-0.5 left-0.5 size-4 rounded-pill bg-sheet shadow-card",
+              "motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-uscita",
               checked && "translate-x-4",
             )}
           />

@@ -1,3 +1,4 @@
+import { ChartColumn } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useBilanci, useRecuperaBilanci } from "../../../hooks/useBilanci";
 import { useFunzioni } from "../../../hooks/useFunzioni";
@@ -13,6 +14,8 @@ import { BILANCI_COPY } from "../../../lib/copy";
 import type { BilanciOut, FasceBilancio } from "../../../types";
 import { Alert } from "../../ui/Alert";
 import { Badge } from "../../ui/Badge";
+import { Card } from "../../ui/Card";
+import { IconChip } from "../../ui/IconChip";
 import { InlineError } from "../../ui/InlineError";
 import { Section, SectionHeader } from "../../ui/SectionHeader";
 import { ErrorState, Skeleton } from "../../ui/states";
@@ -163,12 +166,18 @@ export function BilanciSection() {
         <BilanciTabella esercizi={data.esercizi} />
         <div className={cn("grid gap-6", conTrend && data.fasce && "lg:grid-cols-[3fr_2fr]")}>
           {conTrend && (
-            <Section>
-              <SectionHeader livello={3} titolo="Fatturato negli anni" />
-              <TrendFatturato esercizi={data.esercizi} />
-            </Section>
+            <Card>
+              <Section>
+                <SectionHeader livello={3} titolo="Fatturato negli anni" />
+                <TrendFatturato esercizi={data.esercizi} />
+              </Section>
+            </Card>
           )}
-          {data.fasce && <SintesiFasce fasce={data.fasce} />}
+          {data.fasce && (
+            <Card>
+              <SintesiFasce fasce={data.fasce} />
+            </Card>
+          )}
         </div>
         {data.indicatori.length > 0 && (
           <Section>
@@ -186,11 +195,19 @@ export function BilanciSection() {
 
   return (
     <Section id="bilanci" aria-labelledby="bilanci-titolo" className="scroll-mt-16">
-      <SectionHeader id="bilanci-titolo" titolo="Bilanci" />
+      <SectionHeader
+        id="bilanci-titolo"
+        titolo={
+          <span className="flex items-center gap-3">
+            <IconChip icon={ChartColumn} area="azienda" size="sm" />
+            Bilanci
+          </span>
+        }
+      />
       {disponibili ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Badge>{anni.length === 1 ? "1 esercizio" : `${anni.length} esercizi`}</Badge>
-          {data.sandbox && <Badge>Dati di test</Badge>}
+          <Badge area="azienda">{anni.length === 1 ? "1 esercizio" : `${anni.length} esercizi`}</Badge>
+          {data.sandbox && <Badge tone="warning">Dati di test</Badge>}
           <span className="text-small text-ink-3">Registro Imprese, {intervalloAnni(anni)}</span>
         </div>
       ) : (

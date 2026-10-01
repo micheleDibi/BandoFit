@@ -1,11 +1,13 @@
-import { Ban, CreditCard, Gift, RotateCcw, UserCog } from "lucide-react";
+import { Ban, CreditCard, Gift, RotateCcw, UserCog, Users } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Alert } from "../components/ui/Alert";
 import { Avatar } from "../components/ui/Avatar";
 import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { Dialog } from "../components/ui/Dialog";
 import { SelectField, TextareaField, TextField } from "../components/ui/Field";
+import { KpiCard } from "../components/ui/KpiCard";
 import { Menu, MenuItem, MenuSeparator } from "../components/ui/Menu";
 import { Page } from "../components/ui/Page";
 import { PageHeader } from "../components/ui/PageHeader";
@@ -282,166 +284,184 @@ export default function AdminUtenti() {
   } else if (fuoriPagina) {
     elenco = <SkeletonRighe />;
   } else if (data && data.items.length === 0) {
-    elenco = <EmptyState title="Nessun utente trovato" description="Prova con un'altra ricerca." />;
+    elenco = (
+      <Card>
+        <EmptyState
+          title="Nessun utente trovato"
+          description="Prova con un'altra ricerca."
+          icon={Users}
+          area="admin"
+        />
+      </Card>
+    );
   } else {
     elenco = (
-      <Table
-        className={cn("min-w-[760px]", isPlaceholderData && "opacity-60 transition-opacity")}
-      >
-        <caption className="sr-only">Elenco degli utenti registrati</caption>
-        <thead>
-          <tr>
-            <Th className="w-10">
-              <input
-                ref={selectAllRef}
-                type="checkbox"
-                checked={tuttiSelezionati}
-                onChange={toggleAll}
-                disabled={selezionabili.length === 0}
-                aria-label="Seleziona tutti gli utenti della pagina"
-                className={CASELLA}
-              />
-            </Th>
-            <Th>Utente</Th>
-            <Th>Ruolo</Th>
-            <Th>Azienda</Th>
-            <Th>Piano</Th>
-            <Th>Stato</Th>
-            <Th>Registrato</Th>
-            <Th className="text-right">
-              <span className="sr-only">Azioni</span>
-            </Th>
-          </tr>
-        </thead>
-        <tbody>
-          {data?.items.map((user) => {
-            const isSelf = user.profile.id === me?.profile.id;
-            const fullName = [user.profile.nome, user.profile.cognome].filter(Boolean).join(" ");
-            // Solo i figli ATTIVI ereditano il piano (pending/retrocessi
-            // hanno un piano proprio, gestibile normalmente).
-            const isManagedChild = user.family?.type === "child" && user.family.status === "active";
-            const sospeso = !user.profile.is_active;
-            const checked = selected.has(user.profile.id);
-            const gruppo = gruppoAzienda(user);
-            return (
-              <tr
-                key={user.profile.id}
-                className={cn("transition-colors", checked ? "bg-accent-soft" : "hover:bg-desk")}
-              >
-                <Td>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleOne(user.profile.id)}
-                    disabled={isSelf}
-                    title={isSelf ? "Non puoi selezionare il tuo account" : undefined}
-                    aria-label={`Seleziona ${user.profile.email}`}
-                    className={CASELLA}
-                  />
-                </Td>
-                <Td>
-                  <div className="flex items-center gap-3">
-                    {/* Il nome è accanto: l'avatar non lo ripete allo screen reader. */}
-                    <span aria-hidden>
-                      <Avatar nome={fullName || user.profile.email} />
-                    </span>
-                    <div className="min-w-0">
-                      <p className={cn("font-medium", sospeso ? "text-ink-2" : "text-ink")}>
-                        {fullName || "—"}
-                        {isSelf && <span className="ml-1.5 text-small font-normal text-ink-3">(tu)</span>}
-                      </p>
-                      <p className="text-small text-ink-3">{user.profile.email}</p>
+      <Card className="overflow-hidden p-0">
+        <Table
+          className={cn(
+            "min-w-[760px] [&_tbody_tr:last-child_td]:border-b-0",
+            isPlaceholderData && "opacity-60 transition-opacity",
+          )}
+          classNameContenitore="px-2"
+        >
+          <caption className="sr-only">Elenco degli utenti registrati</caption>
+          <thead>
+            <tr>
+              <Th className="w-10">
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  checked={tuttiSelezionati}
+                  onChange={toggleAll}
+                  disabled={selezionabili.length === 0}
+                  aria-label="Seleziona tutti gli utenti della pagina"
+                  className={CASELLA}
+                />
+              </Th>
+              <Th>Utente</Th>
+              <Th>Ruolo</Th>
+              <Th>Azienda</Th>
+              <Th>Piano</Th>
+              <Th>Stato</Th>
+              <Th>Registrato</Th>
+              <Th className="text-right">
+                <span className="sr-only">Azioni</span>
+              </Th>
+            </tr>
+          </thead>
+          <tbody>
+            {data?.items.map((user) => {
+              const isSelf = user.profile.id === me?.profile.id;
+              const fullName = [user.profile.nome, user.profile.cognome].filter(Boolean).join(" ");
+              // Solo i figli ATTIVI ereditano il piano (pending/retrocessi
+              // hanno un piano proprio, gestibile normalmente).
+              const isManagedChild = user.family?.type === "child" && user.family.status === "active";
+              const sospeso = !user.profile.is_active;
+              const checked = selected.has(user.profile.id);
+              const gruppo = gruppoAzienda(user);
+              return (
+                <tr
+                  key={user.profile.id}
+                  className={cn(
+                    "transition-colors duration-150 ease-uscita",
+                    checked ? "bg-accent-soft" : "hover:bg-desk",
+                  )}
+                >
+                  <Td>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleOne(user.profile.id)}
+                      disabled={isSelf}
+                      title={isSelf ? "Non puoi selezionare il tuo account" : undefined}
+                      aria-label={`Seleziona ${user.profile.email}`}
+                      className={CASELLA}
+                    />
+                  </Td>
+                  <Td>
+                    <div className="flex items-center gap-3">
+                      {/* Il nome è accanto: l'avatar non lo ripete allo screen reader. */}
+                      <span aria-hidden>
+                        <Avatar nome={fullName || user.profile.email} />
+                      </span>
+                      <div className="min-w-0">
+                        <p className={cn("font-medium", sospeso ? "text-ink-2" : "text-ink")}>
+                          {fullName || "—"}
+                          {isSelf && <span className="ml-1.5 text-small font-normal text-ink-3">(tu)</span>}
+                        </p>
+                        <p className="text-small text-ink-3">{user.profile.email}</p>
+                      </div>
                     </div>
-                  </div>
-                </Td>
-                <Td>
-                  <p className="text-ink-2">{RUOLO_LABELS[user.profile.role]}</p>
-                  {user.progettista?.codice && (
-                    <p className="text-small text-ink-3 tabular-nums">{user.progettista.codice}</p>
-                  )}
-                </Td>
-                <Td>
-                  {/* Ragione sociale (dal dossier, se no dalla registrazione) in cima; il
-                      gruppo di account resta come informazione sotto. */}
-                  {user.azienda_nome ? (
-                    <p className="text-ink">{user.azienda_nome}</p>
-                  ) : (
-                    !gruppo && <span className="text-ink-3">—</span>
-                  )}
-                  {gruppo && <p className="text-small text-ink-3">{gruppo}</p>}
-                </Td>
-                <Td>
-                  {user.subscription ? (
-                    <>
-                      <p className="text-ink-2">{planoCorrente(user, planiAttivi)}</p>
-                      {user.subscription.inherited && (
-                        <p className="text-small text-ink-3">(ereditato)</p>
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-ink-3">—</span>
-                  )}
-                </Td>
-                <Td>
-                  {user.profile.is_active ? (
-                    <Status tono="aperto">Attivo</Status>
-                  ) : (
-                    <Status tono="attenzione">Sospeso</Status>
-                  )}
-                </Td>
-                <Td className="whitespace-nowrap text-ink-2 tabular-nums">
-                  {formatDate(user.profile.created_at)}
-                </Td>
-                <Td>
-                  <div className="flex justify-end">
-                    <Menu label={`Azioni per ${user.profile.email}`}>
-                      <MenuItem
-                        icon={<UserCog className="size-4" />}
-                        disabled={isSelf}
-                        title={isSelf ? "Non puoi modificare il tuo ruolo" : undefined}
-                        onSelect={() => openRole(user)}
-                      >
-                        Cambia ruolo…
-                      </MenuItem>
-                      <MenuItem
-                        icon={<CreditCard className="size-4" />}
-                        disabled={isManagedChild}
-                        title={
-                          isManagedChild
-                            ? "Il piano si gestisce sull'account titolare dell'azienda"
-                            : undefined
-                        }
-                        onSelect={() => openPlan(user)}
-                      >
-                        Cambia piano…
-                      </MenuItem>
-                      <MenuItem icon={<Gift className="size-4" />} onSelect={() => openAddon(user)}>
-                        Assegna add-on…
-                      </MenuItem>
-                      <MenuSeparator />
-                      <MenuItem
-                        icon={
-                          user.profile.is_active ? (
-                            <Ban className="size-4" />
-                          ) : (
-                            <RotateCcw className="size-4" />
-                          )
-                        }
-                        danger={user.profile.is_active}
-                        disabled={isSelf}
-                        title={isSelf ? "Non puoi disattivare il tuo account" : undefined}
-                        onSelect={() => openActive(user)}
-                      >
-                        {user.profile.is_active ? "Sospendi" : "Riattiva"}
-                      </MenuItem>
-                    </Menu>
-                  </div>
-                </Td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </Table>
+                  </Td>
+                  <Td>
+                    <p className="text-ink-2">{RUOLO_LABELS[user.profile.role]}</p>
+                    {user.progettista?.codice && (
+                      <p className="text-small text-ink-3 tabular-nums">{user.progettista.codice}</p>
+                    )}
+                  </Td>
+                  <Td>
+                    {/* Ragione sociale (dal dossier, se no dalla registrazione) in cima; il
+                        gruppo di account resta come informazione sotto. */}
+                    {user.azienda_nome ? (
+                      <p className="text-ink">{user.azienda_nome}</p>
+                    ) : (
+                      !gruppo && <span className="text-ink-3">—</span>
+                    )}
+                    {gruppo && <p className="text-small text-ink-3">{gruppo}</p>}
+                  </Td>
+                  <Td>
+                    {user.subscription ? (
+                      <>
+                        <p className="text-ink-2">{planoCorrente(user, planiAttivi)}</p>
+                        {user.subscription.inherited && (
+                          <p className="text-small text-ink-3">(ereditato)</p>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-ink-3">—</span>
+                    )}
+                  </Td>
+                  <Td>
+                    {user.profile.is_active ? (
+                      <Status tono="aperto">Attivo</Status>
+                    ) : (
+                      <Status tono="attenzione">Sospeso</Status>
+                    )}
+                  </Td>
+                  <Td className="whitespace-nowrap text-ink-2 tabular-nums">
+                    {formatDate(user.profile.created_at)}
+                  </Td>
+                  <Td>
+                    <div className="flex justify-end">
+                      <Menu label={`Azioni per ${user.profile.email}`}>
+                        <MenuItem
+                          icon={<UserCog className="size-4" />}
+                          disabled={isSelf}
+                          title={isSelf ? "Non puoi modificare il tuo ruolo" : undefined}
+                          onSelect={() => openRole(user)}
+                        >
+                          Cambia ruolo…
+                        </MenuItem>
+                        <MenuItem
+                          icon={<CreditCard className="size-4" />}
+                          disabled={isManagedChild}
+                          title={
+                            isManagedChild
+                              ? "Il piano si gestisce sull'account titolare dell'azienda"
+                              : undefined
+                          }
+                          onSelect={() => openPlan(user)}
+                        >
+                          Cambia piano…
+                        </MenuItem>
+                        <MenuItem icon={<Gift className="size-4" />} onSelect={() => openAddon(user)}>
+                          Assegna add-on…
+                        </MenuItem>
+                        <MenuSeparator />
+                        <MenuItem
+                          icon={
+                            user.profile.is_active ? (
+                              <Ban className="size-4" />
+                            ) : (
+                              <RotateCcw className="size-4" />
+                            )
+                          }
+                          danger={user.profile.is_active}
+                          disabled={isSelf}
+                          title={isSelf ? "Non puoi disattivare il tuo account" : undefined}
+                          onSelect={() => openActive(user)}
+                        >
+                          {user.profile.is_active ? "Sospendi" : "Riattiva"}
+                        </MenuItem>
+                      </Menu>
+                    </div>
+                  </Td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </Table>
+      </Card>
     );
   }
 
@@ -449,10 +469,11 @@ export default function AdminUtenti() {
     <Page variante="elenco">
       <PageHeader
         titolo="Utenti"
+        area="admin"
         descrizione={
           data ? (
             <>
-              <span className="font-medium text-ink tabular-nums">{data.total}</span>{" "}
+              <span className="font-medium text-white tabular-nums">{data.total}</span>{" "}
               {hasFilter ? "risultati" : "utenti registrati"}
             </>
           ) : (
@@ -460,6 +481,18 @@ export default function AdminUtenti() {
           )
         }
       />
+
+      {/* Indicatore: il totale della query (lo stesso numero della descrizione). */}
+      {data && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <KpiCard
+            etichetta={hasFilter ? "Risultati" : "Utenti registrati"}
+            valore={data.total}
+            icon={Users}
+            area="admin"
+          />
+        </div>
+      )}
 
       <div className="flex flex-col gap-3">
         {/* Barra: ricerca, ruolo, azzera. */}
@@ -497,7 +530,7 @@ export default function AdminUtenti() {
 
         {/* Azioni di massa sugli utenti selezionati. */}
         {selected.size > 0 && (
-          <div className="flex flex-wrap items-center gap-3 rounded-control bg-sunken px-4 py-3">
+          <div className="flex flex-wrap items-center gap-3 rounded-control border border-accent-line bg-accent-soft px-4 py-3 motion-safe:animate-entrata">
             <p className="text-body font-medium text-ink tabular-nums" aria-live="polite">
               {selected.size} selezionat{selected.size === 1 ? "o" : "i"}
             </p>
@@ -719,7 +752,7 @@ function SkeletonRighe() {
   return (
     <div className="flex flex-col gap-3" aria-hidden>
       {Array.from({ length: 6 }).map((_, i) => (
-        <Skeleton key={i} className="h-12 w-full" />
+        <Skeleton key={i} className="h-12 w-full rounded-control" />
       ))}
     </div>
   );

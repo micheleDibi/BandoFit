@@ -9,11 +9,16 @@ function traGiorni(oggi: Date, giorni: number): string {
   return toLocalIsoDate(new Date(oggi.getFullYear(), oggi.getMonth(), oggi.getDate() + giorni));
 }
 
+// Le card entrano una dopo l'altra (la seconda 120 ms dopo); con il movimento
+// ridotto niente entrata e niente ritardo. Classi scritte per intero.
+const RITARDI = ["", "motion-safe:[animation-delay:120ms]"];
+
 /** Due righe d'esempio del registro dei bandi (pannello dell'accesso, hero della
- *  landing). Solo presentazione: niente link né segnalibro, perché prima
- *  dell'accesso non portano da nessuna parte; la scadenza si calcola da oggi,
- *  così l'esempio non scade mai. La larghezza disponibile cambia molto (da ~320
- *  a ~740px): le colonne si dispongono con le container query (stretto: importo e
+ *  landing), come card bianche con ombra: stanno sulla fascia navy. Solo
+ *  presentazione: niente link né segnalibro, perché prima dell'accesso non
+ *  portano da nessuna parte; la scadenza si calcola da oggi, così l'esempio non
+ *  scade mai. La larghezza disponibile cambia molto (da ~320 a ~740px): le
+ *  colonne si dispongono con le container query (stretto: importo e
  *  compatibilità sotto il titolo; medio: in una colonna a destra; largo: in riga
  *  come la tavola «Accesso»). */
 export function RigheEsempio({ className }: { className?: string }) {
@@ -21,12 +26,15 @@ export function RigheEsempio({ className }: { className?: string }) {
   return (
     <ul
       aria-label={ACCESSO_COPY.esempiEtichetta}
-      className={cn("@container flex flex-col border-t border-line", className)}
+      className={cn("@container flex flex-col gap-3", className)}
     >
-      {ACCESSO_COPY.esempi.map((esempio) => (
+      {ACCESSO_COPY.esempi.map((esempio, i) => (
         <li
           key={esempio.titolo}
-          className="flex items-start gap-4 border-b border-line px-2 py-4.5 @xl:gap-6"
+          className={cn(
+            "flex items-start gap-4 rounded-panel border border-line bg-sheet p-4 text-ink shadow-card motion-safe:animate-entrata @xl:gap-6 @xl:p-5",
+            RITARDI[i],
+          )}
         >
           <Due data={traGiorni(oggi, esempio.giorni)} oggi={oggi} />
           <div className="flex min-w-0 flex-1 flex-col gap-2 @xl:flex-row @xl:gap-6">

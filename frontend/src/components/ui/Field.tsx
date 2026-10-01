@@ -8,16 +8,20 @@ import {
 import { cn } from "../../lib/cn";
 import { InlineError } from "./InlineError";
 
-/** Classi comuni dei controlli: bordo `line-control`, altezza 40, raggio
- *  `control`; a fuoco il bordo diventa `accent` (l'anello lo dà la regola
- *  globale, qui senza scarto per non staccarsi dal bordo). */
+/** Classi comuni dei controlli: bordo `line-control` (più scuro al passaggio),
+ *  altezza 40, raggio `control`; a fuoco il bordo diventa `accent` con un alone
+ *  tenue intorno (l'anello lo dà la regola globale, qui senza scarto per non
+ *  staccarsi dal bordo). Colore, bordo e alone in 150 ms. */
 export const inputClasses =
   "h-10 w-full rounded-control border border-line-control bg-sheet px-3 text-body text-ink " +
-  "placeholder:text-ink-3 transition-colors duration-150 " +
+  "placeholder:text-ink-3 transition-[color,background-color,border-color,box-shadow] duration-150 ease-uscita " +
+  "enabled:hover:border-ink-3 " +
   "focus:border-accent focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-accent " +
+  "focus-visible:ring-4 focus-visible:ring-accent/15 " +
   "disabled:cursor-not-allowed disabled:bg-sunken disabled:text-ink-3";
 
-const errorClasses = "border-danger focus:border-danger focus-visible:outline-danger";
+const errorClasses =
+  "border-danger enabled:hover:border-danger focus:border-danger focus-visible:outline-danger focus-visible:ring-danger/15";
 
 /** `aria-describedby` del chiamante (un aiuto esterno) unito all'id dell'errore. */
 function descrittoDa(esterno: string | undefined, errorId: string, error?: string) {

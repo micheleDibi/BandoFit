@@ -180,6 +180,8 @@ export function IdentitaAziendaBox({
       id={ANCORA_IDENTITA}
       aria-labelledby={idTitolo}
       className="scroll-mt-16"
+      icon={ShieldCheck}
+      area="azienda"
       titolo={<span id={idTitolo}>{IDENTITA_COPY.titolo}</span>}
       azione={data ? <StatoIdentitaBadge stato={data.stato} /> : undefined}
     >

@@ -1,3 +1,4 @@
+import { UserRound } from "lucide-react";
 import { useId, useState } from "react";
 import {
   useInformativaPartner,
@@ -87,7 +88,7 @@ export function ReferentePartner({ profilo }: { profilo: PartnerProfile }) {
   };
 
   return (
-    <Panel titolo={PARTNER_COPY.referenteTitolo}>
+    <Panel titolo={PARTNER_COPY.referenteTitolo} icon={UserRound} area="partenariati">
       <p className="text-small text-ink-3">{PARTNER_COPY.referenteDescrizione}</p>
 
       <div className="flex flex-col gap-1">
@@ -192,7 +193,7 @@ export function ReferenteMembro({ profilo }: { profilo: PartnerProfile }) {
       {proposto ? (
         // Un `Panel`, non un `Alert`: l'avviso è una regione `status` e
         // annuncerebbe tutta l'informativa quando arriva.
-        <Panel titolo={PARTNER_COPY.referenteProposto}>
+        <Panel titolo={PARTNER_COPY.referenteProposto} icon={UserRound} area="partenariati">
           <div className="flex flex-col gap-3">
             <div
               id={`${idBase}-informativa`}

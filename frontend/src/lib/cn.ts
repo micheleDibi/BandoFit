@@ -4,7 +4,8 @@ import { extendTailwindMerge } from "tailwind-merge";
 /** tailwind-merge conosce solo le classi standard: senza questa estensione
  *  gli stili di testo del design system (`text-body`, `text-caption`…) passano
  *  per colori e vengono scartati quando nella stessa chiamata c'è anche
- *  `text-ink`; i raggi e l'ombra con un nome resterebbero senza risoluzione. */
+ *  `text-ink`; i raggi, le ombre, la fascia, le animazioni e l'andamento con un
+ *  nome resterebbero senza risoluzione (o passerebbero per colori). */
 const twMerge = extendTailwindMerge({
   extend: {
     classGroups: {
@@ -28,7 +29,15 @@ const twMerge = extendTailwindMerge({
         },
       ],
       rounded: [{ rounded: ["mark", "control", "panel", "pill"] }],
-      shadow: [{ shadow: ["overlay"] }],
+      shadow: [{ shadow: ["card", "card-hover", "overlay"] }],
+      // La fascia è un gradiente (`background-image`): non sostituisce un `bg-*` di colore.
+      "bg-image": [{ bg: ["banda"] }],
+      animate: [
+        {
+          animate: ["shimmer", "entrata", "entrata-sinistra", "entrata-destra", "crescita"],
+        },
+      ],
+      ease: [{ ease: ["uscita"] }],
     },
   },
 });

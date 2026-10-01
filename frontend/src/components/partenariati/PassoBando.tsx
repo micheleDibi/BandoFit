@@ -1,3 +1,4 @@
+import { FileText } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -129,7 +130,8 @@ function SchedaBando({
   const regole = usePartenariatoBando(slug);
   const modalita: ModalitaPartenariato | null = regole.data?.regole?.modalita_effettiva ?? null;
   return (
-    <Panel titolo="Bando">
+    // Dentro la card del passo: riquadro incassato (`desk`), senza ombra.
+    <Panel titolo="Bando" icon={FileText} area="bandi" className="bg-desk shadow-none">
       <p className="font-medium text-ink">{titolo}</p>
       <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-ink-2">
         {scadenza && <span>Scade il {dataConOra(scadenza, oraScadenza)}</span>}

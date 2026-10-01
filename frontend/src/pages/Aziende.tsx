@@ -1,13 +1,17 @@
-import { Plus } from "lucide-react";
+import { Building2, Plus } from "lucide-react";
 import { useState } from "react";
 import { Alert } from "../components/ui/Alert";
+import { Avatar } from "../components/ui/Avatar";
 import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { Dialog } from "../components/ui/Dialog";
 import { TextField } from "../components/ui/Field";
 import { InlineError } from "../components/ui/InlineError";
+import { KpiCard } from "../components/ui/KpiCard";
 import { Page } from "../components/ui/Page";
 import { PageHeader } from "../components/ui/PageHeader";
+import { ProgressRing } from "../components/ui/ProgressRing";
 import { Status } from "../components/ui/Status";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
 import { Table, Td, Th } from "../components/ui/Table";
@@ -159,13 +163,19 @@ export default function Aziende() {
     <Page variante="elenco">
       <PageHeader
         titolo="Aziende gestite"
+        area="azienda"
         descrizione={
           data
             ? `${data.usate} di ${data.max_aziende} aziende del tuo piano.`
             : "Le aziende clienti che gestisci, ciascuna con dati separati."
         }
         azioni={
-          <Button type="button" onClick={() => setCreating(true)} disabled={atLimit}>
+          <Button
+            type="button"
+            variant="inverse"
+            onClick={() => setCreating(true)}
+            disabled={atLimit}
+          >
             <Plus className="size-4" aria-hidden />
             Nuova azienda
           </Button>
@@ -186,6 +196,29 @@ export default function Aziende() {
         </Alert>
       )}
 
+      {/* Indicatore: aziende usate sul massimo del piano (i numeri della descrizione). */}
+      {data && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <KpiCard
+            etichetta="Aziende del piano"
+            valore={data.usate}
+            nota={`su ${data.max_aziende} disponibili`}
+            className="relative pr-28"
+          >
+            <ProgressRing
+              value={data.usate}
+              max={data.max_aziende}
+              size={72}
+              tono="azienda"
+              label={`Aziende del piano: ${data.usate} su ${data.max_aziende}`}
+              className="absolute top-1/2 right-5 -translate-y-1/2"
+            >
+              <Building2 className="size-6 text-area-azienda-ink" aria-hidden />
+            </ProgressRing>
+          </KpiCard>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="flex flex-col gap-3" aria-hidden>
           <Skeleton className="h-10 w-full" />
@@ -198,66 +231,79 @@ export default function Aziende() {
           onRetry={() => refetch()}
         />
       ) : aziende.length === 0 ? (
-        <EmptyState
-          title="Non gestisci ancora nessuna azienda."
-          description="Crea la tua prima azienda cliente per iniziare a gestirne i bandi in modo separato."
-          action={
-            <Button type="button" variant="secondary" onClick={() => setCreating(true)}>
-              Crea la prima azienda
-            </Button>
-          }
-        />
+        <Card>
+          <EmptyState
+            title="Non gestisci ancora nessuna azienda."
+            area="azienda"
+            description="Crea la tua prima azienda cliente per iniziare a gestirne i bandi in modo separato."
+            action={
+              <Button type="button" variant="secondary" onClick={() => setCreating(true)}>
+                Crea la prima azienda
+              </Button>
+            }
+          />
+        </Card>
       ) : (
-        <Table>
-          <thead>
-            <tr>
-              <Th>Azienda</Th>
-              <Th>Stato</Th>
-              <Th>
-                <span className="sr-only">Azioni</span>
-              </Th>
-            </tr>
-          </thead>
-          <tbody>
-            {aziende.map((c) => {
-              const isActive = c.id === activeCompanyId;
-              return (
-                <tr key={c.id}>
-                  <Td>
-                    <span className="block font-semibold text-ink">{c.ragione_sociale}</span>
-                    <span className="block text-small text-ink-2 tabular-nums">
-                      P.IVA {c.partita_iva}
-                    </span>
-                  </Td>
-                  <Td>{isActive && <Status tono="aperto">In uso</Status>}</Td>
-                  <Td className="text-right">
-                    <div className="flex flex-wrap justify-end gap-2">
-                      {!isActive && (
+        <Card className="overflow-hidden p-0">
+          <Table className="[&_tbody_tr:last-child_td]:border-b-0" classNameContenitore="px-2">
+            <thead>
+              <tr>
+                <Th>Azienda</Th>
+                <Th>Stato</Th>
+                <Th>
+                  <span className="sr-only">Azioni</span>
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {aziende.map((c) => {
+                const isActive = c.id === activeCompanyId;
+                return (
+                  <tr key={c.id}>
+                    <Td>
+                      <div className="flex items-center gap-3">
+                        {/* Il nome è già scritto accanto: l'avatar non si annuncia. */}
+                        <span aria-hidden className="flex">
+                          <Avatar nome={c.ragione_sociale} />
+                        </span>
+                        <div className="min-w-0">
+                          <span className="block font-semibold text-ink">{c.ragione_sociale}</span>
+                          <span className="block text-small text-ink-2 tabular-nums">
+                            P.IVA {c.partita_iva}
+                          </span>
+                        </div>
+                      </div>
+                    </Td>
+                    <Td>{isActive && <Status tono="aperto">In uso</Status>}</Td>
+                    <Td className="text-right">
+                      <div className="flex flex-wrap justify-end gap-2">
+                        {!isActive && (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setActiveCompany(c.id)}
+                          >
+                            Rendi attiva
+                          </Button>
+                        )}
                         <Button
                           type="button"
-                          variant="secondary"
+                          variant="ghost"
                           size="sm"
-                          onClick={() => setActiveCompany(c.id)}
+                          onClick={() => setToDelete(c)}
+                          aria-label={`Rimuovi ${c.ragione_sociale}`}
                         >
-                          Rendi attiva
+                          Rimuovi
                         </Button>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setToDelete(c)}
-                        aria-label={`Rimuovi ${c.ragione_sociale}`}
-                      >
-                        Rimuovi
-                      </Button>
-                    </div>
-                  </Td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </Table>
+                      </div>
+                    </Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        </Card>
       )}
 
       <CreateCompanyDialog open={creating} onClose={() => setCreating(false)} />

@@ -102,7 +102,7 @@ export function BilanciTabella({ esercizi }: { esercizi: EsercizioBilancio[] }) 
         role="region"
         aria-labelledby={captionId}
         tabIndex={0}
-        className="overflow-x-auto rounded-panel border border-line bg-sheet focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="overflow-x-auto rounded-panel border border-line bg-sheet shadow-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
         <table className="w-full border-separate border-spacing-0 text-body">
           <caption id={captionId} className="sr-only">

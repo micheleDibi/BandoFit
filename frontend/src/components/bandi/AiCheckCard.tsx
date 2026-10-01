@@ -5,7 +5,9 @@ import { useEntitlements } from "../../hooks/useEntitlements";
 import { apiErrorMessage } from "../../lib/api";
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { IconChip } from "../ui/IconChip";
 import { InlineError } from "../ui/InlineError";
+import { ProgressRing } from "../ui/ProgressRing";
 import { Spinner } from "../ui/Spinner";
 import { Skeleton } from "../ui/states";
 import { TextLink } from "../ui/TextLink";
@@ -82,6 +84,10 @@ export function AiCheckCard({ slug }: { slug: string }) {
 
   return (
     <div className="flex flex-col gap-3">
+      <h4 className="flex items-center gap-2.5 font-sans text-title-group text-ink">
+        <IconChip icon={Sparkles} area="aicheck" size="sm" />
+        AI-check
+      </h4>
       {isPending ? (
         <div className="flex flex-col gap-2" aria-hidden>
           <Skeleton className="h-10 w-full" />
@@ -109,14 +115,26 @@ export function AiCheckCard({ slug }: { slug: string }) {
         </>
       ) : latest?.status === "ready" && latest.esito ? (
         <>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <AiEsitoBadge esito={latest.esito} />
+          <div className="flex items-center gap-4">
             {latest.punteggio !== null && (
-              <span className="text-figure-sm text-ink">
+              <ProgressRing
+                value={latest.punteggio}
+                max={100}
+                size={64}
+                tono="fit"
+                label={`Punteggio di compatibilità: ${latest.punteggio} su 100`}
+              >
                 {latest.punteggio}
-                <span className="font-sans text-small font-normal text-ink-3">/100</span>
-              </span>
+              </ProgressRing>
             )}
+            <div className="flex min-w-0 flex-col items-start gap-1">
+              <AiEsitoBadge esito={latest.esito} />
+              {latest.punteggio !== null && (
+                <span className="text-small text-ink-3" aria-hidden>
+                  Punteggio su 100
+                </span>
+              )}
+            </div>
           </div>
           <p className="text-small text-ink-2">
             <TextLink href="#ai-check-report">Vedi il report AI-check</TextLink>

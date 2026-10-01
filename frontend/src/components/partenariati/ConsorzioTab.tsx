@@ -1,4 +1,4 @@
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useConsorzio } from "../../hooks/useConsorzio";
 import { apiErrorCode, apiErrorMessage } from "../../lib/api";
@@ -6,6 +6,7 @@ import { CONSORZIO_COPY } from "../../lib/copy";
 import type { MembroConsorzio } from "../../types";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
+import { Card } from "../ui/Card";
 import { DefinitionList } from "../ui/Facts";
 import { Section, SectionHeader } from "../ui/SectionHeader";
 import { EmptyState, ErrorState, Skeleton } from "../ui/states";
@@ -103,6 +104,8 @@ export function ConsorzioTab({
   if (consorzio.isError) {
     return apiErrorCode(consorzio.error) === "not_found" ? (
       <EmptyState
+        icon={Users}
+        area="partenariati"
         title="Consorzio non disponibile"
         description="Il consorzio lo vedono l'azienda che ha creato la call e le aziende accettate, da quando la call è stata pubblicata."
       />
@@ -133,7 +136,7 @@ export function ConsorzioTab({
   );
 
   return (
-    <div className="flex flex-col gap-8">
+    <Card className="flex flex-col gap-8 sm:p-8">
       {regioneAnnunci}
       {!consorzio.data.editable && <p className="text-small text-ink-3">{CONSORZIO_COPY.soloTitolare}</p>}
 
@@ -212,6 +215,6 @@ export function ConsorzioTab({
           onSalvato={setAnnuncio}
         />
       )}
-    </div>
+    </Card>
   );
 }

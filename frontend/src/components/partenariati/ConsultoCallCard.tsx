@@ -1,3 +1,4 @@
+import { MessageSquare } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAddons } from "../../hooks/useAddons";
@@ -72,7 +73,7 @@ export function ConsultoCallCard({ call }: { call: CallVistaCreatore }) {
   };
 
   return (
-    <Panel titolo="Consulenza con un progettista">
+    <Panel titolo="Consulenza con un progettista" icon={MessageSquare} area="consulenze">
       {esistente ? (
         <>
           <p className="text-body text-ink-2">

@@ -3,6 +3,7 @@ import { apiErrorMessage } from "../../../lib/api";
 import { cn } from "../../../lib/cn";
 import { Alert } from "../../ui/Alert";
 import { Button } from "../../ui/Button";
+import { Card } from "../../ui/Card";
 import { Dialog } from "../../ui/Dialog";
 import { SelectField } from "../../ui/Field";
 import { EmptyState, ErrorState, Skeleton } from "../../ui/states";
@@ -65,13 +66,19 @@ export function StatiLista({
     return (
       <div className="flex flex-col gap-3" aria-hidden>
         {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-16 w-full" />
+          <Skeleton key={i} className="h-16 w-full rounded-control" />
         ))}
       </div>
     );
   }
   if (isError) return <ErrorState message={apiErrorMessage(error)} onRetry={onRetry} />;
-  if (vuoto) return <EmptyState title={titoloVuoto} description={descrizioneVuoto} />;
+  // Il vuoto su una Card, con l'icona dell'area admin (come le altre pagine Admin).
+  if (vuoto)
+    return (
+      <Card>
+        <EmptyState title={titoloVuoto} description={descrizioneVuoto} area="admin" />
+      </Card>
+    );
   return <>{children}</>;
 }
 
@@ -179,9 +186,10 @@ export function MotivazioneDialog({
   );
 }
 
-/** Tabella admin (`Table` di ui), con scorrimento orizzontale sugli schermi
- *  stretti e i dati attenuati durante il cambio di pagina o filtro. Il nome
- *  resta per i chiamanti: non è più su una Card. */
+/** Tabella admin (`Table` di ui) su una Card con ombra, come nelle altre
+ *  pagine Admin: scorrimento orizzontale sugli schermi stretti, nessun
+ *  filetto sotto l'ultima riga (lo chiude il bordo della card) e i dati
+ *  attenuati durante il cambio di pagina o filtro. */
 export function TabellaCard({
   caption,
   attenuata,
@@ -192,13 +200,19 @@ export function TabellaCard({
   children: ReactNode;
 }) {
   return (
-    <Table
-      className={cn("min-w-[760px]", attenuata && "opacity-60 transition-opacity")}
-      aria-busy={attenuata}
-    >
-      <caption className="sr-only">{caption}</caption>
-      {children}
-    </Table>
+    <Card className="overflow-hidden p-0">
+      <Table
+        className={cn(
+          "min-w-[760px] [&_tbody_tr:last-child>*]:border-b-0",
+          attenuata && "opacity-60 transition-opacity",
+        )}
+        classNameContenitore="px-2"
+        aria-busy={attenuata}
+      >
+        <caption className="sr-only">{caption}</caption>
+        {children}
+      </Table>
+    </Card>
   );
 }
 

@@ -1,9 +1,11 @@
+import { MailCheck } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { AccessoLaterale } from "../components/landing/AccessoLaterale";
 import { Alert } from "../components/ui/Alert";
 import { AuthLayout } from "../components/ui/AuthLayout";
 import { Button } from "../components/ui/Button";
 import { TextField } from "../components/ui/Field";
+import { IconChip } from "../components/ui/IconChip";
 import { TextLink } from "../components/ui/TextLink";
 import { api, apiErrorMessage } from "../lib/api";
 
@@ -39,6 +41,7 @@ export default function RecuperaPassword() {
       {sent ? (
         // Risposta neutra: non dice se l'indirizzo è registrato.
         <div className="flex flex-col items-start gap-2" role="status">
+          <IconChip icon={MailCheck} size="lg" className="mb-2" />
           <h1 className="text-title-page text-ink">Controlla la tua email</h1>
           <p className="text-body text-ink-2">
             Se <strong className="font-semibold text-ink">{email}</strong> è registrata su

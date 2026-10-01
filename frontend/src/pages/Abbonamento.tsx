@@ -42,7 +42,7 @@ export default function Abbonamento() {
   if (isPending) {
     return (
       <Page variante="sezioni">
-        <PageHeader titolo="Abbonamento" />
+        <PageHeader area="account" titolo="Abbonamento" />
         <div className="flex flex-col gap-4" aria-hidden>
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-40 w-full" />
@@ -53,7 +53,7 @@ export default function Abbonamento() {
   if (isError || !me) {
     return (
       <Page variante="sezioni">
-        <PageHeader titolo="Abbonamento" />
+        <PageHeader area="account" titolo="Abbonamento" />
         <ErrorState
           title="Non siamo riusciti a caricare il tuo abbonamento."
           message={apiErrorMessage(error)}
@@ -83,6 +83,7 @@ export default function Abbonamento() {
   return (
     <Page variante="sezioni">
       <PageHeader
+        area="account"
         titolo="Abbonamento"
         descrizione="Il tuo piano, gli add-on che lo estendono, il pagamento e lo storico degli acquisti."
       />

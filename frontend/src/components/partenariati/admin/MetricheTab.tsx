@@ -10,6 +10,7 @@ import { ADMIN_PARTENARIATI_COPY } from "../../../lib/copy";
 import { formatDate, todayItalyIso } from "../../../lib/format";
 import type { AccettazionePartenariati, CostiPartenariati, MetrichePartenariati } from "../../../types";
 import { Button } from "../../ui/Button";
+import { Card } from "../../ui/Card";
 import { TextField } from "../../ui/Field";
 import { InlineError } from "../../ui/InlineError";
 import { ErrorState, Skeleton } from "../../ui/states";
@@ -109,40 +110,42 @@ function Metriche({ m }: { m: MetrichePartenariati }) {
   const inv = tasso(m.accettazione?.invito);
   const ore = m.ore_mediane_prima_candidatura;
   return (
-    <dl className="grid gap-x-10 gap-y-6 border-y border-line py-5 sm:grid-cols-2 lg:grid-cols-3">
-      <Tessera titolo="Call pubblicate" valore={numero(m.call_pubblicate)} />
-      <Tessera
-        titolo="Candidature per call"
-        valore={numero(m.candidature_per_call, 2)}
-        nota={`${numero(m.candidature)} candidature spontanee e ${numero(m.inviti)} inviti in tutto`}
-      />
-      <Tessera
-        titolo="Call con una candidatura entro 30 giorni"
-        valore={percentuale(m.percentuale_call_con_candidatura_30_giorni, true)}
-        nota={`${numero(m.call_con_candidatura_30_giorni)} su ${numero(m.call_osservabili_30_giorni)} call pubblicate da almeno 30 giorni`}
-      />
-      <Tessera titolo="Candidature accettate" valore={cand.valore} nota={cand.nota} />
-      <Tessera titolo="Inviti accettati" valore={inv.valore} nota={inv.nota} />
-      <Tessera
-        titolo="Tempo alla prima candidatura"
-        valore={ore === null ? "—" : `${numero(ore, 1)} ore`}
-        nota={
-          ore === null
-            ? "Nessuna candidatura spontanea"
-            : `Mediana, circa ${numero(ore / 24, 1)} giorni; solo candidature spontanee`
-        }
-      />
-      <Tessera
-        titolo="Copertura media dei requisiti cercati"
-        valore={percentuale(m.copertura_media_gap)}
-        nota="Quota dei requisiti cercati coperti dal consorzio"
-      />
-      <Tessera
-        titolo="Consorzi in regola"
-        valore={numero(m.consorzi_validati_verde)}
-        nota={`su ${numero(m.consorzi_validati)} consorzi verificati (ultima verifica salvata)`}
-      />
-    </dl>
+    <Card className="sm:p-6">
+      <dl className="grid gap-x-10 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
+        <Tessera titolo="Call pubblicate" valore={numero(m.call_pubblicate)} />
+        <Tessera
+          titolo="Candidature per call"
+          valore={numero(m.candidature_per_call, 2)}
+          nota={`${numero(m.candidature)} candidature spontanee e ${numero(m.inviti)} inviti in tutto`}
+        />
+        <Tessera
+          titolo="Call con una candidatura entro 30 giorni"
+          valore={percentuale(m.percentuale_call_con_candidatura_30_giorni, true)}
+          nota={`${numero(m.call_con_candidatura_30_giorni)} su ${numero(m.call_osservabili_30_giorni)} call pubblicate da almeno 30 giorni`}
+        />
+        <Tessera titolo="Candidature accettate" valore={cand.valore} nota={cand.nota} />
+        <Tessera titolo="Inviti accettati" valore={inv.valore} nota={inv.nota} />
+        <Tessera
+          titolo="Tempo alla prima candidatura"
+          valore={ore === null ? "—" : `${numero(ore, 1)} ore`}
+          nota={
+            ore === null
+              ? "Nessuna candidatura spontanea"
+              : `Mediana, circa ${numero(ore / 24, 1)} giorni; solo candidature spontanee`
+          }
+        />
+        <Tessera
+          titolo="Copertura media dei requisiti cercati"
+          valore={percentuale(m.copertura_media_gap)}
+          nota="Quota dei requisiti cercati coperti dal consorzio"
+        />
+        <Tessera
+          titolo="Consorzi in regola"
+          valore={numero(m.consorzi_validati_verde)}
+          nota={`su ${numero(m.consorzi_validati)} consorzi verificati (ultima verifica salvata)`}
+        />
+      </dl>
+    </Card>
   );
 }
 
@@ -156,64 +159,75 @@ const VALUTE: Record<string, string> = {
 function Costi({ c }: { c: CostiPartenariati }) {
   const valute = [...new Set([...c.totali.map((t) => t.valuta), ...c.voci.map((v) => v.valuta)])];
   if (valute.length === 0) {
-    return <p className="text-body text-ink-2">Nessun costo del modulo nel periodo.</p>;
+    return (
+      <Card>
+        <p className="text-body text-ink-2">Nessun costo del modulo nel periodo.</p>
+      </Card>
+    );
   }
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       {valute.map((valuta) => {
         const voci = c.voci.filter((v) => v.valuta === valuta);
         const totale = c.totali.find((t) => t.valuta === valuta);
         return (
-          <Table key={valuta} className="min-w-[640px]">
-            <caption className="pb-3 text-left text-title-group text-ink">
-              {VALUTE[valuta] ?? valuta}
-            </caption>
-            <thead>
-              <tr>
-                <Th>Fornitore</Th>
-                <Th>Servizio</Th>
-                <Th>Esito</Th>
-                <Th numerica>Chiamate</Th>
-                <Th numerica>Costo</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {voci.map((v) => (
-                <tr key={`${v.provider}|${v.service}|${v.outcome}`}>
-                  <Td className="text-ink-2">
-                    {ADMIN_PARTENARIATI_COPY.providers[v.provider] ?? v.provider}
-                  </Td>
-                  <th scope="row" className={thRigaClass}>
-                    {ADMIN_PARTENARIATI_COPY.servizi[v.service] ?? v.service}
-                  </th>
-                  <Td className="text-ink-2">
-                    {ADMIN_PARTENARIATI_COPY.esiti[v.outcome] ?? v.outcome}
-                  </Td>
-                  <Td numerica className="text-ink-2">
-                    {numero(v.eventi)}
-                  </Td>
-                  <Td numerica className="font-medium">
-                    {importoCents(v.cost_cents, valuta)}
-                  </Td>
+          // Una Card con ombra per valuta, come le tabelle delle altre pagine Admin:
+          // la didascalia in testa, nessun filetto sotto l'ultima riga.
+          <Card key={valuta} className="overflow-hidden p-0">
+            <Table
+              className="min-w-[640px] [&>:last-child>tr:last-child>*]:border-b-0"
+              classNameContenitore="px-2"
+            >
+              <caption className="px-3 pt-4 pb-3 text-left text-title-group text-ink">
+                {VALUTE[valuta] ?? valuta}
+              </caption>
+              <thead>
+                <tr>
+                  <Th>Fornitore</Th>
+                  <Th>Servizio</Th>
+                  <Th>Esito</Th>
+                  <Th numerica>Chiamate</Th>
+                  <Th numerica>Costo</Th>
                 </tr>
-              ))}
-            </tbody>
-            {totale && (
-              <tfoot>
-                <tr className="bg-desk">
-                  <th scope="row" colSpan={3} className={cn(thRigaClass, "font-semibold")}>
-                    Totale in {valuta === "EUR" ? "euro" : valuta === "USD" ? "dollari" : valuta}
-                  </th>
-                  <Td numerica className="font-semibold">
-                    {numero(totale.eventi)}
-                  </Td>
-                  <Td numerica className="font-semibold">
-                    {importoCents(totale.cost_cents, valuta)}
-                  </Td>
-                </tr>
-              </tfoot>
-            )}
-          </Table>
+              </thead>
+              <tbody>
+                {voci.map((v) => (
+                  <tr key={`${v.provider}|${v.service}|${v.outcome}`}>
+                    <Td className="text-ink-2">
+                      {ADMIN_PARTENARIATI_COPY.providers[v.provider] ?? v.provider}
+                    </Td>
+                    <th scope="row" className={thRigaClass}>
+                      {ADMIN_PARTENARIATI_COPY.servizi[v.service] ?? v.service}
+                    </th>
+                    <Td className="text-ink-2">
+                      {ADMIN_PARTENARIATI_COPY.esiti[v.outcome] ?? v.outcome}
+                    </Td>
+                    <Td numerica className="text-ink-2">
+                      {numero(v.eventi)}
+                    </Td>
+                    <Td numerica className="font-medium">
+                      {importoCents(v.cost_cents, valuta)}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+              {totale && (
+                <tfoot>
+                  <tr className="bg-desk">
+                    <th scope="row" colSpan={3} className={cn(thRigaClass, "font-semibold")}>
+                      Totale in {valuta === "EUR" ? "euro" : valuta === "USD" ? "dollari" : valuta}
+                    </th>
+                    <Td numerica className="font-semibold">
+                      {numero(totale.eventi)}
+                    </Td>
+                    <Td numerica className="font-semibold">
+                      {importoCents(totale.cost_cents, valuta)}
+                    </Td>
+                  </tr>
+                </tfoot>
+              )}
+            </Table>
+          </Card>
         );
       })}
     </div>
@@ -241,7 +255,7 @@ export function MetricheTab() {
       {q.isPending ? (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3" aria-hidden>
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 w-full" />
+            <Skeleton key={i} className="h-24 w-full rounded-control" />
           ))}
         </div>
       ) : q.isError ? (
@@ -266,7 +280,7 @@ export function CostiTab() {
       <Intestazione periodo={periodo} />
       <p className="text-small text-ink-3">{ADMIN_PARTENARIATI_COPY.notaValute}</p>
       {q.isPending ? (
-        <Skeleton className="h-48 w-full" />
+        <Skeleton className="h-48 w-full rounded-panel" />
       ) : q.isError ? (
         <ErrorState message={apiErrorMessage(q.error)} onRetry={() => void q.refetch()} />
       ) : (

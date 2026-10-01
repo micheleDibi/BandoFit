@@ -49,7 +49,8 @@ export function BozzaAnteprima({ bozza }: { bozza: BozzaDocumento }) {
   return (
     <article aria-labelledby={idTitolo} className="flex flex-col gap-4">
       <DisclaimerBozza />
-      <Card className="flex flex-col gap-4">
+      {/* Il documento sta dentro la card della scheda: foglio incassato, senza ombra. */}
+      <Card className="flex flex-col gap-4 bg-desk shadow-none">
         <h3 id={idTitolo} className="font-sans text-row-title text-ink">
           {titolo}
         </h3>

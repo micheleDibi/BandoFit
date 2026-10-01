@@ -1,3 +1,4 @@
+import { Users } from "lucide-react";
 import { useMieCall } from "../../hooks/useCallPartenariato";
 import { useCompany } from "../../hooks/useCompany";
 import { useFunzioni } from "../../hooks/useFunzioni";
@@ -111,7 +112,7 @@ export function PartenariatoCard({
 
   if (isPending) {
     return (
-      <Panel titolo="Partenariato">
+      <Panel titolo="Partenariato" icon={Users} area="partenariati">
         <div className="flex flex-col gap-2" aria-hidden>
           <Skeleton className="h-4 w-full" />
           <Skeleton className="h-8 w-32" />
@@ -122,7 +123,7 @@ export function PartenariatoCard({
 
   if (isError) {
     return (
-      <Panel titolo="Partenariato">
+      <Panel titolo="Partenariato" icon={Users} area="partenariati">
         <div className="flex flex-col gap-2">
           <InlineError>Non siamo riusciti a caricare le regole di partenariato.</InlineError>
           <div>
@@ -136,7 +137,7 @@ export function PartenariatoCard({
   }
 
   return (
-    <Panel titolo="Partenariato">
+    <Panel titolo="Partenariato" icon={Users} area="partenariati">
       <div className="flex flex-col gap-3">
         <Stato dati={data} />
         {data.calls_aperte > 0 && (

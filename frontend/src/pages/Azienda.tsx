@@ -1,4 +1,4 @@
-import { Pencil } from "lucide-react";
+import { ChartColumn, FileText, Pencil } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { BilanciSection } from "../components/company/bilanci/BilanciSection";
@@ -10,6 +10,9 @@ import { ExportPdfButton } from "../components/shared/ExportPdfButton";
 import { Alert } from "../components/ui/Alert";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
+import { IconChip } from "../components/ui/IconChip";
+import { FOCUS_SU_FASCIA, GHOST_SU_FASCIA } from "../components/shared/fascia";
 import { Page } from "../components/ui/Page";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Section, SectionHeader } from "../components/ui/SectionHeader";
@@ -120,7 +123,7 @@ export default function Azienda() {
   if (isPending) {
     return (
       <Page variante="sezioni">
-        <PageHeader titolo="Dati azienda" />
+        <PageHeader area="azienda" titolo="Dati azienda" />
         <div className="flex flex-col gap-4" aria-hidden>
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-40 w-full" />
@@ -132,7 +135,7 @@ export default function Azienda() {
   if (isError || !data) {
     return (
       <Page variante="sezioni">
-        <PageHeader titolo="Dati azienda" />
+        <PageHeader area="azienda" titolo="Dati azienda" />
         <ErrorState
           title="Non siamo riusciti a caricare il dossier aziendale."
           onRetry={() => refetch()}
@@ -159,6 +162,7 @@ export default function Azienda() {
   return (
     <Page variante="sezioni">
       <PageHeader
+        area="azienda"
         titolo="Dati azienda"
         descrizione={
           nome
@@ -169,11 +173,21 @@ export default function Azienda() {
           // Senza dati la scheda parte già in modifica: l'import resta a portata.
           tab === "dati" && puoModificare && (!editing || !azienda) ? (
             <>
-              <Button type="button" variant="ghost" onClick={() => setImportOpen(true)}>
+              <Button
+                type="button"
+                variant="ghost"
+                className={GHOST_SU_FASCIA}
+                onClick={() => setImportOpen(true)}
+              >
                 Importa da partita IVA
               </Button>
               {!editing && (
-                <Button type="button" variant="secondary" onClick={() => setEditing(true)}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className={FOCUS_SU_FASCIA}
+                  onClick={() => setEditing(true)}
+                >
                   <Pencil className="size-4" aria-hidden />
                   Modifica
                 </Button>
@@ -199,69 +213,82 @@ export default function Azienda() {
             Li compili tu e li vedono anche gli account collegati.
           </p>
         )}
-        <CompanyCard
-          editing={editing}
-          onEditingChange={setEditing}
-          bozza={bozza}
-          onBozzaChange={setBozza}
-        />
+        <Card area="azienda" className="sm:p-6">
+          <CompanyCard
+            editing={editing}
+            onEditingChange={setEditing}
+            bozza={bozza}
+            onBozzaChange={setBozza}
+          />
+        </Card>
       </TabPanel>
 
       <TabPanel id="dossier" attivo={tab} prefisso={PREFISSO}>
-        <Section aria-label="Dossier certificato">
-          <SectionHeader
-            titolo="Dossier certificato"
-            azione={
-              data.imported && data.dossier ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <ExportPdfButton
-                    url="/me/company/dossier/pdf"
-                    filename={`dossier-${slug}.pdf`}
-                    label="Esporta il dossier in PDF"
-                    size="sm"
-                  />
-                  {data.editable && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setImportOpen(true)}
-                    >
-                      Aggiorna
-                    </Button>
-                  )}
-                </div>
-              ) : undefined
-            }
-          />
-          {data.imported && data.dossier ? (
-            <>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                {data.dossier.anagrafica.stato && (
-                  <Status tono={data.dossier.anagrafica.stato === "Attiva" ? "aperto" : "neutro"}>
-                    {data.dossier.anagrafica.stato}
-                  </Status>
-                )}
-                {data.dossier.flags?.startup_innovativa && <Badge>Startup innovativa</Badge>}
-                {data.sandbox && <Badge>Dati di test</Badge>}
-                <span className="text-small text-ink-3">
-                  Registro Imprese, aggiornato il {formatDateNumeric(data.fetched_at)}
+        <Card className="sm:p-6">
+          <Section aria-label="Dossier certificato">
+            <SectionHeader
+              titolo={
+                <span className="flex items-center gap-3">
+                  <IconChip icon={FileText} area="azienda" size="sm" />
+                  Dossier certificato
                 </span>
-              </div>
-              <DossierView dossier={data.dossier} people={data.people} linkBilanci />
-            </>
-          ) : (
-            <EmptyState
-              title="Nessun dato importato."
-              description={
-                data.editable
-                  ? "Importa la visura completa della tua azienda dal Registro Imprese: anagrafica, ATECO, sedi, cariche e molto altro."
-                  : "Il titolare non ha ancora importato i dati aziendali."
               }
-              action={data.editable ? importa : undefined}
+              azione={
+                data.imported && data.dossier ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ExportPdfButton
+                      url="/me/company/dossier/pdf"
+                      filename={`dossier-${slug}.pdf`}
+                      label="Esporta il dossier in PDF"
+                      size="sm"
+                    />
+                    {data.editable && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setImportOpen(true)}
+                      >
+                        Aggiorna
+                      </Button>
+                    )}
+                  </div>
+                ) : undefined
+              }
             />
-          )}
-        </Section>
+            {data.imported && data.dossier ? (
+              <>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                  {data.dossier.anagrafica.stato && (
+                    <Status tono={data.dossier.anagrafica.stato === "Attiva" ? "aperto" : "neutro"}>
+                      {data.dossier.anagrafica.stato}
+                    </Status>
+                  )}
+                  {data.dossier.flags?.startup_innovativa && (
+                    <Badge area="azienda">Startup innovativa</Badge>
+                  )}
+                  {data.sandbox && <Badge tone="warning">Dati di test</Badge>}
+                  <span className="text-small text-ink-3">
+                    Registro Imprese, aggiornato il {formatDateNumeric(data.fetched_at)}
+                  </span>
+                </div>
+                <DossierView dossier={data.dossier} people={data.people} linkBilanci />
+              </>
+            ) : (
+              <EmptyState
+                icon={FileText}
+                area="azienda"
+                title="Nessun dato importato."
+                description={
+                  data.editable
+                    ? "Importa la visura completa della tua azienda dal Registro Imprese: anagrafica, ATECO, sedi, cariche e molto altro."
+                    : "Il titolare non ha ancora importato i dati aziendali."
+                }
+                action={data.editable ? importa : undefined}
+              />
+            )}
+          </Section>
+        </Card>
       </TabPanel>
 
       <TabPanel id="bilanci" attivo={tab} prefisso={PREFISSO}>
@@ -271,6 +298,8 @@ export default function Azienda() {
           <BilanciSection key={activeCompanyId ?? "azienda"} />
         ) : (
           <EmptyState
+            icon={ChartColumn}
+            area="azienda"
             title="Prima importa il dossier."
             description="I bilanci arrivano con il dossier del Registro Imprese: dopo l'import li trovi qui, esercizio per esercizio."
             action={data.editable ? importa : undefined}

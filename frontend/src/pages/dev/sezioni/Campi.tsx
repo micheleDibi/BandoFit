@@ -87,14 +87,17 @@ export default function Campi() {
 
   return (
     <div className="flex flex-col gap-10">
-      <Blocco nome="Avatar" nota="Iniziali su accent-soft; sm 24px, md 32px.">
+      <Blocco nome="Avatar" nota="Iniziali su un colore d'area derivato dal nome (sempre lo stesso per lo stesso nome); sm 24px, md 32px.">
         <Avatar nome="Giulia Rinaldi" size="sm" />
         <Avatar nome="Giulia Rinaldi" />
         <Avatar nome="Marta" />
         <Avatar nome="Officine Rinaldi S.r.l." />
+        <Avatar nome="Fonderia Bertolotti S.r.l." />
+        <Avatar nome="Luca Ferraris" />
+        <Avatar nome="Studio Conti & Associati" />
       </Blocco>
 
-      <Blocco nome="Chip" nota="Filtro attivo rimovibile; senza onRemove è un valore fisso.">
+      <Blocco nome="Chip" nota="Filtro attivo rimovibile, su accent-soft; senza onRemove è un valore fisso.">
         <Chip>Solo lettura</Chip>
         {chips.map((c) => (
           <Chip

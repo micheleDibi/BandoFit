@@ -41,7 +41,7 @@ export function InventarioAddon({
     <div className="flex flex-col gap-2 border-t border-line pt-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         {mostraBadge ? (
-          <Badge>
+          <Badge tone="info">
             Hai {posseduto.quantita} {posseduto.nome}
           </Badge>
         ) : (
@@ -55,7 +55,13 @@ export function InventarioAddon({
           onClick={() => setAperto((v) => !v)}
         >
           {aperto ? "Nascondi i movimenti" : "Vedi i movimenti"}
-          <ChevronDown className={cn("size-4", aperto && "rotate-180")} aria-hidden />
+          <ChevronDown
+            className={cn(
+              "size-4 motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-uscita",
+              aperto && "rotate-180",
+            )}
+            aria-hidden
+          />
         </Button>
       </div>
       {aperto && (

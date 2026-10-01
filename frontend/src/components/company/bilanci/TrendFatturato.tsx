@@ -2,8 +2,11 @@ import { formatEurCompatto } from "../../../lib/bilanci";
 import { cn } from "../../../lib/cn";
 import type { EsercizioBilancio } from "../../../types";
 
-/** Fatturato anno per anno, a barre (div: nel progetto non c'è una libreria
- *  di grafici). Per gli screen reader il grafico è un'immagine con i valori
+/** Fatturato anno per anno, a barre nel colore dell'area azienda (l'ultimo
+ *  anno pieno, i precedenti più tenui), che crescono dalla base all'arrivo
+ *  (niente, con il movimento ridotto). Resta in div e non usa `BarChart`: su
+ *  mobile tiene solo l'etichetta dell'ultimo anno, che con molti esercizi non
+ *  si sovrappone. Per gli screen reader il grafico è un'immagine con i valori
  *  nell'etichetta; le cifre esatte sono comunque nella tabella. Serve almeno
  *  un confronto: con meno di due anni non si mostra. */
 export function TrendFatturato({ esercizi }: { esercizi: EsercizioBilancio[] }) {
@@ -30,7 +33,8 @@ export function TrendFatturato({ esercizi }: { esercizi: EsercizioBilancio[] }) 
                 quella dell'ultimo anno, le altre sono nella tabella. */}
             <span
               className={cn(
-                "whitespace-nowrap text-caption text-ink-2 tabular-nums",
+                "whitespace-nowrap text-caption tabular-nums",
+                ultimo ? "font-semibold text-area-azienda-ink" : "text-ink-2",
                 !ultimo && "hidden sm:block",
               )}
             >
@@ -38,8 +42,11 @@ export function TrendFatturato({ esercizi }: { esercizi: EsercizioBilancio[] }) 
             </span>
             <div className="flex h-28 w-full items-end justify-center">
               <div
-                className={cn("w-full max-w-12 rounded-t-mark", ultimo ? "bg-accent" : "bg-accent-soft")}
-                style={{ height: `${altezza}%` }}
+                className={cn(
+                  "w-full max-w-12 origin-bottom rounded-t-mark motion-safe:animate-crescita",
+                  ultimo ? "bg-area-azienda" : "bg-area-azienda/45",
+                )}
+                style={{ height: `${altezza}%`, animationDelay: `${indice * 60}ms` }}
               />
             </div>
             <span className="text-caption text-ink-3 tabular-nums">{p.anno}</span>

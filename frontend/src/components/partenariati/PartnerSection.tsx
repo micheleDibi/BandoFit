@@ -16,6 +16,7 @@ import { formatDate } from "../../lib/format";
 import type { PartnerProfile, PartnerProfileInput } from "../../types";
 import { Alert } from "../ui/Alert";
 import { Badge } from "../ui/Badge";
+import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Panel } from "../ui/Panel";
@@ -394,7 +395,7 @@ export function PartnerSection({ onImporta }: { onImporta?: () => void }) {
         {data.editable && <ReferentePartner profilo={data} />}
 
         {data.editable && (
-          <div className="flex flex-wrap items-center gap-3 rounded-panel bg-desk p-5">
+          <Card area="partenariati" className="flex flex-wrap items-center gap-3">
             <p className="min-w-0 flex-1 text-body text-ink-2" aria-live="polite">
               {bozzaInCorso && bozzaInCorsoRecente(data) ? (
                 <span className="inline-flex items-center gap-2">
@@ -412,20 +413,22 @@ export function PartnerSection({ onImporta }: { onImporta?: () => void }) {
                 ? PARTNER_COPY.bozzaRivedi
                 : PARTNER_COPY.bozzaCta}
             </Button>
-          </div>
+          </Card>
         )}
 
         <div className="grid items-start gap-6 lg:grid-cols-[3fr_2fr]">
           {form && salvato ? (
-            <PartnerProfileForm
-              valore={form}
-              onChange={setForm}
-              salvato={salvato}
-              editable={data.editable}
-              anonimo={data.anonimo}
-              dedotti={data.tipi_soggetto_dedotti}
-              avvisiAnonimato={data.avvisi_anonimato}
-            />
+            <Card className="min-w-0 sm:p-6">
+              <PartnerProfileForm
+                valore={form}
+                onChange={setForm}
+                salvato={salvato}
+                editable={data.editable}
+                anonimo={data.anonimo}
+                dedotti={data.tipi_soggetto_dedotti}
+                avvisiAnonimato={data.avvisi_anonimato}
+              />
+            </Card>
           ) : (
             <Skeleton className="h-96 w-full" />
           )}

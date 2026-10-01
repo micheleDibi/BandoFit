@@ -3,6 +3,7 @@ import { BACHECA_COPY, PARTNER_COPY } from "../../lib/copy";
 import { nomePaese } from "../../lib/paesi";
 import type { PartnerSuggerito } from "../../types";
 import { Badge } from "../ui/Badge";
+import { Card } from "../ui/Card";
 import { DefinitionList, type Definizione } from "../ui/Facts";
 import { CLASSI_DIMENSIONALI } from "./AnteprimaPartnerCard";
 import { AttenzioneBadge, MatchBadge } from "./MatchBadge";
@@ -27,7 +28,7 @@ function Chips({ voci }: { voci: string[] }) {
  *  registro oppure «Azienda anonima» con regione, sezione ATECO, classe
  *  dimensionale e fascia di fatturato (Q12); un riferimento valido solo per
  *  questa call (mai l'id dell'azienda); il confronto in vista «terzi» (solo
- *  fasce ed esiti, nessun importo) e il profilo pubblico. La riga è un `<li>`. */
+ *  fasce ed esiti, nessun importo) e il profilo pubblico. La card è un `<li>`. */
 export function SuggeritoCard({
   suggerito,
   testi,
@@ -125,43 +126,45 @@ export function SuggeritoCard({
   }
 
   return (
-    <li className="flex flex-col gap-4 border-b border-line py-5 md:flex-row md:gap-6">
-      <div className="flex min-w-0 grow flex-col gap-3">
-        <div className="flex flex-col gap-0.5">
-          <h3 className="font-sans text-row-title text-ink">
-            {profilo.denominazione ?? PARTNER_COPY.aziendaAnonima}
-          </h3>
-          {dove.length > 0 && (
-            <p className="flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-2">
-              {dove.map((d) => (
-                <span key={d}>{d}</span>
-              ))}
-            </p>
+    <li>
+      <Card area="partenariati" className="flex flex-col gap-4 md:flex-row md:gap-6">
+        <div className="flex min-w-0 grow flex-col gap-3">
+          <div className="flex flex-col gap-0.5">
+            <h3 className="font-sans text-row-title text-ink">
+              {profilo.denominazione ?? PARTNER_COPY.aziendaAnonima}
+            </h3>
+            {dove.length > 0 && (
+              <p className="flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-2">
+                {dove.map((d) => (
+                  <span key={d}>{d}</span>
+                ))}
+              </p>
+            )}
+            <p className="text-small text-ink-3">Riferimento per questa call: {pseudonimo}</p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <MatchBadge match={match} persona="lei" />
+            <AttenzioneBadge match={match} />
+          </div>
+          <MatchSpiegazione match={match} persona="lei" testi={testi} compatta />
+
+          {voci.length > 0 && <DefinitionList items={voci} />}
+
+          {(altroProfilo || altre > 0) && (
+            <details className="group">
+              <summary className="inline-flex cursor-pointer select-none items-center gap-1 rounded-mark text-small font-medium text-accent-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+                <span className="group-open:hidden">Profilo completo</span>
+                <span className="hidden group-open:inline">Nascondi il profilo</span>
+              </summary>
+              <div className="mt-3">
+                <DefinitionList items={profiloCompleto} />
+              </div>
+            </details>
           )}
-          <p className="text-small text-ink-3">Riferimento per questa call: {pseudonimo}</p>
         </div>
-
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <MatchBadge match={match} persona="lei" />
-          <AttenzioneBadge match={match} />
-        </div>
-        <MatchSpiegazione match={match} persona="lei" testi={testi} compatta />
-
-        {voci.length > 0 && <DefinitionList items={voci} />}
-
-        {(altroProfilo || altre > 0) && (
-          <details className="group">
-            <summary className="inline-flex cursor-pointer select-none items-center gap-1 rounded-mark text-small font-medium text-accent-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
-              <span className="group-open:hidden">Profilo completo</span>
-              <span className="hidden group-open:inline">Nascondi il profilo</span>
-            </summary>
-            <div className="mt-3">
-              <DefinitionList items={profiloCompleto} />
-            </div>
-          </details>
-        )}
-      </div>
-      {azione && <div className="shrink-0 md:w-48">{azione}</div>}
+        {azione && <div className="shrink-0 md:w-48">{azione}</div>}
+      </Card>
     </li>
   );
 }

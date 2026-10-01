@@ -15,6 +15,7 @@ import {
 import { MonthGrid } from "../components/calendar/MonthGrid";
 import { SlotDialog, type SlotDialogState } from "../components/calendar/SlotDialog";
 import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { IconButton } from "../components/ui/IconButton";
 import { Page } from "../components/ui/Page";
 import { PageHeader } from "../components/ui/PageHeader";
@@ -50,7 +51,10 @@ function Legenda({ voci }: { voci: Array<{ ruolo: RuoloCalendario; label: string
     <ul aria-label="Legenda" className="flex flex-wrap items-center gap-x-4 gap-y-1">
       {voci.map((v) => (
         <li key={v.ruolo} className="inline-flex items-center gap-1.5 text-small text-ink-2">
-          <span aria-hidden className={`size-3 shrink-0 rounded-mark ${ruoloClasses(v.ruolo)}`} />
+          <span
+            aria-hidden
+            className={`h-3.5 w-5 shrink-0 rounded-mark ${ruoloClasses(v.ruolo)}`}
+          />
           {v.label}
         </li>
       ))}
@@ -178,6 +182,7 @@ export default function Calendario() {
     <Page variante="elenco">
       <PageHeader
         titolo="Calendario"
+        area="scadenze"
         descrizione={
           isProgettista
             ? "Clicca su un giorno per aggiungere un evento o una disponibilità, su una voce per gestirla."
@@ -186,13 +191,13 @@ export default function Calendario() {
       />
 
       {isPending ? (
-        <Skeleton className="h-[34rem] w-full" />
+        <Skeleton className="h-[34rem] w-full rounded-panel" />
       ) : isError ? (
         <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
       ) : (
-        <div className="flex flex-col gap-4">
+        <Card className="overflow-hidden p-0">
           {/* Barra: mese, navigazione e legenda */}
-          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b border-line px-4 py-3 sm:px-5">
             <div className="flex items-center gap-2">
               <h2 className="min-w-44 text-title-section capitalize text-ink" aria-live="polite">
                 {formatMonthYear(anno, mese)}
@@ -225,18 +230,16 @@ export default function Calendario() {
             <Legenda voci={legenda} />
           </div>
 
-          <div className="overflow-hidden rounded-panel border border-line">
-            <MonthGrid
-              anno={anno}
-              mese={mese}
-              itemsByDay={itemsByDay}
-              todayIso={todayIso}
-              onDayClick={handleDayClick}
-              onOpenItem={handleOpenItem}
-              onShowDay={setDayListFor}
-            />
-          </div>
-        </div>
+          <MonthGrid
+            anno={anno}
+            mese={mese}
+            itemsByDay={itemsByDay}
+            todayIso={todayIso}
+            onDayClick={handleDayClick}
+            onOpenItem={handleOpenItem}
+            onShowDay={setDayListFor}
+          />
+        </Card>
       )}
 
       <DayEventsDialog

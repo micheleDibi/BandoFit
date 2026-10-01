@@ -1,4 +1,4 @@
-import { Bookmark, CalendarPlus, Check, ExternalLink, Minus, Pencil } from "lucide-react";
+import { Bookmark, CalendarPlus, Check, ExternalLink, Minus, Pencil, Sparkles, Users } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Accordion } from "../../../components/ui/Accordion";
 import { Badge } from "../../../components/ui/Badge";
@@ -34,8 +34,10 @@ function Esempio({ nome, children }: { nome: string; children: ReactNode }) {
 const STATI: { tono: TonoStatus; parola: string }[] = [
   { tono: "aperto", parola: "Aperto" },
   { tono: "in-apertura", parola: "In apertura" },
-  { tono: "chiuso", parola: "Chiuso" },
+  { tono: "in-scadenza", parola: "In scadenza" },
   { tono: "attenzione", parola: "Da rifare" },
+  { tono: "errore", parola: "Pagamento non riuscito" },
+  { tono: "chiuso", parola: "Chiuso" },
   { tono: "neutro", parola: "Spento" },
 ];
 
@@ -78,9 +80,9 @@ const SCHEDE_PARTENARIATI = [
 const PASSI_WIZARD = ["Bando", "Regole del bando", "Requisiti", "Posizioni", "Testi", "Anteprima", "Pubblicazione"];
 
 const VARIANTI_PAGE: { variante: VariantePage; nome: string }[] = [
-  { variante: "elenco", nome: "elenco (1112px)" },
-  { variante: "sezioni", nome: "sezioni (880px)" },
-  { variante: "flusso", nome: "flusso (720px)" },
+  { variante: "elenco", nome: "elenco (1280px, centrato)" },
+  { variante: "sezioni", nome: "sezioni (1040px, centrato)" },
+  { variante: "flusso", nome: "flusso (760px, centrato)" },
 ];
 
 function Riquadro({ children }: { children: ReactNode }) {
@@ -97,7 +99,12 @@ export default function Struttura() {
     <div className="flex flex-col gap-12">
       <Section>
         <SectionHeader titolo="Status" />
-        <div className="flex flex-wrap gap-6">
+        <p className="text-small text-ink-3">
+          Pillola nel colore del tono: aperto fit, in apertura accent, in scadenza warm, attenzione
+          warning, errore danger, chiuso e neutro neutral. La forma del pallino aiuta a non contare
+          solo sul colore.
+        </p>
+        <div className="flex flex-wrap gap-3">
           {STATI.map((s) => (
             <Status key={s.tono} tono={s.tono}>
               {s.parola}
@@ -108,12 +115,19 @@ export default function Struttura() {
 
       <Section>
         <SectionHeader titolo="Due" azione={<span className="text-small text-ink-3">oggi = 30 set 2026</span>} />
+        <p className="text-small text-ink-3">
+          Tessera per urgenza: entro 7 giorni warm, entro 30 warning, oltre accent; passata o con
+          conConto falso, neutra.
+        </p>
         <div className="flex flex-wrap gap-x-8 gap-y-6">
           {SCADENZE.map((s, i) => (
             <Esempio key={i} nome={s.nome}>
               <Due data={s.data} ora={s.ora} oggi={OGGI} />
             </Esempio>
           ))}
+          <Esempio nome="conConto={false} (bando chiuso)">
+            <Due data="2026-10-05" oggi={OGGI} conConto={false} />
+          </Esempio>
         </div>
       </Section>
 
@@ -125,12 +139,19 @@ export default function Struttura() {
           ))}
           <Fit soddisfatti={3} totale={5} label="Requisiti soddisfatti: 3 su 5" />
         </div>
+        <Esempio nome='variante="anello"'>
+          <div className="flex flex-wrap gap-8">
+            {[0, 2, 4].map((n) => (
+              <Fit key={n} soddisfatti={n} totale={4} variante="anello" />
+            ))}
+          </div>
+        </Esempio>
       </Section>
 
       <Section>
         <SectionHeader titolo="Panel" />
         <div className="grid gap-6 lg:grid-cols-3">
-          <Panel titolo="Fa per te?" azione={<Fit soddisfatti={2} totale={4} />}>
+          <Panel titolo="Fa per te?" icon={Sparkles} area="aicheck" azione={<Fit soddisfatti={2} totale={4} />}>
             <p className="text-small text-ink-2">
               Requisiti del bando soddisfatti da Officine Rinaldi S.r.l., tutte le sedi comprese.
             </p>
@@ -160,7 +181,7 @@ export default function Struttura() {
               Ti restano 96 AI-check su 100 quest'anno.
             </p>
           </Panel>
-          <Panel titolo="Partenariato">
+          <Panel titolo="Partenariato" icon={Users} area="partenariati">
             <p className="text-small text-ink-2">
               Scopri se questo bando ammette o richiede partner: leggiamo per te i documenti ufficiali.
             </p>
@@ -342,7 +363,42 @@ export default function Struttura() {
             }
           />
         </Esempio>
-        <Esempio nome="Scheda del bando: ritorno, riga sopra, titolo grande, azioni con nota">
+        <Esempio nome="Con area: la fascia navy, IconChip dell'area, azioni inverse">
+          <PageHeader
+            area="azienda"
+            titolo="Dati azienda"
+            descrizione="I dati di Officine Rinaldi S.r.l., alla base della compatibilità e dell'AI-check."
+            azioni={
+              <Button variant="inverse">
+                <Pencil className="size-4" strokeWidth={1.75} aria-hidden />
+                Modifica
+              </Button>
+            }
+          />
+        </Esempio>
+        <Esempio nome="Con area, ritorno e riga sopra (scheda del bando)">
+          <PageHeader
+            area="bandi"
+            stileTitolo="bando"
+            indietro={{ label: "Bandi", to: "/app/bandi" }}
+            sopra={
+              <>
+                <Status tono="aperto">Aperto</Status>
+                <Badge>Bando regionale</Badge>
+                <Badge>Fondo perduto</Badge>
+              </>
+            }
+            titolo="Contributi Piemonte 2026 per Società di Mutuo Soccorso storiche"
+            descrizione="Regione Piemonte"
+            azioni={
+              <Button variant="inverse">
+                Vai al bando
+                <ExternalLink className="size-4" strokeWidth={1.75} aria-hidden />
+              </Button>
+            }
+          />
+        </Esempio>
+        <Esempio nome="Senza area (come prima). Scheda del bando: ritorno, riga sopra, titolo grande, azioni con nota">
           <PageHeader
             stileTitolo="bando"
             indietro={{ label: "Bandi", to: "/app/bandi" }}
@@ -385,7 +441,7 @@ export default function Struttura() {
             </div>
           </Esempio>
         ))}
-        <Esempio nome='variante="dettaglio" — 1112px, intestazione a tutta larghezza, laterale 320px'>
+        <Esempio nome='variante="dettaglio" — 1280px centrato, intestazione a tutta larghezza, laterale 340px'>
           <div className="border border-dashed border-line-control">
             <Page
               variante="dettaglio"

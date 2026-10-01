@@ -10,7 +10,7 @@ import { Spinner } from "../ui/Spinner";
 /** Prima della cornice (sessione ancora da leggere): alto quanto la finestra. */
 function FullPageSpinner() {
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-sheet">
+    <div className="flex min-h-dvh items-center justify-center bg-desk">
       <Spinner size="lg" label="Caricamento" />
     </div>
   );

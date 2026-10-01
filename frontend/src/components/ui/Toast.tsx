@@ -38,7 +38,7 @@ const MAX_VISIBILI = 3;
 const ToastContext = createContext<ToastApi | null>(null);
 
 /** Notifiche a comparsa per le conferme («Preferenze salvate»): in basso a
- *  sinistra, sopra la pagina, spariscono da sole. La regione `aria-live` è
+ *  sinistra, sopra la pagina, entrano con una breve risalita e spariscono da sole. La regione `aria-live` è
  *  sempre nel DOM, così la prima notifica viene annunciata. Si monta una volta
  *  sola, in `main.tsx`, sopra `App`.
  *  Sta sotto un `<dialog>` modale aperto (il top layer vince su `z-50`): dentro
@@ -113,7 +113,7 @@ function ToastItem({
       role={tono === "errore" ? "alert" : undefined}
       onMouseEnter={() => setInPausa(true)}
       onMouseLeave={() => setInPausa(false)}
-      className="pointer-events-auto inline-flex items-center gap-2.5 rounded-control bg-ink px-4 py-3 text-body font-medium text-on-accent shadow-overlay"
+      className="pointer-events-auto inline-flex items-center gap-2.5 rounded-control bg-ink px-4 py-3 text-body font-medium text-on-accent shadow-overlay motion-safe:animate-entrata"
     >
       {tono === "ok" ? (
         <Check className="size-4 shrink-0 text-fit" aria-hidden />

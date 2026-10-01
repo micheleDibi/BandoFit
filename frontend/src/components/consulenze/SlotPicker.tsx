@@ -112,7 +112,7 @@ export function SlotPicker({
                         aria-pressed={attivo}
                         onClick={() => setSelected(attivo ? null : slot.id)}
                         className={cn(
-                          "inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-control border px-3 text-body font-medium tabular-nums transition-colors",
+                          "inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-control border px-3 text-body font-medium tabular-nums transition-colors duration-150 ease-uscita",
                           "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
                           attivo
                             ? "border-accent bg-accent-soft text-ink"

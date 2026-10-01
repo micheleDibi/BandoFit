@@ -27,6 +27,7 @@ export default function AdminPartenariati() {
       <PageHeader
         titolo="Partenariati"
         descrizione="Segnalazioni e ricorsi, verifiche dell'identità delle aziende, call, metriche, costi ed estrazioni delle regole dei bandi."
+        area="admin"
       />
       <Tabs
         tabs={TABS.map((id) => ({ id, label: ADMIN_PARTENARIATI_COPY.schede[id] }))}

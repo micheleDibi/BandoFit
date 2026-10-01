@@ -2,9 +2,13 @@ import type { ReactNode } from "react";
 import { CALL_COPY } from "../../lib/copy";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
+import { Card } from "../ui/Card";
+import { ProgressRing } from "../ui/ProgressRing";
 import { Stepper } from "../ui/Stepper";
 
-/** Passi del wizard sullo `Stepper` del design system: il passo corrente ha
+/** Passi del wizard sullo `Stepper` del design system, in una card con il
+ *  bordo dell'area partenariati e l'anello dell'avanzamento (decorativo: lo
+ *  `Stepper` dice già «Passo N di 7»): il passo corrente ha
  *  `aria-current="step"`; sono cliccabili i passi che `abilitato` ammette (in
  *  bozza fino all'ultimo raggiunto, dopo la pubblicazione tutti). */
 export function CallStepper({
@@ -23,13 +27,28 @@ export function CallStepper({
     (massimo, _nome, i) => (abilitato(i + 1) ? i : massimo),
     passo - 1,
   );
+  const totale = CALL_COPY.passi.length;
   return (
-    <Stepper
-      passi={CALL_COPY.passi}
-      corrente={passo - 1}
-      raggiunto={raggiunto}
-      onVai={(i) => onVai(i + 1)}
-    />
+    <Card area="partenariati" className="flex items-center gap-5 py-4">
+      <span aria-hidden className="hidden shrink-0 sm:flex">
+        <ProgressRing
+          value={passo}
+          max={totale}
+          size={56}
+          tono="partenariati"
+          label={`Passo ${passo} di ${totale}`}
+        >
+          {`${passo}/${totale}`}
+        </ProgressRing>
+      </span>
+      <Stepper
+        passi={CALL_COPY.passi}
+        corrente={passo - 1}
+        raggiunto={raggiunto}
+        onVai={(i) => onVai(i + 1)}
+        className="min-w-0 grow"
+      />
+    </Card>
   );
 }
 

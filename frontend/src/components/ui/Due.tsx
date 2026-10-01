@@ -58,9 +58,19 @@ export function tempoRelativo(data: string | null | undefined, oggi?: Date): str
 
 const coloreRelativo: Record<StatoScadenza, string> = {
   passata: "text-ink-3",
-  urgente: "font-semibold text-danger",
+  urgente: "font-semibold text-warm-ink",
   vicina: "font-semibold text-warning-ink",
   lontana: "text-ink-3",
+};
+
+// La tessera della data: fondo e testo per urgenza (entro 7 giorni warm, entro 30
+// warning, oltre accent); passata o senza conto, neutra. Testo ≥ 5,1:1 sul fondo.
+const tessera: Record<StatoScadenza | "spenta", string> = {
+  urgente: "bg-warm-soft text-warm-ink ring-1 ring-warm/30 ring-inset",
+  vicina: "bg-warning-soft text-warning-ink ring-1 ring-warning/40 ring-inset",
+  lontana: "bg-accent-soft text-accent-hover",
+  passata: "bg-neutral-soft text-neutral-ink",
+  spenta: "bg-neutral-soft text-neutral-ink",
 };
 
 export interface DueProps {
@@ -77,8 +87,9 @@ export interface DueProps {
   className?: string;
 }
 
-/** Il segno della scadenza: giorno grande, «mese anno», tempo relativo in parole.
- *  Stessa forma in elenco, scheda, calendario e Home. */
+/** Il segno della scadenza: una tessera colorata per urgenza con il giorno grande
+ *  e «mese anno» sotto, poi il tempo relativo in parole. Stessa forma in elenco,
+ *  scheda, calendario e Home. Il colore non basta mai: c'è sempre la parola. */
 export function Due({ data, ora, oggi, conConto = true, className }: DueProps) {
   const parti = data?.slice(0, 10).split("-").map(Number) ?? [];
   const [anno, mese, giorno] = parti;
@@ -87,7 +98,12 @@ export function Due({ data, ora, oggi, conConto = true, className }: DueProps) {
 
   if (!data || !valida || stato === null) {
     return (
-      <span className={cn("w-18 shrink-0 text-small text-ink-3", className)}>
+      <span
+        className={cn(
+          "flex w-18 shrink-0 items-center justify-center rounded-control border border-dashed border-line-control px-1.5 py-2 text-center text-caption text-ink-3",
+          className,
+        )}
+      >
         Scadenza da definire
       </span>
     );
@@ -105,10 +121,17 @@ export function Due({ data, ora, oggi, conConto = true, className }: DueProps) {
       dateTime={ora ? `${dataIso}T${ora}` : dataIso}
       className={cn("flex w-18 shrink-0 flex-col items-start gap-0.5", className)}
     >
-      <span aria-hidden className="flex flex-col items-start gap-0.5">
-        <span className={cn("text-due-day", spenta ? "text-ink-3" : "text-ink")}>{giorno}</span>
-        <span className={cn("text-small font-medium", spenta ? "text-ink-3" : "text-ink-2")}>
-          {meseAnnoFormatter.format(new Date(anno, mese - 1, giorno))}
+      <span aria-hidden className="flex w-full flex-col items-start gap-1">
+        <span
+          className={cn(
+            "flex w-full flex-col items-center gap-0.5 rounded-control px-1 pt-1.5 pb-1",
+            tessera[spenta ? "spenta" : stato],
+          )}
+        >
+          <span className="text-due-day">{giorno}</span>
+          <span className="whitespace-nowrap text-caption">
+            {meseAnnoFormatter.format(new Date(anno, mese - 1, giorno))}
+          </span>
         </span>
         {relativo && (
           <span className={cn("whitespace-nowrap text-caption", coloreRelativo[stato])}>

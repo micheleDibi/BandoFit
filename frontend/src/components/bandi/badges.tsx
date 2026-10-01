@@ -4,13 +4,15 @@ import { Badge } from "../ui/Badge";
 import { Status, type TonoStatus } from "../ui/Status";
 
 /** Esito dell'AI-check. Il report è generato da un modello e può sbagliare:
- *  il linguaggio resta costruttivo — mai un «bocciato» secco. Per l'esito
- *  negativo NESSUN badge: il colore del punteggio e i verdetti dei singoli
- *  requisiti dicono già tutto, un'etichetta vaga non aggiunge significato. */
+ *  il linguaggio resta costruttivo — mai un «bocciato» secco. Pillola verde
+ *  per «In linea col bando», ambra per «Dati da completare», sempre con la
+ *  parola. Per l'esito negativo NESSUN badge (e mai rosso): il punteggio e i
+ *  verdetti dei singoli requisiti dicono già tutto, un'etichetta vaga non
+ *  aggiunge significato. */
 export function AiEsitoBadge({ esito }: { esito: AiEsito }) {
   if (esito === "ammissibile") {
     return (
-      <Badge>
+      <Badge tone="success">
         <CheckCircle2 className="size-3" aria-hidden />
         In linea col bando
       </Badge>
@@ -18,7 +20,7 @@ export function AiEsitoBadge({ esito }: { esito: AiEsito }) {
   }
   if (esito === "da_verificare") {
     return (
-      <Badge>
+      <Badge tone="warning">
         <HelpCircle className="size-3" aria-hidden />
         Dati da completare
       </Badge>

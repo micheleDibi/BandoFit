@@ -143,7 +143,7 @@ function BadgeOrigine<V>({ voce }: { voce: Voce<V> }) {
   const o = origine(voce);
   if (!voce.incluso) {
     return voce.originale !== null && !voce.confermabile ? (
-      <Status tono="in-apertura">Da verificare</Status>
+      <Status tono="attenzione">Da verificare</Status>
     ) : null;
   }
   if (o === "confermata") return <Status tono="aperto">Come nel bando</Status>;

@@ -13,7 +13,7 @@ export function IndicatoriBilancio({ indicatori }: { indicatori: IndicatoreBilan
       {indicatori.map((indicatore) => (
         <li
           key={indicatore.chiave}
-          className="flex flex-col gap-0.5 rounded-panel border border-line bg-sheet p-4"
+          className="flex flex-col gap-0.5 rounded-panel border border-line border-l-4 border-l-area-azienda bg-sheet p-4 shadow-card"
         >
           <p className="text-small text-ink-3">{indicatore.etichetta}</p>
           {indicatore.valore !== null ? (
@@ -36,7 +36,10 @@ export function IndicatoriBilancio({ indicatori }: { indicatori: IndicatoreBilan
             <details className="group mt-auto pt-3 text-small">
               <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-mark text-ink-2 hover:text-ink [&::-webkit-details-marker]:hidden">
                 Come si calcola
-                <ChevronDown className="size-4 group-open:rotate-180" aria-hidden />
+                <ChevronDown
+                  className="size-4 group-open:rotate-180 motion-safe:transition-transform motion-safe:duration-150"
+                  aria-hidden
+                />
               </summary>
               <p className="mt-1.5 text-ink-2">{indicatore.formula}</p>
             </details>

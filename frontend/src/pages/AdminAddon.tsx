@@ -1,7 +1,8 @@
-import { Plus } from "lucide-react";
+import { Package, Plus } from "lucide-react";
 import { useId, useState, type FormEvent } from "react";
 import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { Checkbox } from "../components/ui/Checkbox";
 import { Dialog } from "../components/ui/Dialog";
 import { SelectField, TextField } from "../components/ui/Field";
@@ -187,30 +188,32 @@ function AddonEditor({ addon }: { addon: Addon }) {
   // Un add-on per sezione: titolo con il filetto e lo stato in parole; il
   // pulsante pieno della pagina è «Nuovo add-on», qui «Salva» è secondario.
   return (
-    <Section aria-labelledby={idTitolo}>
-      <SectionHeader
-        id={idTitolo}
-        titolo={addon.nome}
-        azione={
-          form.is_active ? (
-            <Status tono="aperto">Attivo</Status>
-          ) : (
-            <Status tono="chiuso">Disattivato</Status>
-          )
-        }
-      />
-      <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-        <AddonFormFields form={form} setForm={setForm} />
-        <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" variant="secondary" loading={updateAddon.isPending}>
-            Salva add-on
-          </Button>
-          {(validationError || updateAddon.isError) && (
-            <InlineError>{validationError ?? apiErrorMessage(updateAddon.error)}</InlineError>
-          )}
-        </div>
-      </form>
-    </Section>
+    <Card className="sm:p-6">
+      <Section aria-labelledby={idTitolo}>
+        <SectionHeader
+          id={idTitolo}
+          titolo={addon.nome}
+          azione={
+            form.is_active ? (
+              <Status tono="aperto">Attivo</Status>
+            ) : (
+              <Status tono="chiuso">Disattivato</Status>
+            )
+          }
+        />
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+          <AddonFormFields form={form} setForm={setForm} />
+          <div className="flex flex-wrap items-center gap-3">
+            <Button type="submit" variant="secondary" loading={updateAddon.isPending}>
+              Salva add-on
+            </Button>
+            {(validationError || updateAddon.isError) && (
+              <InlineError>{validationError ?? apiErrorMessage(updateAddon.error)}</InlineError>
+            )}
+          </div>
+        </form>
+      </Section>
+    </Card>
   );
 }
 
@@ -249,8 +252,9 @@ export default function AdminAddon() {
       <PageHeader
         titolo="Add-on"
         descrizione="Il catalogo mostrato ai clienti nella pagina Abbonamento. Gli add-on non si eliminano: si disattivano."
+        area="admin"
         azioni={
-          <Button onClick={apriCreazione}>
+          <Button variant="inverse" onClick={apriCreazione}>
             <Plus className="size-4" aria-hidden />
             Nuovo add-on
           </Button>
@@ -260,18 +264,22 @@ export default function AdminAddon() {
       {isPending ? (
         <div className="flex flex-col gap-6" aria-hidden>
           {Array.from({ length: 2 }).map((_, i) => (
-            <Skeleton key={i} className="h-64 w-full" />
+            <Skeleton key={i} className="h-64 w-full rounded-panel" />
           ))}
         </div>
       ) : isError ? (
         <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
       ) : (addons ?? []).length === 0 ? (
-        <EmptyState
-          title="Nessun add-on nel catalogo"
-          description="Creane uno con «Nuovo add-on»."
-        />
+        <Card>
+          <EmptyState
+            title="Nessun add-on nel catalogo"
+            description="Creane uno con «Nuovo add-on»."
+            icon={Package}
+            area="admin"
+          />
+        </Card>
       ) : (
-        <div className="flex flex-col gap-12">
+        <div className="flex flex-col gap-6">
           {(addons ?? []).map((addon) => (
             <AddonEditor key={addon.id} addon={addon} />
           ))}

@@ -21,7 +21,7 @@ export interface DrawerProps {
 /** Cassetto laterale su `<dialog>` nativo, largo 320px: focus intrappolato, Esc e
  *  ritorno del focus al pulsante che lo ha aperto sono gratis; il velo lo dà la
  *  regola globale `dialog::backdrop` di `index.css` (token `veil`). Clic sul velo
- *  = chiusura. Nessuna animazione d'ingresso. */
+ *  = chiusura. Entra scorrendo dal suo lato (di scatto con il movimento ridotto). */
 export function Drawer({
   open,
   onClose,
@@ -65,7 +65,9 @@ export function Drawer({
       className={cn(
         // Sovrascrive la centratura del <dialog> modale: attaccato a un lato, alto quanto la finestra.
         "fixed inset-y-0 m-0 h-dvh max-h-none w-80 max-w-full border-0 bg-desk p-0 text-body text-ink shadow-overlay",
-        lato === "sinistra" ? "left-0 right-auto" : "left-auto right-0",
+        lato === "sinistra"
+          ? "left-0 right-auto motion-safe:animate-entrata-sinistra"
+          : "left-auto right-0 motion-safe:animate-entrata-destra",
         className,
       )}
     >

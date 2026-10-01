@@ -34,12 +34,12 @@ export const Filter = forwardRef<HTMLButtonElement, FilterProps>(
         aria-pressed={haPannello ? undefined : attivo}
         className={cn(
           "inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-control border px-3",
-          "text-body font-medium whitespace-nowrap transition-colors",
+          "text-body font-medium whitespace-nowrap transition-colors duration-150 ease-uscita",
           "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
           "disabled:cursor-not-allowed disabled:text-ink-3",
           attivo
             ? "border-accent bg-accent-soft text-accent-hover hover:border-accent-hover"
-            : "border-line-control bg-sheet text-ink hover:bg-desk",
+            : "border-line-control bg-sheet text-ink hover:border-ink-3 hover:bg-desk",
           className,
         )}
         {...props}

@@ -1,4 +1,4 @@
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, FileText } from "lucide-react";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { ConsulenzaStatoBadge, PropostaStatoBadge } from "../Consulenze";
@@ -9,6 +9,7 @@ import { DossierView } from "../../components/company/dossier/DossierView";
 import { orarioAppuntamento } from "../../components/consulenze/formato";
 import { VideocallButton } from "../../components/consulenze/VideocallButton";
 import { Button, LinkButton } from "../../components/ui/Button";
+import { Card } from "../../components/ui/Card";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { DefinitionList } from "../../components/ui/Facts";
 import { TextareaField } from "../../components/ui/Field";
@@ -210,6 +211,7 @@ export default function RichiestaDetail() {
       <Page variante="sezioni">
         {apiErrorCode(error) === "not_found" ? (
           <EmptyState
+            area="consulenze"
             title="Questa richiesta non è più disponibile."
             description="Il cliente l'ha affidata a un altro progettista oppure l'ha annullata."
             action={tornaAlleRichieste}
@@ -264,9 +266,14 @@ export default function RichiestaDetail() {
     <>
       {/* L'appuntamento, con la videochiamata: su mobile sopra il resto. */}
       {richiesta.appuntamento && (
-        <Panel titolo="Appuntamento" className="order-first lg:order-none">
+        <Panel
+          titolo="Appuntamento"
+          icon={CalendarClock}
+          area="consulenze"
+          className="order-first lg:order-none"
+        >
           <p className="inline-flex items-start gap-2 text-body text-ink tabular-nums">
-            <CalendarClock className="mt-0.5 size-4 shrink-0 text-ink-3" aria-hidden />
+            <CalendarClock className="mt-0.5 size-4 shrink-0 text-area-consulenze-ink" aria-hidden />
             <time dateTime={richiesta.appuntamento.inizio}>
               {orarioAppuntamento(richiesta.appuntamento)}
             </time>
@@ -276,7 +283,7 @@ export default function RichiestaDetail() {
           )}
         </Panel>
       )}
-      <Panel titolo="Bando">
+      <Panel titolo="Bando" icon={FileText} area="bandi">
         <p className="text-body text-ink">{richiesta.bando_titolo}</p>
         <p className="text-small">
           <TextLink to={`/app/bandi/${richiesta.bando_slug}`}>Vai al bando</TextLink>
@@ -290,6 +297,7 @@ export default function RichiestaDetail() {
       variante="dettaglio"
       intestazione={
         <PageHeader
+          area="consulenze"
           indietro={INDIETRO}
           sopra={
             <>
@@ -316,104 +324,114 @@ export default function RichiestaDetail() {
       laterale={laterale}
     >
       {/* AI-check ricevuto dal cliente (requisito punto 3) */}
-      <Section aria-label="AI-check del cliente">
-        <SectionHeader titolo="AI-check del cliente" />
-        {report ? (
-          <>
-            {richiesta.ai_check?.ready_at && (
-              <p className="text-small text-ink-3">
-                Generato il {formatDateTime(richiesta.ai_check.ready_at)}
-              </p>
-            )}
-            <AiReportBody report={report} mostraAzioni={false} />
-          </>
-        ) : (
-          <p className="max-w-lettura text-body text-ink-2">
-            {senzaDatiAzienda
-              ? "La consulenza è stata chiesta dalla call di partenariato: i dettagli li vedi se il titolare ti affida la consulenza."
-              : richiesta.da_call
-                ? richiesta.esito
-                  ? "La consulenza è stata chiesta dalla call di partenariato: esito e punteggio sono quelli dell'ultimo AI-check del cliente su questo bando."
-                  : "La consulenza è stata chiesta dalla call di partenariato, senza un AI-check."
-                : "Il report AI-check non è più disponibile; esito e punteggio della richiesta restano quelli registrati alla creazione."}
-          </p>
-        )}
-      </Section>
+      <Card>
+        <Section aria-label="AI-check del cliente">
+          <SectionHeader titolo="AI-check del cliente" />
+          {report ? (
+            <>
+              {richiesta.ai_check?.ready_at && (
+                <p className="text-small text-ink-3">
+                  Generato il {formatDateTime(richiesta.ai_check.ready_at)}
+                </p>
+              )}
+              <AiReportBody report={report} mostraAzioni={false} />
+            </>
+          ) : (
+            <p className="max-w-lettura text-body text-ink-2">
+              {senzaDatiAzienda
+                ? "La consulenza è stata chiesta dalla call di partenariato: i dettagli li vedi se il titolare ti affida la consulenza."
+                : richiesta.da_call
+                  ? richiesta.esito
+                    ? "La consulenza è stata chiesta dalla call di partenariato: esito e punteggio sono quelli dell'ultimo AI-check del cliente su questo bando."
+                    : "La consulenza è stata chiesta dalla call di partenariato, senza un AI-check."
+                  : "Il report AI-check non è più disponibile; esito e punteggio della richiesta restano quelli registrati alla creazione."}
+            </p>
+          )}
+        </Section>
+      </Card>
 
       {/* Consulenza dalla call (WP9): la call solo per l'assegnato, e solo a
           modulo partenariati acceso (da spento la sua rotta non esiste). */}
       {partenariatiAttivo && richiesta.da_call && (richiesta.assegnata_a_me || !senzaDatiAzienda) && (
-        <Section aria-label="Call di partenariato del cliente">
-          <SectionHeader titolo="La call di partenariato del cliente" />
-          {richiesta.assegnata_a_me ? (
-            <CallDelCliente requestId={richiesta.id} />
-          ) : (
-            <p className="max-w-lettura text-body text-ink-2">
-              Il cliente ha chiesto una consulenza sulla sua call di partenariato: la vedrai se ti
-              affida la consulenza.
-            </p>
-          )}
-        </Section>
+        <Card>
+          <Section aria-label="Call di partenariato del cliente">
+            <SectionHeader titolo="La call di partenariato del cliente" />
+            {richiesta.assegnata_a_me ? (
+              <CallDelCliente requestId={richiesta.id} />
+            ) : (
+              <p className="max-w-lettura text-body text-ink-2">
+                Il cliente ha chiesto una consulenza sulla sua call di partenariato: la vedrai se ti
+                affida la consulenza.
+              </p>
+            )}
+          </Section>
+        </Card>
       )}
 
       {/* Proposta */}
-      <Section aria-label="La tua proposta">
-        <SectionHeader titolo="La tua proposta" />
-        {richiesta.mie_proposte.length > 0 && (
-          <ul className="flex flex-col">
-            {richiesta.mie_proposte.map((proposta) => (
-              <li key={proposta.id} className="flex flex-col gap-2 border-b border-line px-2 py-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-small text-ink-3">{formatDateTime(proposta.created_at)}</p>
-                  <PropostaStatoBadge stato={proposta.stato} />
-                </div>
-                <p className="max-w-lettura whitespace-pre-line text-body text-ink">
-                  {proposta.messaggio}
-                </p>
-                {proposta.stato === "inviata" && (
-                  <div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="text-danger hover:bg-danger-soft"
-                      onClick={() => {
-                        setActionError(null);
-                        setRitirando(proposta);
-                      }}
-                    >
-                      Ritira la proposta
-                    </Button>
+      <Card>
+        <Section aria-label="La tua proposta">
+          <SectionHeader titolo="La tua proposta" />
+          {richiesta.mie_proposte.length > 0 && (
+            <ul className="flex flex-col">
+              {richiesta.mie_proposte.map((proposta) => (
+                <li key={proposta.id} className="flex flex-col gap-2 border-b border-line px-2 py-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-small text-ink-3">{formatDateTime(proposta.created_at)}</p>
+                    <PropostaStatoBadge stato={proposta.stato} />
                   </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+                  <p className="max-w-lettura whitespace-pre-line text-body text-ink">
+                    {proposta.messaggio}
+                  </p>
+                  {proposta.stato === "inviata" && (
+                    <div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="text-danger hover:bg-danger-soft"
+                        onClick={() => {
+                          setActionError(null);
+                          setRitirando(proposta);
+                        }}
+                      >
+                        Ritira la proposta
+                      </Button>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
 
-        {richiesta.stato === "nuova" && !propostaAperta && (
-          <form onSubmit={handleSend} className="flex max-w-lettura flex-col gap-3">
-            <TextareaField
-              label="Messaggio per il titolare"
-              required
-              rows={5}
-              maxLength={4000}
-              value={messaggio}
-              onChange={(e) => setMessaggio(e.target.value)}
-              helper="Presentati e spiega come puoi aiutare su questo bando: il titolare sceglie tra le proposte ricevute."
-            />
-            <div>
-              <Button type="submit" loading={invia.isPending}>
-                Invia la proposta
-              </Button>
-            </div>
-            {actionError && !ritirando && <InlineError>{actionError}</InlineError>}
-          </form>
-        )}
-      </Section>
+          {richiesta.stato === "nuova" && !propostaAperta && (
+            <form onSubmit={handleSend} className="flex max-w-lettura flex-col gap-3">
+              <TextareaField
+                label="Messaggio per il titolare"
+                required
+                rows={5}
+                maxLength={4000}
+                value={messaggio}
+                onChange={(e) => setMessaggio(e.target.value)}
+                helper="Presentati e spiega come puoi aiutare su questo bando: il titolare sceglie tra le proposte ricevute."
+              />
+              <div>
+                <Button type="submit" loading={invia.isPending}>
+                  Invia la proposta
+                </Button>
+              </div>
+              {actionError && !ritirando && <InlineError>{actionError}</InlineError>}
+            </form>
+          )}
+        </Section>
+      </Card>
 
       {/* Vista full: solo per l'assegnato */}
-      {richiesta.assegnata_a_me && <DossierCompleto requestId={richiesta.id} />}
+      {richiesta.assegnata_a_me && (
+        <Card>
+          <DossierCompleto requestId={richiesta.id} />
+        </Card>
+      )}
 
       <ConfirmDialog
         open={!!ritirando}

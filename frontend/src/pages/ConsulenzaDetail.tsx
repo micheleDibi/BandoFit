@@ -1,4 +1,4 @@
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, Inbox, UserRound } from "lucide-react";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import {
@@ -12,6 +12,8 @@ import { SlotPicker } from "../components/consulenze/SlotPicker";
 import { VideocallButton } from "../components/consulenze/VideocallButton";
 import { Avatar } from "../components/ui/Avatar";
 import { Button, LinkButton } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
+import { FOCUS_SU_FASCIA } from "../components/shared/fascia";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { InlineError } from "../components/ui/InlineError";
 import { Page } from "../components/ui/Page";
@@ -32,9 +34,19 @@ import { useFunzioni } from "../hooks/useFunzioni";
 import { apiErrorCode, apiErrorMessage } from "../lib/api";
 import { CONSULTO_CALL_COPY } from "../lib/copy";
 import { formatDate, formatDateTime } from "../lib/format";
-import type { Proposta } from "../types";
+import type { Proposta, PropostaStato } from "../types";
 
 const INDIETRO = { label: "Consulenze", to: "/app/consulenze" };
+
+// Bordo sinistro della card di una proposta nel colore del suo stato (lo stesso
+// di `PropostaStatoBadge`): in attesa accent, accettata fit, chiusa neutra.
+const BORDO_PROPOSTA: Record<PropostaStato, string> = {
+  inviata: "border-l-4 border-l-accent",
+  accettata: "border-l-4 border-l-fit",
+  rifiutata: "border-l-4 border-l-line-control",
+  superata: "border-l-4 border-l-line-control",
+  ritirata: "border-l-4 border-l-line-control",
+};
 
 // Il pulsante testuale delle azioni che annullano qualcosa.
 const TESTUALE_DISTRUTTIVO = "text-danger hover:bg-danger-soft";
@@ -93,6 +105,7 @@ export default function ConsulenzaDetail() {
       <Page variante="sezioni">
         {apiErrorCode(error) === "not_found" ? (
           <EmptyState
+            area="consulenze"
             title="Consulenza non trovata."
             description="L'indirizzo non corrisponde a nessuna delle tue consulenze."
             action={tornaAlleConsulenze}
@@ -188,7 +201,12 @@ export default function ConsulenzaDetail() {
   // le proposte: è la cosa da fare.
   const laterale =
     consulenza.stato === "assegnata" ? (
-      <Panel titolo="Il tuo progettista" className="order-first lg:order-none">
+      <Panel
+        titolo="Il tuo progettista"
+        icon={UserRound}
+        area="consulenze"
+        className="order-first lg:order-none"
+      >
         <div className="flex items-center gap-3">
           {nomeProgettista && <Avatar nome={nomeProgettista} />}
           <p className="font-semibold text-ink">{nomeProgettista ?? "—"}</p>
@@ -198,7 +216,7 @@ export default function ConsulenzaDetail() {
           {consulenza.appuntamento ? (
             <>
               <p className="inline-flex items-start gap-2 text-body text-ink tabular-nums">
-                <CalendarClock className="mt-0.5 size-4 shrink-0 text-ink-3" aria-hidden />
+                <CalendarClock className="mt-0.5 size-4 shrink-0 text-area-consulenze-ink" aria-hidden />
                 <time dateTime={consulenza.appuntamento.inizio}>
                   {orarioAppuntamento(consulenza.appuntamento)}
                 </time>
@@ -244,6 +262,7 @@ export default function ConsulenzaDetail() {
       variante="dettaglio"
       intestazione={
         <PageHeader
+          area="consulenze"
           indietro={INDIETRO}
           sopra={
             <>
@@ -255,11 +274,15 @@ export default function ConsulenzaDetail() {
           descrizione={`Richiesta di consulenza del ${formatDate(consulenza.created_at)}`}
           azioni={
             <>
-              <LinkButton to={`/app/bandi/${consulenza.bando_slug}`} variant="secondary">
+              <LinkButton
+                to={`/app/bandi/${consulenza.bando_slug}`}
+                variant="secondary"
+                className={FOCUS_SU_FASCIA}
+              >
                 Vai al bando
               </LinkButton>
               {linkCall && (
-                <LinkButton to={linkCall} variant="secondary">
+                <LinkButton to={linkCall} variant="secondary" className={FOCUS_SU_FASCIA}>
                   {CONSULTO_CALL_COPY.vaiAllaCall}
                 </LinkButton>
               )}
@@ -273,6 +296,8 @@ export default function ConsulenzaDetail() {
         <SectionHeader titolo="Proposte" />
         {consulenza.proposte.length === 0 ? (
           <EmptyState
+            icon={Inbox}
+            area="consulenze"
             title="Ancora nessuna proposta"
             description={
               consulenza.stato === "nuova"
@@ -281,49 +306,51 @@ export default function ConsulenzaDetail() {
             }
           />
         ) : (
-          <ul className="flex flex-col">
+          <ul className="flex flex-col gap-3">
             {consulenza.proposte.map((proposta) => (
-              <li key={proposta.id} className="flex flex-col gap-3 border-b border-line px-2 py-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  {/* Il cliente vede il progettista per nome e cognome, mai il codice. */}
-                  <div className="flex items-center gap-3">
-                    {proposta.nome_progettista && <Avatar nome={proposta.nome_progettista} />}
-                    <div className="flex flex-col">
-                      <p className="font-semibold text-ink">
-                        {proposta.nome_progettista ?? "Un progettista"}
-                      </p>
-                      <p className="text-small text-ink-3">
-                        {formatDateTime(proposta.created_at)}
-                      </p>
+              <li key={proposta.id}>
+                <Card className={`flex flex-col gap-3 ${BORDO_PROPOSTA[proposta.stato] ?? ""}`}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    {/* Il cliente vede il progettista per nome e cognome, mai il codice. */}
+                    <div className="flex items-center gap-3">
+                      {proposta.nome_progettista && <Avatar nome={proposta.nome_progettista} />}
+                      <div className="flex flex-col">
+                        <p className="font-semibold text-ink">
+                          {proposta.nome_progettista ?? "Un progettista"}
+                        </p>
+                        <p className="text-small text-ink-3">
+                          {formatDateTime(proposta.created_at)}
+                        </p>
+                      </div>
                     </div>
+                    <PropostaStatoBadge stato={proposta.stato} />
                   </div>
-                  <PropostaStatoBadge stato={proposta.stato} />
-                </div>
-                <p className="max-w-lettura whitespace-pre-line text-body text-ink">
-                  {proposta.messaggio}
-                </p>
-                {/* Più proposte possono essere accettabili insieme: «Accetta» è
-                    secondario, il primario della pagina resta uno. */}
-                {editable && consulenza.stato === "nuova" && proposta.stato === "inviata" && (
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => apri(() => setAccepting(proposta))}
-                    >
-                      Accetta la proposta
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => apri(() => setRejecting(proposta))}
-                    >
-                      Rifiuta
-                    </Button>
-                  </div>
-                )}
+                  <p className="max-w-lettura whitespace-pre-line text-body text-ink">
+                    {proposta.messaggio}
+                  </p>
+                  {/* Più proposte possono essere accettabili insieme: «Accetta» è
+                      secondario, il primario della pagina resta uno. */}
+                  {editable && consulenza.stato === "nuova" && proposta.stato === "inviata" && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => apri(() => setAccepting(proposta))}
+                      >
+                        Accetta la proposta
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => apri(() => setRejecting(proposta))}
+                      >
+                        Rifiuta
+                      </Button>
+                    </div>
+                  )}
+                </Card>
               </li>
             ))}
           </ul>

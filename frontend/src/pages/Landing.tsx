@@ -14,24 +14,31 @@ import {
 } from "lucide-react";
 import { Navigate } from "react-router-dom";
 import { RigheEsempio } from "../components/landing/RigheEsempio";
-import { Contenitore, Sezione } from "../components/landing/Sezione";
+import { Contenitore, SegnoTitolo, Sezione } from "../components/landing/Sezione";
 import { Logo } from "../components/layout/Logo";
+import { GHOST_SU_FASCIA } from "../components/shared/fascia";
 import { PlanCard } from "../components/shared/PlanCard";
 import { PoweredBy } from "../components/shared/PoweredBy";
 import { Accordion } from "../components/ui/Accordion";
+import { areaClassi, type Area } from "../components/ui/area";
 import { LinkButton } from "../components/ui/Button";
-import { Facts } from "../components/ui/Facts";
+import { Card } from "../components/ui/Card";
+import { IconChip } from "../components/ui/IconChip";
+import { KpiCard } from "../components/ui/KpiCard";
 import { Panel } from "../components/ui/Panel";
 import { ErrorState, Skeleton } from "../components/ui/states";
 import { TextLink } from "../components/ui/TextLink";
 import { useAuth } from "../hooks/useAuth";
 import { usePlans } from "../hooks/usePlans";
+import { cn } from "../lib/cn";
 import { LANDING_COPY } from "../lib/copy";
 
 interface Voce {
   icon: LucideIcon;
   title: string;
   description: string;
+  /** Il colore dell'`IconChip`: l'area dell'app di cui parla la voce. */
+  area: Area;
 }
 
 const PROBLEMI: Voce[] = [
@@ -39,16 +46,19 @@ const PROBLEMI: Voce[] = [
     icon: Search,
     title: "Sparsi ovunque",
     description: "Un unico catalogo al posto di decine di siti da controllare a mano.",
+    area: "bandi",
   },
   {
     icon: FileText,
     title: "Requisiti oscuri",
     description: "Schede chiare e l'AI-check che spiega, citando il bando, se puoi partecipare.",
+    area: "aicheck",
   },
   {
     icon: CalendarDays,
     title: "Scadenze che sfuggono",
     description: "Salvi i bandi e porti le scadenze nel calendario, sempre a portata d'occhio.",
+    area: "scadenze",
   },
 ];
 
@@ -60,57 +70,87 @@ const FEATURES: Voce[] = [
     title: "Tutti i bandi in un posto solo",
     description:
       "Bandi europei, nazionali, regionali e locali raccolti e aggiornati di continuo: basta rincorrere decine di siti diversi.",
+    area: "bandi",
   },
   {
     icon: SlidersHorizontal,
     title: "Filtri pensati per le imprese",
     description:
       "Regione, settore, codici ATECO, beneficiari, importi e scadenze: restringi il campo ai bandi davvero adatti a te in pochi clic.",
+    area: "bandi",
   },
   {
     icon: Building2,
     title: "Dossier aziendale certificato",
     description:
       "Importa i dati della tua azienda dal Registro Imprese partendo dalla partita IVA: anagrafica, ATECO, sedi, cariche e dati economici. Ufficiali, non autodichiarati.",
+    area: "azienda",
   },
   {
     icon: Target,
     title: "Bandi per te",
     description:
       "Il profilo della tua azienda filtra i risultati: vedi prima i bandi in linea con la tua attività e con gli ambiti che segui.",
+    area: "home",
   },
   {
     icon: CalendarDays,
     title: "Scadenze sempre a fuoco",
     description:
       "Salva i bandi che ti interessano e porta le loro scadenze nel calendario, accanto ai tuoi appuntamenti. Nessuna occasione persa per una data dimenticata.",
+    area: "scadenze",
   },
 ];
 
-const STEPS = [
+// Ogni passo ha il numero nel colore dell'area di cui parla.
+const STEPS: { title: string; description: string; area: Area }[] = [
   {
     title: "Crea la tua azienda",
     description: "Registrati e importa il dossier dal Registro Imprese partendo dalla partita IVA.",
+    area: "azienda",
   },
   {
     title: "Esplora i bandi",
     description: "Cerca e filtra nel catalogo, o lascia che «Bandi per te» faccia una prima selezione.",
+    area: "bandi",
   },
   {
     title: "Lancia l'AI-check",
     description: "Leggi ammissibilità, punteggio e requisiti, punto per punto.",
+    area: "aicheck",
   },
   {
     title: "Segui le scadenze",
     description: "Salva i bandi promettenti e tieni le loro scadenze sotto controllo nel calendario.",
+    area: "scadenze",
   },
 ];
 
-const STATS = [
-  { valore: LANDING_COPY.bandiValore, etichetta: LANDING_COPY.bandiEtichetta },
-  { valore: "4 livelli", etichetta: "Copertura: europea, nazionale, regionale e locale" },
-  { valore: "0–100", etichetta: "Punteggio AI-check con citazioni" },
-  { valore: "Registro Imprese", etichetta: "Dati aziendali certificati" },
+const STATS: { valore: string; etichetta: string; icon: LucideIcon; area: Area }[] = [
+  {
+    valore: LANDING_COPY.bandiValore,
+    etichetta: LANDING_COPY.bandiEtichetta,
+    icon: FileText,
+    area: "bandi",
+  },
+  {
+    valore: "4 livelli",
+    etichetta: "Copertura: europea, nazionale, regionale e locale",
+    icon: Globe,
+    area: "home",
+  },
+  {
+    valore: "0–100",
+    etichetta: "Punteggio AI-check con citazioni",
+    icon: Sparkles,
+    area: "aicheck",
+  },
+  {
+    valore: "Registro Imprese",
+    etichetta: "Dati aziendali certificati",
+    icon: Building2,
+    area: "azienda",
+  },
 ];
 
 const REASONS: Voce[] = [
@@ -119,24 +159,28 @@ const REASONS: Voce[] = [
     title: "Verdetti verificabili",
     description:
       "L'AI-check non si limita a dare un voto: ogni requisito è motivato con la citazione esatta presa dal testo del bando. Niente scatole nere.",
+    area: "aicheck",
   },
   {
     icon: Building2,
     title: "Dati certificati, non a memoria",
     description:
       "Il profilo della tua azienda nasce dai dati ufficiali del Registro Imprese, così l'analisi parte da informazioni affidabili.",
+    area: "azienda",
   },
   {
     icon: Globe,
     title: "Copertura completa",
     description:
       "Bandi europei, nazionali, regionali e locali in un unico catalogo: una sola ricerca invece di decine di portali.",
+    area: "bandi",
   },
   {
     icon: Layers,
     title: "Pensato per le imprese italiane",
     description:
       "Filtri, profili e report parlano la lingua delle PMI: ATECO, beneficiari, classi dimensionali, account per l'azienda.",
+    area: "home",
   },
 ];
 
@@ -181,14 +225,39 @@ const NAV_LINKS = [
   { href: "#faq", label: "FAQ" },
 ];
 
-/** Una voce a filetto (niente card): icona, titolo, testo. */
-function VoceFiletto({ icon: Icon, title, description }: Voce) {
+/** Sulla fascia navy il primario («Inizia gratis») è `LinkButton variant="inverse"`
+ *  (bianco pieno, testo navy, anello del focus bianco). Il secondario è un
+ *  contorno bianco: `ghost` con le classi di `GHOST_SU_FASCIA` (testo bianco,
+ *  fondo bianco/10 al passaggio, anello del focus bianco), più il bordo
+ *  bianco/60 (≥ 3:1 sul fondo, il testo bianco ≥ 6,4:1 anche sul lato chiaro) e
+ *  il padding pieno del pulsante `lg` (il `ghost` ne ha meno ai lati). */
+const CONTORNO_SU_FASCIA = cn(GHOST_SU_FASCIA, "border-white/60 px-5 hover:border-white");
+
+/** Due cerchi a filo bianco dietro i contenuti della fascia: solo decorazione,
+ *  profondità senza un secondo gradiente. Il genitore è `relative overflow-hidden`. */
+function CerchiFascia() {
   return (
-    <div className="flex flex-col gap-2 border-t border-line pt-5">
-      <Icon className="size-5 text-accent" strokeWidth={1.75} aria-hidden />
+    <>
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -top-40 -right-32 size-[32rem] rounded-full border border-white/10"
+      />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -bottom-56 left-1/3 size-[28rem] rounded-full border border-white/10"
+      />
+    </>
+  );
+}
+
+/** Una voce in card: `IconChip` nel colore della sua area, titolo, testo. */
+function VoceCard({ icon, title, description, area }: Voce) {
+  return (
+    <Card className="flex flex-col gap-3">
+      <IconChip icon={icon} area={area} />
       <h3 className="font-sans text-row-title text-ink">{title}</h3>
       <p className="text-body text-ink-2">{description}</p>
-    </div>
+    </Card>
   );
 }
 
@@ -203,9 +272,11 @@ export default function Landing() {
 
   if (session) return <Navigate to="/app" replace />;
 
+  const aicheck = areaClassi("aicheck");
+
   return (
     <div className="min-h-dvh bg-sheet">
-      {/* Testata: l'unico pulsante pieno della prima schermata è quello dell'hero. */}
+      {/* Testata chiara sopra la fascia dell'hero, dove stanno i pulsanti pieni. */}
       <header className="sticky top-0 z-40 border-b border-line bg-sheet">
         <Contenitore className="flex h-16 items-center justify-between gap-4">
           <Logo className={LOGO_TESTATA} />
@@ -214,7 +285,7 @@ export default function Landing() {
               <a
                 key={link.href}
                 href={link.href}
-                className="rounded-control px-3 py-2 text-body font-medium text-ink-2 transition-colors hover:bg-sunken hover:text-ink"
+                className="rounded-control px-3 py-2 text-body font-medium text-ink-2 transition-colors duration-150 ease-uscita hover:bg-sunken hover:text-ink"
               >
                 {link.label}
               </a>
@@ -232,47 +303,54 @@ export default function Landing() {
       </header>
 
       <main>
-        {/* Hero */}
-        <section aria-labelledby="hero-titolo">
-          <Contenitore className="grid items-center gap-12 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16 lg:py-24">
-            <div className="flex flex-col items-start gap-6">
-              <h1 id="hero-titolo" className="text-title-hero text-ink">
+        {/* Hero sulla fascia navy (`bg-banda`): testo bianco, a destra le righe
+            d'esempio come card bianche con ombra. */}
+        <section
+          aria-labelledby="hero-titolo"
+          className="relative overflow-hidden bg-banda text-white"
+        >
+          <CerchiFascia />
+          <Contenitore className="relative grid items-center gap-12 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16 lg:py-24">
+            <div className="flex flex-col items-start gap-6 motion-safe:animate-entrata">
+              <SegnoTitolo className="w-12" />
+              <h1 id="hero-titolo" className="text-title-hero text-white">
                 Il radar sui bandi,
                 <br />
                 su misura per la tua impresa.
               </h1>
-              <p className="max-w-lettura text-prose text-ink-2">
+              <p className="max-w-lettura text-prose text-white/80">
                 BandoFit raccoglie bandi europei, nazionali, regionali e locali e ti dice quali
                 fanno per te — con filtri per impresa, schede chiare e un'analisi di compatibilità
                 che cita il testo ufficiale.
               </p>
               <div className="flex flex-wrap gap-3">
-                <LinkButton to="/registrati" size="lg">
+                <LinkButton to="/registrati" size="lg" variant="inverse">
                   Inizia gratis
                 </LinkButton>
-                <LinkButton to="/login" size="lg" variant="secondary">
+                <LinkButton to="/login" size="lg" variant="ghost" className={CONTORNO_SU_FASCIA}>
                   Ho già un account
                 </LinkButton>
               </div>
-              <ul className="flex flex-col gap-2 text-body text-ink-2">
+              <ul className="flex flex-col gap-2 text-body text-white/80">
                 {[
                   LANDING_COPY.bandiClaim,
                   "Bandi UE, nazionali, regionali e locali",
                   "Dati dal Registro Imprese",
                 ].map((punto) => (
                   <li key={punto} className="flex items-start gap-2">
-                    <Check className="mt-0.75 size-4 shrink-0 text-accent" aria-hidden />
+                    {/* `fit` sul lato scuro della fascia, dove sta la lista: ≥ 3,5:1 (icone ≥ 3:1). */}
+                    <Check className="mt-0.75 size-4 shrink-0 text-fit" aria-hidden />
                     {punto}
                   </li>
                 ))}
               </ul>
             </div>
-            <Panel aria-label="Esempio" className="gap-4 p-6 sm:p-8">
-              <p className="text-small text-ink-3">
+            <section aria-label="Esempio" className="flex flex-col gap-4">
+              <p className="text-small text-white/80">
                 Esempio: scadenza, valore e compatibilità di ogni bando, in una riga.
               </p>
               <RigheEsempio />
-            </Panel>
+            </section>
           </Contenitore>
         </section>
 
@@ -281,9 +359,9 @@ export default function Landing() {
           titolo="I bandi giusti esistono. Trovarli è il difficile."
           sottotitolo="Sono pubblicati su decine di portali diversi, con requisiti scritti in burocratese e scadenze facili da perdere. BandoFit li raccoglie, li rende leggibili e ti dice quali fanno per la tua azienda."
         >
-          <div className="grid gap-8 sm:grid-cols-3 sm:gap-6">
+          <div className="grid gap-6 sm:grid-cols-3">
             {PROBLEMI.map((voce) => (
-              <VoceFiletto key={voce.title} {...voce} />
+              <VoceCard key={voce.title} {...voce} />
             ))}
           </div>
         </Sezione>
@@ -293,12 +371,13 @@ export default function Landing() {
           titolo="Tutto quello che serve per candidarti con criterio"
           sottotitolo="Dalla ricerca all'analisi di compatibilità: gli strumenti per passare dai «tanti bandi» ai «bandi giusti per te»."
         >
+          {/* L'AI-check in evidenza: bordo sinistro e punti nel colore della sua area. */}
           <Panel
             aria-label="AI-check"
-            className="grid gap-6 p-6 sm:p-8 lg:grid-cols-2 lg:gap-12"
+            className={cn("grid gap-6 p-6 sm:p-8 lg:grid-cols-2 lg:gap-12", aicheck.bordo)}
           >
-            <div className="flex flex-col gap-2">
-              <Sparkles className="size-5 text-accent" strokeWidth={1.75} aria-hidden />
+            <div className="flex flex-col items-start gap-3">
+              <IconChip icon={Sparkles} area="aicheck" size="lg" />
               <h3 className="text-title-section text-ink">AI-check</h3>
               <p className="text-body text-ink-2">
                 Scopri se la tua azienda è ammissibile e quanto è compatibile con un punteggio da 0
@@ -308,16 +387,22 @@ export default function Landing() {
             </div>
             <ul className="flex flex-col gap-3 self-center">
               {AI_CHECK_PUNTI.map((punto) => (
-                <li key={punto} className="flex items-start gap-2 text-title-group text-ink">
-                  <Check className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
+                <li
+                  key={punto}
+                  className={cn(
+                    "flex items-center gap-3 rounded-control px-4 py-3 text-title-group",
+                    aicheck.suSoft,
+                  )}
+                >
+                  <Check className="size-4 shrink-0" aria-hidden />
                   {punto}
                 </li>
               ))}
             </ul>
           </Panel>
-          <div className="grid gap-8 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map((voce) => (
-              <VoceFiletto key={voce.title} {...voce} />
+              <VoceCard key={voce.title} {...voce} />
             ))}
           </div>
         </Sezione>
@@ -327,25 +412,43 @@ export default function Landing() {
           fondo="desk"
           titolo="Dai dati al bando giusto, in quattro passi"
         >
-          <ol className="grid gap-8 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
+          <ol className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
             {STEPS.map((step, i) => (
-              <li key={step.title} className="flex flex-col gap-2">
-                <span className="mb-3 h-1 rounded-pill bg-accent" aria-hidden />
-                <span className="text-figure-sm text-accent">{i + 1}</span>
-                <h3 className="font-sans text-row-title text-ink">{step.title}</h3>
-                <p className="text-body text-ink-2">{step.description}</p>
+              <li key={step.title} className="flex">
+                <Card area={step.area} className="flex w-full flex-col gap-3">
+                  <span
+                    className={cn(
+                      "flex size-11 items-center justify-center rounded-control text-figure-sm",
+                      areaClassi(step.area).suSoft,
+                    )}
+                  >
+                    {i + 1}
+                  </span>
+                  <h3 className="font-sans text-row-title text-ink">{step.title}</h3>
+                  <p className="text-body text-ink-2">{step.description}</p>
+                </Card>
               </li>
             ))}
           </ol>
         </Sezione>
 
         <Sezione titolo="Uno strumento serio, non l'ennesima lista di bandi">
-          <div className="grid gap-8 sm:grid-cols-2 sm:gap-6">
+          <div className="grid gap-6 sm:grid-cols-2">
             {REASONS.map((voce) => (
-              <VoceFiletto key={voce.title} {...voce} />
+              <VoceCard key={voce.title} {...voce} />
             ))}
           </div>
-          <Facts items={STATS} />
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {STATS.map((stat) => (
+              <KpiCard
+                key={stat.etichetta}
+                etichetta={stat.etichetta}
+                valore={stat.valore}
+                icon={stat.icon}
+                area={stat.area}
+              />
+            ))}
+          </div>
         </Sezione>
 
         <Sezione
@@ -357,7 +460,7 @@ export default function Landing() {
           {plansLoading ? (
             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
               {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-72 w-full" />
+                <Skeleton key={i} className="h-72 w-full rounded-panel" />
               ))}
             </div>
           ) : plansError ? (
@@ -371,7 +474,8 @@ export default function Landing() {
               </p>
             </div>
           ) : (
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            // `pt-3`: lo spazio per l'etichetta «Consigliato» sul bordo in alto della card.
+            <div className="grid gap-6 pt-3 sm:grid-cols-2 lg:grid-cols-4">
               {(plans ?? []).map((plan) => (
                 <PlanCard
                   key={plan.id}
@@ -403,38 +507,47 @@ export default function Landing() {
         </Sezione>
 
         <Sezione id="faq" titolo="Domande frequenti">
-          <Accordion
-            className="max-w-lettura"
-            items={FAQS.map((faq, i) => ({
-              id: `faq-${i + 1}`,
-              titolo: faq.q,
-              children: <p>{faq.a}</p>,
-            }))}
-          />
+          <Card className="max-w-lettura px-5 py-1 sm:px-6">
+            <Accordion
+              className="border-y-0"
+              items={FAQS.map((faq, i) => ({
+                id: `faq-${i + 1}`,
+                titolo: faq.q,
+                children: <p>{faq.a}</p>,
+              }))}
+            />
+          </Card>
         </Sezione>
 
-        {/* Invito finale: sul piano, senza gradiente. */}
-        <section aria-labelledby="invito-titolo" className="border-t border-line bg-desk">
-          <Contenitore className="flex flex-col items-start gap-4 py-16 sm:py-20">
-            <h2 id="invito-titolo" className="text-title-page text-ink">
-              Pronto a trovare i bandi giusti per la tua azienda?
-            </h2>
-            <p className="max-w-lettura text-prose text-ink-2">
-              Crea il tuo account gratuito ed esplora subito il catalogo. Nessuna carta richiesta.
-            </p>
-            <div className="mt-2 flex flex-wrap gap-3">
-              <LinkButton to="/registrati" size="lg">
-                Inizia gratis
-              </LinkButton>
-              <LinkButton to="/login" size="lg" variant="secondary">
-                Accedi
-              </LinkButton>
+        {/* Invito finale: la fascia navy come card, di seguito alle domande frequenti. */}
+        <section aria-labelledby="invito-titolo" className="bg-sheet">
+          <Contenitore className="pb-16 sm:pb-20">
+            <div className="relative overflow-hidden rounded-panel bg-banda px-6 py-12 text-white shadow-card sm:px-10 sm:py-14 lg:px-14">
+              <CerchiFascia />
+              <div className="relative flex flex-col items-start gap-4">
+                <SegnoTitolo className="w-12" />
+                <h2 id="invito-titolo" className="text-title-page text-white">
+                  Pronto a trovare i bandi giusti per la tua azienda?
+                </h2>
+                <p className="max-w-lettura text-prose text-white/80">
+                  Crea il tuo account gratuito ed esplora subito il catalogo. Nessuna carta
+                  richiesta.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-3">
+                  <LinkButton to="/registrati" size="lg" variant="inverse">
+                    Inizia gratis
+                  </LinkButton>
+                  <LinkButton to="/login" size="lg" variant="ghost" className={CONTORNO_SU_FASCIA}>
+                    Accedi
+                  </LinkButton>
+                </div>
+              </div>
             </div>
           </Contenitore>
         </section>
       </main>
 
-      <footer className="border-t border-line">
+      <footer className="border-t border-line bg-sheet">
         <Contenitore className="py-12">
           <div className="flex flex-col gap-10 sm:flex-row sm:justify-between">
             <div className="flex max-w-lettura flex-col gap-4">

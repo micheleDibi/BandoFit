@@ -1,11 +1,13 @@
 import RevolutCheckout from "@revolut/checkout";
-import { ShieldCheck } from "lucide-react";
+import { CreditCard, ReceiptText, ShieldCheck, ShoppingCart } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { BillingProfileForm } from "../components/BillingProfileForm";
 import { Alert } from "../components/ui/Alert";
 import { Button, LinkButton } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { Checkbox } from "../components/ui/Checkbox";
+import { IconChip } from "../components/ui/IconChip";
 import { InlineError } from "../components/ui/InlineError";
 import { Page } from "../components/ui/Page";
 import { PageHeader } from "../components/ui/PageHeader";
@@ -21,6 +23,16 @@ import { REVOLUT_MODE } from "../lib/revolut";
 import type { CheckoutPreview } from "../types";
 
 const INDIETRO = { label: "Abbonamento", to: "/app/abbonamento" };
+
+/** Titolo di sezione con l'`IconChip` dell'area account accanto. */
+function TitoloConIcona({ icon, children }: { icon: typeof CreditCard; children: string }) {
+  return (
+    <span className="flex items-center gap-3">
+      <IconChip icon={icon} area="account" size="sm" />
+      {children}
+    </span>
+  );
+}
 
 /** "25.00" → "25": l'aliquota arriva come stringa decimale dal backend. */
 const aliquotaDisplay = (aliquota: string) => String(Number(aliquota));
@@ -73,7 +85,7 @@ function Riepilogo({ preview }: { preview: CheckoutPreview }) {
           }
           value={eurFromCents(preview.iva_cents)}
         />
-        <div className="flex items-baseline justify-between gap-4 border-t border-line pt-3">
+        <div className="mt-1 flex items-baseline justify-between gap-4 rounded-control bg-accent-soft px-4 py-3">
           <dt className="text-title-group text-ink">Totale</dt>
           <dd className="text-figure text-ink">{eurFromCents(preview.totale_cents)}</dd>
         </div>
@@ -182,6 +194,8 @@ export default function Checkout() {
     if (!targetValido) {
       return (
         <EmptyState
+          icon={ShoppingCart}
+          area="account"
           title="Indica cosa vuoi acquistare partendo dalla pagina Abbonamento."
           action={tornaAllAbbonamento}
         />
@@ -195,6 +209,7 @@ export default function Checkout() {
     ) {
       return (
         <EmptyState
+          area="account"
           title="Gestito dall'account titolare."
           description={`${apiErrorMessage(preview.isError ? preview.error : billing.error)}.`}
           action={tornaAllAbbonamento}
@@ -209,7 +224,12 @@ export default function Checkout() {
       ["bad_request", "not_found"].includes(apiErrorCode(preview.error) ?? "")
     ) {
       return (
-        <EmptyState title={`${apiErrorMessage(preview.error)}.`} action={tornaAllAbbonamento} />
+        <EmptyState
+          icon={ShoppingCart}
+          area="account"
+          title={`${apiErrorMessage(preview.error)}.`}
+          action={tornaAllAbbonamento}
+        />
       );
     }
 
@@ -248,10 +268,12 @@ export default function Checkout() {
 
     return (
       <>
-        <Section aria-label="Riepilogo">
-          <SectionHeader titolo="Riepilogo" />
-          <Riepilogo preview={dati} />
-        </Section>
+        <Card>
+          <Section aria-label="Riepilogo">
+            <SectionHeader titolo={<TitoloConIcona icon={ShoppingCart}>Riepilogo</TitoloConIcona>} />
+            <Riepilogo preview={dati} />
+          </Section>
+        </Card>
 
         {invitoVies && (
           <Alert tono="attenzione">
@@ -267,56 +289,62 @@ export default function Checkout() {
             Al salvataggio la preview si ricalcola (l'IVA dipende dal
             soggetto: un'azienda UE passa in reverse charge). */}
         {billingMancante ? (
-          <Section aria-label="Dati di fatturazione">
-            <SectionHeader titolo="Completa i dati di fatturazione" />
-            <p className="text-body text-ink-2">
-              Servono per intestare la fattura dell'acquisto: un minuto e torni al pagamento.
-            </p>
-            <BillingProfileForm profile={null} onSaved={() => preview.refetch()} />
-          </Section>
-        ) : (
-          <Section aria-label="Pagamento">
-            <SectionHeader titolo="Pagamento" />
-            {dati.kind === "piano" && (
-              <Checkbox
-                label="Rinnova automaticamente alla scadenza"
-                descrizione="Ti avvisiamo via email almeno 7 giorni prima dell'addebito; puoi disdire quando vuoi."
-                checked={autoRenew}
-                // La scelta è congelata nell'ordine creato: si sblocca solo
-                // con un nuovo checkout, non tra un tentativo e l'altro.
-                disabled={!!pending || start.isPending || opening}
-                onChange={(e) => setAutoRenew(e.target.checked)}
+          <Card>
+            <Section aria-label="Dati di fatturazione">
+              <SectionHeader
+                titolo={<TitoloConIcona icon={ReceiptText}>Completa i dati di fatturazione</TitoloConIcona>}
               />
-            )}
-            <div>
-              <Button
-                type="button"
-                size="lg"
-                onClick={() => handlePaga(dati.kind)}
-                loading={start.isPending || opening}
-              >
-                {pending ? "Riprova il pagamento" : `Paga ${eurFromCents(dati.totale_cents)}`}
-              </Button>
-            </div>
-            <p className="inline-flex items-start gap-1.5 text-small text-ink-3">
-              <ShieldCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
-              Il pagamento avviene nel popup di Revolut: i dati della carta non passano mai da
-              BandoFit.
-            </p>
-            {payNotice && <Alert tono="attenzione">{payNotice}</Alert>}
-            {start.isError && (
-              <div className="flex flex-col gap-2">
-                <InlineError>{apiErrorMessage(start.error)}.</InlineError>
-                {apiErrorCode(start.error) === "conflict" && (
-                  <div>
-                    <LinkButton to="/app/abbonamento?tab=acquisti" variant="secondary" size="sm">
-                      Vedi gli acquisti
-                    </LinkButton>
-                  </div>
-                )}
+              <p className="text-body text-ink-2">
+                Servono per intestare la fattura dell'acquisto: un minuto e torni al pagamento.
+              </p>
+              <BillingProfileForm profile={null} onSaved={() => preview.refetch()} />
+            </Section>
+          </Card>
+        ) : (
+          <Card area="account">
+            <Section aria-label="Pagamento">
+              <SectionHeader titolo={<TitoloConIcona icon={CreditCard}>Pagamento</TitoloConIcona>} />
+              {dati.kind === "piano" && (
+                <Checkbox
+                  label="Rinnova automaticamente alla scadenza"
+                  descrizione="Ti avvisiamo via email almeno 7 giorni prima dell'addebito; puoi disdire quando vuoi."
+                  checked={autoRenew}
+                  // La scelta è congelata nell'ordine creato: si sblocca solo
+                  // con un nuovo checkout, non tra un tentativo e l'altro.
+                  disabled={!!pending || start.isPending || opening}
+                  onChange={(e) => setAutoRenew(e.target.checked)}
+                />
+              )}
+              <div>
+                <Button
+                  type="button"
+                  size="lg"
+                  onClick={() => handlePaga(dati.kind)}
+                  loading={start.isPending || opening}
+                >
+                  {pending ? "Riprova il pagamento" : `Paga ${eurFromCents(dati.totale_cents)}`}
+                </Button>
               </div>
-            )}
-          </Section>
+              <p className="inline-flex items-start gap-1.5 text-small text-ink-3">
+                <ShieldCheck className="mt-0.5 size-4 shrink-0 text-fit-ink" aria-hidden />
+                Il pagamento avviene nel popup di Revolut: i dati della carta non passano mai da
+                BandoFit.
+              </p>
+              {payNotice && <Alert tono="attenzione">{payNotice}</Alert>}
+              {start.isError && (
+                <div className="flex flex-col gap-2">
+                  <InlineError>{apiErrorMessage(start.error)}.</InlineError>
+                  {apiErrorCode(start.error) === "conflict" && (
+                    <div>
+                      <LinkButton to="/app/abbonamento?tab=acquisti" variant="secondary" size="sm">
+                        Vedi gli acquisti
+                      </LinkButton>
+                    </div>
+                  )}
+                </div>
+              )}
+            </Section>
+          </Card>
         )}
       </>
     );
@@ -325,6 +353,7 @@ export default function Checkout() {
   return (
     <Page variante="flusso">
       <PageHeader
+        area="account"
         indietro={INDIETRO}
         titolo="Checkout"
         descrizione="Controlla il riepilogo e completa il pagamento nel popup sicuro di Revolut."

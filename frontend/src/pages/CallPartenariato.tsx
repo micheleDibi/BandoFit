@@ -1,4 +1,4 @@
-import { Pencil } from "lucide-react";
+import { ClipboardList, Inbox, Pencil, Send, Target, Users } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { useRientroPagina } from "../components/partenariati/useRientroPagina";
@@ -28,6 +28,7 @@ import { useNomiCall } from "../components/partenariati/useNomiCall";
 import { Alert } from "../components/ui/Alert";
 import { Badge } from "../components/ui/Badge";
 import { Button, LinkButton } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { Due, tempoRelativo } from "../components/ui/Due";
 import { DefinitionList, type Definizione } from "../components/ui/Facts";
@@ -40,6 +41,12 @@ import { Status, type TonoStatus } from "../components/ui/Status";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
 import { TabPanel, Tabs, type Scheda } from "../components/ui/Tabs";
 import { TextLink } from "../components/ui/TextLink";
+import {
+  FOCUS_SU_FASCIA,
+  GHOST_SU_FASCIA,
+  LINK_SU_FASCIA,
+  TESTO_SU_FASCIA,
+} from "../components/shared/fascia";
 import { useAziendaDaLink } from "../hooks/useAziendaDaLink";
 import { useCandidature } from "../hooks/useCandidature";
 import {
@@ -121,8 +128,8 @@ function perLaTuaAzienda(call: CallPubblica): Pick<CallPubblicaDettaglio, "match
 const TONI_COPERTURA: Record<EsitoCoperturaCall, TonoStatus> = {
   coperto: "aperto",
   non_coperto: "chiuso",
-  dato_mancante: "in-apertura",
-  incerto: "in-apertura",
+  dato_mancante: "attenzione",
+  incerto: "attenzione",
   non_valutabile: "neutro",
 };
 
@@ -145,11 +152,12 @@ function ChiudiCall({ call }: { call: CallVistaCreatore }) {
   return (
     <>
       {call.stato === "pubblicata" && (
-        <Button variant="secondary" onClick={() => setEsito("completata")}>
+        <Button variant="secondary" className={FOCUS_SU_FASCIA} onClick={() => setEsito("completata")}>
           Chiudi la call
         </Button>
       )}
-      <Button variant="ghost" className="text-danger hover:bg-danger-soft" onClick={() => setEsito("annullata")}>
+      {/* Sta sulla fascia navy dell'intestazione: distruttiva, fondo bianco. */}
+      <Button variant="danger" className={FOCUS_SU_FASCIA} onClick={() => setEsito("annullata")}>
         {bozza ? "Annulla la bozza" : "Annulla la call"}
       </Button>
       <ConfirmDialog
@@ -248,7 +256,7 @@ function Panoramica({ call }: { call: CallVistaCreatore }) {
   if (call.versione > 0) sintesi.push({ etichetta: "Versione", valore: String(call.versione) });
 
   return (
-    <div className="flex flex-col gap-8">
+    <Card className="flex flex-col gap-8 sm:p-8">
       {call.motivo_chiusura && (
         <Alert tono="info">
           {CALL_COPY.motiviChiusura[call.motivo_chiusura] ?? call.motivo_chiusura}
@@ -384,7 +392,7 @@ function Panoramica({ call }: { call: CallVistaCreatore }) {
       </Section>
 
       <Versioni call={call} />
-    </div>
+    </Card>
   );
 }
 
@@ -491,6 +499,8 @@ function Suggeriti({ call }: { call: CallVistaCreatore }) {
   if (dati.items.length === 0) {
     return (
       <EmptyState
+        icon={Users}
+        area="partenariati"
         title="Nessuna azienda suggerita per ora"
         description="Nessuna azienda visibile come partner copre i requisiti che cerchi. Prova ad allargare le posizioni o i requisiti: i suggerimenti si aggiornano da soli."
       />
@@ -511,7 +521,7 @@ function Suggeriti({ call }: { call: CallVistaCreatore }) {
             : `${dati.total} aziende suggerite`}
       </p>
       <ul
-        className={`flex flex-col border-t border-line transition-opacity ${suggeriti.isPlaceholderData ? "opacity-60" : ""}`}
+        className={`flex flex-col gap-3 transition-opacity ${suggeriti.isPlaceholderData ? "opacity-60" : ""}`}
         aria-busy={suggeriti.isPlaceholderData}
       >
         {dati.items.map((s) => (
@@ -595,6 +605,8 @@ function CandidatureCall({ call }: { call: CallVistaCreatore }) {
     corpo =
       direzione === "ricevute" ? (
         <EmptyState
+          icon={Inbox}
+          area="partenariati"
           title="Nessuna candidatura per ora"
           description={
             call.visibilita === "solo_invitati"
@@ -604,6 +616,8 @@ function CandidatureCall({ call }: { call: CallVistaCreatore }) {
         />
       ) : (
         <EmptyState
+          icon={Send}
+          area="partenariati"
           title="Nessun invito mandato"
           description="Puoi invitare le aziende dalla scheda «Aziende suggerite», finché la call è pubblicata."
         />
@@ -623,7 +637,7 @@ function CandidatureCall({ call }: { call: CallVistaCreatore }) {
                 : `${lista.data.total} inviti`}
         </p>
         <ul
-          className={`flex flex-col border-t border-line transition-opacity ${lista.isPlaceholderData ? "opacity-60" : ""}`}
+          className={`flex flex-col gap-3 transition-opacity ${lista.isPlaceholderData ? "opacity-60" : ""}`}
           aria-busy={lista.isPlaceholderData}
         >
           {lista.data.items.map((c) => (
@@ -659,7 +673,7 @@ function CandidatureCall({ call }: { call: CallVistaCreatore }) {
 function Confronto({ call, match }: { call: CallPubblica; match: MatchOut | null }) {
   const testi = new Map(call.requisiti.map((r) => [r.etichetta, r.testo] as const));
   return (
-    <Panel titolo="La tua azienda e questa call">
+    <Panel titolo="La tua azienda e questa call" icon={Target} area="partenariati">
       {!match ? (
         <p className="text-body text-ink-2">
           La tua azienda non risulta tra quelle adatte a questa call. Controlla i requisiti e le
@@ -712,12 +726,16 @@ function LaTuaCandidatura({
         )}
       </div>
       {propria && (
-        <Panel titolo={titolo}>
+        <Panel titolo={titolo} icon={Send} area="partenariati">
           <CandidaturaPropriaCard candidatura={propria} callId={call.id} posizioni={call.posizioni} />
         </Panel>
       )}
       {puoCandidarsi && (
-        <Panel titolo={propria?.tipo === "candidatura" ? "Candidati di nuovo" : "Ti interessa?"}>
+        <Panel
+          titolo={propria?.tipo === "candidatura" ? "Candidati di nuovo" : "Ti interessa?"}
+          icon={Send}
+          area="partenariati"
+        >
           <p className="text-body text-ink-2">
             Candidati con un messaggio: chi ha creato la call vede il profilo partner della tua
             azienda, in forma anonima, e decide se aprire una conversazione.
@@ -787,7 +805,7 @@ function Riservati({ call }: { call: CallDettaglioAltraAzienda }) {
 function CallInBreve({ call }: { call: CallVistaCreatore }) {
   const n = call.posizioni.length;
   return (
-    <Panel titolo="La call in breve">
+    <Panel titolo="La call in breve" icon={ClipboardList} area="partenariati">
       <div className="flex flex-col gap-1">
         <p className="font-semibold text-ink">
           {n === 0 ? "Nessuna posizione cercata" : n === 1 ? "1 posizione cercata" : `${n} posizioni cercate`}
@@ -908,14 +926,17 @@ export default function CallPartenariato() {
     <>
       <CallStatoBadge stato={call.stato} />
       {call.scadenza_call && (
-        <span className="text-small text-ink-2">Candidature fino al {formatDate(call.scadenza_call)}</span>
+        <span className="text-small">Candidature fino al {formatDate(call.scadenza_call)}</span>
       )}
-      {relativo && <span className="text-caption text-ink-3">{relativo}</span>}
+      {relativo && <span className={`text-caption ${TESTO_SU_FASCIA}`}>{relativo}</span>}
     </>
   );
   const descrizione = (
     <>
-      Per il bando <TextLink to={`/app/bandi/${call.bando.slug}`}>{call.bando.titolo}</TextLink>
+      Per il bando{" "}
+      <TextLink to={`/app/bandi/${call.bando.slug}`} className={LINK_SU_FASCIA}>
+        {call.bando.titolo}
+      </TextLink>
       {call.bando.scadenza ? `, che scade il ${formatDate(call.bando.scadenza)}` : ""}
     </>
   );
@@ -928,10 +949,10 @@ export default function CallPartenariato() {
     const tua = perLaTuaAzienda(pubblica);
     const dettaglio = pubblica as CallDettaglioAltraAzienda;
     const vistaCall = (
-      <>
+      <Card className="flex flex-col gap-8 sm:p-8">
         <CallPubblicaCard call={pubblica} senzaTitolo />
         {tua.controparte && <Riservati call={dettaglio} />}
-      </>
+      </Card>
     );
     const laterale = (
       <>
@@ -948,6 +969,7 @@ export default function CallPartenariato() {
         intestazione={
           <>
             <PageHeader
+              area="partenariati"
               indietro={{ label: "Partenariati", to: "/app/partenariati" }}
               sopra={sopra}
               titolo={titolo}
@@ -955,9 +977,15 @@ export default function CallPartenariato() {
               azioni={
                 <>
                   {editable && !tua.controparte && (
-                    <SalvaCallButton id={pubblica.id} titolo={titolo} salvata={tua.salvata} />
+                    <SalvaCallButton
+                      id={pubblica.id}
+                      titolo={titolo}
+                      salvata={tua.salvata}
+                      variant="secondary"
+                      className={FOCUS_SU_FASCIA}
+                    />
                   )}
-                  <Button variant="ghost" onClick={() => setSegnala(true)}>
+                  <Button variant="ghost" className={GHOST_SU_FASCIA} onClick={() => setSegnala(true)}>
                     Segnala
                   </Button>
                 </>
@@ -1005,6 +1033,7 @@ export default function CallPartenariato() {
       intestazione={
         <>
           <PageHeader
+            area="partenariati"
             indietro={{ label: "Partenariati", to: "/app/partenariati?tab=mie" }}
             sopra={sopra}
             titolo={titolo}
@@ -1013,12 +1042,16 @@ export default function CallPartenariato() {
               call.editable && aperta ? (
                 <>
                   {call.stato === "bozza" ? (
-                    <LinkButton to={linkCall(call)}>
+                    <LinkButton to={linkCall(call)} variant="inverse">
                       <Pencil className="size-4" aria-hidden />
                       Riprendi dal passo {call.wizard_passo}
                     </LinkButton>
                   ) : (
-                    <LinkButton to={`/app/partenariati/call/${call.id}/modifica?passo=5`} variant="secondary">
+                    <LinkButton
+                      to={`/app/partenariati/call/${call.id}/modifica?passo=5`}
+                      variant="secondary"
+                      className={FOCUS_SU_FASCIA}
+                    >
                       <Pencil className="size-4" aria-hidden />
                       Modifica la call
                     </LinkButton>

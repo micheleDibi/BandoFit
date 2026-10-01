@@ -53,7 +53,7 @@ function Blocco({ nome, nota, children }: { nome: string; nota: string; children
 
 function DemoAlert() {
   return (
-    <Blocco nome="Alert" nota="Quattro toni, bordo intero, icona e parola. L'azione, se serve, a destra.">
+    <Blocco nome="Alert" nota="Quattro toni: fondo nel tono, bordo sinistro di 4px, icona e parola. L'azione, se serve, a destra.">
       <div className="flex max-w-2xl flex-col gap-3">
         <Alert tono="info" azione={<TextLink to="/app/abbonamento">Attiva il rinnovo</TextLink>}>
           Il piano non si rinnova da solo: resta attivo fino al 31 lug 2027.
@@ -372,7 +372,7 @@ function DemoDrawer() {
   const [conLogo, setConLogo] = useState(false);
   const voci = ["Home", "Bandi", "Bandi salvati", "Calendario", "AI-check"];
   return (
-    <Blocco nome="Drawer" nota="Cassetto su <dialog> nativo, 320px, velo, focus intrappolato, Esc. Con «intestazione» il titolo resta solo per le tecnologie assistive.">
+    <Blocco nome="Drawer" nota="Cassetto su <dialog> nativo, 320px, velo, focus intrappolato, Esc; entra scorrendo dal suo lato. Con «intestazione» il titolo resta solo per le tecnologie assistive.">
       <div className="flex flex-wrap gap-2">
         <Button
           variant="secondary"

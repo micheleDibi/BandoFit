@@ -62,7 +62,7 @@ function Bolla({
           <p
             className={cn(
               "whitespace-pre-wrap break-words rounded-panel px-3.5 py-2 text-body",
-              messaggio.propria ? "bg-accent text-on-accent" : "bg-sunken text-ink",
+              messaggio.propria ? "bg-accent text-on-accent" : "bg-area-partenariati-soft text-ink",
             )}
           >
             {messaggio.testo}
@@ -173,7 +173,7 @@ export function ChatThread({
           const el = e.currentTarget;
           inFondo.current = el.scrollHeight - el.scrollTop - el.clientHeight < SOGLIA_FONDO_PX;
         }}
-        className="relative max-h-[60vh] min-h-48 overflow-y-auto rounded-panel border border-line bg-sheet p-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:p-4"
+        className="relative max-h-[60vh] min-h-48 overflow-y-auto rounded-panel border border-line bg-sheet p-3 shadow-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:p-4"
       >
         {haPrecedenti && (
           <div className="mb-3 flex flex-col items-center gap-1">

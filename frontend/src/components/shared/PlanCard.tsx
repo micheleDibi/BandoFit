@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
 import { prezzoDisplay } from "../../lib/prezzo";
 import type { Plan } from "../../types";
+import { Badge } from "../ui/Badge";
 
 function alertFeature(plan: Plan): string {
   // Avvisi nuovi-bandi: copy onesto guidato dal ritardo del piano.
@@ -30,6 +31,10 @@ export function planFeatures(plan: Plan): string[] {
   return features;
 }
 
+/** Card di un piano: foglio bianco con ombra `card`. Il piano in evidenza
+ *  (`highlighted`) ha il bordo `accent`, l'ombra più ampia e l'etichetta
+ *  (`badge`) a pillola piena sul bordo in alto; selezionato, l'anello `accent`
+ *  pieno. Con `onClick` la card intera è un pulsante e risponde al passaggio. */
 export function PlanCard({
   plan,
   highlighted = false,
@@ -55,20 +60,28 @@ export function PlanCard({
       onClick={onClick}
       aria-pressed={interactive ? selected : undefined}
       className={cn(
-        "relative flex h-full flex-col rounded-panel border bg-sheet p-5 text-left",
+        "relative flex h-full flex-col rounded-panel border bg-sheet p-5 text-left shadow-card",
         interactive &&
-          "cursor-pointer transition-colors duration-150 hover:bg-desk focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+          "cursor-pointer transition duration-150 ease-uscita hover:shadow-card-hover motion-safe:hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
         selected
-          ? "border-accent ring-1 ring-accent"
+          ? "border-accent ring-2 ring-accent"
           : highlighted
-            ? "border-accent"
+            ? "border-accent shadow-card-hover ring-1 ring-accent"
             : "border-line",
+        badge && "pt-7",
       )}
     >
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-title-section text-ink">{plan.nome}</h3>
-        {badge && <span className="text-caption font-semibold text-accent-hover">{badge}</span>}
-      </div>
+      <h3 className="text-title-section text-ink">{plan.nome}</h3>
+      {/* L'etichetta sul bordo in alto: pillola piena `accent` (testo bianco, 6,4:1).
+          Dopo il nome nel DOM, così si legge «Pro, Consigliato». */}
+      {badge && (
+        <Badge
+          tone="info"
+          className="absolute -top-3 left-5 bg-accent px-3 font-semibold text-on-accent shadow-card"
+        >
+          {badge}
+        </Badge>
+      )}
       {plan.descrizione && <p className="mt-1 text-small text-ink-3">{plan.descrizione}</p>}
 
       <p className="mt-4">
@@ -79,7 +92,7 @@ export function PlanCard({
         {display.conSuffissoPeriodo && <span className="text-small text-ink-3"> /anno</span>}
       </p>
 
-      <ul className="mt-4 flex flex-1 flex-col gap-2">
+      <ul className="mt-4 flex flex-1 flex-col gap-2 border-t border-line pt-4">
         {planFeatures(plan).map((feature) => (
           <li key={feature} className="flex items-start gap-2 text-body text-ink-2">
             <Check className="mt-0.75 size-4 shrink-0 text-accent" aria-hidden />

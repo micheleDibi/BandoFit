@@ -1,3 +1,4 @@
+import { Receipt } from "lucide-react";
 import { useEffect, useState } from "react";
 import { usePurchases } from "../../hooks/useCheckout";
 import { apiErrorMessage } from "../../lib/api";
@@ -7,6 +8,7 @@ import { eurFromCents, formatDateTime } from "../../lib/format";
 import type { PurchaseStatus } from "../../types";
 import { Badge } from "../ui/Badge";
 import { LinkButton } from "../ui/Button";
+import { Card } from "../ui/Card";
 import { Pagination } from "../ui/Pagination";
 import { Status, type TonoStatus } from "../ui/Status";
 import { EmptyState, ErrorState, Skeleton } from "../ui/states";
@@ -17,10 +19,21 @@ import { TextLink } from "../ui/TextLink";
 const TONI_STATO: Record<PurchaseStatus, TonoStatus> = {
   in_attesa: "in-apertura",
   pagato: "aperto",
-  fallito: "attenzione",
+  fallito: "errore",
   scaduto: "chiuso",
   annullato: "chiuso",
   gratuito: "neutro",
+};
+
+/** Bordo sinistro della riga nel colore dello stato (lo stesso di `Status`, che
+ *  porta la parola): in attesa accent, pagato fit, fallito danger, il resto neutro. */
+const BORDO_STATO: Record<PurchaseStatus, string> = {
+  in_attesa: "border-l-4 border-l-accent",
+  pagato: "border-l-4 border-l-fit",
+  fallito: "border-l-4 border-l-danger",
+  scaduto: "border-l-4 border-l-line-control",
+  annullato: "border-l-4 border-l-line-control",
+  gratuito: "border-l-4 border-l-line-control",
 };
 
 /** Scheda «Acquisti» dell'Abbonamento: lo storico di piani e add-on in tabella. */
@@ -51,6 +64,8 @@ export function SchedaAcquisti() {
         />
       ) : data && data.items.length === 0 ? (
         <EmptyState
+          icon={Receipt}
+          area="account"
           title="Nessun acquisto ancora."
           description="Quando acquisti un piano o un add-on lo trovi qui, con il suo stato."
           action={
@@ -61,55 +76,62 @@ export function SchedaAcquisti() {
         />
       ) : (
         <div className="flex flex-col gap-6">
-          <Table className={cn(isPlaceholderData && "opacity-60 transition-opacity")}>
-            <thead>
-              <tr>
-                <Th>Data</Th>
-                <Th>Descrizione</Th>
-                <Th>Stato</Th>
-                <Th numerica>Importo</Th>
-                <Th>
-                  <span className="sr-only">Azione</span>
-                </Th>
-              </tr>
-            </thead>
-            <tbody>
-              {data?.items.map((p) => {
-                const amministrativo = p.kind === "cambio_admin" || p.kind === "addon_admin";
-                return (
-                  <tr key={p.id}>
-                    <Td className="whitespace-nowrap text-small text-ink-2 tabular-nums">
-                      {formatDateTime(p.created_at)}
-                    </Td>
-                    <Td>
-                      <span className="block font-medium text-ink">{p.descrizione}</span>
-                      {amministrativo && (
-                        <span className="mt-1 block">
-                          <Badge>Operazione dell'amministrazione</Badge>
-                        </span>
-                      )}
-                      {amministrativo && p.motivazione && (
-                        <span className="mt-1 block text-small text-ink-2">{p.motivazione}</span>
-                      )}
-                    </Td>
-                    <Td>
-                      <Status tono={TONI_STATO[p.status]}>{PURCHASE_STATO_LABELS[p.status]}</Status>
-                    </Td>
-                    <Td numerica className="font-semibold text-ink">
-                      {eurFromCents(p.totale_cents)}
-                    </Td>
-                    <Td className="text-right">
-                      {p.status === "in_attesa" && (
-                        <TextLink to={`/app/checkout/esito/${p.id}`} className="text-small font-medium">
-                          Verifica lo stato
-                        </TextLink>
-                      )}
-                    </Td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </Table>
+          <Card className="p-0 sm:p-2">
+            <Table className={cn(isPlaceholderData && "opacity-60 transition-opacity")}>
+              <thead>
+                <tr>
+                  <Th>Data</Th>
+                  <Th>Descrizione</Th>
+                  <Th>Stato</Th>
+                  <Th numerica>Importo</Th>
+                  <Th>
+                    <span className="sr-only">Azione</span>
+                  </Th>
+                </tr>
+              </thead>
+              <tbody>
+                {data?.items.map((p) => {
+                  const amministrativo = p.kind === "cambio_admin" || p.kind === "addon_admin";
+                  return (
+                    <tr key={p.id}>
+                      <Td
+                        className={cn(
+                          "whitespace-nowrap text-small text-ink-2 tabular-nums",
+                          BORDO_STATO[p.status],
+                        )}
+                      >
+                        {formatDateTime(p.created_at)}
+                      </Td>
+                      <Td>
+                        <span className="block font-medium text-ink">{p.descrizione}</span>
+                        {amministrativo && (
+                          <span className="mt-1 block">
+                            <Badge area="admin">Operazione dell'amministrazione</Badge>
+                          </span>
+                        )}
+                        {amministrativo && p.motivazione && (
+                          <span className="mt-1 block text-small text-ink-2">{p.motivazione}</span>
+                        )}
+                      </Td>
+                      <Td>
+                        <Status tono={TONI_STATO[p.status]}>{PURCHASE_STATO_LABELS[p.status]}</Status>
+                      </Td>
+                      <Td numerica className="font-semibold text-ink">
+                        {eurFromCents(p.totale_cents)}
+                      </Td>
+                      <Td className="text-right">
+                        {p.status === "in_attesa" && (
+                          <TextLink to={`/app/checkout/esito/${p.id}`} className="text-small font-medium">
+                            Verifica lo stato
+                          </TextLink>
+                        )}
+                      </Td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+          </Card>
           <Pagination
             page={page}
             totalPages={data?.total_pages ?? 1}

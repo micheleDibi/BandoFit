@@ -18,8 +18,9 @@ export interface DialogProps {
 }
 
 /** Modale basata sull'elemento <dialog> nativo: focus trap ed Esc gratis.
- *  Foglio con raggio `panel` e `shadow-overlay`; il velo lo dà la regola
- *  globale `dialog::backdrop` (token `veil`). */
+ *  Foglio con raggio `panel` e `shadow-overlay`, entra con dissolvenza e una
+ *  breve risalita; il velo lo dà la regola globale `dialog::backdrop` (token
+ *  `veil`), che si dissolve insieme. */
 export function Dialog({
   open,
   onClose,
@@ -60,7 +61,7 @@ export function Dialog({
         if (dismissible && e.target === ref.current) onClose();
       }}
       className={cn(
-        "m-auto w-full rounded-panel bg-sheet p-0 text-ink shadow-overlay",
+        "m-auto w-full rounded-panel bg-sheet p-0 text-ink shadow-overlay motion-safe:animate-entrata",
         size === "lg" ? "max-w-[640px]" : "max-w-[480px]",
       )}
     >

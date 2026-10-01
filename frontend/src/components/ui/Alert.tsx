@@ -18,28 +18,34 @@ export interface AlertProps {
   className?: string;
 }
 
+// Fondo soft del tono, filetto chiaro e bordo sinistro di 4px nel colore pieno,
+// icona nel tono. Il testo resta `ink` (≥ 11:1 su ogni fondo).
 const toni: Record<AlertTono, { classi: string; icona: LucideIcon; ruolo: "status" | "alert" }> = {
   info: {
-    classi: "border-accent-line bg-accent-soft [&>svg]:text-accent",
+    classi: "border-accent-line border-l-accent bg-accent-soft [&>svg]:text-accent",
     icona: Info,
     ruolo: "status",
   },
-  ok: { classi: "border-fit bg-fit-soft [&>svg]:text-fit-ink", icona: Check, ruolo: "status" },
+  ok: {
+    classi: "border-fit/40 border-l-fit bg-fit-soft [&>svg]:text-fit-ink",
+    icona: Check,
+    ruolo: "status",
+  },
   attenzione: {
-    classi: "border-warning-line bg-warning-soft [&>svg]:text-warning-ink",
+    classi: "border-warning-line border-l-warning bg-warning-soft [&>svg]:text-warning-ink",
     icona: TriangleAlert,
     ruolo: "alert",
   },
   errore: {
-    classi: "border-danger-line bg-danger-soft [&>svg]:text-danger",
+    classi: "border-danger-line border-l-danger bg-danger-soft [&>svg]:text-danger",
     icona: CircleAlert,
     ruolo: "alert",
   },
 };
 
-/** Avviso nella pagina: bordo intero, icona e parola, mai una barra colorata a
- *  sinistra. Info e ok sono `status` (annuncio educato); attenzione ed errore
- *  sono `alert` (annuncio immediato). */
+/** Avviso nella pagina: fondo nel tono, bordo sinistro di 4px, icona e parola
+ *  (il colore non basta mai da solo). Info e ok sono `status` (annuncio
+ *  educato); attenzione ed errore sono `alert` (annuncio immediato). */
 export function Alert({ tono, titolo, children, azione, ruolo, className }: AlertProps) {
   const { classi, icona: Icona, ruolo: ruoloDelTono } = toni[tono];
   const ruoloEffettivo = ruolo ?? ruoloDelTono;
@@ -47,7 +53,7 @@ export function Alert({ tono, titolo, children, azione, ruolo, className }: Aler
     <div
       role={ruoloEffettivo === "none" ? undefined : ruoloEffettivo}
       className={cn(
-        "flex items-start gap-3 rounded-control border px-4 py-3 text-body text-ink",
+        "flex items-start gap-3 rounded-control border border-l-4 px-4 py-3 text-body text-ink",
         classi,
         className,
       )}

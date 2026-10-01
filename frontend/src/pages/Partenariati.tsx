@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { Bookmark, Inbox, MessageSquare, Plus, Search, Users } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { BannerOptIn } from "../components/partenariati/BannerOptIn";
 import { CallCard } from "../components/partenariati/CallCard";
@@ -11,6 +11,7 @@ import { AvvisoLimiteCall, RiepilogoLimiteCall, statoLimite, useLimiteCall } fro
 import { Alert } from "../components/ui/Alert";
 import { Badge } from "../components/ui/Badge";
 import { Button, LinkButton } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { Page } from "../components/ui/Page";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Pagination } from "../components/ui/Pagination";
@@ -20,6 +21,8 @@ import { Status } from "../components/ui/Status";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
 import { TabPanel, Tabs, type Scheda } from "../components/ui/Tabs";
 import { TextLink } from "../components/ui/TextLink";
+import { LINK_SU_FASCIA } from "../components/shared/fascia";
+import { LINK_ESTESO, SOPRA_LINK_ESTESO } from "../components/shared/linkEsteso";
 import { useAziendaDaLink } from "../hooks/useAziendaDaLink";
 import { useMieCall } from "../hooks/useCallPartenariato";
 import { useCandidature } from "../hooks/useCandidature";
@@ -56,41 +59,44 @@ function RigaCall({ call }: { call: CallCardDati }) {
   const bozza = call.stato === "bozza";
   const passo = passoDa(null, call.wizard_passo ?? 1);
   return (
-    <li className="flex items-start gap-6 border-b border-line px-2 py-4.5">
-      <div className="flex min-w-0 grow flex-col gap-1">
-        <h3 className="font-sans text-row-title text-ink">
-          <Link to={linkCall(call)} className="rounded-mark hover:text-accent-hover">
-            {call.titolo || "Call senza titolo"}
-          </Link>
-        </h3>
-        <p className="text-body text-ink-2">Bando: {call.bando.titolo}</p>
-        <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-ink-2">
-          <CallStatoBadge stato={call.stato} />
-          {call.scadenza_call && call.stato === "pubblicata" && (
-            <span>Candidature fino al {formatDate(call.scadenza_call)}</span>
-          )}
-          <span>
-            {bozza
-              ? `Bozza ferma al passo ${passo} di 7: ${CALL_COPY.passi[passo - 1]}`
-              : `${call.posizioni_n} ${call.posizioni_n === 1 ? "posizione" : "posizioni"}`}
-          </span>
-          {!bozza && (
+    <li>
+      <Card interattiva area="partenariati" className="relative flex items-start gap-6">
+        <div className="flex min-w-0 grow flex-col gap-1">
+          <h3 className="font-sans text-row-title text-ink">
+            <Link to={linkCall(call)} className={`rounded-mark hover:text-accent-hover ${LINK_ESTESO}`}>
+              {call.titolo || "Call senza titolo"}
+            </Link>
+          </h3>
+          <p className="text-body text-ink-2">Bando: {call.bando.titolo}</p>
+          <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-ink-2">
+            <CallStatoBadge stato={call.stato} />
+            {call.scadenza_call && call.stato === "pubblicata" && (
+              <span>Candidature fino al {formatDate(call.scadenza_call)}</span>
+            )}
             <span>
-              {call.requisiti_cercati_n}{" "}
-              {call.requisiti_cercati_n === 1 ? "requisito cercato" : "requisiti cercati"}
+              {bozza
+                ? `Bozza ferma al passo ${passo} di 7: ${CALL_COPY.passi[passo - 1]}`
+                : `${call.posizioni_n} ${call.posizioni_n === 1 ? "posizione" : "posizioni"}`}
             </span>
-          )}
-          {call.updated_at && <span>Aggiornata il {formatDate(call.updated_at)}</span>}
-        </p>
-      </div>
-      <LinkButton
-        to={linkCall(call)}
-        variant="secondary"
-        size="sm"
-        aria-label={`${bozza ? "Riprendi" : "Apri"}: ${call.titolo || call.bando.titolo}`}
-      >
-        {bozza ? "Riprendi" : "Apri"}
-      </LinkButton>
+            {!bozza && (
+              <span>
+                {call.requisiti_cercati_n}{" "}
+                {call.requisiti_cercati_n === 1 ? "requisito cercato" : "requisiti cercati"}
+              </span>
+            )}
+            {call.updated_at && <span>Aggiornata il {formatDate(call.updated_at)}</span>}
+          </p>
+        </div>
+        <LinkButton
+          to={linkCall(call)}
+          variant="secondary"
+          size="sm"
+          aria-label={`${bozza ? "Riprendi" : "Apri"}: ${call.titolo || call.bando.titolo}`}
+          className={SOPRA_LINK_ESTESO}
+        >
+          {bozza ? "Riprendi" : "Apri"}
+        </LinkButton>
+      </Card>
     </li>
   );
 }
@@ -137,7 +143,7 @@ function Conteggio({ totale, inAggiornamento }: { totale: number; inAggiornament
   );
 }
 
-/** Le righe del registro: filetto sopra, ogni riga chiude con il suo. */
+/** Le righe del registro: una card per riga, sul piano. */
 function Registro({
   children,
   inAggiornamento = false,
@@ -147,7 +153,7 @@ function Registro({
 }) {
   return (
     <ul
-      className={`flex flex-col border-t border-line transition-opacity ${inAggiornamento ? "opacity-60" : ""}`}
+      className={`flex flex-col gap-3 transition-opacity ${inAggiornamento ? "opacity-60" : ""}`}
       aria-busy={inAggiornamento}
     >
       {children}
@@ -169,6 +175,8 @@ function LeMieCall() {
   if (data.items.length === 0) {
     return (
       <EmptyState
+        icon={Users}
+        area="partenariati"
         title="Non hai ancora creato call"
         description="Una call di partenariato ti aiuta a trovare le aziende con cui partecipare a un bando. Parti dal bando che ti interessa."
         action={
@@ -207,6 +215,7 @@ function PerTe({ editable, onVista }: { editable: boolean; onVista: (v: VistaPar
     if (apiErrorCode(perTe.error) === "azienda_mancante") {
       return (
         <EmptyState
+          area="azienda"
           title="Serve un'azienda"
           description="«Per te» confronta le call con i dati della tua azienda: inseriscili o importali dalla partita IVA."
           action={<LinkButton to="/app/azienda">Dati azienda</LinkButton>}
@@ -226,6 +235,8 @@ function PerTe({ editable, onVista }: { editable: boolean; onVista: (v: VistaPar
       <BannerOptIn optIn={dati.opt_in} />
       {dati.items.length === 0 ? (
         <EmptyState
+          icon={Search}
+          area="partenariati"
           title="Per ora nessuna call cerca le tue competenze"
           description={
             dati.opt_in
@@ -279,15 +290,24 @@ function Bacheca({ vista, editable }: { vista: "tutte" | "salvate"; editable: bo
   } else if (lista.data.items.length === 0) {
     corpo = tutte ? (
       filtriUrl.attivi > 0 ? (
-        <EmptyState title="Nessuna call con questi filtri" description="Prova a togliere qualche filtro." />
+        <EmptyState
+          icon={Search}
+          area="partenariati"
+          title="Nessuna call con questi filtri"
+          description="Prova a togliere qualche filtro."
+        />
       ) : (
         <EmptyState
+          icon={Users}
+          area="partenariati"
           title="Ancora nessuna call aperta"
           description="Per ora nessun'altra azienda ha pubblicato call aperte a tutti. Torna a trovarci più avanti."
         />
       )
     ) : (
       <EmptyState
+        icon={Bookmark}
+        area="partenariati"
         title="Nessuna call salvata"
         description={
           editable
@@ -359,14 +379,23 @@ function Candidature({ editable }: { editable: boolean }) {
     );
   } else if (lista.data.items.length === 0) {
     corpo = stato ? (
-      <EmptyState title="Nessuna con questo stato" description="Prova a scegliere «Tutte»." />
+      <EmptyState
+        icon={Inbox}
+        area="partenariati"
+        title="Nessuna con questo stato"
+        description="Prova a scegliere «Tutte»."
+      />
     ) : direzione === "ricevute" ? (
       <EmptyState
+        icon={Inbox}
+        area="partenariati"
         title="Niente da decidere per ora"
         description="Qui arrivano le candidature delle altre aziende alle tue call e gli inviti che la tua azienda riceve."
       />
     ) : (
       <EmptyState
+        icon={Inbox}
+        area="partenariati"
         title="Non hai ancora mandato candidature né inviti"
         description="Candidati alle call delle altre aziende, oppure invita le aziende suggerite dalle tue call."
         action={
@@ -442,38 +471,46 @@ function RigaConversazione({ conversazione: c }: { conversazione: ConversazioneC
   const nome = PARTNER_COPY.aziendaAnonima;
   const link = `/app/partenariati/conversazioni/${c.id}`;
   return (
-    <li className="flex items-start gap-6 border-b border-line px-2 py-4.5">
-      <div className="flex min-w-0 grow flex-col gap-1">
-        <h3 className="font-sans text-row-title text-ink">
-          <Link to={link} className="rounded-mark hover:text-accent-hover">
-            {nome}
-            {c.controparte.pseudonimo && (
-              <span className="ml-2 text-small font-normal text-ink-3">{c.controparte.pseudonimo}</span>
+    <li>
+      <Card interattiva area="partenariati" className="relative flex items-start gap-6">
+        <div className="flex min-w-0 grow flex-col gap-1">
+          <h3 className="font-sans text-row-title text-ink">
+            <Link to={link} className={`rounded-mark hover:text-accent-hover ${LINK_ESTESO}`}>
+              {nome}
+              {c.controparte.pseudonimo && (
+                <span className="ml-2 text-small font-normal text-ink-3">{c.controparte.pseudonimo}</span>
+              )}
+            </Link>
+          </h3>
+          <p className="text-body text-ink-2">
+            {c.lato === "creatore" ? "Sulla tua call" : "Sulla call"} «{c.call.titolo || "Call senza titolo"}»
+          </p>
+          <p className="text-small text-ink-2">Bando: {c.call.bando.titolo}</p>
+          <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-ink-2">
+            {c.non_letti > 0 && (
+              <Badge tone="info">{c.non_letti === 1 ? "1 messaggio non letto" : `${c.non_letti} messaggi non letti`}</Badge>
             )}
-          </Link>
-        </h3>
-        <p className="text-body text-ink-2">
-          {c.lato === "creatore" ? "Sulla tua call" : "Sulla call"} «{c.call.titolo || "Call senza titolo"}»
-        </p>
-        <p className="text-small text-ink-2">Bando: {c.call.bando.titolo}</p>
-        <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-ink-2">
-          {c.non_letti > 0 && (
-            <Badge>{c.non_letti === 1 ? "1 messaggio non letto" : `${c.non_letti} messaggi non letti`}</Badge>
-          )}
-          {c.stato === "chiusa" && <Status tono="chiuso">Chiusa</Status>}
-          {c.stato === "aperta" && !c.controparte.attiva && <Status tono="neutro">Sola lettura</Status>}
-          <span>
-            {c.ultimo_messaggio_at
-              ? `Ultimo messaggio: ${formatDateTime(c.ultimo_messaggio_at)}`
-              : c.created_at
-                ? `Aperta il ${formatDate(c.created_at)}, ancora senza messaggi`
-                : "Ancora senza messaggi"}
-          </span>
-        </p>
-      </div>
-      <LinkButton to={link} variant="secondary" size="sm" aria-label={`Apri la conversazione con ${nome}`}>
-        Apri
-      </LinkButton>
+            {c.stato === "chiusa" && <Status tono="chiuso">Chiusa</Status>}
+            {c.stato === "aperta" && !c.controparte.attiva && <Status tono="neutro">Sola lettura</Status>}
+            <span>
+              {c.ultimo_messaggio_at
+                ? `Ultimo messaggio: ${formatDateTime(c.ultimo_messaggio_at)}`
+                : c.created_at
+                  ? `Aperta il ${formatDate(c.created_at)}, ancora senza messaggi`
+                  : "Ancora senza messaggi"}
+            </span>
+          </p>
+        </div>
+        <LinkButton
+          to={link}
+          variant="secondary"
+          size="sm"
+          aria-label={`Apri la conversazione con ${nome}`}
+          className={SOPRA_LINK_ESTESO}
+        >
+          Apri
+        </LinkButton>
+      </Card>
     </li>
   );
 }
@@ -496,6 +533,8 @@ function Conversazioni() {
   if (lista.data.items.length === 0) {
     return (
       <EmptyState
+        icon={MessageSquare}
+        area="partenariati"
         title="Nessuna conversazione"
         description="Una conversazione si apre quando una candidatura o un invito viene accettato."
       />
@@ -553,13 +592,16 @@ export default function Partenariati() {
   return (
     <Page variante="elenco">
       <PageHeader
+        area="partenariati"
         titolo="Partenariati"
         descrizione="Trova le call delle aziende che cercano partner per un bando, oppure pubblica la tua in forma anonima e scegli tu con chi parlare."
         azioni={
           <>
-            <TextLink to="/app/azienda#partner">Vedi il profilo partner</TextLink>
+            <TextLink to="/app/azienda#partner" className={LINK_SU_FASCIA}>
+              Vedi il profilo partner
+            </TextLink>
             {puoCreare && (
-              <LinkButton to="/app/partenariati/call/nuova">
+              <LinkButton to="/app/partenariati/call/nuova" variant="inverse">
                 <Plus className="size-4" aria-hidden />
                 Crea una call
               </LinkButton>

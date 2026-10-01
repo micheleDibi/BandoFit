@@ -16,7 +16,7 @@ import { TextLink } from "../ui/TextLink";
 
 const TONI: Record<EsitoVoce, TonoStatus> = {
   verde: "aperto",
-  rosso: "attenzione",
+  rosso: "errore",
   grigio: "neutro",
 };
 const TONI_AVVISO: Record<EsitoVoce, AlertTono> = {

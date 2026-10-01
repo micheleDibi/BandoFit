@@ -757,16 +757,21 @@ function AzioneDiretta({ onAnnuncio }: { onAnnuncio: (t: string) => void }) {
     </div>
   );
 
+  // Su una Card come le segnalazioni sopra (lo stesso schema delle domande
+  // frequenti della landing: la card al posto dei filetti dell'Accordion).
   return (
-    <Accordion
-      items={[
-        {
-          id: "azione-diretta",
-          titolo: "Sospendi o ripristina direttamente un profilo o un messaggio",
-          children: contenuto,
-        },
-      ]}
-    />
+    <Card className="px-5 py-1 sm:px-6">
+      <Accordion
+        className="border-y-0"
+        items={[
+          {
+            id: "azione-diretta",
+            titolo: "Sospendi o ripristina direttamente un profilo o un messaggio",
+            children: contenuto,
+          },
+        ]}
+      />
+    </Card>
   );
 }
 

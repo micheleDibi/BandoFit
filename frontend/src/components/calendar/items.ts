@@ -69,18 +69,22 @@ export function itemKindLabel(item: CalendarItem): string {
   }
 }
 
-/** Ruoli di colore del calendario (docs/design-system.md): personali
- *  `accent-soft` + `ink`; scadenze dei bandi `warning-soft` + `warning-ink`;
+/** Ruoli di colore del calendario (docs/design-system.md, veste «Navy deciso»):
+ *  personali in `accent` (fondo `accent-soft`, testo `accent-hover`); scadenze
+ *  dei bandi nel corallo dell'area scadenze (`warm-soft` + `warm-ink`);
  *  disponibilità come slot vuoto (`sheet`, bordo tratteggiato `line-control`,
- *  testo `ink-2`); appuntamenti `accent` + `on-accent`. Il verde resta della
+ *  testo `ink-2`); appuntamenti nel colore dell'area consulenze (soft + ink).
+ *  I ruoli pieni hanno una barretta di 2px a sinistra nel colore base. Testo
+ *  ≥ 5,2:1 sul fondo (il passaggio del mouse non lo cambia). Il verde resta della
  *  compatibilità. Stesse classi per il chip, il campione della legenda e la
- *  riga dell'elenco del giorno. */
+ *  riga dell'elenco del giorno: la parola (legenda, tipo) c'è sempre. */
 // Bordo trasparente sugli altri ruoli: stessa altezza del chip tratteggiato.
 const RUOLI = {
-  personale: "border border-transparent bg-accent-soft text-ink",
-  bando: "border border-transparent bg-warning-soft text-warning-ink",
+  personale: "border border-transparent border-l-2 border-l-accent bg-accent-soft text-accent-hover",
+  bando: "border border-transparent border-l-2 border-l-warm bg-warm-soft text-warm-ink",
   slot: "border border-dashed border-line-control bg-sheet text-ink-2",
-  appuntamento: "border border-transparent bg-accent text-on-accent",
+  appuntamento:
+    "border border-transparent border-l-2 border-l-area-consulenze bg-area-consulenze-soft text-area-consulenze-ink",
 } as const;
 
 export type RuoloCalendario = keyof typeof RUOLI;
@@ -100,11 +104,13 @@ export function ruoloClasses(ruolo: RuoloCalendario): string {
   return RUOLI[ruolo];
 }
 
+// Al passaggio i ruoli pieni prendono un filetto nel colore base (il fondo resta:
+// il testo non perde contrasto, anche sulle celle `desk` fuori dal mese).
 const HOVER: Record<RuoloCalendario, string> = {
-  personale: "hover:bg-accent-line",
-  bando: "hover:bg-warning-line/50",
+  personale: "hover:ring-1 hover:ring-inset hover:ring-accent",
+  bando: "hover:ring-1 hover:ring-inset hover:ring-warm",
   slot: "hover:bg-desk",
-  appuntamento: "hover:bg-accent-hover",
+  appuntamento: "hover:ring-1 hover:ring-inset hover:ring-area-consulenze",
 };
 
 /** Classi del chip desktop: colore del ruolo più il passaggio del mouse. */
@@ -113,12 +119,13 @@ export function itemChipClasses(item: CalendarItem): string {
   return `${RUOLI[ruolo]} ${HOVER[ruolo]}`;
 }
 
-/** Pallino presentazionale (celle mobile), 8px: pieno, tenue o vuoto secondo il ruolo. */
+/** Pallino presentazionale (celle mobile), 8px: pieno nel colore del ruolo,
+ *  vuoto per le disponibilità. */
 const PALLINI: Record<RuoloCalendario, string> = {
-  personale: "bg-accent-soft ring-1 ring-inset ring-accent",
-  bando: "bg-warning-ink",
+  personale: "bg-accent",
+  bando: "bg-warm",
   slot: "bg-sheet ring-1 ring-inset ring-ink-3",
-  appuntamento: "bg-accent",
+  appuntamento: "bg-area-consulenze",
 };
 
 export function itemDotClass(item: CalendarItem): string {

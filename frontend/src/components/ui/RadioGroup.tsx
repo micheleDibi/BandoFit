@@ -73,7 +73,7 @@ export function RadioGroup({
               onChange={() => onChange(opzione.id)}
               disabled={spenta}
               aria-describedby={opzione.descrizione ? descrizioneId : undefined}
-              className="mt-0.75 size-4 shrink-0 cursor-pointer accent-accent disabled:cursor-not-allowed"
+              className="mt-0.75 size-4 shrink-0 cursor-pointer accent-accent transition duration-150 ease-uscita disabled:cursor-not-allowed"
             />
             <div className="flex min-w-0 flex-col">
               <label

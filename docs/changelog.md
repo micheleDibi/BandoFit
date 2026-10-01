@@ -2,6 +2,19 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-10-01 — Nuova veste «Navy deciso»: colori per area, card, grafici, animazioni
+
+Il redesign uscito in mattinata risultava piatto e con poco colore. Stessa struttura e stesse funzioni; cambia la veste. Unico indirizzo diverso: il link ai bandi adatti della Home aggiunge il filtro dello stato (aperti e in apertura), così il numero mostrato coincide con l'elenco.
+- **Cornice**: barra laterale navy piena con le voci colorate per area (bandi blu, AI-check viola, partenariati verde acqua, consulenze oro, scadenze e calendario corallo, azienda, account, amministrazione); contenuto centrato e più largo (elenchi e dettagli fino a 1280 px), niente più spazio vuoto a destra.
+- **Intestazioni**: fascia blu (unico gradiente dell'app, con l'hero della landing) con titolo bianco e icona dell'area.
+- **Stati colorati**: badge e stati a pillola colorata (aperto verde, in apertura blu, in scadenza corallo, chiuso grigio, attenzione ambra, errore rosso); la scadenza è una tessera colorata per urgenza; compatibilità a segmenti verdi.
+- **Superfici**: card con ombra e bordo colorato per area o per stato; le card che portano a una pagina si sollevano al passaggio del mouse.
+- **Home**: numeri grandi animati (bandi adatti, scadenze, AI-check rimasti con un anello, cose da fare), grafico delle scadenze dei bandi salvati, anello del completamento del profilo. Nessuna chiamata in più: stessi dati di prima.
+- **Animazioni**: transizioni su pulsanti e card, indicatore delle schede che scorre, aperture di finestre, cassetti e fisarmoniche, caricamenti con riflesso; nessuna animazione per chi ha attivato il movimento ridotto.
+- **Landing e accesso**: hero e pannello di accesso su fascia blu, icone colorate per area, piani su card.
+- Componenti nuovi in `src/components/ui/`: `IconChip`, `ProgressRing`, `BarChart`, `KpiCard`, `area.ts`; `PageHeader` con `area`, `Button` variante `inverse`, `Badge` di nuovo colorato. Design system aggiornato in `docs/design-system.md`.
+- Nessuna migration, nessun cambio del backend. **Azione manuale**: ricostruire e pubblicare il solo frontend.
+
 ## 2026-10-01 — Redesign del frontend, ondate 2-4: tutte le pagine sul nuovo design
 
 Seconda e ultima tappa del redesign (la prima è l'ondata 1 del 30/09). Tutte le pagine passano ai modelli di `Page` e ai componenti di `src/components/ui/`; nessuna API, hook di dati o regola di business cambia, salvo dove indicato. Il redesign esce in un solo rilascio, insieme all'ondata 1.

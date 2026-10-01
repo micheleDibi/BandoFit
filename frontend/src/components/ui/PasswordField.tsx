@@ -42,7 +42,8 @@ export const PasswordField = forwardRef<HTMLInputElement, PasswordFieldProps>(
             className={cn(
               inputClasses,
               "pr-24",
-              error && "border-danger focus:border-danger focus-visible:outline-danger",
+              error &&
+                "border-danger enabled:hover:border-danger focus:border-danger focus-visible:outline-danger focus-visible:ring-danger/15",
               className,
             )}
             {...props}

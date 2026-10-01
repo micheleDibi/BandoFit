@@ -17,6 +17,7 @@ import type {
 import { Alert } from "../ui/Alert";
 import { Badge } from "../ui/Badge";
 import { Button, LinkButton } from "../ui/Button";
+import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";
 import { DefinitionList, type Definizione } from "../ui/Facts";
 import { Segment } from "../ui/Segment";
@@ -37,6 +38,16 @@ const TONI: Record<StatoCandidatura, TonoStatus> = {
   rifiutata: "chiuso",
   ritirata: "chiuso",
   scaduta: "chiuso",
+};
+
+/** Bordo sinistro della card nel colore dello stato (lo stesso di `Status`):
+ *  in attesa accent, accettata fit, chiusa neutra. La parola sta nello `Status`. */
+const BORDO_STATO: Record<StatoCandidatura, string> = {
+  inviata: "border-l-4 border-l-accent",
+  accettata: "border-l-4 border-l-fit",
+  rifiutata: "border-l-4 border-l-line-control",
+  ritirata: "border-l-4 border-l-line-control",
+  scaduta: "border-l-4 border-l-line-control",
 };
 
 /** Stato di una candidatura o di un invito, in parole con il punto di `Status`. */
@@ -515,7 +526,8 @@ export function CandidaturaPropriaCard({
 
 // ---- Riga ---------------------------------------------------------------------------
 
-/** Una candidatura o un invito, visto dalla tua parte, come riga: chi c'è
+/** Una candidatura o un invito, visto dalla tua parte, come card (bordo
+ *  sinistro nel colore dello stato): chi c'è
  *  dall'altra parte (sempre anonimo), la call (se `mostraCall`), posizione,
  *  requisiti dichiarati, per il creatore il confronto in vista «terzi» (solo
  *  esiti e fasce), messaggio; a destra lo stato, la data, l'esito e le
@@ -576,54 +588,56 @@ export function CandidaturaCard({
   }
 
   return (
-    <li className="flex flex-col gap-4 border-b border-line py-5 md:flex-row md:gap-6">
-      <div className="flex min-w-0 grow flex-col gap-3">
-        {mostraCall ? (
-          <div className="flex flex-col gap-1">
-            <h3 className="font-sans text-row-title text-ink">
-              <Link to={`/app/partenariati/call/${c.call.id}`} className="rounded-mark hover:text-accent-hover">
-                {c.call.titolo || "Call senza titolo"}
-              </Link>
-            </h3>
-            <p className="text-body text-ink-2">Bando: {c.call.bando.titolo}</p>
-            <Controparte c={c} comeTitolo={false} />
-          </div>
-        ) : (
-          <Controparte c={c} comeTitolo />
-        )}
+    <li>
+      <Card className={`flex flex-col gap-4 md:flex-row md:gap-6 ${BORDO_STATO[c.stato] ?? ""}`}>
+        <div className="flex min-w-0 grow flex-col gap-3">
+          {mostraCall ? (
+            <div className="flex flex-col gap-1">
+              <h3 className="font-sans text-row-title text-ink">
+                <Link to={`/app/partenariati/call/${c.call.id}`} className="rounded-mark hover:text-accent-hover">
+                  {c.call.titolo || "Call senza titolo"}
+                </Link>
+              </h3>
+              <p className="text-body text-ink-2">Bando: {c.call.bando.titolo}</p>
+              <Controparte c={c} comeTitolo={false} />
+            </div>
+          ) : (
+            <Controparte c={c} comeTitolo />
+          )}
 
-        {c.lato === "creatore" && c.compatibile === false && c.candidato?.disponibile !== false && (
-          <p className="text-small text-ink-3">
-            Quando è arrivata, l'azienda non risultava compatibile con i requisiti o le posizioni
-            della call: valuta tu dal messaggio.
-          </p>
-        )}
-
-        {voci.length > 0 && <DefinitionList items={voci} />}
-
-        {puoVedereProfilo && <ProfiloCandidato candidaturaId={c.id} />}
-      </div>
-
-      <div className="flex shrink-0 flex-col items-start gap-3 md:w-48">
-        <div className="flex flex-col gap-1">
-          <p className="text-small text-ink-2">{etichettaTipo(c)}</p>
-          <StatoCandidaturaBadge stato={c.stato} />
-          {c.created_at && (
+          {c.lato === "creatore" && c.compatibile === false && c.candidato?.disponibile !== false && (
             <p className="text-small text-ink-3">
-              <span className="sr-only">Data: </span>
-              {tua ? "mandata il" : "dal"} {formatDate(c.created_at)}
+              Quando è arrivata, l'azienda non risultava compatibile con i requisiti o le posizioni
+              della call: valuta tu dal messaggio.
             </p>
           )}
+
+          {voci.length > 0 && <DefinitionList items={voci} />}
+
+          {puoVedereProfilo && <ProfiloCandidato candidaturaId={c.id} />}
         </div>
-        <Esito c={c} />
-        <Azioni
-          su={{ id: c.id, tipo: c.tipo, lato: c.lato, callId: c.call.id }}
-          conversazioneId={c.conversazione_id}
-          accettata={c.stato === "accettata"}
-          puoDecidere={c.puo_decidere}
-          puoRitirare={c.puo_ritirare}
-        />
-      </div>
+
+        <div className="flex shrink-0 flex-col items-start gap-3 md:w-48">
+          <div className="flex flex-col gap-1">
+            <p className="text-small text-ink-2">{etichettaTipo(c)}</p>
+            <StatoCandidaturaBadge stato={c.stato} />
+            {c.created_at && (
+              <p className="text-small text-ink-3">
+                <span className="sr-only">Data: </span>
+                {tua ? "mandata il" : "dal"} {formatDate(c.created_at)}
+              </p>
+            )}
+          </div>
+          <Esito c={c} />
+          <Azioni
+            su={{ id: c.id, tipo: c.tipo, lato: c.lato, callId: c.call.id }}
+            conversazioneId={c.conversazione_id}
+            accettata={c.stato === "accettata"}
+            puoDecidere={c.puo_decidere}
+            puoRitirare={c.puo_ritirare}
+          />
+        </div>
+      </Card>
     </li>
   );
 }

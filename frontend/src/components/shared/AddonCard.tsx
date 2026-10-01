@@ -1,9 +1,21 @@
-import { Minus, Plus } from "lucide-react";
+import {
+  Building2,
+  FileBarChart,
+  MessageSquare,
+  Minus,
+  Package,
+  Plus,
+  Sparkles,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { prezzoDisplay } from "../../lib/prezzo";
 import type { Addon } from "../../types";
 import { Button } from "../ui/Button";
+import type { Area } from "../ui/area";
 import { Card } from "../ui/Card";
+import { IconChip } from "../ui/IconChip";
 import { IconButton } from "../ui/IconButton";
 
 /** Bound del checkout e del grant admin (CHECK purchases.quantita, 0030). */
@@ -14,6 +26,22 @@ const MOTIVO_LABELS: Record<NonNullable<Addon["motivo_non_acquistabile"]>, strin
   solo_titolare: "Gli acquisti si gestiscono sull'account titolare.",
   piano_non_idoneo: "Disponibile con i piani che includono questa funzione.",
 };
+
+/** Icona e area dell'`IconChip` di un add-on (catalogo e «I tuoi add-on»),
+ *  dalla risorsa che estende o dallo slug; il resto è un pacchetto generico. */
+export function iconaAddon(addon: {
+  slug: string;
+  risorsa: "seats" | "companies" | null;
+}): { icon: LucideIcon; area: Area } {
+  if (addon.risorsa === "seats") return { icon: Users, area: "account" };
+  if (addon.risorsa === "companies") return { icon: Building2, area: "azienda" };
+  if (addon.slug === "consulto-esperto") return { icon: MessageSquare, area: "consulenze" };
+  if (addon.slug === "bilancio-ufficiale") return { icon: FileBarChart, area: "azienda" };
+  if (addon.slug.includes("ai-check") || addon.slug.includes("aicheck")) {
+    return { icon: Sparkles, area: "aicheck" };
+  }
+  return { icon: Package, area: "account" };
+}
 
 /** Card di un add-on del catalogo (prezzo una tantum, senza «/anno»). CTA a
  *  tre vie sul tipo_prezzo: «Acquista» (importo) e «Attiva» (gratis) passano
@@ -56,10 +84,15 @@ export function AddonCard({
   const cambiaQuantita = (delta: number) =>
     setQuantita((q) => Math.min(QTY_MAX, Math.max(1, q + delta)));
 
+  const icona = iconaAddon(addon);
+
   return (
     <Card className="flex h-full flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
-        <h3 className="font-sans text-title-group text-ink">{addon.nome}</h3>
+        <div className="flex min-w-0 items-center gap-3">
+          <IconChip icon={icona.icon} area={icona.area} size="md" />
+          <h3 className="font-sans text-title-group text-ink">{addon.nome}</h3>
+        </div>
         <p className="shrink-0 text-figure-sm text-ink">{display.testo}</p>
       </div>
       {addon.descrizione && <p className="flex-1 text-body text-ink-2">{addon.descrizione}</p>}

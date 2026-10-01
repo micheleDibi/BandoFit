@@ -9,8 +9,8 @@ import { EsitoVoceBadge } from "./ValidatoreChecklist";
 const TONI: Record<EsitoCoperturaCall, TonoStatus> = {
   coperto: "aperto",
   non_coperto: "chiuso",
-  dato_mancante: "in-apertura",
-  incerto: "in-apertura",
+  dato_mancante: "attenzione",
+  incerto: "attenzione",
   non_valutabile: "neutro",
 };
 

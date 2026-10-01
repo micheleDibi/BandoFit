@@ -1,4 +1,4 @@
-import { Check, Circle } from "lucide-react";
+import { Building2, Check, Circle } from "lucide-react";
 import { useAlertSettings } from "../../hooks/useAlertSettings";
 import { useCompany } from "../../hooks/useCompany";
 import { useCompanyDossier } from "../../hooks/useCompanyDossier";
@@ -11,7 +11,7 @@ import { formatDate } from "../../lib/format";
 import { Button } from "../ui/Button";
 import { InlineError } from "../ui/InlineError";
 import { Panel } from "../ui/Panel";
-import { ProgressBar } from "../ui/ProgressBar";
+import { ProgressRing } from "../ui/ProgressRing";
 import { Skeleton } from "../ui/states";
 import { TextLink } from "../ui/TextLink";
 
@@ -60,10 +60,12 @@ export function CompletaProfilo() {
 
   if (inCaricamento) {
     return (
-      <Panel titolo="Completa il profilo dell'azienda">
+      <Panel titolo="Completa il profilo dell'azienda" icon={Building2} area="azienda">
         <div className="flex flex-col gap-2" aria-hidden>
-          <Skeleton className="h-4 w-1/3" />
-          <Skeleton className="h-1.5 w-full" />
+          <div className="flex items-center gap-4">
+            <Skeleton className="size-16 shrink-0 rounded-pill" />
+            <Skeleton className="h-4 w-1/3" />
+          </div>
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
@@ -72,7 +74,7 @@ export function CompletaProfilo() {
   }
   if (errore) {
     return (
-      <Panel titolo="Completa il profilo dell'azienda">
+      <Panel titolo="Completa il profilo dell'azienda" icon={Building2} area="azienda">
         <InlineError>Non siamo riusciti a leggere il profilo dell'azienda.</InlineError>
         <div>
           <Button
@@ -159,7 +161,7 @@ export function CompletaProfilo() {
 
   if (fatti === passi.length) {
     return (
-      <Panel titolo="Profilo dell'azienda">
+      <Panel titolo="Profilo dell'azienda" icon={Building2} area="azienda">
         <p className="text-body text-ink-2">
           Profilo completo: compatibilità e bandi adatti usano tutti i dati della tua azienda.
         </p>
@@ -168,11 +170,21 @@ export function CompletaProfilo() {
   }
 
   return (
-    <Panel titolo="Completa il profilo dell'azienda">
-      <p className="text-small text-ink-2">
-        {fatti} {fatti === 1 ? "passo" : "passi"} su {passi.length}
-      </p>
-      <ProgressBar valore={fatti} massimo={passi.length} label="Passi completati" />
+    <Panel titolo="Completa il profilo dell'azienda" icon={Building2} area="azienda">
+      <div className="flex items-center gap-4">
+        <ProgressRing
+          value={fatti}
+          max={passi.length}
+          size={64}
+          tono="azienda"
+          label={`Passi completati: ${fatti} su ${passi.length}`}
+        >
+          {fatti}/{passi.length}
+        </ProgressRing>
+        <p className="text-small text-ink-2" aria-hidden>
+          {fatti} {fatti === 1 ? "passo" : "passi"} su {passi.length}
+        </p>
+      </div>
       <ul className="flex flex-col">
         {passi.map((passo) => (
           <li

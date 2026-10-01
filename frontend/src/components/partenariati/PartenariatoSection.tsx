@@ -1,4 +1,4 @@
-import { ChevronDown, RefreshCw } from "lucide-react";
+import { ChevronDown, RefreshCw, Users } from "lucide-react";
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { useFunzioni } from "../../hooks/useFunzioni";
@@ -18,6 +18,8 @@ import { formatDate, formatDateTime } from "../../lib/format";
 import type { FasePartenariato, PartenariatoBando } from "../../types";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
+import { Card } from "../ui/Card";
+import { IconChip } from "../ui/IconChip";
 import { Section, SectionHeader } from "../ui/SectionHeader";
 import { Spinner } from "../ui/Spinner";
 import { ErrorState, Skeleton } from "../ui/states";
@@ -404,53 +406,60 @@ export function PartenariatoSection({
     ) : null;
   }
 
-  // Stessa cornice della sezione «Report AI-check» che la precede (titolo con
-  // il filetto, `scroll-mt-16`): le due ancore della scheda si fermano allo
-  // stesso punto. Il titolo è il pulsante che apre e chiude la sezione.
+  // Stessa cornice della sezione «Report AI-check» che la precede (card sul
+  // piano, titolo con l'`IconChip` e il filetto, `scroll-mt-16`): le due ancore
+  // della scheda si fermano allo stesso punto. Il titolo è il pulsante che apre
+  // e chiude la sezione.
   return (
-    <Section id={PARTENARIATO_ANCORA} aria-labelledby={TITOLO_ID} className="scroll-mt-16 pt-6">
-      <SectionHeader
-        id={TITOLO_ID}
-        titolo={
-          <button
-            id={PARTENARIATO_TOGGLE_ID}
-            type="button"
-            aria-expanded={open}
-            aria-controls={PARTENARIATO_CONTENUTO_ID}
-            onClick={() => onOpenChange(!open)}
-            className="inline-flex cursor-pointer items-center gap-2 rounded-mark text-left transition-colors hover:text-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-          >
-            Regole di partenariato
-            <ChevronDown
-              className={cn("size-5 shrink-0 text-ink-3 transition-transform", open && "rotate-180")}
-              aria-hidden
-            />
-          </button>
-        }
-        azione={data?.regole && <ModalitaBadge modalita={data.regole.modalita_effettiva} />}
-      />
-      <p className="text-small text-ink-3">{sottotitolo(data)}</p>
+    <Card className="p-6 sm:p-8">
+      <Section id={PARTENARIATO_ANCORA} aria-labelledby={TITOLO_ID} className="scroll-mt-16">
+        <SectionHeader
+          id={TITOLO_ID}
+          titolo={
+            <button
+              id={PARTENARIATO_TOGGLE_ID}
+              type="button"
+              aria-expanded={open}
+              aria-controls={PARTENARIATO_CONTENUTO_ID}
+              onClick={() => onOpenChange(!open)}
+              className="inline-flex cursor-pointer items-center gap-3 rounded-mark text-left transition-colors duration-150 ease-uscita hover:text-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            >
+              <IconChip icon={Users} area="partenariati" size="sm" />
+              Regole di partenariato
+              <ChevronDown
+                className={cn(
+                  "size-5 shrink-0 text-ink-3 motion-safe:transition-transform motion-safe:duration-250 motion-safe:ease-uscita",
+                  open && "rotate-180",
+                )}
+                aria-hidden
+              />
+            </button>
+          }
+          azione={data?.regole && <ModalitaBadge modalita={data.regole.modalita_effettiva} />}
+        />
+        <p className="text-small text-ink-3">{sottotitolo(data)}</p>
 
-      <div id={PARTENARIATO_CONTENUTO_ID} hidden={!open}>
-        {open && (
-          <div className="flex flex-col gap-5">
-            <div role="status" aria-live="polite">
-              {testoAvanzamento ? (
-                <p className="inline-flex items-center gap-2 text-body font-medium text-ink-2">
-                  <Spinner size="sm" />
-                  {testoAvanzamento}
-                </p>
-              ) : annuncio ? (
-                <p className="sr-only">{annuncio}</p>
-              ) : null}
+        <div id={PARTENARIATO_CONTENUTO_ID} hidden={!open}>
+          {open && (
+            <div className="flex flex-col gap-5">
+              <div role="status" aria-live="polite">
+                {testoAvanzamento ? (
+                  <p className="inline-flex items-center gap-2 text-body font-medium text-ink-2">
+                    <Spinner size="sm" />
+                    {testoAvanzamento}
+                  </p>
+                ) : annuncio ? (
+                  <p className="sr-only">{annuncio}</p>
+                ) : null}
+              </div>
+              <p role="note" className="text-small text-ink-3">
+                {PARTENARIATO_COPY.disclaimer}
+              </p>
+              {corpo}
             </div>
-            <p role="note" className="text-small text-ink-3">
-              {PARTENARIATO_COPY.disclaimer}
-            </p>
-            {corpo}
-          </div>
-        )}
-      </div>
-    </Section>
+          )}
+        </div>
+      </Section>
+    </Card>
   );
 }

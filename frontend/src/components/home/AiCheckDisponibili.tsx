@@ -1,3 +1,4 @@
+import { Sparkles } from "lucide-react";
 import { useEntitlements } from "../../hooks/useEntitlements";
 import { Button } from "../ui/Button";
 import { InlineError } from "../ui/InlineError";
@@ -28,7 +29,7 @@ export function AiCheckDisponibili() {
   }
 
   return (
-    <Panel titolo="AI-check">
+    <Panel titolo="AI-check" icon={Sparkles} area="aicheck">
       {isPending ? (
         <Skeleton className="h-4 w-4/5" />
       ) : isError ? (

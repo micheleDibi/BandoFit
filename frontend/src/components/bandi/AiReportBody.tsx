@@ -4,7 +4,7 @@ import type { AiCriterioReport, AiReport, AiRequisitoReport, AiVerdetto } from "
 import { Accordion } from "../ui/Accordion";
 import { Alert } from "../ui/Alert";
 import { Badge } from "../ui/Badge";
-import { ProgressBar } from "../ui/ProgressBar";
+import { ProgressRing } from "../ui/ProgressRing";
 import { Section, SectionHeader } from "../ui/SectionHeader";
 import { TextLink } from "../ui/TextLink";
 import { AiEsitoBadge } from "./badges";
@@ -97,33 +97,35 @@ export function AiReportBody({
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <AiEsitoBadge esito={report.esito_ammissibilita} />
           {report.tipo_punteggio === "stima" ? (
-            <Badge>Stima del punteggio ufficiale</Badge>
+            <Badge area="aicheck">Stima del punteggio ufficiale</Badge>
           ) : (
-            <Badge>Punteggio euristico interno</Badge>
+            <Badge area="aicheck">Punteggio euristico interno</Badge>
           )}
         </div>
         {punteggio !== null ? (
-          <div className="flex max-w-[520px] flex-col gap-2">
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="text-small text-ink-3">Punteggio di compatibilità</span>
-              <span className="text-figure text-ink">
-                {punteggio}
-                <span className="font-sans text-small font-normal text-ink-3">/100</span>
-              </span>
-            </div>
-            <ProgressBar
-              valore={punteggio}
-              massimo={100}
-              label="Punteggio di compatibilità"
+          <div className="flex max-w-[520px] items-center gap-5">
+            <ProgressRing
+              value={punteggio}
+              max={100}
+              size={96}
               tono="fit"
-            />
-            {report.griglia.soglia_minima !== null &&
-              report.griglia.punti_ottenuti_stimati !== null && (
-                <p className="text-small text-ink-3">
-                  {report.griglia.punti_ottenuti_stimati} punti stimati su soglia minima{" "}
-                  {report.griglia.soglia_minima}
-                </p>
-              )}
+              label={`Punteggio di compatibilità: ${punteggio} su 100`}
+            >
+              {punteggio}
+            </ProgressRing>
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="text-title-group text-ink">Punteggio di compatibilità</span>
+              <span className="text-small text-ink-3 tabular-nums" aria-hidden>
+                {punteggio} su 100
+              </span>
+              {report.griglia.soglia_minima !== null &&
+                report.griglia.punti_ottenuti_stimati !== null && (
+                  <p className="text-small text-ink-3">
+                    {report.griglia.punti_ottenuti_stimati} punti stimati su soglia minima{" "}
+                    {report.griglia.soglia_minima}
+                  </p>
+                )}
+            </div>
           </div>
         ) : (
           <p className="text-body text-ink-2">
@@ -196,7 +198,7 @@ export function AiReportBody({
           {report.punti_di_forza.length > 0 && (
             <Section>
               <SectionHeader livello={3} titolo="Punti di forza" />
-              <ul className="flex list-disc flex-col gap-1.5 pl-5 text-body text-ink">
+              <ul className="flex list-disc flex-col gap-1.5 pl-5 text-body text-ink marker:text-fit">
                 {report.punti_di_forza.map((p, i) => (
                   <li key={i}>{p.testo}</li>
                 ))}
@@ -206,7 +208,7 @@ export function AiReportBody({
           {report.punti_di_debolezza.length > 0 && (
             <Section>
               <SectionHeader livello={3} titolo="Punti di debolezza" />
-              <ul className="flex list-disc flex-col gap-1.5 pl-5 text-body text-ink">
+              <ul className="flex list-disc flex-col gap-1.5 pl-5 text-body text-ink marker:text-ink-3">
                 {report.punti_di_debolezza.map((p, i) => (
                   <li key={i}>{p.testo}</li>
                 ))}

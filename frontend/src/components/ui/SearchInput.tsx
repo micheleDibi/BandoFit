@@ -25,8 +25,9 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
         className={cn(
           inputClasses,
           "flex items-center gap-2 text-ink-3",
-          "focus-within:border-accent focus-within:outline-2 focus-within:outline-offset-0 focus-within:outline-accent",
-          disabled && "cursor-not-allowed bg-sunken",
+          "hover:border-ink-3 focus-within:border-accent focus-within:outline-2 focus-within:outline-offset-0 focus-within:outline-accent",
+          "focus-within:ring-4 focus-within:ring-accent/15",
+          disabled && "cursor-not-allowed bg-sunken hover:border-line-control",
           className,
         )}
       >

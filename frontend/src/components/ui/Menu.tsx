@@ -170,7 +170,7 @@ export function Menu({ label, children, triggerIcon, triggerClassName }: MenuPro
             aria-label={label}
             onKeyDown={onPanelKeyDown}
             style={{ position: "fixed", top: coords.top, right: coords.right }}
-            className="z-50 flex min-w-[220px] flex-col gap-0.5 rounded-panel border border-line bg-sheet p-1.5 shadow-overlay"
+            className="z-50 flex min-w-[220px] flex-col gap-0.5 rounded-panel border border-line bg-sheet p-1.5 shadow-overlay motion-safe:animate-entrata"
           >
             <MenuContext.Provider value={{ close }}>{children}</MenuContext.Provider>
           </div>,

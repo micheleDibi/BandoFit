@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { Bell } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { Page } from "../components/ui/Page";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Pagination } from "../components/ui/Pagination";
@@ -15,7 +17,8 @@ import { NOTIFICHE_COPY } from "../lib/copy";
 import { formatDateTime } from "../lib/format";
 import type { Notifica } from "../types";
 
-/** Centro alert: tutte le notifiche in una pagina paginata, a righe. Per gli
+/** Centro alert: tutte le notifiche in una pagina paginata, a righe in una
+ *  card; le non lette hanno il pallino e il fondo tenue `accent`. Per gli
  *  Advisor multi-azienda un filtro per azienda affianca la vista aggregata; il
  *  contatore della voce «Notifiche» (non lette) resta comunque su tutte le aziende. */
 export default function Notifiche() {
@@ -56,11 +59,13 @@ export default function Notifiche() {
       <PageHeader
         titolo={NOTIFICHE_COPY.titoloPagina}
         descrizione={NOTIFICHE_COPY.sottotitoloPagina}
+        area="account"
+        icon={Bell}
         azioni={
           (data?.non_lette ?? 0) > 0 && (
             <Button
               type="button"
-              variant="secondary"
+              variant="inverse"
               loading={markRead.isPending}
               onClick={() => markRead.mutate({ all: true })}
             >
@@ -91,7 +96,7 @@ export default function Notifiche() {
         {isPending ? (
           <div className="flex flex-col gap-3" aria-hidden>
             {Array.from({ length: 5 }).map((_, i) => (
-              <Skeleton key={i} className="h-16 w-full" />
+              <Skeleton key={i} className="h-16 w-full rounded-control" />
             ))}
           </div>
         ) : isError ? (
@@ -100,6 +105,8 @@ export default function Notifiche() {
           companyId ? (
             <EmptyState
               title={NOTIFICHE_COPY.vuotoAzienda}
+              icon={Bell}
+              area="account"
               action={
                 <Button type="button" variant="secondary" onClick={() => setCompanyId(null)}>
                   Mostra tutte le aziende
@@ -107,69 +114,72 @@ export default function Notifiche() {
               }
             />
           ) : (
-            <EmptyState title={NOTIFICHE_COPY.vuoto} />
+            <EmptyState title={NOTIFICHE_COPY.vuoto} icon={Bell} area="account" />
           )
         ) : (
           <>
-            <ul
-              className={cn(
-                "flex flex-col border-t border-line",
-                isPlaceholderData && "opacity-60 transition-opacity",
-              )}
-            >
-              {data?.items.map((notifica) => {
-                const nonLetta = !notifica.read_at;
-                const nomeAzienda = notifica.company_profile_id
-                  ? nomiAziende.get(notifica.company_profile_id)
-                  : undefined;
-                return (
-                  <li key={notifica.id} className="border-b border-line">
-                    <button
-                      type="button"
-                      onClick={() => handleItemClick(notifica)}
-                      className={cn(
-                        "flex w-full items-start gap-3 px-2 py-4 text-left transition-colors",
-                        "hover:bg-desk",
-                        "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
-                        notifica.url ? "cursor-pointer" : "cursor-default",
-                      )}
-                    >
-                      {/* Punto delle non lette (le lette non hanno segno): solo
-                          visivo, a parole lo dice il prefisso sr-only. */}
-                      <span
-                        aria-hidden
+            <Card className="overflow-hidden p-0">
+              <ul
+                className={cn(
+                  "flex flex-col",
+                  isPlaceholderData && "opacity-60 transition-opacity",
+                )}
+              >
+                {data?.items.map((notifica) => {
+                  const nonLetta = !notifica.read_at;
+                  const nomeAzienda = notifica.company_profile_id
+                    ? nomiAziende.get(notifica.company_profile_id)
+                    : undefined;
+                  return (
+                    <li key={notifica.id} className="border-b border-line last:border-b-0">
+                      <button
+                        type="button"
+                        onClick={() => handleItemClick(notifica)}
                         className={cn(
-                          "mt-2 size-2 shrink-0 rounded-pill",
-                          nonLetta && "bg-accent",
+                          "flex w-full items-start gap-3 px-4 py-4 text-left sm:px-5",
+                          "transition-colors duration-150 ease-uscita",
+                          nonLetta ? "bg-accent-soft/60 hover:bg-accent-soft" : "hover:bg-desk",
+                          "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
+                          notifica.url ? "cursor-pointer" : "cursor-default",
                         )}
-                      />
-                      <span className="flex min-w-0 flex-1 flex-col gap-1">
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span
-                            className={cn(
-                              "text-body text-ink",
-                              nonLetta ? "font-semibold" : "font-normal",
-                            )}
-                          >
-                            {nonLetta && (
-                              <span className="sr-only">{NOTIFICHE_COPY.nonLetta} </span>
-                            )}
-                            {notifica.titolo}
+                      >
+                        {/* Punto delle non lette (le lette non hanno segno): solo
+                            visivo, a parole lo dice il prefisso sr-only. */}
+                        <span
+                          aria-hidden
+                          className={cn(
+                            "mt-2 size-2 shrink-0 rounded-pill",
+                            nonLetta && "bg-accent",
+                          )}
+                        />
+                        <span className="flex min-w-0 flex-1 flex-col gap-1">
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={cn(
+                                "text-body text-ink",
+                                nonLetta ? "font-semibold" : "font-normal",
+                              )}
+                            >
+                              {nonLetta && (
+                                <span className="sr-only">{NOTIFICHE_COPY.nonLetta} </span>
+                              )}
+                              {notifica.titolo}
+                            </span>
+                            {nomeAzienda && <Badge area="azienda">{nomeAzienda}</Badge>}
                           </span>
-                          {nomeAzienda && <Badge>{nomeAzienda}</Badge>}
+                          {notifica.corpo && (
+                            <span className="block text-body text-ink-2">{notifica.corpo}</span>
+                          )}
+                          <span className="block text-caption text-ink-3 tabular-nums">
+                            {formatDateTime(notifica.created_at)}
+                          </span>
                         </span>
-                        {notifica.corpo && (
-                          <span className="block text-body text-ink-2">{notifica.corpo}</span>
-                        )}
-                        <span className="block text-caption text-ink-3 tabular-nums">
-                          {formatDateTime(notifica.created_at)}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Card>
             <Pagination
               page={page}
               totalPages={data?.total_pages ?? 1}

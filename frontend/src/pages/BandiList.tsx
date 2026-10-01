@@ -1,4 +1,4 @@
-import { ListFilter } from "lucide-react";
+import { ListFilter, SearchX } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ActiveFilterChips } from "../components/bandi/ActiveFilterChips";
 import { AltriFiltriDrawer } from "../components/bandi/AltriFiltri";
@@ -6,12 +6,13 @@ import { BandiPerTeSegment } from "../components/bandi/BandiPerTeButton";
 import { BandoRow, BandoRowSkeleton } from "../components/bandi/BandoRow";
 import { FiltriBandi } from "../components/bandi/FiltriBandi";
 import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { Page } from "../components/ui/Page";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Pagination } from "../components/ui/Pagination";
 import { SearchInput } from "../components/ui/SearchInput";
 import { Select } from "../components/ui/Select";
-import { EmptyState, ErrorState } from "../components/ui/states";
+import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
 import { useBandi } from "../hooks/useBandi";
 import { useBandiFilters } from "../hooks/useBandiFilters";
 import { useDebounce } from "../hooks/useDebounce";
@@ -29,6 +30,19 @@ const SORT_LABELS: Record<string, string> = {
 
 function contaBandi(n: number): string {
   return `${n.toLocaleString("it-IT")} ${n === 1 ? "bando" : "bandi"}`;
+}
+
+/** Il conteggio dei risultati sopra l'elenco: il numero in evidenza, poi la
+ *  stessa frase dell'intestazione. */
+function ConteggioRisultati({ totale, conFiltri }: { totale: number; conFiltri: boolean }) {
+  return (
+    <p className="flex flex-wrap items-baseline gap-x-2 text-body text-ink-2">
+      <span className="text-figure-sm text-ink">{totale.toLocaleString("it-IT")}</span>
+      <span>
+        {totale === 1 ? "bando" : "bandi"} {conFiltri ? "con i filtri scelti" : "nel catalogo"}
+      </span>
+    </p>
+  );
 }
 
 export default function BandiList() {
@@ -101,9 +115,9 @@ export default function BandiList() {
 
   return (
     <Page variante="elenco">
-      <PageHeader titolo="Bandi" descrizione={descrizione} />
+      <PageHeader area="bandi" titolo="Bandi" descrizione={descrizione} />
 
-      <div className="flex flex-col gap-3">
+      <Card className="flex flex-col gap-3 p-4 sm:p-5">
         {/* Barra: ricerca, segmento del preset, ordinamento (e «Filtri» sotto lg). */}
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <SearchInput
@@ -158,7 +172,7 @@ export default function BandiList() {
           altriAttivi={altriAttivi}
           altriAperti={filtriAperti}
           onAltri={() => setFiltriAperti(true)}
-          className="hidden lg:flex"
+          className="hidden border-t border-line pt-3 lg:flex"
         />
 
         <ActiveFilterChips
@@ -169,7 +183,7 @@ export default function BandiList() {
           onUpdate={update}
           onReset={azzera}
         />
-      </div>
+      </Card>
 
       <AltriFiltriDrawer
         {...controlli}
@@ -181,13 +195,20 @@ export default function BandiList() {
         totale={data?.total}
       />
 
-      <section aria-label="Risultati" aria-busy={isPending || isPlaceholderData}>
+      <section
+        aria-label="Risultati"
+        aria-busy={isPending || isPlaceholderData}
+        className="flex flex-col gap-4"
+      >
         {isPending ? (
-          <ul className="flex flex-col border-t border-line">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <BandoRowSkeleton key={i} />
-            ))}
-          </ul>
+          <>
+            <Skeleton className="h-6 w-40" />
+            <ul className="flex flex-col gap-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <BandoRowSkeleton key={i} />
+              ))}
+            </ul>
+          </>
         ) : isError ? (
           <ErrorState
             title="Non siamo riusciti a caricare i bandi."
@@ -198,6 +219,8 @@ export default function BandiList() {
           <EmptyState
             title="Nessun bando trovato."
             description="Prova a togliere qualche filtro o a usare parole chiave diverse."
+            icon={SearchX}
+            area="bandi"
             action={
               activeCount > 0 ? (
                 <Button type="button" variant="secondary" onClick={azzera}>
@@ -208,9 +231,10 @@ export default function BandiList() {
           />
         ) : (
           <>
+            {data && <ConteggioRisultati totale={data.total} conFiltri={activeCount > 0} />}
             <ul
               className={cn(
-                "flex flex-col border-t border-line",
+                "flex flex-col gap-3",
                 isPlaceholderData && "opacity-60 transition-opacity",
               )}
             >
@@ -218,7 +242,7 @@ export default function BandiList() {
                 <BandoRow key={bando.id} bando={bando} />
               ))}
             </ul>
-            <div className="mt-6">
+            <div className="mt-2">
               <Pagination
                 page={filters.page}
                 totalPages={data?.total_pages ?? 1}

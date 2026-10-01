@@ -12,13 +12,14 @@ export interface ChipProps {
   className?: string;
 }
 
-/** Filtro attivo (o valore scelto) rimovibile: pillola su `sunken`, 28px.
- *  Non è uno stato né un'etichetta: per quelli ci sono `Status` e `Badge`. */
+/** Filtro attivo (o valore scelto) rimovibile: pillola su `accent-soft` con il
+ *  testo in `accent-hover`, 28px. Non è uno stato né un'etichetta: per quelli
+ *  ci sono `Status` e `Badge`. */
 export function Chip({ children, onRemove, label, className }: ChipProps) {
   return (
     <span
       className={cn(
-        "inline-flex h-7 max-w-full items-center gap-1.5 rounded-pill bg-sunken pl-2.5 text-small text-ink",
+        "inline-flex h-7 max-w-full items-center gap-1.5 rounded-pill bg-accent-soft pl-2.5 text-small font-medium text-accent-hover",
         onRemove ? "pr-1.5" : "pr-2.5",
         className,
       )}
@@ -31,7 +32,7 @@ export function Chip({ children, onRemove, label, className }: ChipProps) {
           aria-label={label ?? "Rimuovi"}
           className={cn(
             "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-pill",
-            "text-ink-2 transition-colors hover:bg-line hover:text-ink",
+            "text-accent-hover transition-colors duration-150 ease-uscita hover:bg-accent-line hover:text-ink",
             "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent",
           )}
         >

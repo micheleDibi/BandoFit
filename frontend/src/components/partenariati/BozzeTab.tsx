@@ -1,4 +1,4 @@
-import { Check, ChevronDown, TriangleAlert } from "lucide-react";
+import { Check, ChevronDown, FileText, TriangleAlert } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   bozzaInCorsoRecente,
@@ -15,6 +15,7 @@ import type { BozzaDocumento, StatoBozzaDocumento, TipoBozzaDocumento } from "..
 import { ExportPdfButton } from "../shared/ExportPdfButton";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
+import { Card } from "../ui/Card";
 import { Checkbox } from "../ui/Checkbox";
 import { Section, SectionHeader } from "../ui/SectionHeader";
 import { Spinner } from "../ui/Spinner";
@@ -35,7 +36,7 @@ const recenti = (bozze: BozzaDocumento[]) =>
 
 const TONI: Record<StatoBozzaDocumento, TonoStatus> = {
   ready: "aperto",
-  error: "attenzione",
+  error: "errore",
   pending: "in-apertura",
 };
 
@@ -298,6 +299,8 @@ export function BozzeTab({
     corpoElenco =
       apiErrorCode(bozze.error) === "not_found" ? (
         <EmptyState
+          icon={FileText}
+          area="partenariati"
           title="Bozze non disponibili"
           description="Le bozze dei documenti le preparano l'azienda che ha creato la call e le aziende del suo consorzio."
         />
@@ -308,7 +311,14 @@ export function BozzeTab({
         />
       );
   } else if (elenco.length === 0) {
-    corpoElenco = <EmptyState title={BOZZE_COPY.nessunaTitolo} description={BOZZE_COPY.nessuna} />;
+    corpoElenco = (
+      <EmptyState
+        icon={FileText}
+        area="partenariati"
+        title={BOZZE_COPY.nessunaTitolo}
+        description={BOZZE_COPY.nessuna}
+      />
+    );
   } else {
     corpoElenco = (
       <ul className="flex flex-col border-t border-line">
@@ -326,7 +336,7 @@ export function BozzeTab({
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <Card className="flex flex-col gap-8 sm:p-8">
       <Section>
         <SectionHeader titolo={BOZZE_COPY.titolo} />
         <p className="text-body text-ink-2">{BOZZE_COPY.intro}</p>
@@ -354,6 +364,6 @@ export function BozzeTab({
         <SectionHeader titolo={BOZZE_COPY.elencoTitolo} id={`${idElenco}-titolo`} />
         {corpoElenco}
       </Section>
-    </div>
+    </Card>
   );
 }

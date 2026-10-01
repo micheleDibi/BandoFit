@@ -4,7 +4,7 @@ import { useSalvaCall } from "../../hooks/usePartenariati";
 import { apiErrorMessage } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { BACHECA_COPY } from "../../lib/copy";
-import { IconButton } from "../ui/IconButton";
+import { IconButton, type IconButtonVariant } from "../ui/IconButton";
 import { useToast } from "../ui/Toast";
 import { Tooltip } from "../ui/Tooltip";
 
@@ -17,11 +17,17 @@ export function SalvaCallButton({
   id,
   titolo,
   salvata,
+  variant,
+  className,
 }: {
   id: string;
   /** Per il nome accessibile («Salva la call «…»»). */
   titolo: string;
   salvata: boolean;
+  /** `secondary` (fondo bianco) sulla fascia navy dell'intestazione. */
+  variant?: IconButtonVariant;
+  /** Classi in più per il pulsante (es. l'anello del focus bianco sulla fascia). */
+  className?: string;
 }) {
   const salva = useSalvaCall();
   const { mostra } = useToast();
@@ -54,6 +60,8 @@ export function SalvaCallButton({
         label={`${BACHECA_COPY.salva} la call «${titolo}»`}
         icon={<Bookmark className={cn(attuale && "fill-current text-accent")} />}
         aria-pressed={attuale}
+        variant={variant}
+        className={className}
         onClick={onClick}
       />
     </Tooltip>

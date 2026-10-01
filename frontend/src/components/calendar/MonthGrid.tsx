@@ -51,7 +51,7 @@ export function MonthGrid({
     <div>
       <div className="grid grid-cols-7 border-b border-line bg-desk" aria-hidden>
         {WEEKDAYS.map((label) => (
-          <div key={label} className="px-2 py-2 text-center text-caption text-ink-3">
+          <div key={label} className="px-2 py-2 text-center text-caption font-medium text-ink-3">
             {label}
           </div>
         ))}
@@ -89,7 +89,7 @@ export function MonthGrid({
                 }`}
                 aria-current={isToday ? "date" : undefined}
                 className={cn(
-                  "absolute inset-0 cursor-pointer transition-colors hover:bg-ink/3",
+                  "absolute inset-0 cursor-pointer transition-colors duration-150 ease-uscita hover:bg-accent-soft/40",
                   "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
                 )}
               />
@@ -106,7 +106,7 @@ export function MonthGrid({
                 </span>
                 {/* Segno di creazione: appare al passaggio del mouse */}
                 <Plus
-                  className="mr-0.5 mt-1 size-4 text-accent opacity-0 transition-opacity group-hover:opacity-100"
+                  className="mr-0.5 mt-1 size-4 text-accent opacity-0 transition-opacity duration-150 ease-uscita group-hover:opacity-100"
                   aria-hidden
                 />
               </div>
@@ -124,7 +124,7 @@ export function MonthGrid({
                         type="button"
                         onClick={() => onOpenItem(item)}
                         className={cn(
-                          "cursor-pointer truncate rounded-mark px-1.5 py-0.5 text-left text-caption transition-colors",
+                          "cursor-pointer truncate rounded-mark px-1.5 py-0.5 text-left text-caption font-medium transition-colors duration-150 ease-uscita",
                           "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent",
                           itemChipClasses(item),
                         )}

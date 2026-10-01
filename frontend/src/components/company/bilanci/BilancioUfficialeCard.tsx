@@ -34,11 +34,11 @@ import { Status, type TonoStatus } from "../../ui/Status";
 const TONI_STATO: Record<StatoRichiestaBilancio, TonoStatus> = {
   in_invio: "neutro",
   in_lavorazione: "neutro",
-  esito_ignoto: "in-apertura",
+  esito_ignoto: "attenzione",
   completata: "aperto",
   non_disponibile: "chiuso",
   annullata: "chiuso",
-  errore: "attenzione",
+  errore: "errore",
 };
 
 /** Riga di spiegazione sotto una richiesta: il messaggio del server se c'è,
@@ -80,7 +80,7 @@ function RichiestaVoce({ richiesta: r }: { richiesta: BilancioRichiesta }) {
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-body font-medium text-ink">{COPY.esercizioTitolo(anno)}</span>
-          <Status tono={inutilizzabile ? "in-apertura" : (TONI_STATO[r.stato] ?? "neutro")}>
+          <Status tono={inutilizzabile ? "attenzione" : (TONI_STATO[r.stato] ?? "neutro")}>
             {inutilizzabile ? COPY.statoNonUtilizzabile : (COPY.stati[r.stato] ?? r.stato)}
           </Status>
           {r.rimborsata && (

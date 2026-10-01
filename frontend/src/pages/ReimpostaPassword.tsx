@@ -1,9 +1,11 @@
+import { CircleCheck, Link2Off } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AccessoLaterale } from "../components/landing/AccessoLaterale";
 import { Alert } from "../components/ui/Alert";
 import { AuthLayout } from "../components/ui/AuthLayout";
 import { Button, LinkButton } from "../components/ui/Button";
+import { IconChip } from "../components/ui/IconChip";
 import { PasswordField } from "../components/ui/PasswordField";
 import { PasswordStrengthMeter } from "../components/ui/PasswordStrengthMeter";
 import { api, apiErrorMessage } from "../lib/api";
@@ -68,6 +70,7 @@ export default function ReimpostaPassword() {
     <AuthLayout laterale={<AccessoLaterale />}>
       {expired ? (
         <div className="flex flex-col items-start gap-2">
+          <IconChip icon={Link2Off} size="lg" className="mb-2" />
           <h1 className="text-title-page text-ink">Link scaduto o non valido</h1>
           <p className="text-body text-ink-2">
             I link di recupero valgono una sola volta e per un'ora. Richiedine uno nuovo.
@@ -78,6 +81,7 @@ export default function ReimpostaPassword() {
         </div>
       ) : done ? (
         <div className="flex flex-col items-start gap-2" role="status">
+          <IconChip icon={CircleCheck} size="lg" className="mb-2" />
           <h1 className="text-title-page text-ink">Password aggiornata</h1>
           <p className="text-body text-ink-2">Ti stiamo facendo entrare…</p>
         </div>

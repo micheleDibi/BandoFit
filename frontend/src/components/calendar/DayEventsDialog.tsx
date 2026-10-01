@@ -51,13 +51,13 @@ function ItemRow({ item, onOpen }: { item: CalendarItem; onOpen: () => void }) {
       onClick={onOpen}
       className={cn(
         "flex w-full cursor-pointer items-start gap-3 rounded-control border border-line px-3 py-2.5 text-left",
-        "transition-colors hover:bg-desk",
+        "transition-colors duration-150 ease-uscita hover:bg-desk",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
       )}
     >
       <span
         aria-hidden
-        className={cn("mt-1 size-3 shrink-0 rounded-mark", ruoloClasses(itemRuolo(item)))}
+        className={cn("mt-1 h-3.5 w-5 shrink-0 rounded-mark", ruoloClasses(itemRuolo(item)))}
       />
       <span className="flex min-w-0 flex-col gap-0.5">
         <span className="text-small text-ink-3">{itemKindLabel(item)}</span>

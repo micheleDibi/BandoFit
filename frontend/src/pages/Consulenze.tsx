@@ -1,8 +1,10 @@
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, MessageSquare } from "lucide-react";
 import { Link } from "react-router-dom";
 import { inizioAppuntamento } from "../components/consulenze/formato";
 import { Badge } from "../components/ui/Badge";
 import { LinkButton } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
+import { LINK_ESTESO } from "../components/shared/linkEsteso";
 import { Page } from "../components/ui/Page";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Status, type TonoStatus } from "../components/ui/Status";
@@ -58,7 +60,7 @@ export function PropostaStatoBadge({
 
 /** Etichetta delle consulenze chieste dalla call di partenariato (WP9). */
 export function ConsultoCallBadge() {
-  return <Badge>{CONSULTO_CALL_COPY.badge}</Badge>;
+  return <Badge area="partenariati">{CONSULTO_CALL_COPY.badge}</Badge>;
 }
 
 /** Link alla call di una consulenza chiesta dalla call (WP9); null se la
@@ -78,8 +80,9 @@ function proposteDaValutare(n: number): string {
   return n === 1 ? "1 proposta da valutare" : `${n} proposte da valutare`;
 }
 
-/** Riga dell'elenco: il bando è il link al dettaglio (niente pulsanti nella
- *  riga); sotto lo stato e i metadati, a destra le proposte o l'appuntamento. */
+/** Card dell'elenco (tutta cliccabile, bordo dell'area consulenze): il bando è
+ *  il link al dettaglio (niente pulsanti nella card); sotto lo stato e i
+ *  metadati, a destra le proposte o l'appuntamento. */
 function RigaConsulenza({
   consulenza,
   partenariatiAttivo,
@@ -88,61 +91,68 @@ function RigaConsulenza({
   partenariatiAttivo: boolean;
 }) {
   return (
-    <li className="flex flex-col gap-2 border-b border-line px-2 py-4 md:flex-row md:items-start md:gap-6">
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <Link
-          to={`/app/consulenze/${consulenza.id}`}
-          className="self-start rounded-mark text-row-title text-ink hover:text-accent-hover"
-        >
-          {consulenza.bando_titolo}
-        </Link>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-ink-2">
-          <ConsulenzaStatoBadge stato={consulenza.stato} />
-          <span>Richiesta del {formatDate(consulenza.created_at)}</span>
-          {consulenza.progettista?.nome && (
-            <span>
-              Progettista{" "}
-              <span className="font-medium text-ink">{consulenza.progettista.nome}</span>
-            </span>
-          )}
-          {/* Il link alla call sta nel dettaglio: qui il titolo è già un link. */}
-          {linkCallDelConsulto(consulenza, partenariatiAttivo) && <ConsultoCallBadge />}
+    <li>
+      <Card
+        interattiva
+        area="consulenze"
+        className="relative flex flex-col gap-2 md:flex-row md:items-start md:gap-6"
+      >
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <Link
+            to={`/app/consulenze/${consulenza.id}`}
+            className={`self-start rounded-mark text-row-title text-ink hover:text-accent-hover ${LINK_ESTESO}`}
+          >
+            {consulenza.bando_titolo}
+          </Link>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-ink-2">
+            <ConsulenzaStatoBadge stato={consulenza.stato} />
+            <span>Richiesta del {formatDate(consulenza.created_at)}</span>
+            {consulenza.progettista?.nome && (
+              <span>
+                Progettista{" "}
+                <span className="font-medium text-ink">{consulenza.progettista.nome}</span>
+              </span>
+            )}
+            {/* Il link alla call sta nel dettaglio: qui il titolo è già un link. */}
+            {linkCallDelConsulto(consulenza, partenariatiAttivo) && <ConsultoCallBadge />}
+          </div>
         </div>
-      </div>
 
-      {(consulenza.stato === "nuova" || consulenza.appuntamento) && (
-        <div className="flex shrink-0 flex-col gap-1 text-small md:w-64 md:items-end md:text-right">
-          {consulenza.stato === "nuova" && (
-            <span
-              className={
-                consulenza.proposte_aperte > 0 ? "font-semibold text-ink" : "text-ink-2"
-              }
-            >
-              {proposteDaValutare(consulenza.proposte_aperte)}
-            </span>
-          )}
-          {consulenza.appuntamento && (
-            <span className="inline-flex items-center gap-1.5 text-ink tabular-nums">
-              <CalendarClock className="size-4 shrink-0 text-ink-3" aria-hidden />
-              <time dateTime={consulenza.appuntamento.inizio}>
-                {inizioAppuntamento(consulenza.appuntamento.inizio)}
-              </time>
-            </span>
-          )}
-        </div>
-      )}
+        {(consulenza.stato === "nuova" || consulenza.appuntamento) && (
+          <div className="flex shrink-0 flex-col gap-1 text-small md:w-64 md:items-end md:text-right">
+            {consulenza.stato === "nuova" &&
+              (consulenza.proposte_aperte > 0 ? (
+                <Badge tone="info" className="self-start font-semibold md:self-end">
+                  {proposteDaValutare(consulenza.proposte_aperte)}
+                </Badge>
+              ) : (
+                <span className="text-ink-2">{proposteDaValutare(consulenza.proposte_aperte)}</span>
+              ))}
+            {consulenza.appuntamento && (
+              <span className="inline-flex items-center gap-1.5 text-ink tabular-nums">
+                <CalendarClock className="size-4 shrink-0 text-area-consulenze-ink" aria-hidden />
+                <time dateTime={consulenza.appuntamento.inizio}>
+                  {inizioAppuntamento(consulenza.appuntamento.inizio)}
+                </time>
+              </span>
+            )}
+          </div>
+        )}
+      </Card>
     </li>
   );
 }
 
 function RigaSkeleton() {
   return (
-    <li className="flex flex-col gap-2 border-b border-line px-2 py-4" aria-hidden>
-      <Skeleton className="h-5 w-3/5" />
-      <div className="flex gap-3">
-        <Skeleton className="h-3 w-24" />
-        <Skeleton className="h-3 w-28" />
-      </div>
+    <li aria-hidden>
+      <Card className="flex flex-col gap-2">
+        <Skeleton className="h-5 w-3/5" />
+        <div className="flex gap-3">
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-3 w-28" />
+        </div>
+      </Card>
     </li>
   );
 }
@@ -155,12 +165,13 @@ export default function Consulenze() {
   return (
     <Page variante="elenco">
       <PageHeader
+        area="consulenze"
         titolo="Consulenze"
         descrizione="Le tue richieste di consulenza con i progettisti: dalle proposte ricevute all'appuntamento."
       />
 
       {isPending ? (
-        <ul className="flex flex-col border-t border-line">
+        <ul className="flex flex-col gap-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <RigaSkeleton key={i} />
           ))}
@@ -173,6 +184,8 @@ export default function Consulenze() {
         />
       ) : !consulenze || consulenze.length === 0 ? (
         <EmptyState
+          icon={MessageSquare}
+          area="consulenze"
           title="Nessuna richiesta di consulenza"
           description="Completa un AI-check su un bando e richiedi una consulenza dalla scheda del bando: la tua richiesta arriverà ai progettisti della piattaforma."
           action={
@@ -182,7 +195,7 @@ export default function Consulenze() {
           }
         />
       ) : (
-        <ul className="flex flex-col border-t border-line">
+        <ul className="flex flex-col gap-3">
           {consulenze.map((consulenza) => (
             <RigaConsulenza
               key={consulenza.id}

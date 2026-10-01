@@ -1,4 +1,4 @@
-import { Infinity as InfinityIcon } from "lucide-react";
+import { Infinity as InfinityIcon, Package } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAddons } from "../../hooks/useAddons";
@@ -8,12 +8,13 @@ import { purchaseAddon } from "../../lib/addons";
 import { requestConsultation } from "../../lib/consulenza";
 import { prezzoDisplay } from "../../lib/prezzo";
 import type { Addon, Entitlements, MyAddon } from "../../types";
-import { AddonCard } from "../shared/AddonCard";
+import { AddonCard, iconaAddon } from "../shared/AddonCard";
 import { InventarioAddon } from "../shared/InventarioAddon";
 import { Alert } from "../ui/Alert";
 import { Button, LinkButton } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";
+import { IconChip } from "../ui/IconChip";
 import { ProgressBar } from "../ui/ProgressBar";
 import { Section, SectionHeader } from "../ui/SectionHeader";
 import { Status } from "../ui/Status";
@@ -40,7 +41,7 @@ function dormiente(posseduto: MyAddon, entitlements: Entitlements | undefined): 
 
 function StatoPosseduto({ posseduto, dorme }: { posseduto: MyAddon; dorme: boolean }) {
   if (posseduto.quantita === 0) return <Status tono="chiuso">Esaurito</Status>;
-  if (dorme) return <Status tono="in-apertura">Dormiente</Status>;
+  if (dorme) return <Status tono="attenzione">Dormiente</Status>;
   return <Status tono="aperto">Attivo</Status>;
 }
 
@@ -67,11 +68,15 @@ function AddonPosseduto({
   const usate = Math.max(posseduto.consumate - rimborsate, 0);
   const acquistate = Math.max(posseduto.acquistate, usate);
   const inUso = unitaInUso(posseduto, entitlements);
+  const icona = iconaAddon(posseduto);
 
   return (
     <Card className="flex h-full flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
-        <h3 className="font-sans text-title-group text-ink">{posseduto.nome}</h3>
+        <div className="flex min-w-0 items-center gap-3">
+          <IconChip icon={icona.icon} area={icona.area} size="md" />
+          <h3 className="font-sans text-title-group text-ink">{posseduto.nome}</h3>
+        </div>
         <StatoPosseduto posseduto={posseduto} dorme={dorme} />
       </div>
       {posseduto.descrizione && <p className="text-body text-ink-2">{posseduto.descrizione}</p>}
@@ -211,7 +216,7 @@ export function SchedaAddon() {
             onRetry={() => addons.refetch()}
           />
         ) : catalogo.length === 0 ? (
-          <EmptyState title="Nessun add-on disponibile al momento." />
+          <EmptyState icon={Package} area="account" title="Nessun add-on disponibile al momento." />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             {catalogo.map((addon) => {
@@ -249,6 +254,8 @@ export function SchedaAddon() {
           />
         ) : (miei.data?.length ?? 0) === 0 ? (
           <EmptyState
+            icon={Package}
+            area="account"
             title="Non possiedi ancora nessun add-on."
             description="Gli add-on estendono il tuo piano: più account collegati, più aziende, consulenze con un progettista."
           />

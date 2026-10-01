@@ -6,11 +6,19 @@ import { useCompany } from "../../hooks/useCompany";
 import { useMe } from "../../hooks/useMe";
 import { cn } from "../../lib/cn";
 import type { CompanySummary } from "../../types";
+import { IconChip } from "../ui/IconChip";
 import { Popover, usePopover } from "../ui/Popover";
 import { spostaFocusVoce, voceMenu } from "./tastieraMenu";
 
+// Sulla barra navy: riquadro velato (bianco/5, filetto bianco/15), chip
+// dell'area azienda e nome in bianco. Il pannello a comparsa resta chiaro.
 const scatola =
-  "flex h-10 w-full items-center gap-2.5 rounded-control border border-line-control bg-sheet px-3 text-left text-body";
+  "flex h-11 w-full items-center gap-2.5 rounded-control border border-white/15 bg-white/5 pr-3 pl-1.5 text-left text-body";
+
+/** Il chip dell'area azienda (icona `Building2`), uguale nei due casi. */
+function ChipAzienda() {
+  return <IconChip icon={Building2} area="azienda" size="sm" className="size-7" />;
+}
 
 /** Pulsante del selettore: `forwardRef` e props passate al `<button>`, è il
  *  trigger di `Popover`. */
@@ -24,14 +32,15 @@ const TriggerAzienda = forwardRef<
     aria-label={`Azienda attiva: ${label}. Cambia azienda`}
     className={cn(
       scatola,
-      "cursor-pointer transition-colors duration-150 hover:bg-desk aria-expanded:bg-desk",
+      "cursor-pointer transition-colors duration-150 ease-uscita hover:bg-white/10 aria-expanded:bg-white/10",
+      "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
       className,
     )}
     {...props}
   >
-    <Building2 className="size-4 shrink-0 text-ink-3" strokeWidth={1.75} aria-hidden />
-    <span className="min-w-0 flex-1 truncate font-medium text-ink">{label}</span>
-    <ChevronsUpDown className="size-4 shrink-0 text-ink-3" aria-hidden />
+    <ChipAzienda />
+    <span className="min-w-0 flex-1 truncate font-medium text-white">{label}</span>
+    <ChevronsUpDown className="size-4 shrink-0 text-white/60" aria-hidden />
   </button>
 ));
 TriggerAzienda.displayName = "TriggerAzienda";
@@ -111,7 +120,7 @@ function VociAziende({
   );
 }
 
-/** Selettore dell'azienda in cima alla barra laterale.
+/** Selettore dell'azienda in cima alla barra laterale (adattato al navy).
  *  - non‑Advisor (una sola azienda): il nome dell'azienda, non un menu.
  *  - Advisor (multi-azienda): menu su `Popover` con lo switch dell'azienda
  *    attiva e il collegamento ad «Aziende gestite»; Esc e clic fuori chiudono,
@@ -128,8 +137,8 @@ export function CompanyMenu({ onNavigate }: { onNavigate?: () => void }) {
     const nome = azienda?.company?.ragione_sociale ?? me?.profile.azienda ?? "La tua azienda";
     return (
       <div className={scatola}>
-        <Building2 className="size-4 shrink-0 text-ink-3" strokeWidth={1.75} aria-hidden />
-        <span className="min-w-0 flex-1 truncate font-medium text-ink">{nome}</span>
+        <ChipAzienda />
+        <span className="min-w-0 flex-1 truncate font-medium text-white">{nome}</span>
       </div>
     );
   }

@@ -1,49 +1,24 @@
-import { useMemo } from "react";
-import { useBandi } from "../../hooks/useBandi";
-import type { BandiFilterState, FacetKey } from "../../hooks/useBandiFilters";
-import { useCompanyFacets } from "../../hooks/useCompany";
-import { usePreferences } from "../../hooks/usePreferences";
-import { buildBandiPerTePreset, presetHasValues, presetSearchParams } from "../../lib/bandiPreset";
+import { FileText } from "lucide-react";
+import type { FacetKey } from "../../hooks/useBandiFilters";
 import { BandoRow, BandoRowSkeleton } from "../bandi/BandoRow";
 import { LinkButton } from "../ui/Button";
+import { IconChip } from "../ui/IconChip";
 import { Section, SectionHeader } from "../ui/SectionHeader";
 import { EmptyState, ErrorState, Skeleton } from "../ui/states";
 import { TextLink } from "../ui/TextLink";
+import { linkBandiAdatti, useBandiAdatti, usePresetPerTe } from "./datiHome";
 
 /** Quante righe nella Home. */
 const RIGHE = 3;
 
-/** Filtri di default dell'elenco (stessa forma di `useBandiFilters`): il
- *  preset «per te» si somma a questi. Solo bandi aperti o in apertura: senza
- *  filtro di stato il catalogo mette i chiusi in coda ma non li esclude, e con
- *  un preset stretto finirebbero fra i «nuovi bandi adatti». */
-const FILTRI_BASE: BandiFilterState = {
-  q: "",
-  stato: ["aperto", "in apertura prossimamente"],
-  tipologie: [],
-  modalita: [],
-  programmi: [],
-  regioni: [],
-  settori: [],
-  beneficiari: [],
-  ateco: [],
-  importo_min: null,
-  importo_max: null,
-  scade_entro_giorni: null,
-  partenariato: null,
-  sort: "pubblicazione_desc",
-  page: 1,
-};
-
 /** Le righe: montato solo con un preset, così la query parte solo allora.
  *  La chiave di cache è la stessa dell'elenco con quei filtri. */
 function RigheAdatte({ preset }: { preset: Record<FacetKey, number[]> }) {
-  const filters = useMemo(() => ({ ...FILTRI_BASE, ...preset }), [preset]);
-  const { data, isPending, isError, refetch } = useBandi(filters);
+  const { data, isPending, isError, refetch } = useBandiAdatti(preset);
 
   if (isPending) {
     return (
-      <ul className="flex flex-col border-t border-line">
+      <ul className="flex flex-col gap-3">
         {Array.from({ length: RIGHE }).map((_, i) => (
           <BandoRowSkeleton key={i} />
         ))}
@@ -64,6 +39,7 @@ function RigheAdatte({ preset }: { preset: Record<FacetKey, number[]> }) {
       <EmptyState
         title="Nessun bando nuovo per la tua azienda in questo momento."
         description="Controlla tra qualche giorno, oppure allarga gli interessi sui bandi."
+        area="bandi"
         action={
           <LinkButton to="/app/preferenze" variant="secondary">
             Scegli gli interessi sui bandi
@@ -73,7 +49,7 @@ function RigheAdatte({ preset }: { preset: Record<FacetKey, number[]> }) {
     );
   }
   return (
-    <ul className="flex flex-col border-t border-line">
+    <ul className="flex flex-col gap-3">
       {righe.map((bando) => (
         <BandoRow key={bando.id} bando={bando} />
       ))}
@@ -82,38 +58,38 @@ function RigheAdatte({ preset }: { preset: Record<FacetKey, number[]> }) {
 }
 
 /** «Nuovi bandi adatti alla tua azienda»: le prime righe dell'elenco con il
- *  preset «per te» (dati reali dell'azienda + interessi), dai più recenti. */
+ *  preset «per te» (dati reali dell'azienda + interessi), dai più recenti. Le
+ *  righe sono le card dell'elenco dei bandi: il blocco non ha un riquadro suo. */
 export function BandiAdatti() {
-  const facets = useCompanyFacets();
-  const preferenze = usePreferences();
-
-  const preset = useMemo(
-    () => buildBandiPerTePreset(facets.data, preferenze.data),
-    [facets.data, preferenze.data],
-  );
-  const haPreset = presetHasValues(preset);
-  const inAttesa = facets.isPending || preferenze.isPending;
+  const { preset, haPreset, inAttesa } = usePresetPerTe();
 
   return (
     <Section aria-label="Nuovi bandi adatti alla tua azienda">
       <SectionHeader
-        titolo="Nuovi bandi adatti alla tua azienda"
+        className="items-center"
+        titolo={
+          <span className="flex items-center gap-3">
+            <IconChip icon={FileText} area="bandi" size="sm" />
+            Nuovi bandi adatti alla tua azienda
+          </span>
+        }
         azione={
           haPreset && (
-            <TextLink to={`/app/bandi?${presetSearchParams(preset)}`} className="text-small font-medium">
+            <TextLink to={linkBandiAdatti(preset)} className="text-small font-medium">
               Vedi tutti i bandi adatti
             </TextLink>
           )
         }
       />
       {inAttesa ? (
-        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-24 w-full rounded-panel" />
       ) : haPreset ? (
         <RigheAdatte preset={preset} />
       ) : (
         <EmptyState
           title="Dicci che cosa cerchi."
           description="Completa i dati aziendali o scegli gli interessi sui bandi: qui compariranno i bandi adatti alla tua azienda."
+          area="bandi"
           action={
             <LinkButton to="/app/preferenze" variant="secondary">
               Scegli gli interessi sui bandi

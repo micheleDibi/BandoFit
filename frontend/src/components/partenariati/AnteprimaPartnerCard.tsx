@@ -202,7 +202,7 @@ export function AnteprimaPartnerCard({
   }
 
   return (
-    <Card className={cn("flex flex-col gap-4", className)}>
+    <Card area="partenariati" className={cn("flex flex-col gap-4", className)}>
       <div className="flex flex-col gap-0.5">
         <h3 id="partner-anteprima-titolo" className="font-sans text-title-group text-ink">
           {PARTNER_COPY.anteprimaTitolo}

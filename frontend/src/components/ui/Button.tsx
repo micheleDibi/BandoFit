@@ -3,17 +3,21 @@ import { Link, type LinkProps } from "react-router-dom";
 import { cn } from "../../lib/cn";
 import { Spinner } from "./Spinner";
 
-type Variant = "primary" | "secondary" | "ghost" | "danger";
+type Variant = "primary" | "secondary" | "ghost" | "danger" | "inverse";
 type Size = "sm" | "md" | "lg";
 
-/** Un solo pulsante pieno per schermata (`primary`); gli altri sono secondari
- *  (bordo `line-control`), testuali (`ghost`, il «quiet» delle tavole) o
- *  distruttivi (`danger`: bordo e testo in danger, mai pieno). */
+/** Un solo pulsante pieno per schermata (`primary`, con un'ombra leggera); gli
+ *  altri sono secondari (bordo `line-control`), testuali (`ghost`, il «quiet»
+ *  delle tavole) o distruttivi (`danger`: bordo e testo in danger, mai pieno).
+ *  `inverse` (fondo bianco, testo navy, anello del focus bianco) solo sulla
+ *  fascia navy di `PageHeader`: lì fa la parte del primario. */
 const variants: Record<Variant, string> = {
-  primary: "bg-accent text-on-accent hover:bg-accent-hover",
-  secondary: "border-line-control bg-sheet text-ink hover:bg-desk",
+  primary: "bg-accent text-on-accent shadow-card hover:bg-accent-hover hover:shadow-card-hover",
+  secondary: "border-line-control bg-sheet text-ink hover:border-ink-3 hover:bg-desk",
   ghost: "text-accent-hover hover:bg-accent-soft",
   danger: "border-danger bg-sheet text-danger hover:bg-danger-soft",
+  inverse:
+    "bg-sheet text-navy-900 shadow-card hover:bg-brand-50 hover:shadow-card-hover focus-visible:outline-white",
 };
 
 // `sm` cambia taglia con `text-small` (13/20): il peso 600 va ridetto, perché
@@ -35,7 +39,8 @@ export function buttonClasses(variant: Variant = "primary", size: Size = "md", c
   return cn(
     "inline-flex cursor-pointer items-center justify-center whitespace-nowrap rounded-control",
     "border border-transparent text-title-group",
-    "transition-colors duration-150",
+    // Colore, bordo e ombra in 150 ms; alla pressione si stringe appena (non con il movimento ridotto).
+    "transition duration-150 ease-uscita motion-safe:active:scale-[0.98]",
     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
     "disabled:pointer-events-none disabled:opacity-50",
     variants[variant],

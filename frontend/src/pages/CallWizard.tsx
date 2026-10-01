@@ -13,11 +13,13 @@ import { PassoRegole } from "../components/partenariati/PassoRegole";
 import { PassoTesti } from "../components/partenariati/PassoTesti";
 import { Alert } from "../components/ui/Alert";
 import { LinkButton } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { Page } from "../components/ui/Page";
 import { PageHeader } from "../components/ui/PageHeader";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/states";
 import { TextLink } from "../components/ui/TextLink";
+import { LINK_SU_FASCIA } from "../components/shared/fascia";
 import { useAziendaDaLink } from "../hooks/useAziendaDaLink";
 import { isVistaCreatore, useCall } from "../hooks/useCallPartenariato";
 import { apiErrorCode, apiErrorMessage } from "../lib/api";
@@ -56,7 +58,7 @@ function TitoloPasso({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <p className="text-small text-ink-3">
+      <p className="text-small font-medium text-area-partenariati-ink">
         Passo {passo} di {NUMERO_PASSI}
       </p>
       <h2 ref={titoloRef} tabIndex={-1} className="text-title-section text-ink outline-none">
@@ -129,21 +131,23 @@ export default function CallWizard() {
   if (!id) {
     return (
       <Page variante="flusso">
-        <PageHeader indietro={RITORNO} titolo="Nuova call di partenariato" />
+        <PageHeader area="partenariati" indietro={RITORNO} titolo="Nuova call di partenariato" />
         {avvisoLink}
         <CallStepper passo={1} salvatiFinoA={1} abilitato={(n) => n === 1} onVai={() => undefined} />
-        <TitoloPasso passo={1} />
-        <PassoBandoNuova
-          slug={params.get("bando")}
-          onScegliBando={(slug) =>
-            setParams((p) => {
-              const nuovi = new URLSearchParams(p);
-              if (slug) nuovi.set("bando", slug);
-              else nuovi.delete("bando");
-              return nuovi;
-            })
-          }
-        />
+        <Card className="flex flex-col gap-6 sm:p-8">
+          <TitoloPasso passo={1} />
+          <PassoBandoNuova
+            slug={params.get("bando")}
+            onScegliBando={(slug) =>
+              setParams((p) => {
+                const nuovi = new URLSearchParams(p);
+                if (slug) nuovi.set("bando", slug);
+                else nuovi.delete("bando");
+                return nuovi;
+              })
+            }
+          />
+        </Card>
       </Page>
     );
   }
@@ -197,9 +201,10 @@ export default function CallWizard() {
   if (!callModificabile(call)) {
     return (
       <Page variante="flusso">
-        <PageHeader indietro={RITORNO} titolo={call.titolo || call.bando.titolo} />
+        <PageHeader area="partenariati" indietro={RITORNO} titolo={call.titolo || call.bando.titolo} />
         {avvisoLink}
         <EmptyState
+          area="partenariati"
           title={call.editable ? "Questa call non si può più modificare" : "Non puoi modificare questa call"}
           description={
             call.editable
@@ -222,19 +227,25 @@ export default function CallWizard() {
   return (
     <Page variante="flusso">
       <PageHeader
+        area="partenariati"
         indietro={RITORNO}
         titolo={bozza ? "Crea la call di partenariato" : "Modifica la call"}
         descrizione={
           <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <CallStatoBadge stato={call.stato} />
             <span>
-              Per il bando <TextLink to={`/app/bandi/${call.bando.slug}`}>{call.bando.titolo}</TextLink>
+              Per il bando{" "}
+              <TextLink to={`/app/bandi/${call.bando.slug}`} className={LINK_SU_FASCIA}>
+                {call.bando.titolo}
+              </TextLink>
             </span>
           </span>
         }
         azioni={
           !bozza ? (
-            <TextLink to={`/app/partenariati/call/${call.id}?tab=panoramica`}>Torna alla call</TextLink>
+            <TextLink to={`/app/partenariati/call/${call.id}?tab=panoramica`} className={LINK_SU_FASCIA}>
+              Torna alla call
+            </TextLink>
           ) : undefined
         }
       />
@@ -247,16 +258,18 @@ export default function CallWizard() {
         abilitato={(n) => !bozza || n <= Math.max(call.wizard_passo, passo)}
         onVai={vai}
       />
-      <TitoloPasso passo={passo} titoloRef={titoloPasso} />
-      <Passo
-        // Un passo nuovo riparte dai dati salvati (niente stato ereditato).
-        key={`${call.id}-${passo}`}
-        call={call}
-        onAvanti={() => vaiSubito(Math.min(passo + 1, NUMERO_PASSI))}
-        onIndietro={() => vai(Math.max(passo - 1, 1))}
-        onDirty={setDirty}
-        onVai={vai}
-      />
+      <Card className="flex flex-col gap-6 sm:p-8">
+        <TitoloPasso passo={passo} titoloRef={titoloPasso} />
+        <Passo
+          // Un passo nuovo riparte dai dati salvati (niente stato ereditato).
+          key={`${call.id}-${passo}`}
+          call={call}
+          onAvanti={() => vaiSubito(Math.min(passo + 1, NUMERO_PASSI))}
+          onIndietro={() => vai(Math.max(passo - 1, 1))}
+          onDirty={setDirty}
+          onVai={vai}
+        />
+      </Card>
 
       <ConfirmDialog
         open={uscita !== null}

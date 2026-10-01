@@ -3,6 +3,7 @@ import { Check, RefreshCw, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Button, LinkButton } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { InlineError } from "../components/ui/InlineError";
 import { Page } from "../components/ui/Page";
 import { PageHeader } from "../components/ui/PageHeader";
@@ -27,6 +28,33 @@ function retryUrl(purchase: Purchase): string | null {
   if (purchase.kind === "piano" || purchase.kind === "rinnovo")
     return `/app/checkout?piano=${purchase.oggetto_slug}`;
   return null; // cambio_admin: non è un flusso self-serve
+}
+
+/** Card dell'esito: bordo sinistro nel colore dello stato (riuscito fit, in
+ *  attesa accent, non completato warning); la parola sta nel titolo. */
+const BORDO_ESITO = {
+  riuscito: "border-l-4 border-l-fit",
+  attesa: "border-l-4 border-l-accent",
+  fallito: "border-l-4 border-l-warning",
+} as const;
+
+/** L'icona dell'esito in un quadrato nel tono dello stato (decorativa: il
+ *  titolo accanto dice com'è andata). */
+const CHIP_ESITO = {
+  riuscito: "bg-fit-soft text-fit-ink",
+  attesa: "bg-accent-soft text-accent-hover",
+  fallito: "bg-warning-soft text-warning-ink",
+} as const;
+
+function ChipEsito({ tono, children }: { tono: keyof typeof CHIP_ESITO; children: React.ReactNode }) {
+  return (
+    <span
+      aria-hidden
+      className={`inline-flex size-10 shrink-0 items-center justify-center rounded-control ${CHIP_ESITO[tono]}`}
+    >
+      {children}
+    </span>
+  );
 }
 
 const ACQUISTI = (
@@ -68,9 +96,11 @@ export default function CheckoutEsito() {
   const renderStato = (p: Purchase) => {
     if (p.status === "pagato" || p.status === "gratuito") {
       return (
-        <div className="flex max-w-lettura flex-col items-start gap-3">
-          <h2 className="flex items-center gap-2 text-title-section text-ink">
-            <Check className="size-5 shrink-0 text-fit-ink" aria-hidden />
+        <Card className={`flex flex-col items-start gap-3 sm:p-8 ${BORDO_ESITO.riuscito}`}>
+          <h2 className="flex items-center gap-3 text-title-section text-ink">
+            <ChipEsito tono="riuscito">
+              <Check className="size-5" />
+            </ChipEsito>
             Pagamento riuscito, grazie!
           </h2>
           <p className="text-body text-ink-2">
@@ -90,15 +120,17 @@ export default function CheckoutEsito() {
             )}
             {ACQUISTI}
           </div>
-        </div>
+        </Card>
       );
     }
 
     if (p.status === "in_attesa") {
       return (
-        <div className="flex max-w-lettura flex-col items-start gap-3">
-          <h2 className="flex items-center gap-2 text-title-section text-ink">
-            <Spinner size="md" />
+        <Card className={`flex flex-col items-start gap-3 sm:p-8 ${BORDO_ESITO.attesa}`}>
+          <h2 className="flex items-center gap-3 text-title-section text-ink">
+            <ChipEsito tono="attesa">
+              <Spinner size="md" className="text-current" />
+            </ChipEsito>
             Stiamo confermando il pagamento
           </h2>
           <p className="text-body text-ink-2" role="status">
@@ -118,7 +150,7 @@ export default function CheckoutEsito() {
             {pollScaduto && ACQUISTI}
           </div>
           {sync.isError && <InlineError>{apiErrorMessage(sync.error)}</InlineError>}
-        </div>
+        </Card>
       );
     }
 
@@ -130,9 +162,11 @@ export default function CheckoutEsito() {
     };
     const retry = retryUrl(p);
     return (
-      <div className="flex max-w-lettura flex-col items-start gap-3">
-        <h2 className="flex items-center gap-2 text-title-section text-ink">
-          <TriangleAlert className="size-5 shrink-0 text-warning-ink" aria-hidden />
+      <Card className={`flex flex-col items-start gap-3 sm:p-8 ${BORDO_ESITO.fallito}`}>
+        <h2 className="flex items-center gap-3 text-title-section text-ink">
+          <ChipEsito tono="fallito">
+            <TriangleAlert className="size-5" />
+          </ChipEsito>
           Pagamento non completato
         </h2>
         <p className="text-body text-ink-2">{messaggi[p.status]}</p>
@@ -143,13 +177,13 @@ export default function CheckoutEsito() {
           {retry && <LinkButton to={retry}>Riprova l'acquisto</LinkButton>}
           {ACQUISTI}
         </div>
-      </div>
+      </Card>
     );
   };
 
   return (
     <Page variante="flusso">
-      <PageHeader titolo="Esito del pagamento" />
+      <PageHeader area="account" titolo="Esito del pagamento" />
       {isPending ? (
         <Skeleton className="h-40 w-full" />
       ) : isError || !purchase ? (

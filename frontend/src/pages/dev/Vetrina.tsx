@@ -26,7 +26,7 @@ const sezioni = Object.entries(moduli)
  *  se lo monta da sola. */
 export default function Vetrina() {
   return (
-    <div className="min-h-dvh bg-sheet text-ink">
+    <div className="min-h-dvh bg-desk text-ink">
       <div className="mx-auto flex w-full max-w-278 flex-col gap-12 px-6 py-8 lg:px-10">
       <header className="flex flex-col gap-1">
         <h1 className="text-title-page text-ink">Vetrina dei componenti</h1>

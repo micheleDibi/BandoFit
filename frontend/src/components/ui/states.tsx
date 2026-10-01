@@ -1,28 +1,38 @@
 import { TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
+import { areaIcona, type Area } from "./area";
 import { Button } from "./Button";
+import { IconChip, type IconaChip } from "./IconChip";
 
-/** Rettangolo su `sunken`, senza animazione: mentre arrivano i dati si vede
- *  la forma del contenuto, non un effetto. */
+/** Rettangolo su `sunken` con il riflesso (`riflesso` in `index.css`): mentre
+ *  arrivano i dati si vede la forma del contenuto. Con il movimento ridotto il
+ *  riflesso non c'è. */
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn("rounded-mark bg-sunken", className)} aria-hidden />;
+  return <div className={cn("riflesso rounded-mark bg-sunken", className)} aria-hidden />;
 }
 
 /** Stato vuoto: che cosa manca e un'azione per cominciare, allineati a
- *  sinistra, senza icona. `icon` è accettata per compatibilità e ignorata. */
+ *  sinistra. Con `icon` (o con la sola `area`, che porta la sua icona) un
+ *  `IconChip` grande nel colore dell'area sta sopra il titolo. */
 export function EmptyState({
   title,
   description,
   action,
+  icon,
+  area,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
-  icon?: ReactNode;
+  /** L'icona di lucide (`Bookmark`, o anche `<Bookmark />`). */
+  icon?: IconaChip;
+  area?: Area;
 }) {
+  const Icona = icon ?? (area ? areaIcona[area] : undefined);
   return (
     <div className="flex max-w-[520px] flex-col items-start gap-2 py-8">
+      {Icona && <IconChip icon={Icona} area={area} size="lg" className="mb-2" />}
       <h3 className="font-sans text-row-title text-ink">{title}</h3>
       {description && <p className="text-body text-ink-2">{description}</p>}
       {action && <div className="mt-2">{action}</div>}

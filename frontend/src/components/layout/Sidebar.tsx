@@ -24,6 +24,7 @@ import { useMe } from "../../hooks/useMe";
 import { useRiepilogoPartenariati } from "../../hooks/usePartenariati";
 import { hasAreaProgettista } from "../../lib/roles";
 import type { RiepilogoPartenariati } from "../../types";
+import type { Area } from "../ui/area";
 import { CompanyMenu } from "./CompanyMenu";
 import { Logo } from "./Logo";
 import { NavItem, type VoceNav } from "./NavItem";
@@ -32,38 +33,51 @@ import { UserMenu } from "./UserMenu";
 
 interface Voce extends VoceNav {
   icon: LucideIcon;
+  /** Colore dell'icona: la mappa delle aree di docs/design-system.md. */
+  area: Area;
   end?: boolean;
 }
 
 // Le etichette sono i titoli delle pagine: stesso nome nel menu e nell'h1.
 const vociBase: Voce[] = [
-  { to: "/app", label: "Home", icon: House, end: true },
-  { to: "/app/bandi", label: "Bandi", icon: FileText },
-  { to: "/app/salvati", label: "Bandi salvati", icon: Bookmark },
-  { to: "/app/calendario", label: "Calendario", icon: CalendarDays },
-  { to: "/app/ai-check", label: "AI-check", icon: Sparkles },
+  { to: "/app", label: "Home", icon: House, area: "home", end: true },
+  { to: "/app/bandi", label: "Bandi", icon: FileText, area: "bandi" },
+  { to: "/app/salvati", label: "Bandi salvati", icon: Bookmark, area: "bandi" },
+  { to: "/app/calendario", label: "Calendario", icon: CalendarDays, area: "scadenze" },
+  { to: "/app/ai-check", label: "AI-check", icon: Sparkles, area: "aicheck" },
 ];
-const voceConsulenze: Voce = { to: "/app/consulenze", label: "Consulenze", icon: MessageSquare };
+const voceConsulenze: Voce = {
+  to: "/app/consulenze",
+  label: "Consulenze",
+  icon: MessageSquare,
+  area: "consulenze",
+};
 const vociAzienda: Voce[] = [
-  { to: "/app/azienda", label: "Dati azienda", icon: Building2 },
-  { to: "/app/preferenze", label: "Preferenze", icon: SlidersHorizontal },
+  { to: "/app/azienda", label: "Dati azienda", icon: Building2, area: "azienda" },
+  { to: "/app/preferenze", label: "Preferenze", icon: SlidersHorizontal, area: "account" },
 ];
 // Per progettisti e admin (parità completa). Le disponibilità si gestiscono
 // dal Calendario, non da una pagina dedicata.
 const vociProgettista: Voce[] = [
-  { to: "/app/progettista/richieste", label: "Richieste di consulenza", icon: ClipboardList },
+  {
+    to: "/app/progettista/richieste",
+    label: "Richieste di consulenza",
+    icon: ClipboardList,
+    area: "consulenze",
+  },
 ];
 const vociAdmin: Voce[] = [
-  { to: "/app/admin/utenti", label: "Utenti", icon: UserCog },
-  { to: "/app/admin/piani", label: "Piani", icon: Layers },
-  { to: "/app/admin/addon", label: "Add-on", icon: Package },
-  { to: "/app/admin/pagamenti", label: "Pagamenti", icon: CreditCard },
+  { to: "/app/admin/utenti", label: "Utenti", icon: UserCog, area: "admin" },
+  { to: "/app/admin/piani", label: "Piani", icon: Layers, area: "admin" },
+  { to: "/app/admin/addon", label: "Add-on", icon: Package, area: "admin" },
+  { to: "/app/admin/pagamenti", label: "Pagamenti", icon: CreditCard, area: "admin" },
 ];
 // Solo a modulo acceso (WP9): moderazione, verifiche, call, metriche.
 const voceAdminPartenariati: Voce = {
   to: "/app/admin/partenariati",
   label: "Partenariati",
   icon: ShieldCheck,
+  area: "admin",
 };
 // Menu account: ciò che è personale. «Account collegati» è aggiunto per i titolari.
 const vociAccount: VoceNav[] = [
@@ -111,6 +125,7 @@ function PartenariatiNavItem({ onNavigate }: { onNavigate?: () => void }) {
       to="/app/partenariati"
       label="Partenariati"
       icon={Users}
+      area="partenariati"
       contatore={numero}
       contatoreFrase={frase}
       onNavigate={onNavigate}
@@ -123,7 +138,7 @@ function NavGroup({ label, children }: { label?: string; children: ReactNode }) 
   return (
     <div role="group" aria-labelledby={label ? id : undefined} className="flex flex-col gap-0.5">
       {label && (
-        <p id={id} className="px-3 pb-1.5 text-caption text-ink-3">
+        <p id={id} className="px-3 pb-1.5 text-caption text-white/50">
           {label}
         </p>
       )}
@@ -132,8 +147,10 @@ function NavGroup({ label, children }: { label?: string; children: ReactNode }) 
   );
 }
 
-/** Contenuto della barra laterale (tavola `Main`): logo, selettore
- *  dell'azienda, gruppi di voci per ruolo e, in fondo, Notifiche e account.
+/** Contenuto della barra laterale navy (tavola `Main`): logo su una piastrina
+ *  chiara (il PNG del marchio è navy su trasparente: sul navy sparirebbe),
+ *  selettore dell'azienda, gruppi di voci per ruolo e, in fondo, Notifiche e
+ *  account.
  *  Lo stesso contenuto va nel cassetto mobile (`conLogo={false}`: il logo sta
  *  nella testata del cassetto), con `onNavigate` per chiuderlo. */
 export function Sidebar({
@@ -171,7 +188,7 @@ export function Sidebar({
           to="/app"
           onClick={onNavigate}
           aria-label="BandoFit — vai alla Home"
-          className="self-start rounded-mark px-3"
+          className="self-start rounded-control bg-sheet px-3 py-2.5 shadow-card focus-visible:outline-white"
         >
           <Logo variant="stack" />
         </Link>
@@ -187,7 +204,7 @@ export function Sidebar({
         {isProgettista && <NavGroup label="Progettista">{vociProgettista.map(voce)}</NavGroup>}
         {isAdmin && <NavGroup label="Amministrazione">{vociAdminTutte.map(voce)}</NavGroup>}
       </nav>
-      <div className="mt-auto flex flex-col gap-1 pt-5">
+      <div className="mt-auto flex flex-col gap-1 border-t border-white/10 pt-4">
         <NotificationBell variante="voce" onNavigate={onNavigate} />
         <UserMenu
           nome={me?.profile.nome}

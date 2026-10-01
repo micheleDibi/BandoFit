@@ -1,3 +1,4 @@
+import { Building2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import { AntitrustBanner } from "../components/partenariati/AntitrustBanner";
@@ -15,6 +16,7 @@ import { Panel } from "../components/ui/Panel";
 import { Status } from "../components/ui/Status";
 import { ErrorState, Skeleton } from "../components/ui/states";
 import { TextLink } from "../components/ui/TextLink";
+import { GHOST_SU_FASCIA, LINK_SU_FASCIA, TESTO_SU_FASCIA } from "../components/shared/fascia";
 import { useAziendaDaLink } from "../hooks/useAziendaDaLink";
 import { useCompany } from "../hooks/useCompany";
 import {
@@ -48,17 +50,22 @@ function nomeControparte(c: Conversazione): string {
   return (c.identita_rivelata ? c.identita?.ragione_sociale : null) ?? PARTNER_COPY.aziendaAnonima;
 }
 
-/** Briciole del terzo livello: «Partenariati › Call › Conversazione». */
+/** Briciole del terzo livello: «Partenariati › Call › Conversazione» (sulla
+ *  fascia navy dell'intestazione: link bianchi sottolineati). */
 function Briciole({ c }: { c: Conversazione }) {
   return (
     <nav aria-label="Percorso">
-      <ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-small text-ink-2">
+      <ol className={`flex flex-wrap items-center gap-x-2 gap-y-1 text-small ${TESTO_SU_FASCIA}`}>
         <li>
-          <TextLink to="/app/partenariati?tab=conversazioni">Partenariati</TextLink>
+          <TextLink to="/app/partenariati?tab=conversazioni" className={LINK_SU_FASCIA}>
+            Partenariati
+          </TextLink>
         </li>
         <li aria-hidden>›</li>
         <li>
-          <TextLink to={`/app/partenariati/call/${c.call.id}`}>{c.call.titolo || "Call senza titolo"}</TextLink>
+          <TextLink to={`/app/partenariati/call/${c.call.id}`} className={LINK_SU_FASCIA}>
+            {c.call.titolo || "Call senza titolo"}
+          </TextLink>
         </li>
         <li aria-hidden>›</li>
         <li aria-current="page">Conversazione</li>
@@ -83,7 +90,7 @@ function Identita({ identita }: { identita: IdentitaRivelata }) {
     voci.push({ etichetta: "Referente", valore: `${identita.referente_nome}${ruolo ? ` (${ruolo})` : ""}` });
   }
   return (
-    <Panel titolo={identita.ragione_sociale ?? "Dati dell'azienda"}>
+    <Panel titolo={identita.ragione_sociale ?? "Dati dell'azienda"} icon={Building2} area="azienda">
       {voci.length > 0 ? <DefinitionList items={voci} /> : <p className="text-body text-ink-3">Nessun dato.</p>}
     </Panel>
   );
@@ -95,7 +102,8 @@ function ChiudiConversazione({ id }: { id: string }) {
   const [aperto, setAperto] = useState(false);
   return (
     <>
-      <Button variant="ghost" onClick={() => setAperto(true)}>
+      {/* Sta sulla fascia navy dell'intestazione. */}
+      <Button variant="ghost" className={GHOST_SU_FASCIA} onClick={() => setAperto(true)}>
         Chiudi la conversazione
       </Button>
       <ConfirmDialog
@@ -282,6 +290,7 @@ export default function ConversazionePartenariato() {
   return (
     <Page variante="sezioni">
       <PageHeader
+        area="partenariati"
         sopra={
           <>
             <Briciole c={c} />
@@ -296,7 +305,7 @@ export default function ConversazionePartenariato() {
           <>
             {nome}
             {c.controparte.pseudonimo && (
-              <span className="ml-2 font-sans text-small font-normal text-ink-3">
+              <span className={`ml-2 font-sans text-small font-normal ${TESTO_SU_FASCIA}`}>
                 <span className="sr-only">riferimento </span>
                 {c.controparte.pseudonimo}
               </span>
@@ -307,7 +316,9 @@ export default function ConversazionePartenariato() {
           <>
             {c.lato === "partner" ? "L'azienda che ha creato la call. " : ""}
             {c.lato === "creatore" ? "Sulla tua call " : "Sulla call "}
-            <TextLink to={`/app/partenariati/call/${c.call.id}`}>{c.call.titolo || "Call senza titolo"}</TextLink>{" "}
+            <TextLink to={`/app/partenariati/call/${c.call.id}`} className={LINK_SU_FASCIA}>
+              {c.call.titolo || "Call senza titolo"}
+            </TextLink>{" "}
             per il bando {c.call.bando.titolo}
             {c.chiusa_at ? `, chiusa il ${formatDate(c.chiusa_at)}` : ""}
           </>

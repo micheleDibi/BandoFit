@@ -1,4 +1,4 @@
-import { Check } from "lucide-react";
+import { Check, Gem, LayoutList } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useEntitlements } from "../../hooks/useEntitlements";
@@ -14,10 +14,13 @@ import { planFeatures } from "../shared/PlanCard";
 import { Alert } from "../ui/Alert";
 import { Badge } from "../ui/Badge";
 import { Button, LinkButton } from "../ui/Button";
+import { Card } from "../ui/Card";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Dialog } from "../ui/Dialog";
 import { Facts, type Fatto } from "../ui/Facts";
+import { IconChip } from "../ui/IconChip";
 import { InlineError } from "../ui/InlineError";
+import { ProgressRing } from "../ui/ProgressRing";
 import { Section, SectionHeader } from "../ui/SectionHeader";
 import { Status } from "../ui/Status";
 import { ErrorState, Skeleton } from "../ui/states";
@@ -165,7 +168,26 @@ export function SchedaPiano({ vaiAPagamento }: { vaiAPagamento: () => void }) {
     fatti.push({ etichetta: "Attivo fino al", valore: formatDate(me.subscription.data_scadenza) });
   }
   if (quota && quota.effettivo > 0) {
-    fatti.push({ etichetta: "AI-check disponibili", valore: `${quota.residuo} su ${quota.effettivo}` });
+    fatti.push({
+      etichetta: "AI-check disponibili",
+      valore: (
+        <span className="inline-flex items-center gap-2">
+          {/* Decorativo: il numero «N su M» sta scritto accanto. */}
+          <span aria-hidden className="flex">
+            <ProgressRing
+              value={quota.residuo}
+              max={quota.effettivo}
+              size={32}
+              tono="aicheck"
+              label={`AI-check disponibili: ${quota.residuo} su ${quota.effettivo}`}
+            >
+              {""}
+            </ProgressRing>
+          </span>
+          {`${quota.residuo} su ${quota.effettivo}`}
+        </span>
+      ),
+    });
   }
   if (isActiveChild) {
     fatti.push({
@@ -178,162 +200,182 @@ export function SchedaPiano({ vaiAPagamento }: { vaiAPagamento: () => void }) {
 
   return (
     <>
-      <Section>
-        <SectionHeader titolo={`Piano ${me.subscription?.plan.nome ?? ""}`.trim()} />
-        {me.family?.role === "child" && me.family.status === "demoted" && (
-          <Alert tono="attenzione">
-            Il tuo account è stato retrocesso dall'azienda: hai un piano indipendente finché il
-            titolare non ti riattiva.
-          </Alert>
-        )}
-        {fatti.length > 0 && (
-          <Facts
-            items={fatti}
-            azione={
-              !isActiveChild && currentPaid ? (
-                // Solo `setTab` (replace): un link farebbe anche un push dello
-                // stesso URL, e il tasto Indietro sembrerebbe non fare nulla.
-                <Button type="button" variant="secondary" onClick={vaiAPagamento}>
-                  Gestisci pagamento e rinnovo
-                </Button>
-              ) : undefined
+      <Card area="account">
+        <Section>
+          <SectionHeader
+            titolo={
+              <span className="flex items-center gap-3">
+                <IconChip icon={Gem} area="account" size="sm" />
+                {`Piano ${me.subscription?.plan.nome ?? ""}`.trim()}
+              </span>
             }
           />
-        )}
-        {isActiveChild && me.subscription && (
-          <>
-            <ul className="flex flex-col gap-1.5">
-              {planFeatures(me.subscription.plan).map((feature) => (
-                <li key={feature} className="flex items-start gap-2 text-body text-ink-2">
-                  <Check className="mt-0.5 size-4 shrink-0 text-fit-ink" aria-hidden />
-                  {feature}
-                </li>
-              ))}
-            </ul>
-            <p className="text-small text-ink-3">
-              Le quote del piano sono condivise con tutta l'azienda. Solo il titolare può cambiare
-              l'abbonamento.
-            </p>
-          </>
-        )}
-        {switchNotice && <Alert tono="ok">{switchNotice}</Alert>}
-      </Section>
+          {me.family?.role === "child" && me.family.status === "demoted" && (
+            <Alert tono="attenzione">
+              Il tuo account è stato retrocesso dall'azienda: hai un piano indipendente finché il
+              titolare non ti riattiva.
+            </Alert>
+          )}
+          {fatti.length > 0 && (
+            <Facts
+              items={fatti}
+              azione={
+                !isActiveChild && currentPaid ? (
+                  // Solo `setTab` (replace): un link farebbe anche un push dello
+                  // stesso URL, e il tasto Indietro sembrerebbe non fare nulla.
+                  <Button type="button" variant="secondary" onClick={vaiAPagamento}>
+                    Gestisci pagamento e rinnovo
+                  </Button>
+                ) : undefined
+              }
+            />
+          )}
+          {isActiveChild && me.subscription && (
+            <>
+              <ul className="flex flex-col gap-1.5">
+                {planFeatures(me.subscription.plan).map((feature) => (
+                  <li key={feature} className="flex items-start gap-2 text-body text-ink-2">
+                    <Check className="mt-0.5 size-4 shrink-0 text-fit-ink" aria-hidden />
+                    {feature}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-small text-ink-3">
+                Le quote del piano sono condivise con tutta l'azienda. Solo il titolare può cambiare
+                l'abbonamento.
+              </p>
+            </>
+          )}
+          {switchNotice && <Alert tono="ok">{switchNotice}</Alert>}
+        </Section>
+      </Card>
 
       {!isActiveChild && (
-        <Section aria-label="Confronta i piani">
-          <SectionHeader titolo="Confronta i piani" />
-          {plans.isPending ? (
-            <div className="flex flex-col gap-3" aria-hidden>
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-16 w-full" />
-            </div>
-          ) : plans.isError ? (
-            <ErrorState
-              title="Non siamo riusciti a caricare i piani."
-              onRetry={() => plans.refetch()}
+        <Card>
+          <Section aria-label="Confronta i piani">
+            <SectionHeader
+              titolo={
+                <span className="flex items-center gap-3">
+                  <IconChip icon={LayoutList} area="account" size="sm" />
+                  Confronta i piani
+                </span>
+              }
             />
-          ) : (
-            <Table>
-              <thead>
-                <tr>
-                  <Th>Piano</Th>
-                  <Th>AI-check all'anno</Th>
-                  <Th>Avvisi email sui nuovi bandi</Th>
-                  <Th>Account aziendali</Th>
-                  <Th numerica>Prezzo</Th>
-                  <Th>
-                    <span className="sr-only">Azione</span>
-                  </Th>
-                </tr>
-              </thead>
-              <tbody>
-                {(plans.data ?? []).map((plan) => {
-                  const isCurrent = plan.id === currentPlanId;
-                  const suMisura = !!plan.features_override && plan.features_override.length > 0;
-                  return (
-                    <tr key={plan.id}>
-                      <Td>
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="font-semibold text-ink">{plan.nome}</span>
-                          {/* Il piano consigliato; il piano attuale vince. */}
-                          {plan.slug === "pro" && !isCurrent && <Badge>Consigliato</Badge>}
-                        </span>
-                        {plan.descrizione && (
-                          <span className="block text-small text-ink-2">{plan.descrizione}</span>
-                        )}
-                      </Td>
-                      {suMisura ? (
-                        <Td colSpan={3}>
-                          <ul className="flex flex-col gap-1 text-ink-2">
-                            {plan.features_override!.map((f) => (
-                              <li key={f}>{f}</li>
-                            ))}
-                          </ul>
+            {plans.isPending ? (
+              <div className="flex flex-col gap-3" aria-hidden>
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-16 w-full" />
+              </div>
+            ) : plans.isError ? (
+              <ErrorState
+                title="Non siamo riusciti a caricare i piani."
+                onRetry={() => plans.refetch()}
+              />
+            ) : (
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Piano</Th>
+                    <Th>AI-check all'anno</Th>
+                    <Th>Avvisi email sui nuovi bandi</Th>
+                    <Th>Account aziendali</Th>
+                    <Th numerica>Prezzo</Th>
+                    <Th>
+                      <span className="sr-only">Azione</span>
+                    </Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(plans.data ?? []).map((plan) => {
+                    const isCurrent = plan.id === currentPlanId;
+                    const suMisura = !!plan.features_override && plan.features_override.length > 0;
+                    return (
+                      // Il piano attuale si distingue: fondo tenue, bordo sinistro
+                      // accent e lo stato «Piano attuale» in verde (con la parola).
+                      <tr key={plan.id} className={isCurrent ? "bg-accent-soft/40" : undefined}>
+                        <Td className={isCurrent ? "border-l-4 border-l-accent" : undefined}>
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="font-semibold text-ink">{plan.nome}</span>
+                            {/* Il piano consigliato; il piano attuale vince. */}
+                            {plan.slug === "pro" && !isCurrent && <Badge tone="info">Consigliato</Badge>}
+                          </span>
+                          {plan.descrizione && (
+                            <span className="block text-small text-ink-2">{plan.descrizione}</span>
+                          )}
                         </Td>
-                      ) : (
-                        <>
-                          <Td className="tabular-nums">
-                            {plan.ai_check > 0 ? plan.ai_check : "Non inclusi"}
+                        {suMisura ? (
+                          <Td colSpan={3}>
+                            <ul className="flex flex-col gap-1 text-ink-2">
+                              {plan.features_override!.map((f) => (
+                                <li key={f}>{f}</li>
+                              ))}
+                            </ul>
                           </Td>
-                          <Td>{avvisiPiano(plan)}</Td>
-                          <Td className="tabular-nums">
-                            {plan.num_account_aziendali === 1
-                              ? "1"
-                              : `Fino a ${plan.num_account_aziendali}`}
-                          </Td>
-                        </>
-                      )}
-                      <Td numerica>
-                        <Prezzo plan={plan} />
-                      </Td>
-                      <Td className="text-right">
-                        {isCurrent ? (
-                          <Status tono="neutro">Piano attuale</Status>
-                        ) : plan.tipo_prezzo === "su_richiesta" ? (
-                          // Non attivabile self-serve (il backend rifiuta comunque
-                          // lo switch): la CTA diventa una richiesta di contatto.
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleRichiedi(plan)}
-                          >
-                            Richiedi una consulenza
-                          </Button>
-                        ) : aPagamento(plan) ? (
-                          // A pagamento: si passa dal checkout, che mostra
-                          // differenza per l'anno, credito residuo e IVA.
-                          <LinkButton
-                            to={`/app/checkout?piano=${plan.slug}`}
-                            variant="secondary"
-                            size="sm"
-                          >
-                            Passa a {plan.nome}
-                          </LinkButton>
                         ) : (
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => setPlanToConfirm(plan)}
-                          >
-                            Passa a {plan.nome}
-                          </Button>
+                          <>
+                            <Td className="tabular-nums">
+                              {plan.ai_check > 0 ? plan.ai_check : "Non inclusi"}
+                            </Td>
+                            <Td>{avvisiPiano(plan)}</Td>
+                            <Td className="tabular-nums">
+                              {plan.num_account_aziendali === 1
+                                ? "1"
+                                : `Fino a ${plan.num_account_aziendali}`}
+                            </Td>
+                          </>
                         )}
-                      </Td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </Table>
-          )}
-          <p className="text-small text-ink-2">
-            Passando a un piano superiore paghi al checkout la differenza per l'anno: il credito
-            del periodo residuo viene scalato dal totale. Il passaggio a Gratuito diventa effettivo
-            alla scadenza del piano attuale.
-          </p>
-        </Section>
+                        <Td numerica>
+                          <Prezzo plan={plan} />
+                        </Td>
+                        <Td className="text-right">
+                          {isCurrent ? (
+                            <Status tono="aperto">Piano attuale</Status>
+                          ) : plan.tipo_prezzo === "su_richiesta" ? (
+                            // Non attivabile self-serve (il backend rifiuta comunque
+                            // lo switch): la CTA diventa una richiesta di contatto.
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handleRichiedi(plan)}
+                            >
+                              Richiedi una consulenza
+                            </Button>
+                          ) : aPagamento(plan) ? (
+                            // A pagamento: si passa dal checkout, che mostra
+                            // differenza per l'anno, credito residuo e IVA.
+                            <LinkButton
+                              to={`/app/checkout?piano=${plan.slug}`}
+                              variant="secondary"
+                              size="sm"
+                            >
+                              Passa a {plan.nome}
+                            </LinkButton>
+                          ) : (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setPlanToConfirm(plan)}
+                            >
+                              Passa a {plan.nome}
+                            </Button>
+                          )}
+                        </Td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </Table>
+            )}
+            <p className="text-small text-ink-2">
+              Passando a un piano superiore paghi al checkout la differenza per l'anno: il credito
+              del periodo residuo viene scalato dal totale. Il passaggio a Gratuito diventa effettivo
+              alla scadenza del piano attuale.
+            </p>
+          </Section>
+        </Card>
       )}
 
       {/* Conferma cambio piano (solo verso piani gratuiti: i pagati vanno al checkout) */}

@@ -1,4 +1,12 @@
-import { useId, useRef, type HTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type HTMLAttributes,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { cn } from "../../lib/cn";
 
 export interface Scheda<T extends string = string> {
@@ -26,9 +34,10 @@ function idScheda(prefisso: string, id: string) {
   return { tab: `${prefisso}-tab-${id}`, panel: `${prefisso}-panel-${id}` };
 }
 
-/** Schede: filetto sotto, scheda attiva con bordo `accent`. Non legge l'URL:
- *  lo fa `useTab`, che passa `attivo` e `onChange`. Frecce, Home e End
- *  spostano il focus e la selezione. */
+/** Schede: filetto sotto, scheda attiva in `accent` con l'indicatore che scorre
+ *  fin sotto di lei (250 ms; di scatto con il movimento ridotto); i contatori
+ *  sono pillole. Non legge l'URL: lo fa `useTab`, che passa `attivo` e
+ *  `onChange`. Frecce, Home e End spostano il focus e la selezione. */
 export function Tabs<T extends string>({
   tabs,
   attivo,
@@ -41,6 +50,29 @@ export function Tabs<T extends string>({
   const idAutomatico = useId();
   const base = prefisso ?? idAutomatico;
   const indiceAttivo = tabs.findIndex((t) => t.id === attivo);
+
+  // L'indicatore: posizione e larghezza della scheda attiva, misurate prima del
+  // paint e di nuovo quando le schede cambiano larghezza (font caricati,
+  // contatori che arrivano, finestra ridimensionata).
+  const lista = useRef<HTMLDivElement>(null);
+  const [indicatore, setIndicatore] = useState<{ left: number; width: number } | null>(null);
+  const firmaSchede = tabs.map((t) => `${t.id}:${t.label}:${t.count ?? ""}`).join("|");
+  useLayoutEffect(() => {
+    const misura = () => {
+      const scheda = indiceAttivo >= 0 ? pulsanti.current[indiceAttivo] : null;
+      const nuovo = scheda ? { left: scheda.offsetLeft, width: scheda.offsetWidth } : null;
+      // Stessa misura = stesso stato: niente render a ogni notifica dell'osservatore.
+      setIndicatore((prima) =>
+        prima && nuovo && prima.left === nuovo.left && prima.width === nuovo.width ? prima : nuovo,
+      );
+    };
+    misura();
+    if (typeof ResizeObserver === "undefined" || !lista.current) return;
+    const osservatore = new ResizeObserver(misura);
+    osservatore.observe(lista.current);
+    for (const pulsante of pulsanti.current) if (pulsante) osservatore.observe(pulsante);
+    return () => osservatore.disconnect();
+  }, [indiceAttivo, firmaSchede]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const n = tabs.length;
@@ -59,10 +91,11 @@ export function Tabs<T extends string>({
 
   return (
     <div
+      ref={lista}
       role="tablist"
       aria-label={ariaLabel}
       onKeyDown={onKeyDown}
-      className={cn("flex gap-6 overflow-x-auto border-b border-line", className)}
+      className={cn("relative flex gap-6 overflow-x-auto border-b border-line", className)}
     >
       {tabs.map((scheda, i) => {
         const selezionata = scheda.id === attivo;
@@ -83,17 +116,33 @@ export function Tabs<T extends string>({
             tabIndex={raggiungibile ? 0 : -1}
             onClick={() => onChange(scheda.id)}
             className={cn(
-              "-mb-px inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap border-b-2 font-medium focus-visible:-outline-offset-2",
-              selezionata ? "border-accent text-ink" : "border-transparent text-ink-2 hover:text-ink",
+              "inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap font-medium focus-visible:-outline-offset-2",
+              "transition-colors duration-150 ease-uscita",
+              selezionata ? "text-accent" : "text-ink-2 hover:text-ink",
             )}
           >
             {scheda.label}
             {scheda.count !== undefined && (
-              <span className="text-caption font-semibold text-ink-3 tabular-nums">{scheda.count}</span>
+              <span
+                className={cn(
+                  "inline-flex h-5 min-w-5 items-center justify-center rounded-pill px-1.5 text-caption font-semibold tabular-nums",
+                  "transition-colors duration-150 ease-uscita",
+                  selezionata ? "bg-accent text-on-accent" : "bg-accent-soft text-accent-hover",
+                )}
+              >
+                {scheda.count}
+              </span>
             )}
           </button>
         );
       })}
+      {indicatore && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute bottom-0 h-0.5 rounded-pill bg-accent motion-safe:transition-[left,width] motion-safe:duration-250 motion-safe:ease-uscita"
+          style={{ left: indicatore.left, width: indicatore.width }}
+        />
+      )}
     </div>
   );
 }

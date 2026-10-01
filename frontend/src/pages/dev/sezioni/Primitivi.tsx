@@ -1,4 +1,4 @@
-import { Pencil, Trash2 } from "lucide-react";
+import { Bookmark, Pencil, Trash2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Badge } from "../../../components/ui/Badge";
 import { Button, LinkButton } from "../../../components/ui/Button";
@@ -107,8 +107,11 @@ export default function Primitivi() {
         </div>
       </Blocco>
 
-      <Blocco titolo="Card" nota="Bordo line, raggio panel, senza ombra, padding 20 (p-* passato vince).">
-        <div className="grid gap-4 sm:grid-cols-2">
+      <Blocco
+        titolo="Card"
+        nota="Foglio bianco con ombra card, filetto line, raggio panel, padding 20 (p-* passato vince). interattiva: ombra più ampia e mezzo passo in su al passaggio; area: bordo sinistro di 4px."
+      >
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Card>
             <p className="text-title-group text-ink">Piano Base</p>
             <p className="mt-1 text-body text-ink-2">Padding di default.</p>
@@ -117,16 +120,42 @@ export default function Primitivi() {
             <p className="text-title-group text-ink">Piano Pro</p>
             <p className="mt-1 text-body text-ink-2">Padding ridotto con p-3.</p>
           </Card>
+          <Card interattiva area="partenariati">
+            <p className="text-title-group text-ink">Call di partenariato</p>
+            <p className="mt-1 text-body text-ink-2">interattiva e area: passa il mouse.</p>
+          </Card>
+          <Card area="consulenze">
+            <p className="text-title-group text-ink">Consulenza</p>
+            <p className="mt-1 text-body text-ink-2">Solo area, senza effetto.</p>
+          </Card>
         </div>
       </Blocco>
 
-      <Blocco titolo="Badge" nota="Etichetta neutra per ogni tono: lo stato in parole lo fa Status.">
+      <Blocco
+        titolo="Badge"
+        nota="Pillola con fondo soft e testo ink: sei toni (i nomi vecchi brand, emerald, amber, slate, red valgono ancora) o un'area. Lo stato in parole lo fa Status."
+      >
         <div className="flex flex-wrap items-center gap-2">
           <Badge>Fondo perduto</Badge>
-          <Badge tone="brand">Regione Piemonte</Badge>
-          <Badge tone="emerald">Voucher</Badge>
-          <Badge tone="amber">Credito d'imposta</Badge>
-          <Badge tone="red">Micro impresa</Badge>
+          <Badge tone="info">Regione Piemonte</Badge>
+          <Badge tone="success">Voucher</Badge>
+          <Badge tone="warning">Credito d'imposta</Badge>
+          <Badge tone="danger">Micro impresa</Badge>
+          <Badge tone="warm">Nuovo</Badge>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone="brand">brand → info</Badge>
+          <Badge tone="emerald">emerald → success</Badge>
+          <Badge tone="amber">amber → warning</Badge>
+          <Badge tone="slate">slate → neutral</Badge>
+          <Badge tone="red">red → danger</Badge>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge area="bandi">Bando regionale</Badge>
+          <Badge area="aicheck">Report AI-check</Badge>
+          <Badge area="partenariati">Capofila</Badge>
+          <Badge area="consulenze">Call di partenariato</Badge>
+          <Badge area="azienda">Startup innovativa</Badge>
         </div>
         <div className="flex w-48 flex-col items-start gap-1">
           <p className="text-small text-ink-3">Testo lungo in 192px: va a capo, minimo 24px.</p>
@@ -207,7 +236,10 @@ export default function Primitivi() {
         </Dialog>
       </Blocco>
 
-      <Blocco titolo="Stati" nota="Skeleton su sunken senza animazione; vuoto ed errore a sinistra.">
+      <Blocco
+        titolo="Stati"
+        nota="Skeleton su sunken con il riflesso (fermo con il movimento ridotto); vuoto ed errore a sinistra. Lo stato vuoto può avere un IconChip grande (icon, area)."
+      >
         <div className="grid gap-6 lg:grid-cols-2">
           <div className="flex flex-col gap-2">
             <Skeleton className="h-5 w-2/3" />
@@ -222,6 +254,22 @@ export default function Primitivi() {
                 Cerca nei bandi
               </LinkButton>
             }
+          />
+          <EmptyState
+            icon={Bookmark}
+            area="bandi"
+            title="Non hai ancora salvato nessun bando."
+            description="Con icon e area: l'IconChip grande sta sopra il titolo."
+            action={
+              <LinkButton to="/app/bandi" variant="secondary">
+                Cerca nei bandi
+              </LinkButton>
+            }
+          />
+          <EmptyState
+            area="partenariati"
+            title="Nessuna call per te, per ora."
+            description="Con la sola area: l'icona è quella dell'area."
           />
           <ErrorState
             title="Non siamo riusciti a caricare i bandi salvati."

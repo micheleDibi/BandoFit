@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert } from "../components/ui/Alert";
 import { Button, LinkButton } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { Chip } from "../components/ui/Chip";
 import { InlineError } from "../components/ui/InlineError";
 import { Page } from "../components/ui/Page";
@@ -123,47 +124,49 @@ function AvvisiBandiSection() {
   };
 
   return (
-    <Section aria-labelledby="preferenze-avvisi-bandi">
-      <SectionHeader id="preferenze-avvisi-bandi" titolo="Avvisi email sui nuovi bandi" />
-      {isPending ? (
-        <Skeleton className="h-10 w-full" />
-      ) : isError || !settings ? (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <InlineError>
-            {apiErrorMessage(error, "Impossibile caricare le impostazioni degli avvisi email.")}
-          </InlineError>
-          <Button type="button" variant="secondary" size="sm" onClick={() => void refetch()}>
-            Riprova
-          </Button>
-        </div>
-      ) : settings.piano_include_alert ? (
-        <>
-          <Switch
-            label="Ricevi gli avvisi via email"
-            descrizione={`Quando esce un bando compatibile con la tua azienda te lo segnaliamo via email ${descrizioneRitardo(settings.ritardo_giorni)}.`}
-            checked={settings.abilitati}
-            disabled={save.isPending}
-            onChange={(checked) => void cambia(checked)}
-          />
-          <p className="text-small text-ink-3">
-            Puoi disattivarli quando vuoi, anche dal link in fondo a ogni email.
-          </p>
-          {errore && <InlineError>{errore}</InlineError>}
-        </>
-      ) : (
-        <>
-          <p className="text-body text-ink-2">
-            Gli avvisi email sui nuovi bandi compatibili con la tua azienda sono inclusi nei
-            piani a pagamento.
-          </p>
-          <div>
-            <LinkButton to="/app/abbonamento" variant="secondary" size="sm">
-              Scopri i piani
-            </LinkButton>
+    <Card className="sm:p-6">
+      <Section aria-labelledby="preferenze-avvisi-bandi">
+        <SectionHeader id="preferenze-avvisi-bandi" titolo="Avvisi email sui nuovi bandi" />
+        {isPending ? (
+          <Skeleton className="h-10 w-full" />
+        ) : isError || !settings ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <InlineError>
+              {apiErrorMessage(error, "Impossibile caricare le impostazioni degli avvisi email.")}
+            </InlineError>
+            <Button type="button" variant="secondary" size="sm" onClick={() => void refetch()}>
+              Riprova
+            </Button>
           </div>
-        </>
-      )}
-    </Section>
+        ) : settings.piano_include_alert ? (
+          <>
+            <Switch
+              label="Ricevi gli avvisi via email"
+              descrizione={`Quando esce un bando compatibile con la tua azienda te lo segnaliamo via email ${descrizioneRitardo(settings.ritardo_giorni)}.`}
+              checked={settings.abilitati}
+              disabled={save.isPending}
+              onChange={(checked) => void cambia(checked)}
+            />
+            <p className="text-small text-ink-3">
+              Puoi disattivarli quando vuoi, anche dal link in fondo a ogni email.
+            </p>
+            {errore && <InlineError>{errore}</InlineError>}
+          </>
+        ) : (
+          <>
+            <p className="text-body text-ink-2">
+              Gli avvisi email sui nuovi bandi compatibili con la tua azienda sono inclusi nei
+              piani a pagamento.
+            </p>
+            <div>
+              <LinkButton to="/app/abbonamento" variant="secondary" size="sm">
+                Scopri i piani
+              </LinkButton>
+            </div>
+          </>
+        )}
+      </Section>
+    </Card>
   );
 }
 
@@ -202,43 +205,45 @@ function EmailPartenariatiSection() {
   ];
 
   return (
-    <Section aria-labelledby="preferenze-email-partenariati">
-      <SectionHeader id="preferenze-email-partenariati" titolo="Email sui partenariati" />
-      {isPending ? (
-        <Skeleton className="h-16 w-full" />
-      ) : isError || !settings ? (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <InlineError>
-            {apiErrorMessage(error, "Impossibile caricare le preferenze email dei partenariati.")}
-          </InlineError>
-          <Button type="button" variant="secondary" size="sm" onClick={() => void refetch()}>
-            Riprova
-          </Button>
-        </div>
-      ) : (
-        <>
-          <p className="text-body text-ink-2">
-            Gli avvisi nell'app arrivano comunque: qui scegli quali ricevere anche via email.
-          </p>
-          <div className="flex flex-col gap-4">
-            {voci.map((v) => (
-              <Switch
-                key={v.campo}
-                label={v.etichetta}
-                descrizione={v.nota}
-                checked={settings[v.campo]}
-                disabled={save.isPending}
-                onChange={(checked) => void cambia(v.campo, checked)}
-              />
-            ))}
+    <Card className="sm:p-6">
+      <Section aria-labelledby="preferenze-email-partenariati">
+        <SectionHeader id="preferenze-email-partenariati" titolo="Email sui partenariati" />
+        {isPending ? (
+          <Skeleton className="h-16 w-full" />
+        ) : isError || !settings ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <InlineError>
+              {apiErrorMessage(error, "Impossibile caricare le preferenze email dei partenariati.")}
+            </InlineError>
+            <Button type="button" variant="secondary" size="sm" onClick={() => void refetch()}>
+              Riprova
+            </Button>
           </div>
-          <p className="text-small text-ink-3">
-            Puoi disattivarle quando vuoi, anche dal link in fondo a ogni email.
-          </p>
-          {errore && <InlineError>{errore}</InlineError>}
-        </>
-      )}
-    </Section>
+        ) : (
+          <>
+            <p className="text-body text-ink-2">
+              Gli avvisi nell'app arrivano comunque: qui scegli quali ricevere anche via email.
+            </p>
+            <div className="flex flex-col gap-4">
+              {voci.map((v) => (
+                <Switch
+                  key={v.campo}
+                  label={v.etichetta}
+                  descrizione={v.nota}
+                  checked={settings[v.campo]}
+                  disabled={save.isPending}
+                  onChange={(checked) => void cambia(v.campo, checked)}
+                />
+              ))}
+            </div>
+            <p className="text-small text-ink-3">
+              Puoi disattivarle quando vuoi, anche dal link in fondo a ogni email.
+            </p>
+            {errore && <InlineError>{errore}</InlineError>}
+          </>
+        )}
+      </Section>
+    </Card>
   );
 }
 
@@ -339,11 +344,12 @@ export default function Preferenze() {
       <PageHeader
         titolo="Preferenze"
         descrizione="Il profilo della tua azienda è la base: qui aggiungi ciò che vuoi seguire in più e scegli quali avvisi ricevere via email."
+        area="account"
         azioni={
           presetHasValues(preset) && (
             <LinkButton
               to={`/app/bandi?${presetSearchParams(preset)}`}
-              variant="secondary"
+              variant="inverse"
               size="sm"
             >
               Vedi i bandi adatti alla tua azienda
@@ -364,8 +370,8 @@ export default function Preferenze() {
         {isPending ? (
           <div className="flex flex-col gap-4" aria-hidden>
             <Skeleton className="h-12 w-full" />
-            <Skeleton className="h-40 w-full" />
-            <Skeleton className="h-40 w-full" />
+            <Skeleton className="h-40 w-full rounded-panel" />
+            <Skeleton className="h-40 w-full rounded-panel" />
           </div>
         ) : prefsError ? (
           <ErrorState
@@ -409,65 +415,67 @@ export default function Preferenze() {
               const extra = form[facet.key].filter((id) => !inheritedIds.includes(id));
               const titoloId = `preferenze-${facet.key}`;
               return (
-                <Section key={facet.key} aria-labelledby={titoloId}>
-                  <SectionHeader
-                    id={titoloId}
-                    titolo={facet.title}
-                    azione={
-                      extra.length > 0 && (
-                        <span className="text-small text-ink-2 tabular-nums">
-                          {extra.length === 1 ? "1 scelto da te" : `${extra.length} scelti da te`}
-                        </span>
-                      )
-                    }
-                  />
-                  <p className="text-body text-ink-2">{facet.description}</p>
+                <Card key={facet.key} className="sm:p-6">
+                  <Section aria-labelledby={titoloId}>
+                    <SectionHeader
+                      id={titoloId}
+                      titolo={facet.title}
+                      azione={
+                        extra.length > 0 && (
+                          <span className="text-small text-ink-2 tabular-nums">
+                            {extra.length === 1 ? "1 scelto da te" : `${extra.length} scelti da te`}
+                          </span>
+                        )
+                      }
+                    />
+                    <p className="text-body text-ink-2">{facet.description}</p>
 
-                  {inheritedHere.length > 0 && (
-                    <div className="flex flex-col gap-2">
-                      <p className="text-small text-ink-3">Dai dati aziendali, sempre inclusi</p>
-                      <ul className="flex flex-wrap gap-2">
-                        {inheritedHere.map((value) => (
-                          <li key={value.id} className="max-w-full">
-                            <Chip>{value.label}</Chip>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {extra.length > 0 && (
-                    <div className="flex flex-col gap-2">
-                      <p className="text-small text-ink-3">Scelti da te</p>
-                      <ul className="flex flex-wrap gap-2">
-                        {extra.map((id) => (
-                          <li key={id} className="max-w-full">
-                            <Chip
-                              onRemove={() => toggle(facet.key, id)}
-                              label={`Rimuovi ${labelOf(facet, id)}`}
-                            >
-                              {labelOf(facet, id)}
-                            </Chip>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  <div className="w-full sm:w-md">
-                    {lookups ? (
-                      <TagSelect
-                        label={`Aggiungi ${facet.title.toLowerCase()}`}
-                        options={facet.options(lookups)}
-                        values={form[facet.key]}
-                        inherited={inheritedIds}
-                        onToggle={(id) => toggle(facet.key, id)}
-                      />
-                    ) : (
-                      <Skeleton className="h-10 w-full" />
+                    {inheritedHere.length > 0 && (
+                      <div className="flex flex-col gap-2">
+                        <p className="text-small text-ink-3">Dai dati aziendali, sempre inclusi</p>
+                        <ul className="flex flex-wrap gap-2">
+                          {inheritedHere.map((value) => (
+                            <li key={value.id} className="max-w-full">
+                              <Chip>{value.label}</Chip>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     )}
-                  </div>
-                </Section>
+
+                    {extra.length > 0 && (
+                      <div className="flex flex-col gap-2">
+                        <p className="text-small text-ink-3">Scelti da te</p>
+                        <ul className="flex flex-wrap gap-2">
+                          {extra.map((id) => (
+                            <li key={id} className="max-w-full">
+                              <Chip
+                                onRemove={() => toggle(facet.key, id)}
+                                label={`Rimuovi ${labelOf(facet, id)}`}
+                              >
+                                {labelOf(facet, id)}
+                              </Chip>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <div className="w-full sm:w-md">
+                      {lookups ? (
+                        <TagSelect
+                          label={`Aggiungi ${facet.title.toLowerCase()}`}
+                          options={facet.options(lookups)}
+                          values={form[facet.key]}
+                          inherited={inheritedIds}
+                          onToggle={(id) => toggle(facet.key, id)}
+                        />
+                      ) : (
+                        <Skeleton className="h-10 w-full" />
+                      )}
+                    </div>
+                  </Section>
+                </Card>
               );
             })}
           </>
@@ -485,7 +493,7 @@ export default function Preferenze() {
           solo con modifiche non salvate (un salvataggio fallito le lascia tali,
           con l'errore sotto). In flusso e non `fixed`: non copre la barra laterale. */}
       {dirty && (
-        <div className="sticky bottom-0 z-10 flex flex-col gap-2 border-t border-line bg-sheet py-3">
+        <div className="sticky bottom-4 z-10 flex flex-col gap-2 rounded-panel border border-line bg-sheet px-5 py-3 shadow-overlay motion-safe:animate-entrata">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-body font-medium text-ink">
               Hai modifiche non salvate agli interessi sui bandi

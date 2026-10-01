@@ -7,8 +7,9 @@ import { Popover, usePopover } from "../ui/Popover";
 import type { VoceNav } from "./NavItem";
 import { spostaFocusVoce, voceMenu } from "./tastieraMenu";
 
-/** Pulsante del menu account: avatar con le iniziali, nome e doppia freccia.
- *  `forwardRef` e props passate al `<button>`: è il trigger di `Popover`. */
+/** Pulsante del menu account sulla barra navy: avatar con le iniziali, nome in
+ *  bianco e doppia freccia. `forwardRef` e props passate al `<button>`: è il
+ *  trigger di `Popover` (il pannello resta chiaro). */
 const TriggerAccount = forwardRef<
   HTMLButtonElement,
   ButtonHTMLAttributes<HTMLButtonElement> & { nome: string }
@@ -18,8 +19,9 @@ const TriggerAccount = forwardRef<
     type="button"
     aria-label={`Account: ${nome}. Apri il menu`}
     className={cn(
-      "flex h-11 w-full cursor-pointer items-center gap-2.5 rounded-control px-2 text-left text-body font-medium text-ink",
-      "transition-colors duration-150 hover:bg-sunken aria-expanded:bg-sunken",
+      "flex h-11 w-full cursor-pointer items-center gap-2.5 rounded-control px-2 text-left text-body font-medium text-white",
+      "transition-colors duration-150 ease-uscita hover:bg-white/10 aria-expanded:bg-white/10",
+      "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
       className,
     )}
     {...props}
@@ -28,7 +30,7 @@ const TriggerAccount = forwardRef<
       <Avatar nome={nome} />
     </span>
     <span className="min-w-0 flex-1 truncate">{nome}</span>
-    <ChevronsUpDown className="size-4 shrink-0 text-ink-3" aria-hidden />
+    <ChevronsUpDown className="size-4 shrink-0 text-white/60" aria-hidden />
   </button>
 ));
 TriggerAccount.displayName = "TriggerAccount";

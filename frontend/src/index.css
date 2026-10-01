@@ -25,13 +25,58 @@
   --color-on-accent: #ffffff; /* testo su accent e su ink */
 
   /* Superfici e filetti */
-  --color-sheet: #ffffff; /* il foglio: contenuto, campi, menu, finestre */
-  --color-desk: #f7f9fc; /* il piano: barra laterale, pannelli */
-  --color-sunken: #eef2f7; /* fondo incassato: etichette, segmenti, barre vuote, voce al passaggio */
+  --color-sheet: #ffffff; /* il foglio: card, pannelli, campi, menu, finestre */
+  --color-desk: #f3f6fb; /* il piano: lo sfondo dell'app, su cui stanno le card */
+  --color-sunken: #eaeef6; /* fondo incassato: segmenti, barre vuote, scheletri, voce al passaggio */
   --color-line: #e2e8f0; /* filetto che separa; non delimita un controllo */
   --color-line-control: #8290a8; /* bordo dei controlli e della testata delle tabelle (3,2:1) */
   /* `surface` = `desk`: resta finché le pagine vecchie usano `bg-surface` */
-  --color-surface: #f7f9fc;
+  --color-surface: #f3f6fb;
+
+  /* Navy: la fascia delle intestazioni (`bg-banda`), il testo sulle azioni `inverse` */
+  --color-navy-950: #121a3d;
+  --color-navy-900: #1a2350;
+  --color-navy-800: #243066;
+  --color-navy-700: #2f3d7d;
+  --color-navy-200: #c9d0ea;
+
+  /* Accento caldo (corallo): urgenza, scadenze vicine, il segno che chiama l'occhio.
+     `warm` 3,1:1: solo segni, mai testo; il testo va in `warm-ink` (5,2:1 su `warm-soft`). */
+  --color-warm: #ef6a45;
+  --color-warm-soft: #fdebe5;
+  --color-warm-ink: #b13b18;
+
+  /* Colori d'area: base (segni, barre, bordo sinistro), soft (fondo di chip e
+     pillole), ink (testo e icone: ≥ 5,2:1 sul soft). Le classi si prendono solo
+     da `components/ui/area.ts`, mai costruite a runtime. */
+  --color-area-bandi: #2c56c9;
+  --color-area-bandi-soft: #e7eefc;
+  --color-area-bandi-ink: #1f3f99;
+  --color-area-aicheck: #6d4ae0;
+  --color-area-aicheck-soft: #efeafd;
+  --color-area-aicheck-ink: #5232c4;
+  --color-area-partenariati: #0e9488;
+  --color-area-partenariati-soft: #e2f5f2;
+  --color-area-partenariati-ink: #0a6b62;
+  --color-area-consulenze: #d99206;
+  --color-area-consulenze-soft: #fdf3dc;
+  --color-area-consulenze-ink: #8a5a00;
+  --color-area-scadenze: #ef6a45;
+  --color-area-scadenze-soft: #fdebe5;
+  --color-area-scadenze-ink: #b13b18;
+  --color-area-azienda: #3d5cb8;
+  --color-area-azienda-soft: #e8ecf8;
+  --color-area-azienda-ink: #2f3d7d;
+  --color-area-account: #5b6b8c;
+  --color-area-account-soft: #edf0f5;
+  --color-area-account-ink: #3f4b66;
+  --color-area-admin: #475569;
+  --color-area-admin-soft: #eef1f5;
+  --color-area-admin-ink: #334155;
+
+  /* Neutro: pillole ed etichette senza un tono (chiuso, spento, tag) */
+  --color-neutral-soft: #eef1f5;
+  --color-neutral-ink: #475569;
 
   /* Azione */
   --color-accent: var(--color-brand-500); /* azione primaria, scheda attiva, anello del focus */
@@ -44,9 +89,12 @@
   --color-fit-ink: #0e7a68; /* testo di esito positivo e di «Aperto» (5,3:1) */
   --color-fit-soft: #e6f5f2;
 
-  /* Attenzione: scadenza entro 30 giorni, «In apertura» */
+  /* Attenzione: scadenza entro 30 giorni, avvisi da guardare. `warning` (ambra
+     piena) solo per segni: bordo sinistro dell'avviso, pallino dello stato.
+     `warning-soft` più deciso di prima (#fffbeb): sul bianco deve leggersi come tinta. */
+  --color-warning: #f59e0b;
   --color-warning-ink: #973c00;
-  --color-warning-soft: #fffbeb;
+  --color-warning-soft: #fef3c7;
   --color-warning-line: #f0c36b;
 
   /* Errori, scadenza entro 7 giorni, azioni distruttive */
@@ -120,8 +168,94 @@
   --radius-panel: 12px; /* pannelli, card, menu, finestre */
   --radius-pill: 999px; /* solo avatar, contatori, filtri attivi, barre */
 
-  /* Ombra: `overlay` è l'unica del design system (menu, finestre, notifiche a comparsa). */
+  /* Ombre: `card` per ciò che sta sul piano (card, pannelli, fascia), `card-hover`
+     per la card interattiva al passaggio, `overlay` per ciò che sta sopra la
+     pagina (menu, finestre, notifiche a comparsa). */
+  --shadow-card: 0 1px 2px rgb(22 32 74 / 0.06), 0 2px 8px rgb(22 32 74 / 0.06);
+  --shadow-card-hover: 0 6px 20px rgb(22 32 74 / 0.12);
   --shadow-overlay: 0 12px 32px -8px rgb(33 43 80 / 0.28), 0 2px 6px rgb(33 43 80 / 0.08);
+
+  /* Movimento: 150 ms per il passaggio del mouse, 250 ms per le aperture, con
+     l'uscita morbida. Con `prefers-reduced-motion: reduce` niente animazioni
+     (la regola in fondo al file, più `motion-safe:` nei componenti). Le entrate
+     usano `backwards`, non `both`: un transform tenuto a fine animazione farebbe
+     del <dialog> il contenitore dei figli `position: fixed` (Popover, Tooltip). */
+  --ease-uscita: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  --animate-entrata: entrata 250ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  --animate-entrata-sinistra: entrata-sinistra 250ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  --animate-entrata-destra: entrata-destra 250ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  --animate-crescita: crescita 600ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+
+  /* Riflesso degli scheletri: una banda chiara che attraversa il segnaposto. */
+  @keyframes shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
+  /* Entrata breve degli overlay (finestre, popover, notifiche): dissolvenza e
+     8px di risalita. */
+  @keyframes entrata {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+  /* Cassetti: entrano dal loro lato. */
+  @keyframes entrata-sinistra {
+    from {
+      opacity: 0;
+      transform: translateX(-24px);
+    }
+  }
+  @keyframes entrata-destra {
+    from {
+      opacity: 0;
+      transform: translateX(24px);
+    }
+  }
+  /* Barre dei grafici: crescono dalla base (con `transform-origin: bottom`). */
+  @keyframes crescita {
+    from {
+      transform: scaleY(0);
+    }
+  }
+}
+
+/* La fascia delle intestazioni di pagina (`PageHeader` con `area`) e l'hero della
+   landing: l'UNICO gradiente dell'app. Il colore pieno sotto vale dove il
+   gradiente non si disegna. Testo bianco: ≥ 4,7:1 anche al bianco/80 sul lato chiaro. */
+@utility bg-banda {
+  background-color: var(--color-navy-900);
+  background-image: linear-gradient(120deg, #1a2350 0%, #24357a 55%, #2c56c9 100%);
+}
+
+/* Riflesso dello scheletro (`Skeleton`): la banda chiara è un segnale di
+   caricamento, non una decorazione. Con il movimento ridotto non c'è. */
+@utility riflesso {
+  position: relative;
+  overflow: hidden;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(
+      90deg,
+      rgb(255 255 255 / 0) 0%,
+      rgb(255 255 255 / 0.7) 50%,
+      rgb(255 255 255 / 0) 100%
+    );
+    animation: var(--animate-shimmer);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    &::after {
+      display: none;
+    }
+  }
 }
 
 /* Sora solo tramite questi stili: la utility aggiunge la famiglia (e le cifre
@@ -189,7 +323,7 @@ html {
 body {
   /* `leading-normal` dopo `text-body`: l'interlinea fissa di 22px non deve
      ereditarsi dai titoli che non impostano la propria. */
-  @apply bg-sheet font-sans text-body leading-normal text-ink antialiased;
+  @apply bg-desk font-sans text-body leading-normal text-ink antialiased;
   text-rendering: optimizeLegibility;
 }
 
@@ -237,4 +371,39 @@ body {
    browser in cui ::backdrop non eredita le variabili dalla radice. */
 dialog::backdrop {
   background: var(--color-veil, rgb(33 43 80 / 0.4));
+}
+
+/* Apertura animata dell'`Accordion`: il contenuto del <details> passa da 0 righe
+   all'altezza piena (grid-rows 0fr → 1fr) e il figlio unico (`min-h-0`) si
+   ritaglia. Chiuso resta `content-visibility: hidden` (fuori dal tab e dalle
+   tecnologie assistive, come senza questa regola). Dove `::details-content`
+   non esiste la regola si ignora e la voce si apre di scatto, come prima. Con
+   il movimento ridotto: niente transizione. */
+.accordion-voce::details-content {
+  display: grid;
+  grid-template-rows: 0fr;
+  content-visibility: hidden;
+}
+.accordion-voce[open]::details-content {
+  grid-template-rows: 1fr;
+  content-visibility: visible;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .accordion-voce::details-content {
+    transition:
+      grid-template-rows 250ms var(--ease-uscita, cubic-bezier(0.2, 0.8, 0.2, 1)),
+      content-visibility 250ms allow-discrete;
+  }
+
+  /* Il velo sotto finestre e cassetti si dissolve insieme al loro ingresso. */
+  dialog[open]::backdrop {
+    animation: comparsa-velo 250ms ease-out;
+  }
+}
+
+@keyframes comparsa-velo {
+  from {
+    opacity: 0;
+  }
 }

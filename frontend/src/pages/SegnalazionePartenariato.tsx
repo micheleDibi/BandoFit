@@ -7,6 +7,8 @@ import {
 } from "../components/partenariati/StatoSegnalazioneBadge";
 import { Alert } from "../components/ui/Alert";
 import { Button, LinkButton } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
+import { TESTO_SU_FASCIA } from "../components/shared/fascia";
 import { Facts } from "../components/ui/Facts";
 import { Page } from "../components/ui/Page";
 import { PageHeader } from "../components/ui/PageHeader";
@@ -226,11 +228,12 @@ export default function SegnalazionePartenariato() {
   return (
     <Page variante="sezioni">
       <PageHeader
+        area="partenariati"
         indietro={{ label: "Partenariati", to: "/app/partenariati" }}
         sopra={
           <>
             <StatoSegnalazioneBadge stato={s.stato} />
-            <span className="text-small text-ink-3 tabular-nums">
+            <span className={`text-small tabular-nums ${TESTO_SU_FASCIA}`}>
               <span className="sr-only">Codice </span>
               {s.codice || codiceSegnalazione(s.id)}
             </span>
@@ -240,25 +243,27 @@ export default function SegnalazionePartenariato() {
       />
       {avvisoAzienda}
 
-      <Facts
-        items={[
-          { etichetta: "Contenuto", valore: MODERAZIONE_COPY.oggetti[s.oggetto_tipo] ?? s.oggetto_tipo },
-          { etichetta: "Motivo", valore: CALL_COPY.segnalaMotivi[s.motivo] ?? s.motivo },
-          { etichetta: "Ricevuta il", valore: formatDateTime(s.created_at) },
-        ]}
-      />
-      {s.descrizione && (
-        <Section>
-          <SectionHeader titolo="Cosa hai scritto" />
-          <p className="whitespace-pre-line text-body text-ink-2">{s.descrizione}</p>
-        </Section>
-      )}
-      {s.ruolo === "autore" && (
-        <p className="text-small text-ink-3">Per tutelare chi segnala, non ti diciamo chi è stato.</p>
-      )}
+      <Card className="flex flex-col gap-8 sm:p-8">
+        <Facts
+          items={[
+            { etichetta: "Contenuto", valore: MODERAZIONE_COPY.oggetti[s.oggetto_tipo] ?? s.oggetto_tipo },
+            { etichetta: "Motivo", valore: CALL_COPY.segnalaMotivi[s.motivo] ?? s.motivo },
+            { etichetta: "Ricevuta il", valore: formatDateTime(s.created_at) },
+          ]}
+        />
+        {s.descrizione && (
+          <Section>
+            <SectionHeader titolo="Cosa hai scritto" />
+            <p className="whitespace-pre-line text-body text-ink-2">{s.descrizione}</p>
+          </Section>
+        )}
+        {s.ruolo === "autore" && (
+          <p className="text-small text-ink-3">Per tutelare chi segnala, non ti diciamo chi è stato.</p>
+        )}
 
-      <Decisione s={s} />
-      <Ricorso s={s} />
+        <Decisione s={s} />
+        <Ricorso s={s} />
+      </Card>
     </Page>
   );
 }

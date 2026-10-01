@@ -74,7 +74,7 @@ export function RegolaVoce({
       <summary className="flex cursor-pointer list-none items-center gap-3 rounded-mark py-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden">
         <span className="min-w-0 flex-1 text-row-title text-ink">{titolo}</span>
         {daVerificare ? (
-          <Status tono="in-apertura" className="shrink-0">
+          <Status tono="attenzione" className="shrink-0">
             Da verificare
           </Status>
         ) : (

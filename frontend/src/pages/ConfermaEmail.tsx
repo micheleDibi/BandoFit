@@ -1,3 +1,4 @@
+import { CircleCheck, Link2Off, Mail } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AccessoLaterale } from "../components/landing/AccessoLaterale";
@@ -5,6 +6,7 @@ import { Alert } from "../components/ui/Alert";
 import { AuthLayout } from "../components/ui/AuthLayout";
 import { Button, LinkButton } from "../components/ui/Button";
 import { TextField } from "../components/ui/Field";
+import { IconChip } from "../components/ui/IconChip";
 import { PasswordField } from "../components/ui/PasswordField";
 import { PasswordStrengthMeter } from "../components/ui/PasswordStrengthMeter";
 import { TextLink } from "../components/ui/TextLink";
@@ -159,6 +161,7 @@ export default function ConfermaEmail() {
 
       {step === "done" && (
         <div className="flex flex-col items-start gap-2" role="status">
+          <IconChip icon={CircleCheck} size="lg" className="mb-2" />
           <h1 className="text-title-page text-ink">Account attivo, benvenuto!</h1>
           <p className="text-body text-ink-2">
             Il tuo indirizzo è confermato: accedi con la password che hai appena scelto.
@@ -174,6 +177,7 @@ export default function ConfermaEmail() {
 
       {(step === "richiedi" || step === "invalid") && (
         <div className="flex flex-col items-start gap-2">
+          <IconChip icon={step === "richiedi" ? Mail : Link2Off} size="lg" className="mb-2" />
           <h1 className="text-title-page text-ink">
             {step === "richiedi"
               ? "Richiedi il link di conferma"

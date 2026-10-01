@@ -1,8 +1,9 @@
-import { ShieldCheck } from "lucide-react";
+import { CircleCheck, CreditCard, Receipt, ShieldCheck } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Alert } from "../components/ui/Alert";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import { Page } from "../components/ui/Page";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Pagination } from "../components/ui/Pagination";
@@ -25,11 +26,12 @@ import { PURCHASE_KIND_LABELS, PURCHASE_STATO_LABELS } from "../lib/copy";
 import { eurFromCents, formatDateNumeric, formatDateTime } from "../lib/format";
 import type { AdminInvoice, InvoiceStato, PurchaseKind, PurchaseStatus } from "../types";
 
-/** Stato dell'acquisto in parole (`Status`): il tono dice solo l'esito. */
+/** Stato dell'acquisto in parole (`Status`): il tono dice solo l'esito. Gli
+ *  esiti negativi usano `errore` (rosso): `attenzione` ora è ambra. */
 const PURCHASE_TONI: Record<PurchaseStatus, TonoStatus> = {
   in_attesa: "in-apertura",
   pagato: "aperto",
-  fallito: "attenzione",
+  fallito: "errore",
   scaduto: "chiuso",
   annullato: "chiuso",
   gratuito: "neutro",
@@ -43,9 +45,9 @@ const INVOICE_STATI: Record<InvoiceStato, { label: string; tono: TonoStatus }> =
   in_invio: { label: "In invio", tono: "in-apertura" },
   inviata: { label: "Inviata", tono: "in-apertura" },
   consegnata: { label: "Consegnata", tono: "aperto" },
-  non_consegnata: { label: "Non consegnata", tono: "in-apertura" },
-  scartata: { label: "Scartata", tono: "attenzione" },
-  errore: { label: "Errore", tono: "attenzione" },
+  non_consegnata: { label: "Non consegnata", tono: "attenzione" },
+  scartata: { label: "Scartata", tono: "errore" },
+  errore: { label: "Errore", tono: "errore" },
 };
 
 /** «12/2026» (o «A12/2026» con serie); presente solo sulle righe storiche già
@@ -57,7 +59,7 @@ function SkeletonRighe({ n = 6 }: { n?: number }) {
   return (
     <div className="flex flex-col gap-3" aria-hidden>
       {Array.from({ length: n }).map((_, i) => (
-        <Skeleton key={i} className="h-12 w-full" />
+        <Skeleton key={i} className="h-12 w-full rounded-control" />
       ))}
     </div>
   );
@@ -91,60 +93,75 @@ function SezioneAcquisti() {
   } else if (fuoriPagina) {
     elenco = <SkeletonRighe />;
   } else if (data && data.items.length === 0) {
-    elenco = <EmptyState title="Nessun acquisto" description="Con questi filtri non c'è nulla." />;
+    elenco = (
+      <Card>
+        <EmptyState
+          title="Nessun acquisto"
+          description="Con questi filtri non c'è nulla."
+          icon={CreditCard}
+          area="admin"
+        />
+      </Card>
+    );
   } else {
     elenco = (
-      <Table
-        className={cn("min-w-[720px]", isPlaceholderData && "opacity-60 transition-opacity")}
-      >
-        <caption className="sr-only">Storico degli acquisti</caption>
-        <thead>
-          <tr>
-            <Th>Data</Th>
-            <Th>Descrizione</Th>
-            <Th numerica>Totale</Th>
-            <Th>Stato</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {data?.items.map((p) => (
-            <tr key={p.id} className="hover:bg-desk">
-              <Td className="whitespace-nowrap text-ink-2 tabular-nums">
-                {formatDateTime(p.created_at)}
-              </Td>
-              <Td>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-ink">{p.descrizione}</span>
-                  {p.kind === "cambio_admin" && (
-                    <Badge>
-                      <ShieldCheck className="size-3.5" aria-hidden />
-                      Cambio admin
-                    </Badge>
-                  )}
-                  {p.kind === "addon_admin" && (
-                    <Badge>
-                      <ShieldCheck className="size-3.5" aria-hidden />
-                      {PURCHASE_KIND_LABELS.addon_admin}
-                    </Badge>
-                  )}
-                </div>
-                {(p.kind === "cambio_admin" || p.kind === "addon_admin") && p.motivazione && (
-                  <p className="text-small text-ink-2">{p.motivazione}</p>
-                )}
-                {p.decline_reason && (
-                  <p className="text-small text-ink-3">Declino: {p.decline_reason}</p>
-                )}
-              </Td>
-              <Td numerica className="font-medium text-ink">
-                {eurFromCents(p.totale_cents)}
-              </Td>
-              <Td>
-                <Status tono={PURCHASE_TONI[p.status]}>{PURCHASE_STATO_LABELS[p.status]}</Status>
-              </Td>
+      <Card className="overflow-hidden p-0">
+        <Table
+          className={cn(
+            "min-w-[720px] [&_tbody_tr:last-child_td]:border-b-0",
+            isPlaceholderData && "opacity-60 transition-opacity",
+          )}
+          classNameContenitore="px-2"
+        >
+          <caption className="sr-only">Storico degli acquisti</caption>
+          <thead>
+            <tr>
+              <Th>Data</Th>
+              <Th>Descrizione</Th>
+              <Th numerica>Totale</Th>
+              <Th>Stato</Th>
             </tr>
-          ))}
-        </tbody>
-      </Table>
+          </thead>
+          <tbody>
+            {data?.items.map((p) => (
+              <tr key={p.id} className="transition-colors duration-150 ease-uscita hover:bg-desk">
+                <Td className="whitespace-nowrap text-ink-2 tabular-nums">
+                  {formatDateTime(p.created_at)}
+                </Td>
+                <Td>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-ink">{p.descrizione}</span>
+                    {p.kind === "cambio_admin" && (
+                      <Badge>
+                        <ShieldCheck className="size-3.5" aria-hidden />
+                        Cambio admin
+                      </Badge>
+                    )}
+                    {p.kind === "addon_admin" && (
+                      <Badge>
+                        <ShieldCheck className="size-3.5" aria-hidden />
+                        {PURCHASE_KIND_LABELS.addon_admin}
+                      </Badge>
+                    )}
+                  </div>
+                  {(p.kind === "cambio_admin" || p.kind === "addon_admin") && p.motivazione && (
+                    <p className="text-small text-ink-2">{p.motivazione}</p>
+                  )}
+                  {p.decline_reason && (
+                    <p className="text-small text-ink-3">Declino: {p.decline_reason}</p>
+                  )}
+                </Td>
+                <Td numerica className="font-medium text-ink">
+                  {eurFromCents(p.totale_cents)}
+                </Td>
+                <Td>
+                  <Status tono={PURCHASE_TONI[p.status]}>{PURCHASE_STATO_LABELS[p.status]}</Status>
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </Card>
     );
   }
 
@@ -220,43 +237,58 @@ function SezioneFatture() {
   } else if (fuoriPagina) {
     elenco = <SkeletonRighe />;
   } else if (data && data.items.length === 0) {
-    elenco = <EmptyState title="Nessuna fattura" description="Con questo filtro non c'è nulla." />;
+    elenco = (
+      <Card>
+        <EmptyState
+          title="Nessuna fattura"
+          description="Con questo filtro non c'è nulla."
+          icon={Receipt}
+          area="admin"
+        />
+      </Card>
+    );
   } else {
     elenco = (
-      <Table
-        className={cn("min-w-[760px]", isPlaceholderData && "opacity-60 transition-opacity")}
-      >
-        <caption className="sr-only">Registro delle fatture</caption>
-        <thead>
-          <tr>
-            <Th>Numero</Th>
-            <Th>Data documento</Th>
-            <Th numerica>Totale</Th>
-            <Th>Stato</Th>
-            <Th numerica>Tentativi</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {data?.items.map((inv) => {
-            const stile = INVOICE_STATI[inv.stato];
-            return (
-              <tr key={inv.id} className="hover:bg-desk">
-                <Td className="font-medium text-ink tabular-nums">{numeroFattura(inv)}</Td>
-                <Td className="text-ink-2 tabular-nums">{formatDateNumeric(inv.data_documento)}</Td>
-                <Td numerica className="font-medium text-ink">
-                  {eurFromCents(inv.totale_cents)}
-                </Td>
-                <Td>
-                  <Status tono={stile.tono}>{stile.label}</Status>
-                </Td>
-                <Td numerica className="text-ink-2">
-                  {inv.tentativi}
-                </Td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </Table>
+      <Card className="overflow-hidden p-0">
+        <Table
+          className={cn(
+            "min-w-[760px] [&_tbody_tr:last-child_td]:border-b-0",
+            isPlaceholderData && "opacity-60 transition-opacity",
+          )}
+          classNameContenitore="px-2"
+        >
+          <caption className="sr-only">Registro delle fatture</caption>
+          <thead>
+            <tr>
+              <Th>Numero</Th>
+              <Th>Data documento</Th>
+              <Th numerica>Totale</Th>
+              <Th>Stato</Th>
+              <Th numerica>Tentativi</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {data?.items.map((inv) => {
+              const stile = INVOICE_STATI[inv.stato];
+              return (
+                <tr key={inv.id} className="transition-colors duration-150 ease-uscita hover:bg-desk">
+                  <Td className="font-medium text-ink tabular-nums">{numeroFattura(inv)}</Td>
+                  <Td className="text-ink-2 tabular-nums">{formatDateNumeric(inv.data_documento)}</Td>
+                  <Td numerica className="font-medium text-ink">
+                    {eurFromCents(inv.totale_cents)}
+                  </Td>
+                  <Td>
+                    <Status tono={stile.tono}>{stile.label}</Status>
+                  </Td>
+                  <Td numerica className="text-ink-2">
+                    {inv.tentativi}
+                  </Td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </Table>
+      </Card>
     );
   }
 
@@ -324,44 +356,53 @@ function SezioneAnomalie() {
       ) : isError ? (
         <ErrorState message={apiErrorMessage(error)} onRetry={() => refetch()} />
       ) : (data?.items.length ?? 0) === 0 ? (
-        <EmptyState
-          title={stato === "aperta" ? "Nessuna anomalia aperta" : "Nessuna anomalia risolta"}
-          description={
-            stato === "aperta"
-              ? "Tutti gli incassi corrispondono a un acquisto: niente da riconciliare."
-              : "Le anomalie risolte compariranno qui."
-          }
-        />
+        <Card>
+          <EmptyState
+            title={stato === "aperta" ? "Nessuna anomalia aperta" : "Nessuna anomalia risolta"}
+            description={
+              stato === "aperta"
+                ? "Tutti gli incassi corrispondono a un acquisto: niente da riconciliare."
+                : "Le anomalie risolte compariranno qui."
+            }
+            icon={CircleCheck}
+            area="admin"
+          />
+        </Card>
       ) : (
-        <ul className="flex flex-col divide-y divide-line border-y border-line">
-          {data?.items.map((a) => (
-            <li key={a.audit_id} className="flex flex-wrap items-center justify-between gap-3 py-4">
-              <div className="flex min-w-0 flex-col gap-1">
-                <p className="font-medium text-ink">
-                  {a.payload?.motivo ?? "Incasso da riconciliare"}
-                </p>
-                <p className="flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-3 tabular-nums">
-                  <span>Ordine Revolut: {a.payload?.revolut_order_id ?? "—"}</span>
-                  {a.payload?.purchase_id && <span>Purchase: {a.payload.purchase_id}</span>}
-                  <span>{formatDateTime(a.created_at)}</span>
-                </p>
-              </div>
-              {a.risolta ? (
-                <Status tono="chiuso">Risolta</Status>
-              ) : (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => handleResolve(a.audit_id)}
-                  loading={resolve.isPending && resolve.variables === a.audit_id}
-                  disabled={resolve.isPending}
-                >
-                  Segna come risolta
-                </Button>
-              )}
-            </li>
-          ))}
-        </ul>
+        <Card className="overflow-hidden p-0">
+          <ul className="flex flex-col divide-y divide-line">
+            {data?.items.map((a) => (
+              <li
+                key={a.audit_id}
+                className="flex flex-wrap items-center justify-between gap-3 px-5 py-4"
+              >
+                <div className="flex min-w-0 flex-col gap-1">
+                  <p className="font-medium text-ink">
+                    {a.payload?.motivo ?? "Incasso da riconciliare"}
+                  </p>
+                  <p className="flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-3 tabular-nums">
+                    <span>Ordine Revolut: {a.payload?.revolut_order_id ?? "—"}</span>
+                    {a.payload?.purchase_id && <span>Purchase: {a.payload.purchase_id}</span>}
+                    <span>{formatDateTime(a.created_at)}</span>
+                  </p>
+                </div>
+                {a.risolta ? (
+                  <Status tono="chiuso">Risolta</Status>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => handleResolve(a.audit_id)}
+                    loading={resolve.isPending && resolve.variables === a.audit_id}
+                    disabled={resolve.isPending}
+                  >
+                    Segna come risolta
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Card>
       )}
     </>
   );
@@ -384,6 +425,7 @@ export default function AdminPagamenti() {
       <PageHeader
         titolo="Pagamenti"
         descrizione="Storico acquisti, registro fatture e incassi da riconciliare."
+        area="admin"
       />
 
       {numAperte > 0 && (

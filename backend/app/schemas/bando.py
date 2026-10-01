@@ -1,9 +1,21 @@
 from datetime import date, datetime, time
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.schemas.common import AtecoItem, LookupItem
+
+# Motivi per cui lo stato di un bando non è certo (contratto DB bandi §4.1).
+# Un motivo non cambia lo stato: un bando «aperto · da verificare» resta fra
+# gli aperti.
+MotivoDaVerificare = Literal[
+    "data_apertura_passata",
+    "smentito_dalla_fonte",
+    "previsione_scaduta",
+    "senza_conferma",
+    "termine_passato",
+]
+MOTIVI_DA_VERIFICARE: frozenset[str] = frozenset(get_args(MotivoDaVerificare))
 
 
 class CompatibilitaDimensione(BaseModel):
@@ -42,6 +54,8 @@ class BandoListItem(BaseModel):
     # (calcolato alla lettura dal catalogo, contratto DB bandi §4).
     stato_bando: str | None = None
     stato_effettivo: str | None = None
+    # Perché lo stato non è certo (§4.1), oppure None: stato certo.
+    stato_da_verificare: MotivoDaVerificare | None = None
     livello: str | None = None
     data_pubblicazione: date | None = None
     data_apertura: date | None = None
@@ -54,6 +68,13 @@ class BandoListItem(BaseModel):
     regioni: list[LookupItem] = []
     # Calcolato dinamicamente (mai persistito); None se profilo insufficiente.
     compatibilita: Compatibilita | None = None
+
+    @field_validator("stato_da_verificare", mode="before")
+    @classmethod
+    def _motivo_noto(cls, value: Any) -> str | None:
+        """Tollerante: un motivo nuovo o un valore non stringa diventano None
+        (stato mostrato senza dubbio), mai un errore di validazione."""
+        return value if isinstance(value, str) and value in MOTIVI_DA_VERIFICARE else None
 
 
 OrigineLink = Literal["candidatura", "link_candidatura", "fonte_ufficiale", "portale", "link_bando"]

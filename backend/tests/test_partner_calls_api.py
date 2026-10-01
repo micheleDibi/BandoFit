@@ -38,6 +38,7 @@ from tests.test_partner_call_service import (  # noqa: F401  fixture autouse
     _iso,
     catalogo,
     oggi,
+    riga_bando_pubblico,
     stub_settings,
 )
 
@@ -393,3 +394,38 @@ class TestValidazione:
                 "bando_slug": SLUG, "ruolo_creatore": "capofila", "anonima": False})
         assert resp.status_code == 409
         assert resp.json()["error"]["code"] == "identita_non_verificata_admin"
+
+
+class TestBandoSospeso:
+    """C4/Q18: il bando sospeso non chiude la call; resta il divieto di
+    crearla o pubblicarla."""
+
+    @staticmethod
+    def _sospeso() -> FakeSecondary:
+        return FakeSecondary(pubblici=[riga_bando_pubblico(stato_effettivo="sospeso")])
+
+    async def test_dettaglio_200_la_call_pubblicata_resta_aperta(self, flag):
+        flag(True)
+        db = FakeDb()
+        call = db.call_pronta(stato="pubblicata", pubblicata_at=_iso(),
+                              scadenza_call=(oggi() + timedelta(days=10)).isoformat())
+        async with _http(mini_app(db, secondary=self._sospeso())) as client:
+            resp = await client.get(f"/api/v1/partenariati/call/{call['id']}")
+        assert resp.status_code == 200
+        corpo = resp.json()
+        assert (corpo["stato"], corpo["motivo_chiusura"]) == ("pubblicata", None)
+        assert db.chiamate("fn_partner_call_chiudi_auto") == []
+
+    async def test_pubblica_409_e_crea_409(self, flag):
+        flag(True)
+        db = FakeDb()
+        call = db.call_pronta()
+        async with _http(mini_app(db, secondary=self._sospeso())) as client:
+            pubblica = await client.post(f"/api/v1/partenariati/call/{call['id']}/pubblica")
+            crea = await client.post("/api/v1/partenariati/call",
+                                     json={"bando_slug": SLUG, "ruolo_creatore": "capofila"})
+        assert pubblica.status_code == 409
+        assert pubblica.json()["error"]["code"] == "bando_non_disponibile"
+        assert crea.status_code == 409
+        assert crea.json()["error"]["code"] == "bando_non_disponibile"
+        assert db.call(call["id"])["stato"] == "bozza"

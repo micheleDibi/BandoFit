@@ -1190,6 +1190,10 @@ class BandoPubblicoCallOut(_Pubblico):
     slug: str
     titolo: str
     scadenza: date | None = None
+    # Stato del bando all'ultimo allineamento della call (snapshot
+    # `bando_stato_effettivo`, tenuto dallo scheduler): con `sospeso` la call
+    # resta aperta e la UI mostra l'avviso (Q18). None = non noto.
+    stato_effettivo: str | None = None
 
 
 class RequisitoPubblicoOut(_Pubblico):

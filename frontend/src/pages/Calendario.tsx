@@ -6,6 +6,7 @@ import { AppuntamentoDialog } from "../components/calendar/AppuntamentoDialog";
 import { DayEventsDialog } from "../components/calendar/DayEventsDialog";
 import { EventDialog, type DialogState } from "../components/calendar/EventDialog";
 import {
+  bandoNonInCorso,
   itemDay,
   itemSortKey,
   ruoloClasses,
@@ -170,6 +171,10 @@ export default function Calendario() {
   const legenda: Array<{ ruolo: RuoloCalendario; label: string }> = [
     { ruolo: "personale", label: "Personali" },
     { ruolo: "bando", label: "Scadenze bandi" },
+    // Solo se nel mese c'è almeno una scadenza di un bando chiuso, sospeso o revocato.
+    ...((events ?? []).some((e) => bandoNonInCorso(e) !== null)
+      ? [{ ruolo: "bando-neutro" as const, label: "Bandi chiusi, sospesi o revocati" }]
+      : []),
     ...(isProgettista
       ? [
           { ruolo: "slot" as const, label: "Disponibilità" },

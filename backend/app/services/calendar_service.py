@@ -3,12 +3,15 @@
 Due tipi di evento: 'personale' (CRUD completo) e 'bando' (scadenza derivata
 dal catalogo secondario: data in SOLA LETTURA — modificabili solo titolo e
 note; il riferimento è denormalizzato come nei bandi salvati, senza FK).
+Data, ora e stato del bando di una scadenza li riallinea al catalogo il passo
+periodico (`calendario_allineamento.py`), con le regole di `campi_scadenza`.
 Le date/ore sono di calendario italiano (wall-clock), mai convertite.
 """
 
 import logging
 import uuid
-from datetime import date
+from datetime import date, datetime
+from typing import Any
 
 from postgrest.exceptions import APIError
 
@@ -32,16 +35,56 @@ BANDO_EVENT_EDITABLE = {"titolo", "note"}
 
 EVENT_SELECT = (
     "id,titolo,data,tutto_il_giorno,ora_inizio,ora_fine,note,tipo,"
-    "bando_id,bando_slug,created_at,updated_at"
+    "bando_id,bando_slug,bando_stato,created_at,updated_at"
 )
 # Snapshot della scadenza (contratto DB bandi §12, R6): `ora_scadenza` entra
-# nell'evento come ora di inizio; `data_scadenza_verificata` si legge ma non
-# si salva, perché `calendar_events` non ha una colonna per conservarla.
-SNAPSHOT_SELECT = "id,slug,titolo,titolo_breve,data_scadenza,ora_scadenza,data_scadenza_verificata"
+# nell'evento come ora di inizio, `stato_effettivo` in `bando_stato`
+# (migration 0048); `data_scadenza_verificata` si legge ma non si salva,
+# perché `calendar_events` non ha una colonna per conservarla.
+SNAPSHOT_SELECT = (
+    "id,slug,titolo,titolo_breve,data_scadenza,ora_scadenza,data_scadenza_verificata,"
+    "stato_effettivo"
+)
 
 
 def _to_out(row: dict) -> CalendarEventOut:
     return CalendarEventOut(**{**row, "id": str(row["id"])})
+
+
+def _data_iso(value: Any) -> str | None:
+    """Data di calendario «YYYY-MM-DD»; None se manca o non è una data."""
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value.isoformat()
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value.strip()).isoformat()
+    except ValueError:
+        return None
+
+
+def campi_scadenza(data_scadenza: Any, ora_scadenza: Any) -> dict | None:
+    """Data e orari della scadenza in calendario dalla scadenza del catalogo:
+    UNICA fonte delle regole per la creazione e per il riallineamento
+    (`services/calendario_allineamento.py`). `data` = `data_scadenza`;
+    `ora_inizio` = l'ora della scadenza (di Roma, tollerante come nel
+    dettaglio: «24:00» o un valore non valido = nessuna ora); senza ora vale
+    tutta la giornata. None se la scadenza manca o non è una data."""
+    data = _data_iso(data_scadenza)
+    if data is None:
+        return None
+    ora = _ora(ora_scadenza)
+    return {
+        "data": data,
+        "tutto_il_giorno": ora is None,
+        "ora_inizio": ora.isoformat() if ora is not None else None,
+    }
+
+
+def stato_del_bando(value: Any) -> str | None:
+    """Lo `stato_effettivo` del catalogo come si salva in `bando_stato`:
+    stringa non vuota così com'è (anche uno stato nuovo), altrimenti None."""
+    return value if isinstance(value, str) and value.strip() else None
 
 
 def _month_bounds(anno: int, mese: int) -> tuple[str, str]:
@@ -128,7 +171,8 @@ async def create_bando_event(
     Slug spostato (storico 301 o fusione) → l'evento riguarda il master;
     ritirato → 410; sconosciuto → 404."""
     bando = await carica_per_slug(secondary, slug, SNAPSHOT_SELECT)
-    if not bando.get("data_scadenza"):
+    scadenza = campi_scadenza(bando.get("data_scadenza"), bando.get("ora_scadenza"))
+    if scadenza is None:
         raise BadRequestError("Questo bando non ha una data di scadenza da aggiungere")
 
     existing = (
@@ -148,24 +192,23 @@ async def create_bando_event(
 
     await _check_cap(primary, user_id, active)
     titolo = bando.get("titolo_breve") or bando.get("titolo") or bando["slug"]
-    # Scadenza con l'ora (di Roma, tollerante come nel dettaglio: «24:00» o
-    # un valore non valido = nessuna ora): l'evento la porta come ora di
-    # inizio; senza ora vale tutta la giornata. Niente in `note`: è il
-    # campo dell'utente e decide la sorte dell'evento nella rimappatura dei
-    # bandi fusi.
-    ora = _ora(bando.get("ora_scadenza"))
+    # Data e ora dalla scadenza (`campi_scadenza`, le stesse regole del
+    # riallineamento) e lo stato del bando. Niente in `note`: è il campo
+    # dell'utente e decide la sorte dell'evento nella rimappatura dei bandi
+    # fusi.
     row = {
         "user_id": str(user_id),
         "company_profile_id": company_scope.scope_value(active),
         "titolo": f"Scadenza: {titolo}"[:200],
-        "data": bando["data_scadenza"],
-        "tutto_il_giorno": ora is None,
+        "data": scadenza["data"],
+        "tutto_il_giorno": scadenza["tutto_il_giorno"],
         "tipo": "bando",
         "bando_id": bando["id"],
         "bando_slug": bando["slug"],
+        "bando_stato": stato_del_bando(bando.get("stato_effettivo")),
     }
-    if ora is not None:
-        row["ora_inizio"] = ora.isoformat()
+    if scadenza["ora_inizio"] is not None:
+        row["ora_inizio"] = scadenza["ora_inizio"]
     try:
         insert = await primary.table("calendar_events").insert(row).execute()
         return _to_out(insert.data[0])

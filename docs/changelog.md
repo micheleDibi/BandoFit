@@ -2,6 +2,19 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-10-01 — Catalogo: bandi sospesi e revocati, stato da verificare, calendario allineato, monitoraggio ⚠️ migration 0048
+
+Il catalogo dei bandi si aggiorna più spesso e da solo: chiusure, proroghe e rettifiche delle date arrivano più volte al giorno, i doppioni si fondono in automatico e compaiono gli stati «sospeso» (può riaprire o chiudersi) e «revocato». BandoFit si prepara a mostrarli bene.
+- **Stati del bando**: «Sospeso» (ambra) e «Revocato» hanno ora il loro aspetto, distinto da «Chiuso». Il catalogo può segnalare che lo stato di un bando aperto o in apertura non è certo (`stato_da_verificare`, cinque motivi): la scheda e l'elenco mostrano «Aperto · da verificare» o «In apertura · da verificare», e la scheda spiega il motivo in una riga. Il bando resta fra gli aperti.
+- **Scheda del bando**: una nota diversa per sospeso, revocato e da verificare; il conto alla rovescia e l'icona corallo della scadenza solo per i bandi in corso.
+- **Filtro di stato**: si possono cercare anche i bandi sospesi e revocati. Senza filtro l'elenco non cambia (aperti, poi chiusi); con il filtro i sospesi e i revocati vengono in coda.
+- **AI-check**: su un bando revocato non parte e non consuma l'analisi del piano (409 `bando_revocato`); le analisi già fatte restano leggibili.
+- **Call di partenariato**: un bando sospeso non chiude più la call. La call resta aperta ma in pausa (fuori da bacheca, suggerimenti, inviti e notifiche) finché il bando non riapre; si chiude se il bando chiude o viene revocato. La pagina della call e «Le tue call» mostrano l'avviso «bando sospeso»; il conto alla rovescia del bando compare solo a bando in corso.
+- **Calendario**: le scadenze dei bandi già in calendario seguono il catalogo. Il passo periodico del catalogo (lo stesso della rimappatura dei bandi fusi, con la stessa modalità) riallinea data, ora e stato del bando; titolo e note dell'utente non cambiano. Le scadenze di bandi chiusi, sospesi o revocati sono grigie, con lo stato nel dettaglio dell'evento (migration 0048: colonna `calendar_events.bando_stato`).
+- **Amministrazione**: nuovo pannello «Catalogo» (`/app/admin/catalogo`) con la salute della raccolta dei bandi, letta dall'interfaccia di monitoraggio del catalogo con una chiave riservata (`MONITORAGGIO_CATALOGO_CHIAVE`, solo lato server). Senza chiave il pannello dice «Monitoraggio non configurato».
+- **Alert**: nessun cambiamento visibile; la ricerca dei candidati non legge la nuova colonna dello stato da verificare.
+- **Azione manuale**: applicare la 0048 sul primario PRIMA del deploy del backend (il calendario legge la colonna); mettere `MONITORAGGIO_CATALOGO_CHIAVE` nel `.env` del server (facoltativa); poi `docker compose up -d --build` di backend e frontend. Dettagli in `docs/deploy.md`.
+
 ## 2026-10-01 — Ultimi rilievi minori: citazioni, etichette, menzioni, indici della rimappatura ⚠️ migration 0047
 
 Chiusura dei rilievi minori rimasti dalla revisione del giro precedente.

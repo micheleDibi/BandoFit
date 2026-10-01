@@ -4,7 +4,7 @@ import { BannerOptIn } from "../components/partenariati/BannerOptIn";
 import { CallCard } from "../components/partenariati/CallCard";
 import { CallStatoBadge } from "../components/partenariati/CallStatoBadge";
 import { CandidaturaCard } from "../components/partenariati/CandidaturaCard";
-import { linkCall, passoDa } from "../components/partenariati/callDati";
+import { bandoCallSospeso, linkCall, passoDa } from "../components/partenariati/callDati";
 import { FiltriBacheca, paginaDa, useFiltriBacheca } from "../components/partenariati/FiltriBacheca";
 import { useRientroPagina } from "../components/partenariati/useRientroPagina";
 import { AvvisoLimiteCall, RiepilogoLimiteCall, statoLimite, useLimiteCall } from "../components/partenariati/LimitiCall";
@@ -55,9 +55,12 @@ const STATI_CANDIDATURA = Object.keys(CANDIDATURE_COPY.stati) as StatoCandidatur
 const VISTA_PREDEFINITA: VistaPartenariati = "per-te";
 const PREFISSO_SCHEDE = "partenariati";
 
+/** Una delle tue call: con il bando sospeso e la call aperta, «Bando sospeso»
+ *  accanto al bando (la call resta pubblicata ma in pausa). */
 function RigaCall({ call }: { call: CallCardDati }) {
   const bozza = call.stato === "bozza";
   const passo = passoDa(null, call.wizard_passo ?? 1);
+  const sospeso = (bozza || call.stato === "pubblicata") && bandoCallSospeso(call.bando);
   return (
     <li>
       <Card interattiva area="partenariati" className="relative flex items-start gap-6">
@@ -67,7 +70,10 @@ function RigaCall({ call }: { call: CallCardDati }) {
               {call.titolo || "Call senza titolo"}
             </Link>
           </h3>
-          <p className="text-body text-ink-2">Bando: {call.bando.titolo}</p>
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-body text-ink-2">
+            <span>Bando: {call.bando.titolo}</span>
+            {sospeso && <Status tono="attenzione">{CALL_COPY.bandoSospesoChip}</Status>}
+          </p>
           <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-ink-2">
             <CallStatoBadge stato={call.stato} />
             {call.scadenza_call && call.stato === "pubblicata" && (

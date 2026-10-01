@@ -103,7 +103,7 @@ export function BandoRow({ bando, azioni }: { bando: BandoListItem; azioni?: Rea
             <p className="line-clamp-2 text-body text-ink-2">{bando.descrizione_breve}</p>
           )}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-small text-ink-2">
-            <StatoBadge stato={stato} />
+            <StatoBadge stato={stato} daVerificare={bando.stato_da_verificare} />
             {bando.ente_erogatore && <span>{bando.ente_erogatore}</span>}
             {bando.tipologia && <Badge area="bandi">{bando.tipologia.nome}</Badge>}
           </div>

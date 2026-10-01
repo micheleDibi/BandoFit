@@ -4,7 +4,7 @@ al primo rifiuto di budget; avvio nel lifespan solo con il modulo acceso.
 
 Passi del WP5 (sul primario finto di test_partner_call_service, gemello delle
 RPC della 0037): `failsafe_ai_call` e `chiusura_call` (scadenza della call;
-bando chiuso, sospeso, revocato o assente da 7 giorni; azienda non viva;
+bando chiuso, revocato o assente da 7 giorni, mai sospeso; azienda non viva;
 snapshot del bando; errore del catalogo che non vale come assenza; notifica
 al creatore e al titolare con dedup)."""
 
@@ -626,7 +626,7 @@ class TestChiusuraCall:
 
     @pytest.mark.parametrize(
         ("stato_bando", "stato", "motivo"),
-        [("chiuso", "scaduta", "bando_chiuso"), ("sospeso", "scaduta", "bando_sospeso"),
+        [("chiuso", "scaduta", "bando_chiuso"),
          ("revocato", "chiusa_annullata", "bando_revocato"), ("Revocato ", "chiusa_annullata",
                                                                "bando_revocato")],
     )
@@ -641,6 +641,25 @@ class TestChiusuraCall:
         # una bozza non «scade»: si annulla con lo stesso motivo
         assert (db.call(bozza["id"])["stato"], db.call(bozza["id"])["motivo_chiusura"]) == (
             "chiusa_annullata", motivo)
+
+    async def test_bando_sospeso_non_chiude(self):
+        # Q18: né la pubblicata né la bozza si chiudono; lo snapshot segue lo stato.
+        db, Secondary, riga = _call_db()
+        call = _pubblicata(db, OGGI + timedelta(days=30))
+        bozza = db.con_call(company_profile_id="c0000000-0000-0000-0000-000000000002")
+        esiti = await sched.chiusura_call(
+            db, Secondary(pubblici=[riga(stato_effettivo="sospeso")]), OGGI)
+        assert esiti["chiuse"] == 0
+        assert (db.call(call["id"])["stato"], db.call(call["id"])["motivo_chiusura"]) == (
+            "pubblicata", None)
+        assert db.call(bozza["id"])["stato"] == "bozza"
+        assert db.call(call["id"])["bando_stato_effettivo"] == "sospeso"
+        assert db.chiamate("fn_partner_call_chiudi_auto") == []
+        assert db.tabelle["notifications"] == []
+        # se poi il bando chiude, la call si chiude come per un chiuso
+        await sched.chiusura_call(db, Secondary(pubblici=[riga(stato_effettivo="chiuso")]), OGGI)
+        assert (db.call(call["id"])["stato"], db.call(call["id"])["motivo_chiusura"]) == (
+            "scaduta", "bando_chiuso")
 
     async def test_bando_assente_sette_giorni(self):
         db, Secondary, _ = _call_db()

@@ -46,7 +46,13 @@ def _csv_ints(raw: str | None, param: str) -> list[int]:
 
 def parse_filters(
     q: str | None = Query(default=None, max_length=200, description="Ricerca full-text"),
-    stato: str | None = Query(default=None, description="Stati separati da virgola"),
+    stato: str | None = Query(
+        default=None,
+        description=(
+            "Stati separati da virgola: aperto, in apertura prossimamente, chiuso, sospeso, "
+            "revocato. In elenco: aperti, poi chiusi, poi sospesi e revocati"
+        ),
+    ),
     livello: str | None = Query(default=None),
     tipologie: str | None = Query(default=None, description="Id separati da virgola"),
     modalita: str | None = Query(default=None),

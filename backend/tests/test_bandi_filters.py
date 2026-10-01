@@ -27,6 +27,7 @@ from app.services.bandi_service import (
     apply_closed_tier,
     apply_filters,
     apply_open_tier,
+    apply_other_tier,
     build_list_select,
     fetch_bandi,
     map_detail,
@@ -66,6 +67,11 @@ class TestSelect:
         colonne = build_list_select(BandiFilters()).split(",")
         assert "stato_effettivo" in colonne
         assert "stato_bando" in colonne  # resta, solo informativo
+
+    def test_select_ha_stato_da_verificare(self):
+        # Contratto DB bandi §4.1: solo letta, mai filtrata né ordinata.
+        colonne = build_list_select(BandiFilters()).split(",")
+        assert "stato_da_verificare" in colonne
 
     def test_active_facets_add_aliased_inner_embeds(self):
         filters = BandiFilters(regioni=[1], settori=[2, 3])
@@ -313,6 +319,59 @@ class TestSegmentiPerStato:
             assert len(segmenti_di(client, stato)) == 1, stato
 
 
+def _condizioni_stato(query) -> list[str]:
+    """Condizioni sullo stato di una query del builder reale (via la difesa
+    sullo slug, che non riguarda lo stato)."""
+    params = params_of(query)
+    params.pop("select")
+    assert params.pop("slug", ["not.is.null"]) == ["not.is.null"]
+    condizioni = [f"or{cond}" for cond in params.pop("or", [])]
+    condizioni += [f"{col}.{val}" for col, vals in params.items() for val in vals]
+    assert all(c.startswith(("or(", "stato_effettivo.")) for c in condizioni)
+    return condizioni
+
+
+def _entra(query, stato: str | None) -> bool:
+    return all(valuta(c, {"stato_effettivo": stato}) is True for c in _condizioni_stato(query))
+
+
+class TestSegmentoAltri:
+    """C2: sospesi e revocati in un terzo segmento, solo se chiesti."""
+
+    def test_params(self, client):
+        params = params_of(apply_other_tier(build(client, BandiFilters()), TODAY))
+        assert params["stato_effettivo"] == ["in.(sospeso,revocato)"]
+        params = params_of(apply_other_tier(build(client, BandiFilters()), TODAY, ("revocato",)))
+        assert params["stato_effettivo"] == ["in.(revocato)"]
+        assert "or" not in params
+
+    @pytest.mark.parametrize(
+        ("stato", "atteso"),
+        [("sospeso", True), ("revocato", True), ("aperto", False), ("chiuso", False),
+         ("in apertura prossimamente", False), (None, False), ("pippo", False)],
+    )
+    def test_righe_del_segmento(self, client, stato, atteso):
+        query = apply_other_tier(build(client, BandiFilters()), TODAY)
+        assert _entra(query, stato) is atteso
+
+    def test_filtro_utente_in_and_col_segmento(self, client):
+        filtri = BandiFilters(stato=["aperto", "sospeso"])
+        query = apply_other_tier(build(client, filtri), TODAY, ("sospeso",))
+        assert params_of(query)["stato_effettivo"] == ["in.(aperto,sospeso)", "in.(sospeso)"]
+        assert _entra(query, "sospeso") and not _entra(query, "aperto")
+
+    @pytest.mark.parametrize(
+        ("stato", "atteso"),
+        [("aperto", True), (None, False), ("in apertura prossimamente", False),
+         ("sospeso", False), ("chiuso", False)],
+    )
+    def test_filtro_aperto_esclude_il_null(self, client, stato, atteso):
+        # Come oggi: il filtro dell'utente (`in`) è in AND col segmento degli
+        # aperti, quindi un bando senza stato non entra con `stato=aperto`.
+        query = apply_open_tier(build(client, BandiFilters(stato=["aperto"])), TODAY)
+        assert _entra(query, stato) is atteso
+
+
 def bando_row(id_: int) -> dict:
     return {**TestMapping.ROW, "id": id_, "slug": f"bando-{id_}"}
 
@@ -396,8 +455,10 @@ class FakeSecondary:
 
 
 # Gli id del finto catalogo sono la posizione della riga nel proprio segmento:
-# 0, 1, 2… per i non chiusi, ID_CHIUSI + 0, 1, 2… per i chiusi.
+# 0, 1, 2… per i non chiusi, ID_CHIUSI + 0, 1, 2… per i chiusi, ID_ALTRI + 0,
+# 1, 2… per sospesi e revocati.
 ID_CHIUSI = 100_000
+ID_ALTRI = 200_000
 
 
 class FakeQuerySegmento(FakeBandiQuery):
@@ -427,12 +488,14 @@ class FakeQuerySegmento(FakeBandiQuery):
 
 
 class FakeCatalogo:
-    """Finto catalogo con due segmenti di righe, che risponde come quello vero
-    quando si chiede il conteggio esatto: pagina vuota se l'offset è uguale al
-    numero di righe del segmento, errore PGRST103 se lo supera."""
+    """Finto catalogo con tre segmenti di righe (aperti, chiusi, altri), che
+    risponde come quello vero quando si chiede il conteggio esatto: pagina
+    vuota se l'offset è uguale al numero di righe del segmento, errore
+    PGRST103 se lo supera."""
 
-    def __init__(self, aperti: int, chiusi: int, *, errore_aperti: Exception | None = None):
-        self.righe = {"aperti": aperti, "chiusi": chiusi}
+    def __init__(self, aperti: int, chiusi: int, altri: int = 0, *,
+                 errore_aperti: Exception | None = None):
+        self.righe = {"aperti": aperti, "chiusi": chiusi, "altri": altri}
         self.errore_aperti = errore_aperti
         self.queries: list[FakeQuerySegmento] = []
 
@@ -445,8 +508,14 @@ class FakeCatalogo:
     def segmento_di(query: FakeBandiQuery) -> str:
         if ("stato_effettivo", "chiuso") in query.eq_filters:
             return "chiusi"
-        assert any("stato_effettivo.in." in f for f in query.or_filters), "query senza segmento"
-        return "aperti"
+        if any("stato_effettivo.in." in f for f in query.or_filters):
+            return "aperti"
+        # Segmento «altri»: il suo `in` (solo sospeso/revocato) segue quello
+        # del filtro dell'utente.
+        stati = [valori for col, valori in query.in_filters if col == "stato_effettivo"]
+        assert len(stati) == 2 and set(stati[-1]) <= {"sospeso", "revocato"}, (
+            "query senza segmento")
+        return "altri"
 
     def richieste(self, segmento: str) -> list[tuple]:
         """(range, limit) delle richieste fatte a un segmento, in ordine."""
@@ -468,7 +537,7 @@ class FakeCatalogo:
                 "code": "PGRST103", "message": "Requested range not satisfiable",
                 "details": None, "hint": None,
             })
-        base = ID_CHIUSI if segmento == "chiusi" else 0
+        base = {"aperti": 0, "chiusi": ID_CHIUSI, "altri": ID_ALTRI}[segmento]
         return SimpleNamespace(
             data=[bando_row(base + i) for i in range(inizio, min(fine + 1, righe))],
             count=righe,
@@ -664,7 +733,8 @@ class TestFetchBandiOltreIlSegmento:
         page = await self._pagina(catalogo, 2, BandiFilters(stato=["chiuso"]))
         assert _ids(page) == list(range(ID_CHIUSI + 20, ID_CHIUSI + 40))
         assert (page.total, page.total_pages) == (45, 3)
-        assert catalogo.richieste("aperti") == [((20, 39), None), (None, 1)]
+        # Il solo `chiuso` non interseca gli aperti: nessuna query su quel segmento.
+        assert catalogo.richieste("aperti") == []
         assert catalogo.richieste("chiusi") == [((20, 39), None)]
         for query in catalogo.queries:
             assert query.in_filters == [("stato_effettivo", ["chiuso"])]
@@ -700,6 +770,123 @@ class TestFetchBandiOltreIlSegmento:
         assert sollevata.value is errore
         assert catalogo.richieste("aperti") == [((1440, 1459), None)]
         assert catalogo.richieste("chiusi") == []
+
+
+class TestFetchBandiTreSegmenti:
+    """C2: con il filtro di stato i segmenti sono aperti → chiusi → altri,
+    ciascuno solo se interseca gli stati chiesti; paginazione e totale esatti
+    a cavallo dei confini. Senza filtro, le stesse query di prima."""
+
+    @staticmethod
+    async def _pagina(catalogo, page: int, stati: list[str] | None = None,
+                      sort: str = "pubblicazione_desc"):
+        return await fetch_bandi(catalogo, BandiFilters(stato=stati or []), page, 20, sort)
+
+    @staticmethod
+    def _sequenza(catalogo) -> list[tuple]:
+        return [(catalogo.segmento_di(q), q.range_args, q.limit_arg) for q in catalogo.queries]
+
+    @pytest.mark.parametrize(
+        ("page", "attese"),
+        [
+            (1, [("aperti", (0, 19), None), ("chiusi", None, 1)]),
+            (72, [("aperti", (1420, 1439), None), ("chiusi", (0, 6), None)]),
+            (73, [("aperti", (1440, 1459), None), ("aperti", None, 1),
+                  ("chiusi", (7, 26), None)]),
+            (111, [("aperti", (2200, 2219), None), ("aperti", None, 1),
+                   ("chiusi", (767, 786), None), ("chiusi", None, 1)]),
+        ],
+    )
+    async def test_senza_filtro_query_identiche(self, page, attese):
+        # Sospesi e revocati ci sono nel catalogo ma non si interrogano.
+        catalogo = FakeCatalogo(1433, 747, 50)
+        out = await self._pagina(catalogo, page)
+        assert self._sequenza(catalogo) == attese
+        assert out.total == 2180
+        for query in catalogo.queries:
+            assert query.in_filters == []
+
+    async def test_solo_sospeso_una_query(self):
+        catalogo = FakeCatalogo(1433, 747, 12)
+        out = await self._pagina(catalogo, 1, ["sospeso"])
+        assert _ids(out) == list(range(ID_ALTRI, ID_ALTRI + 12))
+        assert (out.total, out.total_pages) == (12, 1)
+        assert self._sequenza(catalogo) == [("altri", (0, 19), None)]
+        [query] = catalogo.queries
+        assert query.in_filters == [("stato_effettivo", ["sospeso"])] * 2
+
+    async def test_sospeso_e_revocato(self):
+        catalogo = FakeCatalogo(1433, 747, 30)
+        out = await self._pagina(catalogo, 2, ["revocato", "sospeso"])
+        assert _ids(out) == list(range(ID_ALTRI + 20, ID_ALTRI + 30))
+        assert out.total == 30
+        [query] = catalogo.queries
+        # valori del segmento in ordine fisso
+        assert query.in_filters[-1] == ("stato_effettivo", ["sospeso", "revocato"])
+
+    async def test_solo_aperto_nessuna_query_sui_chiusi(self):
+        catalogo = FakeCatalogo(30, 747, 12)
+        out = await self._pagina(catalogo, 1, ["aperto"])
+        assert _ids(out) == list(range(20))
+        assert out.total == 30
+        assert self._sequenza(catalogo) == [("aperti", (0, 19), None)]
+
+    async def test_aperto_e_sospeso_a_cavallo(self):
+        catalogo = FakeCatalogo(25, 747, 10)
+        out = await self._pagina(catalogo, 2, ["aperto", "sospeso"])
+        assert _ids(out) == [*range(20, 25), *range(ID_ALTRI, ID_ALTRI + 10)]
+        assert (out.total, out.total_pages) == (35, 2)
+        assert self._sequenza(catalogo) == [
+            ("aperti", (20, 39), None), ("altri", (0, 14), None)
+        ]
+
+    async def test_chiuso_e_revocato(self):
+        catalogo = FakeCatalogo(1433, 45, 10)
+        out = await self._pagina(catalogo, 3, ["chiuso", "revocato"])
+        assert _ids(out) == [*range(ID_CHIUSI + 40, ID_CHIUSI + 45),
+                             *range(ID_ALTRI, ID_ALTRI + 10)]
+        assert (out.total, out.total_pages) == (55, 3)
+        assert self._sequenza(catalogo) == [
+            ("chiusi", (40, 59), None), ("altri", (0, 14), None)
+        ]
+
+    async def test_pagina_piena_conta_gli_altri_segmenti(self):
+        catalogo = FakeCatalogo(30, 20, 5)
+        tutti = ["aperto", "in apertura prossimamente", "chiuso", "sospeso", "revocato"]
+        out = await self._pagina(catalogo, 1, tutti)
+        assert _ids(out) == list(range(20))
+        assert out.total == 55
+        assert self._sequenza(catalogo) == [
+            ("aperti", (0, 19), None), ("chiusi", None, 1), ("altri", None, 1)
+        ]
+
+    async def test_pagina_tutta_negli_altri(self):
+        catalogo = FakeCatalogo(5, 5, 30)
+        out = await self._pagina(catalogo, 2, ["aperto", "chiuso", "sospeso"])
+        assert _ids(out) == list(range(ID_ALTRI + 10, ID_ALTRI + 30))
+        assert (out.total, out.total_pages) == (40, 2)
+        assert self._sequenza(catalogo) == [
+            ("aperti", (20, 39), None), ("aperti", None, 1),
+            ("chiusi", (15, 34), None), ("chiusi", None, 1),
+            ("altri", (10, 29), None),
+        ]
+
+    async def test_pagina_oltre_l_ultima(self):
+        catalogo = FakeCatalogo(5, 5, 5)
+        out = await self._pagina(catalogo, 2, ["aperto", "chiuso", "revocato"])
+        assert out.items == []
+        assert (out.total, out.total_pages) == (15, 1)
+        assert [s for s, *_ in self._sequenza(catalogo)] == [
+            "aperti", "aperti", "chiusi", "chiusi", "altri", "altri"
+        ]
+
+    async def test_altri_ordinati_come_i_chiusi(self):
+        catalogo = FakeCatalogo(1, 1, 1)
+        await self._pagina(catalogo, 1, ["aperto", "chiuso", "sospeso"], sort="scadenza_asc")
+        ordini = {catalogo.segmento_di(q): q.orders for q in catalogo.queries}
+        assert ordini["aperti"] == [("data_scadenza", False, False), ("id", False, None)]
+        assert ordini["chiusi"] == [("data_scadenza", True, False), ("id", False, None)]
+        assert ordini["altri"] == ordini["chiusi"]
 
 
 def _client_elenco(monkeypatch, secondary) -> httpx.AsyncClient:
@@ -743,6 +930,25 @@ class TestEndpointElencoOltreIlSegmento:
             resp = await client.get("/api/v1/bandi", params={"stato": "chiuso", "page": 2})
         assert resp.status_code == 200
         assert (len(resp.json()["items"]), resp.json()["total"]) == (20, 45)
+
+    @pytest.mark.parametrize("stato", ["sospeso", "revocato", "sospeso,revocato"])
+    async def test_filtro_sospeso_revocato_200(self, monkeypatch, stato):
+        catalogo = FakeCatalogo(1433, 747, 12)
+        async with _client_elenco(monkeypatch, catalogo) as client:
+            resp = await client.get("/api/v1/bandi", params={"stato": stato})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert (len(body["items"]), body["total"]) == (12, 12)
+        assert [catalogo.segmento_di(q) for q in catalogo.queries] == ["altri"]
+
+    async def test_filtro_aperto_e_sospeso_200(self, monkeypatch):
+        catalogo = FakeCatalogo(15, 747, 12)
+        async with _client_elenco(monkeypatch, catalogo) as client:
+            resp = await client.get("/api/v1/bandi", params={"stato": "aperto,sospeso"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert [i["id"] for i in body["items"]] == [*range(15), *range(ID_ALTRI, ID_ALTRI + 5)]
+        assert (body["total"], body["total_pages"]) == (27, 2)
 
     async def test_pagina_oltre_l_ultima_200_vuota(self, monkeypatch):
         async with _client_elenco(monkeypatch, FakeCatalogo(1433, 747)) as client:
@@ -894,6 +1100,23 @@ class TestMapping:
         assert detail.tematica == ["Smart cities"]
         assert detail.cta.url == "https://example.com/bando"
         assert detail.cta.origine == "link_bando"
+
+    def test_map_list_item_stato_da_verificare(self):
+        item = map_list_item({**self.ROW, "stato_da_verificare": "senza_conferma"})
+        assert item.stato_da_verificare == "senza_conferma"
+        assert map_list_item(self.ROW).stato_da_verificare is None
+
+    @pytest.mark.parametrize("valore", ["motivo_nuovo", "", 3, ["senza_conferma"], {"a": 1}])
+    def test_stato_da_verificare_sconosciuto_diventa_none(self, valore):
+        # Un motivo nuovo del catalogo o un valore non stringa: nessun errore.
+        item = map_list_item({**self.ROW, "stato_da_verificare": valore})
+        assert item.stato_da_verificare is None
+
+    def test_stato_da_verificare_non_cambia_lo_stato(self):
+        row = {**self.ROW, "stato_effettivo": "aperto", "stato_da_verificare": "termine_passato"}
+        item = map_list_item(row)
+        assert item.stato_effettivo == "aperto"
+        assert item.stato_da_verificare == "termine_passato"
 
     def test_map_handles_missing_embeds(self):
         row = {**self.ROW, "tipologie_bando": None, "bando_regioni": []}

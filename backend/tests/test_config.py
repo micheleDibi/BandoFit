@@ -7,6 +7,7 @@ altrimenti fornirebbe i valori che il test vuole assenti.
 """
 
 import logging
+import secrets
 import traceback
 
 import pytest
@@ -219,3 +220,57 @@ def test_intervallo_rimappatura_non_valido_nel_env_non_blocca_l_avvio(monkeypatc
         settings = get_settings()
     assert settings.rimappatura_fusi_intervallo_minuti == 60
     assert len(_errori_config(caplog)) == 1
+
+
+# --- monitoraggio_catalogo_chiave: segreta, tollerante, mai bloccante ---------
+
+
+def _avvisi_config(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records
+            if r.name == "bandofit.config" and r.levelno == logging.WARNING]
+
+
+def test_chiave_monitoraggio_di_default_assente(monkeypatch):
+    monkeypatch.delenv("MONITORAGGIO_CATALOGO_CHIAVE", raising=False)
+    assert _costruisci().monitoraggio_catalogo_chiave is None
+
+
+@pytest.mark.parametrize("valore", ["", "   ", None])
+def test_chiave_monitoraggio_vuota_non_configurata_senza_avvisi(caplog, valore):
+    with caplog.at_level(logging.WARNING, logger="bandofit.config"):
+        settings = _costruisci(monitoraggio_catalogo_chiave=valore)
+    assert settings.monitoraggio_catalogo_chiave is None
+    assert _avvisi_config(caplog) == []
+
+
+@pytest.mark.parametrize("lunghezza", [1, 31, 257, 1000])
+def test_chiave_monitoraggio_di_lunghezza_non_ammessa(caplog, lunghezza):
+    # Il prefisso non compare mai nel messaggio: anche una chiave di un solo
+    # carattere non può trovarcisi per caso.
+    chiave = ("Ω" + secrets.token_hex(600))[:lunghezza]
+    with caplog.at_level(logging.WARNING, logger="bandofit.config"):
+        settings = _costruisci(monitoraggio_catalogo_chiave=chiave)
+    assert settings.monitoraggio_catalogo_chiave is None
+    [avviso] = _avvisi_config(caplog)
+    assert "MONITORAGGIO_CATALOGO_CHIAVE" in avviso and "non configurato" in avviso
+    assert chiave not in caplog.text and str(lunghezza) not in avviso
+
+
+@pytest.mark.parametrize("lunghezza", [32, 64, 256])
+def test_chiave_monitoraggio_valida_e_segreta(caplog, lunghezza):
+    chiave = secrets.token_hex(200)[:lunghezza]
+    with caplog.at_level(logging.WARNING, logger="bandofit.config"):
+        settings = _costruisci(monitoraggio_catalogo_chiave=f"  {chiave}\n")
+    assert settings.monitoraggio_catalogo_chiave.get_secret_value() == chiave
+    assert _avvisi_config(caplog) == []
+    assert chiave not in repr(settings) and chiave not in str(settings)
+    assert chiave not in settings.model_dump_json()
+
+
+def test_chiave_monitoraggio_dal_env(monkeypatch):
+    chiave = secrets.token_urlsafe(48)
+    for nome, valore in _OBBLIGATORIE.items():
+        monkeypatch.setenv(nome.upper(), valore)
+    monkeypatch.setenv("MONITORAGGIO_CATALOGO_CHIAVE", chiave)
+    get_settings.cache_clear()
+    assert get_settings().monitoraggio_catalogo_chiave.get_secret_value() == chiave

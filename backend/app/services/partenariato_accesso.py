@@ -486,6 +486,7 @@ def _bando_pubblico(call: Mapping) -> BandoPubblicoCallOut:
         slug=str(call.get("bando_slug") or ""),
         titolo=str(call.get("bando_titolo") or ""),
         scadenza=call.get("bando_scadenza"),
+        stato_effettivo=call.get("bando_stato_effettivo"),
     )
 
 

@@ -22,6 +22,7 @@ from app.api.routers import (
     addons,
     admin_addons,
     admin_alerts,
+    admin_catalogo,
     admin_partenariati,
     admin_payments,
     admin_plans,
@@ -292,5 +293,6 @@ for router in (
     admin_alerts.router,
     admin_payments.router,
     admin_partenariati.router,
+    admin_catalogo.router,
 ):
     app.include_router(router, prefix=API_PREFIX)

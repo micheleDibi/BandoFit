@@ -29,13 +29,13 @@ Passi del WP5:
 - `chiusura_call`: chiusura d'ufficio delle bozze e delle call pubblicate
   (`partner_call_service.motivo_chiusura_auto`): azienda non viva →
   annullata; scadenza della call → scaduta; stato LIVE del bando
-  (`bando_pubblico`, a blocchi): chiuso o sospeso → scaduta, revocato →
-  annullata, assente → `bando_mancante_dal` e dopo 7 giorni annullata
-  (`bando_non_disponibile`). Un assente presente in `bando_fusione` è un
-  doppione fuso, non un bando mancante: nessuna marca, nessuna chiusura per
-  assenza, un log. Un errore di lettura del catalogo (o delle fusioni) non è
-  un'assenza: salta solo i motivi del bando. Snapshot del bando aggiornato
-  quando cambia. A ogni chiusura una notifica al creatore e al titolare
+  (`bando_pubblico`, a blocchi): chiuso → scaduta, revocato → annullata,
+  sospeso → nessuna chiusura (Q18), assente → `bando_mancante_dal` e dopo 7
+  giorni annullata (`bando_non_disponibile`). Un assente presente in
+  `bando_fusione` è un doppione fuso, non un bando mancante: nessuna marca,
+  nessuna chiusura per assenza, un log. Un errore di lettura del catalogo (o
+  delle fusioni) non è un'assenza: salta solo i motivi del bando. Snapshot
+  del bando aggiornato quando cambia. A ogni chiusura una notifica al creatore e al titolare
   (dedup per call).
 
 Passi del WP6:

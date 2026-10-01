@@ -1590,7 +1590,7 @@ class TestChiusuraInLettura:
 
     @pytest.mark.parametrize(
         ("stato_bando", "stato", "motivo"),
-        [("chiuso", "scaduta", "bando_chiuso"), ("sospeso", "scaduta", "bando_sospeso"),
+        [("chiuso", "scaduta", "bando_chiuso"),
          ("revocato", "chiusa_annullata", "bando_revocato")],
     )
     async def test_stato_del_bando(self, stato_bando, stato, motivo):
@@ -1600,6 +1600,28 @@ class TestChiusuraInLettura:
         secondary = FakeSecondary(pubblici=[riga_bando_pubblico(stato_effettivo=stato_bando)])
         out = await leggi(db, call, secondary=secondary)
         assert (out.stato, out.motivo_chiusura) == (stato, motivo)
+
+    async def test_bando_sospeso_la_call_resta_aperta(self):
+        # Q18: il sospeso può riaprire o chiudersi; la call non si chiude.
+        db = FakeDb()
+        call = db.call_pronta(stato="pubblicata", pubblicata_at=_iso(),
+                              scadenza_call=(oggi() + timedelta(days=10)).isoformat())
+        secondary = FakeSecondary(pubblici=[riga_bando_pubblico(stato_effettivo="sospeso")])
+        out = await leggi(db, call, secondary=secondary)
+        assert (out.stato, out.motivo_chiusura) == ("pubblicata", None)
+        assert db.chiamate("fn_partner_call_chiudi_auto") == []
+        assert db.tabelle["notifications"] == []
+
+    async def test_bozza_con_bando_sospeso_resta_bozza_non_pubblicabile(self):
+        db = FakeDb()
+        call = db.call_pronta()
+        secondary = FakeSecondary(pubblici=[riga_bando_pubblico(stato_effettivo="sospeso")])
+        out = await leggi(db, call, secondary=secondary)
+        assert (out.stato, out.motivo_chiusura) == ("bozza", None)
+        assert db.chiamate("fn_partner_call_chiudi_auto") == []
+        # resta il divieto di pubblicare su un bando sospeso
+        assert "bando_non_disponibile" in {m.codice for m in out.motivi_blocco}
+        assert out.puo_pubblicare is False
 
     async def test_bozza_con_bando_chiuso_annullata(self):
         db = FakeDb()
@@ -3290,6 +3312,15 @@ class TestLista:
         assert (card.mia, card.posizioni_n, card.requisiti_cercati_n) == (True, 1, 1)
         assert card.creatore.denominazione == "Azienda anonima"
         assert CANARY_RISERVATI not in pagina.model_dump_json()
+
+    async def test_stato_del_bando_sulla_card(self):
+        # C4/Q18: la card dice se il bando è sospeso (snapshot della call).
+        assert "bando_stato_effettivo" in pcs.LISTA_SELECT.split(",")
+        db = FakeDb()
+        db.call_pronta(bando_stato_effettivo="sospeso")
+        pagina = await pcs.lista_mie(db, FakeSecondary(), membro(), USER_MEMBRO)
+        [card] = pagina.items
+        assert card.bando.stato_effettivo == "sospeso"
 
     async def test_senza_azienda_pagina_vuota(self):
         senza = ActiveCompany(company_id=None, owner_id=OWNER, editable=True)

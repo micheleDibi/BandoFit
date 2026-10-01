@@ -12,10 +12,14 @@ import { RadioGroup } from "../ui/RadioGroup";
 import { Skeleton } from "../ui/states";
 import { FacetGroup } from "./FacetGroup";
 
+/** Valori del filtro di stato, nell'ordine dei risultati: aperti, chiusi, poi
+ *  sospesi e revocati (senza filtro questi ultimi non compaiono). */
 export const STATI = [
   { id: "aperto", label: "Aperto" },
   { id: "in apertura prossimamente", label: "In apertura" },
   { id: "chiuso", label: "Chiuso" },
+  { id: "sospeso", label: "Sospeso" },
+  { id: "revocato", label: "Revocato" },
 ] as const;
 
 const SCADENZE = [

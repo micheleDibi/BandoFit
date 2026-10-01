@@ -12,6 +12,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from functools import partial
 from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -34,14 +35,20 @@ from app.schemas.common import Page
 
 logger = logging.getLogger("bandofit.bandi_service")
 
-# Campi mostrati nelle card dell'elenco + embed di visualizzazione.
-LIST_SELECT = (
+# Campi mostrati nelle card dell'elenco + embed di visualizzazione, senza
+# `stato_da_verificare`: la base serve a chi legge molte righe e non mostra
+# card (candidati degli alert, a pagine da 1000).
+LIST_SELECT_BASE = (
     "id,slug,titolo,titolo_breve,descrizione_breve,stato_bando,stato_effettivo,livello,"
     "data_pubblicazione,data_apertura,data_scadenza,"
     "importo_totale_eur,importo_max_per_progetto_eur,ente_erogatore,"
     "tipologie_bando(id,nome),modalita_erogazione(id,nome),"
     "bando_regioni(regioni(id,nome))"
 )
+# Card dell'elenco (elenco, Home, preferiti). `stato_da_verificare` (contratto
+# DB bandi §4.1) si legge e basta: mai filtri né ordinamenti su quella colonna,
+# calcolata riga per riga alla lettura.
+LIST_SELECT = LIST_SELECT_BASE + ",stato_da_verificare"
 
 # Junction settori/beneficiari/ateco come SOLI id: non si mostrano in lista,
 # servono al punteggio di compatibilità e viaggiano nella stessa query. Si
@@ -60,7 +67,8 @@ COLONNE_RIPIEGO_51: tuple[str, ...] = ("link_candidatura", "link_bando", "allega
 
 def _detail_select(ripieghi: tuple[str, ...]) -> str:
     return (
-        "id,slug,titolo,titolo_breve,descrizione_breve,stato_bando,stato_effettivo,livello,"
+        "id,slug,titolo,titolo_breve,descrizione_breve,stato_bando,stato_effettivo,"
+        "stato_da_verificare,livello,"
         "data_pubblicazione,data_apertura,data_scadenza,ora_apertura,ora_scadenza,"
         "data_pubblicazione_verificata,data_apertura_verificata,data_scadenza_verificata,"
         "importo_totale_eur,importo_max_per_progetto_eur,ente_erogatore,"
@@ -209,16 +217,18 @@ def apply_filters(query, filters: BandiFilters, today: date | None = None):
     return query
 
 
-# I due segmenti poggiano su `stato_effettivo`, lo stato che il catalogo
+# I segmenti poggiano su `stato_effettivo`, lo stato che il catalogo
 # calcola alla lettura con data e ora di Roma (contratto DB bandi §4): la
 # scadenza è già dentro lo stato, quindi `today` non serve più (resta nella
 # firma, che usano anche alert e partenariati). 'sospeso', 'revocato' e
 # qualunque stato non previsto non sono né aperti né chiusi e restano fuori
 # da ENTRAMBI. Uno stato NULL conta come aperto: un bando non deve sparire
 # in silenzio dalle liste. PostgREST mette in AND questi filtri con gli
-# altri, ricerca full-text compresa.
+# altri, ricerca full-text compresa. Sospesi e revocati entrano nell'elenco
+# solo se il filtro di stato li chiede, in un terzo segmento in coda.
 
 STATI_APERTI = ("aperto", "in apertura prossimamente")
+STATI_ALTRI = ("sospeso", "revocato")
 
 
 def apply_open_tier(query, today: date):
@@ -231,6 +241,31 @@ def apply_open_tier(query, today: date):
 def apply_closed_tier(query, today: date):
     """Solo i bandi chiusi."""
     return query.eq("stato_effettivo", "chiuso")
+
+
+def apply_other_tier(query, today: date, stati: tuple[str, ...] = STATI_ALTRI):
+    """Solo i bandi negli stati «altri» indicati (sospesi, revocati)."""
+    return query.in_("stato_effettivo", list(stati))
+
+
+def segmenti_elenco(filters: BandiFilters, desc_open: bool, desc_closed: bool) -> list:
+    """Segmenti dell'elenco, nell'ordine, come (segmento, desc). Senza filtro
+    di stato: aperti, poi chiusi (sospesi e revocati esclusi). Con il filtro:
+    aperti → chiusi → altri, ciascuno solo se interseca gli stati chiesti; gli
+    altri sono ordinati come i chiusi. Il filtro dell'utente resta in AND
+    (`apply_filters`): con il solo `aperto` un bando senza stato non entra."""
+    if not filters.stato:
+        return [(apply_open_tier, desc_open), (apply_closed_tier, desc_closed)]
+    chiesti = set(filters.stato)
+    segmenti = []
+    if chiesti.intersection(STATI_APERTI):
+        segmenti.append((apply_open_tier, desc_open))
+    if "chiuso" in chiesti:
+        segmenti.append((apply_closed_tier, desc_closed))
+    altri = tuple(stato for stato in STATI_ALTRI if stato in chiesti)
+    if altri:
+        segmenti.append((partial(apply_other_tier, stati=altri), desc_closed))
+    return segmenti
 
 
 def _lookup(value: dict | None) -> dict | None:
@@ -287,6 +322,7 @@ def map_list_item(row: dict) -> BandoListItem:
         descrizione_breve=row.get("descrizione_breve"),
         stato_bando=row.get("stato_bando"),
         stato_effettivo=row.get("stato_effettivo"),
+        stato_da_verificare=row.get("stato_da_verificare"),
         livello=row.get("livello"),
         data_pubblicazione=row.get("data_pubblicazione"),
         data_apertura=row.get("data_apertura"),
@@ -375,11 +411,12 @@ async def fetch_bandi(
     company_facets: "CompanyFacets | None" = None,
     totale_regioni: int = 0,
 ) -> Page[BandoListItem]:
-    """Elenco paginato in due segmenti: prima i bandi non chiusi, poi i chiusi
-    — sempre in coda, qualunque ordinamento. PostgREST non sa ordinare per
-    espressioni, quindi il confine è realizzato con due query complementari;
-    la pagina a cavallo del confine unisce le due code. Una pagina oltre
-    l'ultima è vuota, con il totale esatto."""
+    """Elenco paginato a segmenti (`segmenti_elenco`): prima i bandi non
+    chiusi, poi i chiusi — sempre in coda, qualunque ordinamento — e, solo se
+    il filtro di stato li chiede, sospesi e revocati in fondo. PostgREST non
+    sa ordinare per espressioni, quindi i confini sono realizzati con query
+    complementari; una pagina a cavallo di un confine unisce le code. Una
+    pagina oltre l'ultima è vuota, con il totale esatto."""
     if filters.bando_ids is not None and not filters.bando_ids:
         # `id=in.()` non va mandato al catalogo: nessun id ammesso = pagina vuota.
         return Page.build([], 0, page, page_size)
@@ -394,32 +431,28 @@ async def fetch_bandi(
         q = tier(apply_filters(q, filters, today), today)
         return q.order(column, desc=desc, nullsfirst=False).order("id", desc=False)
 
-    # Pagina oltre le righe del segmento = pagina vuota con il conteggio
-    # riletto (`paginazione.pagina`, contratto DB bandi §8).
-    rows, open_count = await pagina(
-        lambda: segmento(apply_open_tier, desc_open), offset, page_size
-    )
+    rows: list[dict] = []
+    total = 0
+    for tier, desc in segmenti_elenco(filters, desc_open, desc_closed):
+        costruisci = partial(segmento, tier, desc)
+        need = page_size - len(rows)
+        if need > 0:
+            # Offset dentro il segmento: 0 se la pagina ci entra a cavallo del
+            # confine, oltre se cade tutta dentro. Pagina oltre le righe del
+            # segmento = pagina vuota con il conteggio riletto
+            # (`paginazione.pagina`, contratto DB bandi §8).
+            seg_rows, count = await pagina(costruisci, max(0, offset - total), need)
+            rows.extend(seg_rows)
+        else:
+            # Pagina già piena: del segmento serve solo il conteggio per il
+            # totale della paginazione.
+            resp = await costruisci().limit(1).execute()
+            count = resp.count or 0
+        total += count
 
-    need = page_size - len(rows)
-    if need > 0:
-        # Offset dentro il segmento dei chiusi: 0 se la pagina è a cavallo del
-        # confine, oltre se la pagina è tutta nel segmento dei chiusi.
-        closed_offset = max(0, offset - open_count)
-        closed_rows, closed_count = await pagina(
-            lambda: segmento(apply_closed_tier, desc_closed), closed_offset, need
-        )
-        rows.extend(closed_rows)
-    else:
-        # Pagina piena di non chiusi: serve comunque il conteggio dei chiusi
-        # per il totale della paginazione.
-        closed_resp = await segmento(apply_closed_tier, desc_closed).limit(1).execute()
-        closed_count = closed_resp.count or 0
-
-    total = open_count + closed_count
-
-    # Le due query non condividono uno snapshot: un bando che cambia segmento
-    # tra l'una e l'altra (pipeline di ingestione) comparirebbe in entrambe le
-    # code — dedup per id, la pagina si riassesta al refetch successivo.
+    # Le query non condividono uno snapshot: un bando che cambia segmento
+    # tra l'una e l'altra (pipeline di ingestione) comparirebbe in due code
+    # — dedup per id, la pagina si riassesta al refetch successivo.
     seen_ids: set = set()
     items = []
     for row in rows:

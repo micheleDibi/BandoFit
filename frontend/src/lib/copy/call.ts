@@ -71,6 +71,10 @@ export const CALL_COPY = {
     creatore_annullata: "L'hai annullata tu.",
     moderazione: "È stata chiusa dalla moderazione.",
   } satisfies Record<MotivoChiusuraCall, string>,
+  /** Bando sospeso: la call resta aperta (avviso nella pagina, chip sulla card). */
+  bandoSospeso:
+    "Il bando è sospeso: la call resta aperta, ma per ora non si possono presentare domande al bando.",
+  bandoSospesoChip: "Bando sospeso",
 
   ruoliCreatore: {
     capofila: "Sono il capofila e cerco partner",

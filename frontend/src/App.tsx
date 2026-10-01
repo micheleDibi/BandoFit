@@ -12,6 +12,7 @@ import Abbonamento from "./pages/Abbonamento";
 import Collegati from "./pages/Collegati";
 import AccettaInvito from "./pages/AccettaInvito";
 import AdminAddon from "./pages/AdminAddon";
+import AdminCatalogo from "./pages/AdminCatalogo";
 import AdminPagamenti from "./pages/AdminPagamenti";
 import AdminPartenariati from "./pages/AdminPartenariati";
 import AdminPiani from "./pages/AdminPiani";
@@ -160,6 +161,8 @@ export default function App() {
           <Route path="admin/piani" element={<AdminPiani />} />
           <Route path="admin/addon" element={<AdminAddon />} />
           <Route path="admin/pagamenti" element={<AdminPagamenti />} />
+          {/* Monitoraggio del catalogo bandi: solo admin. */}
+          <Route path="admin/catalogo" element={<AdminCatalogo />} />
           {/* Pannello admin dei partenariati (WP9): admin E modulo acceso. */}
           <Route
             element={

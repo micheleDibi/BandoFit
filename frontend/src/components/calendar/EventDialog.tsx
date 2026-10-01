@@ -9,6 +9,7 @@ import {
 import { apiErrorMessage } from "../../lib/api";
 import { formatDate } from "../../lib/format";
 import type { CalendarEvent } from "../../types";
+import { StatoBadge } from "../bandi/badges";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Checkbox } from "../ui/Checkbox";
@@ -18,6 +19,14 @@ import { TextareaField, TextField } from "../ui/Field";
 import { InlineError } from "../ui/InlineError";
 import { TextLink } from "../ui/TextLink";
 import { useToast } from "../ui/Toast";
+import { bandoNonInCorso, type StatoBandoNonInCorso } from "./items";
+
+/** Nota accanto allo stato di un bando che non è più in corso. */
+const NOTA_STATO_BANDO: Record<StatoBandoNonInCorso, string> = {
+  sospeso: "Il bando è sospeso: la scadenza potrebbe cambiare.",
+  revocato: "Il bando è stato revocato.",
+  chiuso: "Il bando è chiuso.",
+};
 
 export type DialogState =
   | { mode: "create"; date: string }
@@ -49,7 +58,9 @@ function initialForm(state: Exclude<DialogState, null>): FormState {
 }
 
 /** Dialog di creazione/modifica evento. Per gli eventi legati a un bando la
- *  data è la scadenza ufficiale: si mostrano solo titolo e note modificabili. */
+ *  data segue la scadenza del bando (la riallinea il server): si mostrano lo
+ *  stato del bando, con una nota se è chiuso, sospeso o revocato, e solo
+ *  titolo e note modificabili. */
 export function EventDialog({ state, onClose }: { state: DialogState; onClose: () => void }) {
   const createEvent = useCreateEvent();
   const updateEvent = useUpdateEvent();
@@ -65,6 +76,7 @@ export function EventDialog({ state, onClose }: { state: DialogState; onClose: (
   const open = state !== null;
   const editing = state?.mode === "edit" ? state.event : null;
   const isBando = editing?.tipo === "bando";
+  const statoNonInCorso = editing ? bandoNonInCorso(editing) : null;
 
   useEffect(() => {
     if (state) {
@@ -195,6 +207,12 @@ export function EventDialog({ state, onClose }: { state: DialogState; onClose: (
             onChange={(e) => setForm((f) => ({ ...f, titolo: e.target.value }))}
           />
 
+          {isBando && editing?.bando_stato && (
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-small text-ink-2">
+              <StatoBadge stato={editing.bando_stato} />
+              {statoNonInCorso && <span>{NOTA_STATO_BANDO[statoNonInCorso]}</span>}
+            </p>
+          )}
           {isBando ? (
             <Alert
               tono="info"
@@ -210,8 +228,8 @@ export function EventDialog({ state, onClose }: { state: DialogState; onClose: (
                 )
               }
             >
-              Scadenza del bando: <strong>{formatDate(form.data)}</strong>. La data non è
-              modificabile perché deriva dal bando ufficiale.
+              Scadenza del bando: <strong>{formatDate(form.data)}</strong>. La data segue la
+              scadenza del bando e si aggiorna da sola se cambia.
             </Alert>
           ) : (
             <>

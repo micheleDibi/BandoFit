@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { api, apiErrorCode } from "../lib/api";
 import type { AiChecksResponse } from "../types";
 import { useAuth } from "./useAuth";
 
@@ -63,6 +63,13 @@ export function useRequestAiCheck(slug: string | undefined) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ai-check", slug] });
       queryClient.invalidateQueries({ queryKey: ["ai-checks"] });
+    },
+    // Bando revocato dopo l'apertura della scheda (409 `bando_revocato`): la
+    // scheda si rilegge e mostra lo stato aggiornato, senza più l'avvio.
+    onError: (err) => {
+      if (apiErrorCode(err) === "bando_revocato") {
+        queryClient.invalidateQueries({ queryKey: ["bando", slug] });
+      }
     },
   });
 }

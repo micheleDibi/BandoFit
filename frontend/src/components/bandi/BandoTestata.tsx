@@ -1,6 +1,6 @@
 import { ExternalLink } from "lucide-react";
 import type { ReactNode } from "react";
-import type { OrigineLinkScheda } from "../../types";
+import type { MotivoDaVerificare, OrigineLinkScheda } from "../../types";
 import type { Area } from "../ui/area";
 import { buttonClasses } from "../ui/Button";
 import { Card } from "../ui/Card";
@@ -21,6 +21,8 @@ export interface BandoTestataProps {
   titolo: string;
   /** Stato del catalogo, in parole (`StatoBadge`). */
   stato: string | null;
+  /** Motivo per cui lo stato va controllato sulla fonte (`stato_da_verificare`). */
+  daVerificare?: MotivoDaVerificare | null;
   tipologia?: string | null;
   modalita?: string | null;
   /** Programma di finanziamento (PNRR, FESR…), accanto a tipologia e modalità. */
@@ -33,6 +35,8 @@ export interface BandoTestataProps {
   cta?: { url: string; host: string | null; origine?: OrigineLinkScheda } | null;
   /** Al posto di «Vai al bando» quando non c'è (bando non aperto): il perché. */
   notaSenzaCta?: string;
+  /** Sotto la fascia, prima dei fatti: la nota dello stato (`NotaStatoBando`). */
+  nota?: ReactNode;
   /** Azione secondaria accanto al primario (il segnalibro, variante `fascia`). */
   azioni?: ReactNode;
   /** Fatti chiave (scadenza con il tempo relativo, dotazione, contributo
@@ -51,12 +55,14 @@ export interface BandoTestataProps {
 export function BandoTestata({
   titolo,
   stato,
+  daVerificare,
   tipologia,
   modalita,
   programma,
   ente,
   cta,
   notaSenzaCta,
+  nota,
   azioni,
   fatti,
   azioneFatti,
@@ -70,7 +76,7 @@ export function BandoTestata({
         stileTitolo="bando"
         sopra={
           <>
-            <StatoBadge stato={stato} />
+            <StatoBadge stato={stato} daVerificare={daVerificare} />
             {tipologia && <span>{tipologia}</span>}
             {modalita && <span>{modalita}</span>}
             {programma && <span>{programma}</span>}
@@ -110,6 +116,7 @@ export function BandoTestata({
           )
         }
       />
+      {nota}
       {fatti.length > 0 && (
         <div className="flex flex-col gap-2">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

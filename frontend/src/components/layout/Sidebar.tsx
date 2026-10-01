@@ -1,4 +1,5 @@
 import {
+  Activity,
   Bookmark,
   Building2,
   CalendarDays,
@@ -71,6 +72,7 @@ const vociAdmin: Voce[] = [
   { to: "/app/admin/piani", label: "Piani", icon: Layers, area: "admin" },
   { to: "/app/admin/addon", label: "Add-on", icon: Package, area: "admin" },
   { to: "/app/admin/pagamenti", label: "Pagamenti", icon: CreditCard, area: "admin" },
+  { to: "/app/admin/catalogo", label: "Catalogo", icon: Activity, area: "admin" },
 ];
 // Solo a modulo acceso (WP9): moderazione, verifiche, call, metriche.
 const voceAdminPartenariati: Voce = {

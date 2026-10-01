@@ -56,12 +56,30 @@ export function itemChipLabel(item: CalendarItem): string {
   }
 }
 
+/** Stati del bando in cui la scadenza non è più da rispettare: l'evento passa
+ *  allo stile neutro e il dettaglio lo dice in parole. */
+const STATI_BANDO_NON_IN_CORSO = ["chiuso", "sospeso", "revocato"] as const;
+export type StatoBandoNonInCorso = (typeof STATI_BANDO_NON_IN_CORSO)[number];
+
+/** Lo stato del bando di un evento `bando` (all'ultimo allineamento) se è
+ *  chiuso, sospeso o revocato; null altrimenti (aperto, in apertura, ignoto,
+ *  evento personale). */
+export function bandoNonInCorso(event: CalendarEvent): StatoBandoNonInCorso | null {
+  if (event.tipo !== "bando") return null;
+  const stato = STATI_BANDO_NON_IN_CORSO.find((s) => s === event.bando_stato);
+  return stato ?? null;
+}
+
 /** Il tipo dell'item in parole (legenda, elenco del giorno, screen reader):
- *  il colore del chip non basta mai da solo. */
+ *  il colore del chip non basta mai da solo. Per un bando chiuso, sospeso o
+ *  revocato anche lo stato («Scadenza del bando sospeso»). */
 export function itemKindLabel(item: CalendarItem): string {
   switch (item.kind) {
-    case "evento":
-      return item.event.tipo === "bando" ? "Scadenza del bando" : "Evento personale";
+    case "evento": {
+      if (item.event.tipo !== "bando") return "Evento personale";
+      const stato = bandoNonInCorso(item.event);
+      return stato ? `Scadenza del bando ${stato}` : "Scadenza del bando";
+    }
     case "slot":
       return "Disponibilità";
     case "appuntamento":
@@ -71,7 +89,9 @@ export function itemKindLabel(item: CalendarItem): string {
 
 /** Ruoli di colore del calendario (docs/design-system.md, veste «Navy deciso»):
  *  personali in `accent` (fondo `accent-soft`, testo `accent-hover`); scadenze
- *  dei bandi nel corallo dell'area scadenze (`warm-soft` + `warm-ink`);
+ *  dei bandi nel corallo dell'area scadenze (`warm-soft` + `warm-ink`), in
+ *  neutro (`neutral-soft` + `neutral-ink`) se il bando è chiuso, sospeso o
+ *  revocato;
  *  disponibilità come slot vuoto (`sheet`, bordo tratteggiato `line-control`,
  *  testo `ink-2`); appuntamenti nel colore dell'area consulenze (soft + ink).
  *  I ruoli pieni hanno una barretta di 2px a sinistra nel colore base. Testo
@@ -82,6 +102,8 @@ export function itemKindLabel(item: CalendarItem): string {
 const RUOLI = {
   personale: "border border-transparent border-l-2 border-l-accent bg-accent-soft text-accent-hover",
   bando: "border border-transparent border-l-2 border-l-warm bg-warm-soft text-warm-ink",
+  "bando-neutro":
+    "border border-transparent border-l-2 border-l-ink-off bg-neutral-soft text-neutral-ink",
   slot: "border border-dashed border-line-control bg-sheet text-ink-2",
   appuntamento:
     "border border-transparent border-l-2 border-l-area-consulenze bg-area-consulenze-soft text-area-consulenze-ink",
@@ -92,7 +114,8 @@ export type RuoloCalendario = keyof typeof RUOLI;
 export function itemRuolo(item: CalendarItem): RuoloCalendario {
   switch (item.kind) {
     case "evento":
-      return item.event.tipo === "bando" ? "bando" : "personale";
+      if (item.event.tipo !== "bando") return "personale";
+      return bandoNonInCorso(item.event) ? "bando-neutro" : "bando";
     case "slot":
       return "slot";
     case "appuntamento":
@@ -109,6 +132,7 @@ export function ruoloClasses(ruolo: RuoloCalendario): string {
 const HOVER: Record<RuoloCalendario, string> = {
   personale: "hover:ring-1 hover:ring-inset hover:ring-accent",
   bando: "hover:ring-1 hover:ring-inset hover:ring-warm",
+  "bando-neutro": "hover:ring-1 hover:ring-inset hover:ring-ink-3",
   slot: "hover:bg-desk",
   appuntamento: "hover:ring-1 hover:ring-inset hover:ring-area-consulenze",
 };
@@ -120,13 +144,15 @@ export function itemChipClasses(item: CalendarItem): string {
 }
 
 /** Pallino presentazionale (celle mobile), 8px. Scadenze e appuntamenti pieni
- *  nell'ink del ruolo: il base del corallo e quello delle consulenze sul
- *  bianco e sul `desk` stanno sotto il 3:1 dei segni grafici. Personali tenui
+ *  nell'ink del ruolo (le scadenze dei bandi non in corso in `ink-3`): il base
+ *  del corallo e quello delle consulenze sul bianco e sul `desk` stanno sotto
+ *  il 3:1 dei segni grafici. Personali tenui
  *  con l'anello `accent` (la forma li distingue dai pieni anche senza colore),
  *  disponibilità vuote con l'anello `ink-3`. */
 const PALLINI: Record<RuoloCalendario, string> = {
   personale: "bg-accent-soft ring-1 ring-inset ring-accent",
   bando: "bg-warm-ink",
+  "bando-neutro": "bg-ink-3",
   slot: "bg-sheet ring-1 ring-inset ring-ink-3",
   appuntamento: "bg-area-consulenze-ink",
 };

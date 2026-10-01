@@ -1,7 +1,9 @@
 import { CalendarPlus } from "lucide-react";
 import type { ReactNode } from "react";
+import { StatoBadge } from "../../../components/bandi/badges";
 import { BandoRow, BandoRowSkeleton } from "../../../components/bandi/BandoRow";
 import { BandoTestata } from "../../../components/bandi/BandoTestata";
+import { NotaStatoBando } from "../../../components/bandi/NotaStato";
 import { Button } from "../../../components/ui/Button";
 import { tempoRelativo } from "../../../components/ui/Due";
 import { formatDate, formatEur, toLocalIsoDate } from "../../../lib/format";
@@ -96,6 +98,45 @@ const BANDI: BandoListItem[] = [
   }),
 ];
 
+/** Gli stati del giro 3: sospeso, revocato e i due «da verificare». */
+const BANDI_ALTRI_STATI: BandoListItem[] = [
+  finto({
+    id: 5,
+    titolo: "Contributi per l'efficienza energetica delle piccole imprese",
+    descrizione_breve: "Sportello sospeso dall'ente: può riaprire o chiudersi.",
+    stato_bando: "sospeso",
+    stato_effettivo: "sospeso",
+    data_scadenza: traGiorni(5),
+    importo_totale_eur: 500000,
+  }),
+  finto({
+    id: 6,
+    titolo: "Voucher per la digitalizzazione delle botteghe artigiane",
+    descrizione_breve: "Bando revocato dall'ente.",
+    stato_bando: "revocato",
+    stato_effettivo: "revocato",
+    data_scadenza: traGiorni(20),
+  }),
+  finto({
+    id: 7,
+    titolo: "Contributi per l'internazionalizzazione delle PMI piemontesi",
+    descrizione_breve: "Aperto, ma la pagina ufficiale indica uno stato diverso.",
+    stato_da_verificare: "smentito_dalla_fonte",
+    data_scadenza: traGiorni(12),
+    importo_max_per_progetto_eur: 40000,
+  }),
+  finto({
+    id: 8,
+    titolo: "Bando per le start-up innovative a vocazione sociale",
+    descrizione_breve: "In apertura, ma la data di apertura è passata senza conferma.",
+    stato_bando: "in apertura prossimamente",
+    stato_effettivo: "in apertura prossimamente",
+    stato_da_verificare: "data_apertura_passata",
+    data_apertura: traGiorni(-2),
+    data_scadenza: traGiorni(60),
+  }),
+];
+
 const SCADENZA = traGiorni(31);
 
 export default function Catalogo() {
@@ -110,6 +151,38 @@ export default function Catalogo() {
             <BandoRow key={bando.id} bando={bando} />
           ))}
         </ul>
+      </Blocco>
+
+      <Blocco
+        titolo="Stati del bando"
+        nota="Un solo stato per riga. Sospeso in ambra, Revocato come chiuso (senza conto alla rovescia); «da verificare» non cambia lo stato."
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <StatoBadge stato="aperto" />
+          <StatoBadge stato="aperto" daVerificare="senza_conferma" />
+          <StatoBadge stato="in apertura prossimamente" />
+          <StatoBadge stato="in apertura prossimamente" daVerificare="previsione_scaduta" />
+          <StatoBadge stato="chiuso" />
+          <StatoBadge stato="sospeso" />
+          <StatoBadge stato="revocato" />
+          <StatoBadge stato="chiuso" daVerificare="termine_passato" />
+        </div>
+        <ul className="flex flex-col border-t border-line">
+          {BANDI_ALTRI_STATI.map((bando) => (
+            <BandoRow key={bando.id} bando={bando} />
+          ))}
+        </ul>
+      </Blocco>
+
+      <Blocco
+        titolo="NotaStatoBando"
+        nota="Sotto la fascia della scheda: sospeso, revocato, aperto con un motivo da verificare. Il chiuso tiene la nota generica nella fascia."
+      >
+        <div className="flex flex-col gap-3">
+          <NotaStatoBando stato="sospeso" />
+          <NotaStatoBando stato="revocato" />
+          <NotaStatoBando stato="aperto" daVerificare="data_apertura_passata" />
+        </div>
       </Blocco>
 
       <Blocco titolo="BandoRowSkeleton" nota="Tre righe su sunken mentre arrivano i dati.">

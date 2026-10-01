@@ -166,6 +166,14 @@ class AiQuotaExceededError(AppError):
         super().__init__(429, "ai_quota_exceeded", message)
 
 
+class BandoRevocatoAiError(AppError):
+    """AI-check chiesto su un bando revocato (stato terminale del catalogo):
+    nessuna analisi nuova e nessun consumo; quelle già fatte restano leggibili."""
+
+    def __init__(self, message: str = "Il bando è stato revocato: l'AI-check non è disponibile."):
+        super().__init__(409, "bando_revocato", message)
+
+
 class PdfEngineUnavailableError(AppError):
     """Nessun motore PDF disponibile (WeasyPrint/ReportLab non importabili:
     librerie di sistema mancanti nell'immagine). La feature degrada, l'app no."""

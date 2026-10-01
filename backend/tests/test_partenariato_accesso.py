@@ -274,6 +274,22 @@ class TestCanary:
                             ident=ident)
         assert mia.wizard_passo == 1 and mia.updated_at is not None
 
+    @pytest.mark.parametrize("stato", ["sospeso", "aperto", None])
+    def test_stato_del_bando_nella_proiezione(self, stato):
+        # C4/Q18: lo snapshot `bando_stato_effettivo` esce come `bando.stato_effettivo`.
+        company, dati, persone = azienda()
+        ident = identificativi_azienda(company, dati, persone)
+        creatore = acc.creatore_pubblico(dati, {}, REGIONI)
+        call = call_canary(bando_stato_effettivo=stato)
+        assert proiezione(call).bando.stato_effettivo == stato
+        card = acc.call_card(call, creatore, posizioni_n=1, requisiti_cercati_n=2, mia=False,
+                             ident=ident)
+        assert card.bando.stato_effettivo == stato
+
+    def test_stato_del_bando_assente_none(self):
+        call = {k: v for k, v in call_canary().items() if k != "bando_stato_effettivo"}
+        assert proiezione(call).bando.stato_effettivo is None
+
     def test_forma_altra_non_esce(self):
         out = proiezione(call_canary(forma_aggregazione_prevista="altra"))
         assert out.forma_aggregazione_prevista is None

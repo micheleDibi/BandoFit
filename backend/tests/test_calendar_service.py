@@ -77,6 +77,40 @@ class TestCalendarEventIn:
             CalendarEventIn(titolo="X", data=date(2101, 1, 1))
 
 
+# ------------------------------------------------------- regole della scadenza
+
+class TestCampiScadenza:
+    """La funzione condivisa da creazione e riallineamento."""
+
+    @pytest.mark.parametrize(("data", "ora", "attesa"), [
+        ("2026-09-15", None, {"data": "2026-09-15", "tutto_il_giorno": True, "ora_inizio": None}),
+        ("2026-09-15", "12:00:00",
+         {"data": "2026-09-15", "tutto_il_giorno": False, "ora_inizio": "12:00:00"}),
+        (" 2026-09-15 ", "18:30",
+         {"data": "2026-09-15", "tutto_il_giorno": False, "ora_inizio": "18:30:00"}),
+        ("2026-09-15", "12:00:00+02",
+         {"data": "2026-09-15", "tutto_il_giorno": False, "ora_inizio": "12:00:00"}),
+        ("2026-09-15", "24:00",
+         {"data": "2026-09-15", "tutto_il_giorno": True, "ora_inizio": None}),
+        ("2026-09-15", "boh", {"data": "2026-09-15", "tutto_il_giorno": True, "ora_inizio": None}),
+        (date(2026, 9, 15), time(9, 0),
+         {"data": "2026-09-15", "tutto_il_giorno": False, "ora_inizio": "09:00:00"}),
+    ])
+    def test_data_e_ora(self, data, ora, attesa):
+        assert calendar_service.campi_scadenza(data, ora) == attesa
+
+    @pytest.mark.parametrize("data", [None, "", "boh", "2026-13-01", 20260915, True])
+    def test_senza_data_valida(self, data):
+        assert calendar_service.campi_scadenza(data, "12:00") is None
+
+    @pytest.mark.parametrize(("valore", "atteso"), [
+        ("aperto", "aperto"), ("stato_nuovo", "stato_nuovo"), (None, None), ("", None),
+        (" ", None), (1, None),
+    ])
+    def test_stato_del_bando(self, valore, atteso):
+        assert calendar_service.stato_del_bando(valore) == atteso
+
+
 # --------------------------------------------------------------------- lista
 
 class TestListEvents:
@@ -88,6 +122,14 @@ class TestListEvents:
         assert filters["data__lt"] == "2026-08-01"
         assert filters["user_id"] == USER_ID
         assert out.items[0].titolo == "Riunione"
+        assert out.items[0].bando_stato is None  # evento personale
+
+    async def test_scadenza_con_lo_stato_del_bando(self):
+        assert "bando_stato" in calendar_service.EVENT_SELECT.split(",")
+        riga = event_row(tipo="bando", bando_id=42, bando_slug="bando-x", bando_stato="revocato")
+        primary = FakeDb({"calendar_events": [riga]})
+        out = await calendar_service.list_events(primary, USER_ID, _active(), 2026, 7)
+        assert out.items[0].bando_stato == "revocato"
 
     async def test_rollover_dicembre(self):
         primary = FakeDb({"calendar_events": []})
@@ -156,7 +198,35 @@ class TestCreateBandoEvent:
         # la select: si verifica la costante.
         colonne = calendar_service.SNAPSHOT_SELECT.split(",")
         assert colonne == ["id", "slug", "titolo", "titolo_breve", "data_scadenza",
-                           "ora_scadenza", "data_scadenza_verificata"]
+                           "ora_scadenza", "data_scadenza_verificata", "stato_effettivo"]
+
+    async def test_salva_lo_stato_del_bando(self):
+        # Migration 0048: lo stato del catalogo entra in `bando_stato` e torna
+        # nella risposta.
+        primary = FakeDb({"calendar_events": []})
+        secondary = FakeDb({"bando_pubblico": [{**BANDO_VIVO, "stato_effettivo": "sospeso"}]})
+        out = await calendar_service.create_bando_event(
+            primary, secondary, USER_ID, _active(), "bando-x"
+        )
+        [(inserted, _)] = primary.ops_for("calendar_events", "insert")
+        assert inserted["bando_stato"] == "sospeso"
+        assert out.bando_stato == "sospeso"
+
+    @pytest.mark.parametrize("stato", [None, "", "  ", 3])
+    async def test_stato_assente_o_strano_resta_null(self, stato):
+        primary = FakeDb({"calendar_events": []})
+        secondary = FakeDb({"bando_pubblico": [{**BANDO_VIVO, "stato_effettivo": stato}]})
+        await calendar_service.create_bando_event(primary, secondary, USER_ID, _active(), "bando-x")
+        [(inserted, _)] = primary.ops_for("calendar_events", "insert")
+        assert inserted["bando_stato"] is None
+
+    @pytest.mark.parametrize("data_scadenza", ["", "boh", "2026-02-30", 20260915])
+    async def test_scadenza_non_valida_400(self, data_scadenza):
+        secondary = FakeDb({"bando_pubblico": [{**BANDO_VIVO, "data_scadenza": data_scadenza}]})
+        with pytest.raises(BadRequestError):
+            await calendar_service.create_bando_event(
+                FakeDb(), secondary, USER_ID, _active(), "bando-x"
+            )
 
     @pytest.mark.parametrize(
         ("ora_scadenza", "attesa"),

@@ -32,7 +32,7 @@ from app.schemas.bando import LookupsOut
 from app.services import email_service, lookup_service, notification_service
 from app.services.bandi_risoluzione import VISTA_BANDI
 from app.services.bandi_service import (
-    LIST_SELECT,
+    LIST_SELECT_BASE,
     SCORING_EMBEDS,
     apply_open_tier,
     bando_facet_ids,
@@ -45,7 +45,9 @@ logger = logging.getLogger("bandofit.bando_alerts")
 # Soglia di compatibilità (decisione di prodotto): punteggio del pre-check.
 PUNTEGGIO_MINIMO = 60
 
-CANDIDATE_SELECT = LIST_SELECT + SCORING_EMBEDS + ",created_at"
+# Senza `stato_da_verificare`: l'alert non lo usa e su migliaia di righe
+# costerebbe una funzione per riga (rischio di timeout del giro).
+CANDIDATE_SELECT = LIST_SELECT_BASE + SCORING_EMBEDS + ",created_at"
 
 # PostgREST del catalogo non restituisce mai più di 1000 righe per richiesta
 # (max-rows): i candidati si leggono a pagine, ordinate per id, finché non si

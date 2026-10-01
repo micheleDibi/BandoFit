@@ -78,6 +78,25 @@ export function bandoAperto(stato: string | null | undefined): boolean {
   return s === "aperto" || s === "in apertura prossimamente";
 }
 
+/** Stato del bando di una call come lo manda il server (`stato_effettivo` del
+ *  catalogo all'ultimo allineamento), null se manca. Tipo strutturale: vale
+ *  per la vista del creatore e per quella pubblica. */
+export function statoBandoCall(bando: {
+  scadenza: string | null;
+  stato_effettivo?: string | null;
+}): string | null {
+  return bando.stato_effettivo ?? null;
+}
+
+/** Bando sospeso: la call resta aperta, ma per ora al bando non si possono
+ *  presentare domande (si chiude se il bando chiude o viene revocato). */
+export function bandoCallSospeso(bando: {
+  scadenza: string | null;
+  stato_effettivo?: string | null;
+}): boolean {
+  return statoBandoCall(bando) === "sospeso";
+}
+
 // ---- Importi e percentuali (decimali come stringhe verso il server) ----------
 
 export type Lettura = { ok: true; valore: string | null } | { ok: false; errore: string };

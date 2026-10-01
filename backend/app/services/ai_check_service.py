@@ -28,6 +28,7 @@ from app.core.errors import (
     AiTimeoutError,
     AppError,
     BadRequestError,
+    BandoRevocatoAiError,
     ForbiddenError,
     NotFoundError,
 )
@@ -281,6 +282,10 @@ async def request_check(
         )
 
     bando = await bandi_service.fetch_bando_for_ai(secondary, bando_slug)
+    # Revocato = stato terminale del catalogo: nessuna analisi nuova, PRIMA di
+    # cooldown, quota e qualunque scrittura. Gli altri stati non cambiano.
+    if bando.get("stato_effettivo") == "revocato":
+        raise BandoRevocatoAiError()
 
     settings = get_settings()
     cooldown = timedelta(minutes=settings.ai_check_cooldown_minutes)

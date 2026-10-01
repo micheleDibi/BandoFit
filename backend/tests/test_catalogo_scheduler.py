@@ -2,15 +2,16 @@
 §6.2): modalità `spenta` | `prova` | `attiva` normalizzata dalla config,
 intervallo con un minimo, loop che sopravvive agli errori, avvio nel
 lifespan solo con una modalità accesa e mai bloccante con un valore non
-valido."""
+valido; riallineamento del calendario dopo la rimappatura, nella stessa
+modalità, che non la ferma mai."""
 
 import asyncio
 import logging
 
 import pytest
 
+from app.services import calendario_allineamento, rimappatura_fusi
 from app.services import catalogo_scheduler as cs
-from app.services import rimappatura_fusi
 
 
 @pytest.fixture(autouse=True)
@@ -39,6 +40,28 @@ def imposta(monkeypatch, **valori):
     for chiave, valore in valori.items():
         monkeypatch.setenv(chiave, str(valore))
     get_settings.cache_clear()
+
+
+CONTEGGI_CALENDARIO = {"eventi": 0, "bandi": 0, "date_aggiornate": 0, "stati_aggiornati": 0,
+                       "assenti": 0, "errori": 0}
+
+
+@pytest.fixture(autouse=True)
+def riallineamenti(monkeypatch):
+    """Sostituisce `calendario_allineamento.passo`: registra il flag `scrivi`."""
+    chiamate: list[bool] = []
+
+    async def passo(primary, secondary, *, scrivi):
+        chiamate.append(scrivi)
+        return dict(CONTEGGI_CALENDARIO)
+
+    monkeypatch.setattr(calendario_allineamento, "passo", passo)
+    return chiamate
+
+
+def righe_rimappatura(caplog) -> list:
+    return [r for r in caplog.records if r.name == "bandofit.catalogo_scheduler"
+            and "rimappatura fusi" in r.getMessage()]
 
 
 @pytest.fixture
@@ -104,7 +127,7 @@ class TestModalita:
         monkeypatch.setattr(rimappatura_fusi, "passo", passo)
         with caplog.at_level(logging.INFO, logger="bandofit.catalogo_scheduler"):
             await cs.esegui_passo(object(), object())
-        righe = [r for r in caplog.records if r.name == "bandofit.catalogo_scheduler"]
+        righe = righe_rimappatura(caplog)
         assert [r.levelno for r in righe] == [livello]
         assert "rimappatura fusi (prova)" in righe[0].getMessage()
 
@@ -130,10 +153,74 @@ class TestModalita:
         monkeypatch.setattr(rimappatura_fusi, "passo", passo)
         with caplog.at_level(logging.INFO, logger="bandofit.catalogo_scheduler"):
             report = await cs.esegui_passo(object(), object())
-        righe = [r for r in caplog.records if r.name == "bandofit.catalogo_scheduler"]
+        righe = righe_rimappatura(caplog)
         assert [r.levelno for r in righe] == [livello]
         assert "'coppie_catalogo': 6" in righe[0].getMessage()
         assert report["coppie_catalogo"] == 6
+
+
+class TestRiallineamento:
+    @pytest.mark.parametrize(("modalita", "scrivi"), [("prova", False), ("attiva", True)])
+    async def test_dopo_la_rimappatura_nella_stessa_modalita(
+        self, monkeypatch, caplog, riallineamenti, modalita, scrivi
+    ):
+        imposta(monkeypatch, RIMAPPATURA_FUSI_MODALITA=modalita)
+        ordine: list[str] = []
+
+        async def rimappa(primary, secondary, *, prova):
+            ordine.append("rimappatura")
+            return {"modalita": modalita, "errori": 0, "totali": {}, "coppie": []}
+
+        async def riallinea(primary, secondary, *, scrivi):
+            ordine.append(("riallineamento", scrivi))
+            return {**CONTEGGI_CALENDARIO, "eventi": 7, "stati_aggiornati": 2}
+
+        monkeypatch.setattr(rimappatura_fusi, "passo", rimappa)
+        monkeypatch.setattr(calendario_allineamento, "passo", riallinea)
+        with caplog.at_level(logging.INFO, logger="bandofit.catalogo_scheduler"):
+            report = await cs.esegui_passo(object(), object())
+        assert ordine == ["rimappatura", ("riallineamento", scrivi)]
+        assert report["modalita"] == modalita  # il report resta quello della rimappatura
+        [riga] = [r for r in caplog.records if "riallineamento calendario" in r.getMessage()]
+        assert riga.levelno == logging.INFO
+        assert f"riallineamento calendario ({modalita})" in riga.getMessage()
+        assert "'stati_aggiornati': 2" in riga.getMessage()
+
+    @pytest.mark.parametrize("valore", ["spenta", "boh"])
+    async def test_spenta_o_non_valida_nessun_riallineamento(
+        self, monkeypatch, passi, riallineamenti, valore
+    ):
+        imposta(monkeypatch, RIMAPPATURA_FUSI_MODALITA=valore)
+        assert await cs.esegui_passo(object(), object()) is None
+        assert riallineamenti == []
+
+    async def test_errori_a_warning(self, monkeypatch, caplog, passi):
+        imposta(monkeypatch, RIMAPPATURA_FUSI_MODALITA="attiva")
+
+        async def riallinea(primary, secondary, *, scrivi):
+            return {**CONTEGGI_CALENDARIO, "errori": 1}
+
+        monkeypatch.setattr(calendario_allineamento, "passo", riallinea)
+        with caplog.at_level(logging.INFO, logger="bandofit.catalogo_scheduler"):
+            await cs.esegui_passo(object(), object())
+        [riga] = [r for r in caplog.records if "riallineamento calendario" in r.getMessage()]
+        assert riga.levelno == logging.WARNING
+
+    async def test_eccezione_non_ferma_la_rimappatura(self, monkeypatch, caplog, passi):
+        imposta(monkeypatch, RIMAPPATURA_FUSI_MODALITA="attiva")
+
+        async def riallinea(primary, secondary, *, scrivi):
+            raise RuntimeError("dettaglio interno")
+
+        monkeypatch.setattr(calendario_allineamento, "passo", riallinea)
+        with caplog.at_level(logging.INFO, logger="bandofit.catalogo_scheduler"):
+            report = await cs.esegui_passo(object(), object())
+        assert passi == [False] and report["modalita"] == "attiva"
+        [riga] = [r for r in caplog.records if "riallineamento calendario" in r.getMessage()]
+        assert riga.levelno == logging.ERROR
+        assert "RuntimeError" in riga.getMessage()
+        assert "dettaglio interno" not in caplog.text
+        assert [r.levelno for r in righe_rimappatura(caplog)] == [logging.INFO]
 
 
 class TestLoop:

@@ -8,9 +8,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
+from fastapi import FastAPI
 
+from app.api import deps
 from app.api.deps import ActiveCompany
+from app.api.routers import ai_check as ai_check_router
 from app.clients.anthropic_ai import AiUsage
 from app.core.errors import (
     AiNotConfiguredError,
@@ -18,8 +22,10 @@ from app.core.errors import (
     AiTimeoutError,
     AppError,
     BadRequestError,
+    BandoRevocatoAiError,
     ForbiddenError,
     NotFoundError,
+    register_exception_handlers,
 )
 from app.schemas.ai_check import ExtractionResult, MatchingResult
 from app.services import ai_check_service, entitlement_service
@@ -449,6 +455,39 @@ class TestRequestCheck:
             await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
         assert err.value.code == "ai_check_in_progress"
         assert RILASCIO in primary.rpcs
+
+    async def test_bando_revocato_409_senza_consumi(self, spawned, fake_bando):
+        # Contratto C3: il 409 arriva PRIMA di cooldown, lock, quota e insert.
+        fake_bando["stato_effettivo"] = "revocato"
+        primary = FakePrimary(base_selects())
+        with pytest.raises(BandoRevocatoAiError) as err:
+            await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
+        assert err.value.status_code == 409
+        assert err.value.code == "bando_revocato"
+        assert err.value.message == "Il bando è stato revocato: l'AI-check non è disponibile."
+        assert not primary.ops_for("ai_checks", "insert")
+        assert not primary.ops_for("ai_checks", "select")  # nemmeno il cooldown
+        assert not primary.ops_for("api_usage_events", "insert")
+        assert not primary.ops_for("audit_log", "insert")
+        assert ACQUISIZIONE not in primary.rpcs
+        assert not [nome for nome, _ in primary.rpcs if nome == "fn_entitlement_snapshot"]
+        assert spawned == []
+
+    async def test_bando_revocato_vince_sulla_quota_esaurita(self, spawned, fake_bando):
+        fake_bando["stato_effettivo"] = "revocato"
+        primary = FakePrimary(base_selects(
+            user_subscriptions=[{**SUBSCRIPTION, "subscription_plans": {"ai_check": 0}}],
+        ))
+        with pytest.raises(BandoRevocatoAiError):
+            await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
+
+    @pytest.mark.parametrize("stato", ["sospeso", "chiuso", "aperto", None, "stato_nuovo"])
+    async def test_altri_stati_invariati(self, spawned, fake_bando, stato):
+        fake_bando["stato_effettivo"] = stato
+        primary = FakePrimary(base_selects())
+        out = await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
+        assert out.status == "pending"
+        assert primary.ops_for("ai_checks", "insert")
 
     async def test_happy_path(self, spawned, fake_bando):
         primary = FakePrimary(base_selects())
@@ -1074,3 +1113,49 @@ class TestVersioniPrompt:
         assert meta["company_pack_version"] == COMPANY_PACK_VERSION
         # nessuna colonna nuova scritta su ai_checks
         assert "match_prompt_version" not in update
+
+
+# ------------------------------------------------- endpoint, bando revocato
+
+def _client_ai_check(primary, *, utente: bool = True) -> httpx.AsyncClient:
+    """App minima con la rotta dell'AI-check e gli handler di `core/errors.py`."""
+    app = FastAPI()
+    register_exception_handlers(app)
+    app.include_router(ai_check_router.router, prefix="/api/v1")
+    if utente:
+        app.dependency_overrides[deps.get_current_user] = lambda: USER
+        app.dependency_overrides[deps.active_company] = lambda: _active()
+    app.dependency_overrides[deps.get_primary] = lambda: primary
+    app.dependency_overrides[deps.get_secondary] = lambda: None
+    app.dependency_overrides[deps.get_ai] = lambda: FakeAi()
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+class TestEndpointBandoRevocato:
+    async def test_409_bando_revocato(self, spawned, fake_bando):
+        fake_bando["stato_effettivo"] = "revocato"
+        primary = FakePrimary(base_selects())
+        async with _client_ai_check(primary) as client:
+            resp = await client.post("/api/v1/me/ai-checks", json={"bando_slug": SLUG})
+        assert resp.status_code == 409
+        assert resp.json() == {"error": {
+            "code": "bando_revocato",
+            "message": "Il bando è stato revocato: l'AI-check non è disponibile.",
+        }}
+        assert not primary.ops_for("ai_checks", "insert")
+        assert spawned == []
+
+    async def test_201_bando_sospeso(self, spawned, fake_bando):
+        fake_bando["stato_effettivo"] = "sospeso"
+        async with _client_ai_check(FakePrimary(base_selects())) as client:
+            resp = await client.post("/api/v1/me/ai-checks", json={"bando_slug": SLUG})
+        assert resp.status_code == 201
+        assert resp.json()["status"] == "pending"
+
+    async def test_401_senza_autenticazione(self, spawned, fake_bando):
+        fake_bando["stato_effettivo"] = "revocato"
+        primary = FakePrimary(base_selects())
+        async with _client_ai_check(primary, utente=False) as client:
+            resp = await client.post("/api/v1/me/ai-checks", json={"bando_slug": SLUG})
+        assert resp.status_code == 401
+        assert primary.ops == []

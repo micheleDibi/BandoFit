@@ -12,7 +12,14 @@ import {
   SceltaDirezione,
 } from "../components/partenariati/CandidaturaCard";
 import { CandidaturaDialog } from "../components/partenariati/CandidaturaDialog";
-import { descriviCriterio, linkCall, mostraDecimale, percentuale } from "../components/partenariati/callDati";
+import {
+  bandoCallSospeso,
+  descriviCriterio,
+  linkCall,
+  mostraDecimale,
+  percentuale,
+  statoBandoCall,
+} from "../components/partenariati/callDati";
 import { ConsorzioTab } from "../components/partenariati/ConsorzioTab";
 import { ConsultoCallCard } from "../components/partenariati/ConsultoCallCard";
 import { CallNonTrovata } from "../components/partenariati/UscitaCallSospesa";
@@ -25,6 +32,7 @@ import { SalvaCallButton } from "../components/partenariati/SalvaCallButton";
 import { SegnalaDialog } from "../components/partenariati/SegnalaDialog";
 import { SuggeritoCard } from "../components/partenariati/SuggeritoCard";
 import { useNomiCall } from "../components/partenariati/useNomiCall";
+import { bandoInCorso } from "../components/bandi/stato";
 import { Alert } from "../components/ui/Alert";
 import { Badge } from "../components/ui/Badge";
 import { Button, LinkButton } from "../components/ui/Button";
@@ -800,8 +808,9 @@ function Riservati({ call }: { call: CallDettaglioAltraAzienda }) {
   );
 }
 
-/** «La call in breve»: posizioni cercate, scadenza del bando e visibilità,
- *  nel pannello della colonna laterale. */
+/** «La call in breve»: posizioni cercate, scadenza del bando (il conto alla
+ *  rovescia solo con il bando in corso) e visibilità, nel pannello della
+ *  colonna laterale. */
 function CallInBreve({ call }: { call: CallVistaCreatore }) {
   const n = call.posizioni.length;
   return (
@@ -820,7 +829,7 @@ function CallInBreve({ call }: { call: CallVistaCreatore }) {
       </div>
       <div className="flex flex-col gap-1 border-t border-line pt-3">
         <p className="font-semibold text-ink">Scadenza del bando</p>
-        <Due data={call.bando.scadenza} />
+        <Due data={call.bando.scadenza} conConto={bandoInCorso(statoBandoCall(call.bando))} />
       </div>
       <div className="flex flex-col gap-1 border-t border-line pt-3">
         <p className="font-semibold text-ink">Visibilità</p>
@@ -922,6 +931,11 @@ export default function CallPartenariato() {
   const call = callQ.data;
   const titolo = call.titolo || "Call senza titolo";
   const relativo = call.scadenza_call ? tempoRelativo(call.scadenza_call) : "";
+  // Bando sospeso: la call (bozza o pubblicata) resta aperta, con l'avviso.
+  const avvisoBando =
+    (call.stato === "bozza" || call.stato === "pubblicata") && bandoCallSospeso(call.bando) ? (
+      <Alert tono="attenzione">{CALL_COPY.bandoSospeso}</Alert>
+    ) : null;
   const sopra = (
     <>
       <CallStatoBadge stato={call.stato} />
@@ -992,6 +1006,7 @@ export default function CallPartenariato() {
               }
             />
             {avvisi}
+            {avvisoBando}
             {schedeVisibili}
           </>
         }
@@ -1062,6 +1077,7 @@ export default function CallPartenariato() {
             }
           />
           {avvisi}
+          {avvisoBando}
           {schedeVisibili}
         </>
       }

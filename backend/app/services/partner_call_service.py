@@ -299,7 +299,6 @@ _MOTIVI_IDENTITA = {
 _CORPI_CHIUSURA = {
     "scadenza_call": "La call ha raggiunto la scadenza che avevi indicato.",
     "bando_chiuso": "Il bando della call si è chiuso.",
-    "bando_sospeso": "Il bando della call è stato sospeso.",
     "bando_revocato": "Il bando della call è stato revocato.",
     "bando_non_disponibile": "Il bando della call non è più disponibile nel catalogo.",
     "azienda_non_disponibile": "L'azienda della call è stata eliminata o archiviata.",
@@ -315,8 +314,8 @@ PERSONE_SELECT = "nome,cognome"
 PROFILO_PARTNER_SELECT = "company_profile_id,tipi_soggetto,competenze,certificazioni,esperienze"
 PARTENARIATO_SELECT = "bando_id,stato,esito,modalita_effettiva,regole,estratta_at,prompt_version"
 LISTA_SELECT = (
-    "id,bando_slug,bando_titolo,bando_scadenza,ruolo_creatore,titolo,budget_fascia,"
-    "scadenza_call,stato,pubblicata_at,wizard_passo,anonima,created_at,updated_at"
+    "id,bando_slug,bando_titolo,bando_scadenza,bando_stato_effettivo,ruolo_creatore,titolo,"
+    "budget_fascia,scadenza_call,stato,pubblicata_at,wizard_passo,anonima,created_at,updated_at"
 )
 BANDO_CATALOGO_SELECT = "id,slug,titolo,titolo_breve,programmi(id),tipologie_bando(id)"
 BANDO_FACET_SELECT = (
@@ -708,11 +707,12 @@ def motivo_chiusura_auto(
 
     Solo bozze e pubblicate. Nell'ordine: azienda non viva → annullata;
     scadenza della call passata (solo pubblicate: una bozza non scade) →
-    scaduta; bando revocato → annullata; chiuso o sospeso (Q18) → scaduta;
-    assente da `bando_pubblico` da almeno 7 giorni (`bando_mancante_dal`) →
-    annullata. Senza lettura del bando (`bando_letto=False`) i motivi del
-    bando non si valutano: un errore non è un'assenza. Da bozza la RPC chiude
-    sempre come annullata."""
+    scaduta; bando revocato → annullata; chiuso → scaduta; assente da
+    `bando_pubblico` da almeno 7 giorni (`bando_mancante_dal`) → annullata.
+    Un bando sospeso (Q18) NON chiude la call: può riaprire o chiudersi, e
+    la chiusura arriva solo con lo stato successivo. Senza lettura del bando
+    (`bando_letto=False`) i motivi del bando non si valutano: un errore non è
+    un'assenza. Da bozza la RPC chiude sempre come annullata."""
     stato = call.get("stato")
     if stato not in STATI_MODIFICABILI:
         return None
@@ -734,8 +734,6 @@ def motivo_chiusura_auto(
         return "chiusa_annullata", "bando_revocato"
     if effettivo == "chiuso":
         return "scaduta", "bando_chiuso"
-    if effettivo == "sospeso":
-        return "scaduta", "bando_sospeso"
     return None
 
 

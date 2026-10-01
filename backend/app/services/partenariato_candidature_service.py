@@ -149,7 +149,10 @@ CANDIDATURA_SELECT = (
     "messaggio,requisiti_dichiarati,valutazione,pseudonimo,stato,motivo_chiusura,"
     "motivo_rifiuto,scade_at,conversazione_id,decisa_at,chiusa_at,created_at"
 )
-CALL_RIF_SELECT = "id,bando_slug,bando_titolo,bando_scadenza,titolo,stato,scadenza_call,visibilita"
+CALL_RIF_SELECT = (
+    "id,bando_slug,bando_titolo,bando_scadenza,bando_stato_effettivo,titolo,stato,"
+    "scadenza_call,visibilita"
+)
 
 Direzione = Literal["inviate", "ricevute"]
 Lato = Literal["creatore", "partner"]
@@ -504,6 +507,7 @@ def call_riferimento(call: Mapping, ident: Identificativi | None = None) -> Call
             slug=str(call.get("bando_slug") or ""),
             titolo=str(call.get("bando_titolo") or ""),
             scadenza=call.get("bando_scadenza"),
+            stato_effettivo=call.get("bando_stato_effettivo"),
         ),
         stato=str(call.get("stato") or ""),
         scadenza_call=call.get("scadenza_call"),

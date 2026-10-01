@@ -27,6 +27,16 @@ export type StatoBando =
   | "sospeso"
   | "revocato";
 
+/** Perché lo stato di un bando aperto o in apertura va controllato sulla fonte
+ *  ufficiale (contratto DB bandi §4.1). Il motivo non cambia lo stato: un bando
+ *  «aperto · da verificare» resta fra gli aperti. Negli altri stati si ignora. */
+export type MotivoDaVerificare =
+  | "data_apertura_passata"
+  | "smentito_dalla_fonte"
+  | "previsione_scaduta"
+  | "senza_conferma"
+  | "termine_passato";
+
 /** Dettaglio di un requisito del pre-check. Le voci del bando sono alternative:
  *  `soddisfatta` è vera con ANCHE UNA SOLA voce in comune (`matched_ids`).
  *  `matched`/`totale` sono solo il dettaglio (voci in comune / voci elencate dal
@@ -60,6 +70,8 @@ export interface BandoListItem {
   /** Stato calcolato dal catalogo alla lettura (per esempio chiuso dopo la
    *  scadenza): è quello da mostrare, con `stato_bando` come ripiego. */
   stato_effettivo: StatoBando | null;
+  /** Motivo per cui lo stato va controllato sulla fonte; `null` se non serve. */
+  stato_da_verificare?: MotivoDaVerificare | null;
   livello: "flash_bando" | "guida_bando" | null;
   data_pubblicazione: string | null;
   data_apertura: string | null;
@@ -1046,6 +1058,9 @@ export interface CalendarEvent {
   tipo: "personale" | "bando";
   bando_id: number | null;
   bando_slug: string | null;
+  /** Stato del bando all'ultimo allineamento; `null` per gli eventi personali e
+   *  finché non è noto. Stringa libera del catalogo. */
+  bando_stato: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -2492,6 +2507,8 @@ export interface BandoPubblicoCall {
   slug: string;
   titolo: string;
   scadenza: string | null;
+  /** Stato del bando nella proiezione pubblica della call; assente sui backend precedenti. */
+  stato_effettivo?: string | null;
 }
 
 /** Requisito CERCATO: niente copertura del creatore, niente citazione. */

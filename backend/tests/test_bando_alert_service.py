@@ -11,6 +11,7 @@ from postgrest.exceptions import APIError
 
 from app.schemas.bando import LookupsOut
 from app.schemas.common import AtecoItem, LookupItem
+from app.services import bandi_service
 from app.services import bando_alert_service as svc
 from app.services.compatibility import CompanyFacets
 
@@ -825,6 +826,15 @@ class TestCaricaCandidati:
     @staticmethod
     def _righe(n: int) -> list[dict]:
         return [bando_row(id=i, slug=f"bando-{i}") for i in range(1, n + 1)]
+
+    def test_select_senza_stato_da_verificare(self):
+        # Contratto DB bandi §4.1: la colonna costa una funzione per riga e
+        # l'alert non la usa; resta solo nelle select delle card.
+        colonne = svc.CANDIDATE_SELECT.split(",")
+        assert "stato_da_verificare" not in colonne
+        assert "stato_effettivo" in colonne
+        assert svc.CANDIDATE_SELECT.startswith(svc.LIST_SELECT_BASE)
+        assert "stato_da_verificare" in bandi_service.LIST_SELECT.split(",")
 
     async def test_richiesta_sulla_vista(self):
         secondary = FakeClient(selects={"bando_pubblico": [bando_row()]})

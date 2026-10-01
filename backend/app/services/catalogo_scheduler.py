@@ -9,7 +9,11 @@ SOLO con `rimappatura_fusi_modalita` diversa da `spenta` (default).
 Il riassunto va a WARNING se il passo ha errori, coppie scartate o righe
 ripristinate (in prova: da ripristinare), altrimenti a INFO: le separazioni
 in attesa della vista, le righe in conflitto e i conflitti resi definitivi
-(scelte dell'utente) non lo alzano. Il primo passo
+(scelte dell'utente) non lo alzano. Nello stesso giro, dopo la rimappatura e
+nella stessa modalità, il riallineamento delle scadenze in calendario
+(`calendario_allineamento.passo`, migration 0048: in prova conta senza
+scrivere): conteggi a INFO, a WARNING con errori; una sua eccezione si
+scrive nel log e non ferma né la rimappatura né il loop. Il primo passo
 parte all'avvio, poi uno ogni
 `rimappatura_fusi_intervallo_minuti` (minimo 5). Nessun claim a DB: il passo
 è idempotente e le scritture si serializzano nella RPC. Il loop non muore
@@ -21,7 +25,7 @@ import asyncio
 import logging
 
 from app.core.config import INTERVALLO_RIMAPPATURA_MINIMO, get_settings
-from app.services import rimappatura_fusi
+from app.services import calendario_allineamento, rimappatura_fusi
 
 logger = logging.getLogger("bandofit.catalogo_scheduler")
 
@@ -55,7 +59,25 @@ async def esegui_passo(primary, secondary) -> dict | None:
         logging.WARNING if anomalo else logging.INFO,
         "rimappatura fusi (%s): %s", modalita, rimappatura_fusi.riassunto(report),
     )
+    await _riallinea_calendario(primary, secondary, modalita)
     return report
+
+
+async def _riallinea_calendario(primary, secondary, modalita: str) -> None:
+    """Riallineamento delle scadenze in calendario nella modalità del passo.
+    Un'eccezione resta qui (nel log solo il tipo, mai il messaggio)."""
+    try:
+        conteggi = await calendario_allineamento.passo(
+            primary, secondary, scrivi=modalita == "attiva"
+        )
+    except Exception as exc:  # noqa: BLE001 — non ferma la rimappatura né il loop
+        logger.error("riallineamento calendario (%s): errore inatteso (%s)",
+                     modalita, type(exc).__name__)
+        return
+    logger.log(
+        logging.WARNING if (conteggi.get("errori") or 0) > 0 else logging.INFO,
+        "riallineamento calendario (%s): %s", modalita, conteggi,
+    )
 
 
 async def run_forever(primary, secondary) -> None:

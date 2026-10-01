@@ -191,7 +191,7 @@ def _colonne_top(select: str) -> list[str]:
 # ------------------------------------------------------------------- select
 
 NUOVE_COLONNE = (
-    "stato_effettivo", "ora_apertura", "ora_scadenza", "data_pubblicazione_verificata",
+    "stato_effettivo", "stato_da_verificare", "ora_apertura", "ora_scadenza", "data_pubblicazione_verificata",
     "data_apertura_verificata", "data_scadenza_verificata", "fonte_ufficiale_e_atto",
 )
 DEPRECATE = ("link_candidatura", "link_bando", "allegati")
@@ -549,6 +549,12 @@ class TestMapDetailFaseC:
         assert detail.data_scadenza_verificata is True
         assert detail.fonte_ufficiale_e_atto is True
 
+    def test_stato_da_verificare(self):
+        detail = map_detail(_riga(1, "bando-a", stato_da_verificare="smentito_dalla_fonte"))
+        assert detail.stato_da_verificare == "smentito_dalla_fonte"
+        assert detail.stato_effettivo == "aperto"  # il motivo non cambia lo stato
+        assert map_detail(_riga(1, "bando-a")).stato_da_verificare is None
+
     def test_campi_della_vista_assenti_sono_none(self):
         riga = {k: v for k, v in CORRENTE.items() if k not in NUOVE_COLONNE}
         detail = map_detail(riga)
@@ -740,6 +746,19 @@ class TestEndpointDettaglio:
         body = resp.json()
         assert body["ora_scadenza"] is None
         assert body["ora_apertura"] is None
+
+    @pytest.mark.parametrize(
+        ("valore", "atteso"),
+        [("data_apertura_passata", "data_apertura_passata"), (None, None),
+         ("motivo_nuovo", None), (42, None)],
+    )
+    async def test_200_stato_da_verificare(self, monkeypatch, valore, atteso):
+        riga = _riga(1, "bando-a", stato_da_verificare=valore)
+        db = FakeSecondary({"bando_pubblico": [riga], "bando_link": []})
+        async with _client(monkeypatch, db) as client:
+            resp = await client.get("/api/v1/bandi/bando-a")
+        assert resp.status_code == 200
+        assert resp.json()["stato_da_verificare"] == atteso
 
     async def test_200_se_bando_link_fallisce(self, monkeypatch):
         errore = APIError({"message": "x", "code": "42501", "hint": None, "details": None})

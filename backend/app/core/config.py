@@ -1,7 +1,7 @@
 import logging
 from functools import lru_cache
 
-from pydantic import ValidationError, field_validator, model_validator
+from pydantic import SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("bandofit.config")
@@ -9,6 +9,9 @@ logger = logging.getLogger("bandofit.config")
 # Rimappatura dei bandi fusi: minuti fra due passi (default e minimo).
 INTERVALLO_RIMAPPATURA_DEFAULT = 60
 INTERVALLO_RIMAPPATURA_MINIMO = 5
+# Chiave del monitoraggio del catalogo: lunghezze ammesse (contratto DB bandi §14.1).
+CHIAVE_MONITORAGGIO_MIN = 32
+CHIAVE_MONITORAGGIO_MAX = 256
 
 
 class Settings(BaseSettings):
@@ -160,6 +163,13 @@ class Settings(BaseSettings):
     rimappatura_fusi_modalita: str = "spenta"
     rimappatura_fusi_intervallo_minuti: int = INTERVALLO_RIMAPPATURA_DEFAULT
 
+    # Monitoraggio del catalogo (pannello admin «Catalogo», contratto DB bandi
+    # §14): chiave consegnata dal fornitore del catalogo per un canale
+    # privato. Vuota = pannello non configurato (il backend non chiama). Una
+    # chiave fuori da 32-256 caratteri vale come non configurata, con un log
+    # WARNING che non la contiene. SecretStr: mai in repr, log o risposte.
+    monitoraggio_catalogo_chiave: SecretStr | None = None
+
     # AI-check (API Anthropic). Chiave vuota = feature disattivata (le rotte
     # rispondono 503 ai_not_configured). Ogni report costa ~0,10 $ di API.
     anthropic_api_key: str = ""
@@ -307,6 +317,23 @@ class Settings(BaseSettings):
             )
             return INTERVALLO_RIMAPPATURA_DEFAULT
         return minuti
+
+    @field_validator("monitoraggio_catalogo_chiave", mode="before")
+    @classmethod
+    def _chiave_monitoraggio(cls, valore):
+        if isinstance(valore, SecretStr):
+            valore = valore.get_secret_value()
+        if not isinstance(valore, str) or not valore.strip():
+            return None
+        valore = valore.strip()
+        if not CHIAVE_MONITORAGGIO_MIN <= len(valore) <= CHIAVE_MONITORAGGIO_MAX:
+            logger.warning(
+                "MONITORAGGIO_CATALOGO_CHIAVE di lunghezza non ammessa (%d-%d caratteri): "
+                "monitoraggio del catalogo non configurato",
+                CHIAVE_MONITORAGGIO_MIN, CHIAVE_MONITORAGGIO_MAX,
+            )
+            return None
+        return valore
 
     @model_validator(mode="after")
     def _segreti_obbligatori_in_produzione(self) -> "Settings":

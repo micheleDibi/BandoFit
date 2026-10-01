@@ -57,14 +57,18 @@ export function ActiveFilterChips({
 
   const chips: ChipAttivo[] = [];
 
-  // Prima i filtri della barra, nello stesso ordine dei pulsanti.
+  // Prima i filtri della barra, nello stesso ordine dei pulsanti. Lo stato con
+  // la sua parola, mai l'id: un valore sconosciuto (il server lo ignora) non ha chip.
   for (const id of filters.stato) {
-    chips.push({
-      key: `stato-${id}`,
-      label: STATI.find((s) => s.id === id)?.label ?? id,
-      onRemove: () => onToggleStato(id),
-      inBarra: true,
-    });
+    const stato = STATI.find((s) => s.id === id);
+    if (stato) {
+      chips.push({
+        key: `stato-${id}`,
+        label: stato.label,
+        onRemove: () => onToggleStato(id),
+        inBarra: true,
+      });
+    }
   }
   for (const { facet, lookup } of FACET_BARRA) {
     for (const id of filters[facet]) {

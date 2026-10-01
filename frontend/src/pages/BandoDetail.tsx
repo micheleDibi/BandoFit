@@ -18,6 +18,7 @@ import { BandoTestata, type FattoTestata } from "../components/bandi/BandoTestat
 import { CompatibilitaCard } from "../components/bandi/CompatibilitaCard";
 import { ConsultoCard } from "../components/bandi/ConsultoCard";
 import { ContenutoRenderer } from "../components/bandi/ContenutoRenderer";
+import { NotaStatoBando } from "../components/bandi/NotaStato";
 import { SaveBandoButton } from "../components/bandi/SaveBandoButton";
 import { bandoInCorso, dataConOra, statoDelBando } from "../components/bandi/stato";
 import { vaiASezionePartenariato } from "../components/partenariati/ancora";
@@ -142,8 +143,8 @@ export default function BandoDetail() {
     bando.link_fonte && bando.link_fonte.url !== cta?.url ? bando.link_fonte : null;
 
   // Solo i fatti con un dato reale: niente «—». Ognuno in una piccola card con
-  // l'icona colorata: la scadenza nel corallo delle scadenze, il resto nel blu
-  // dell'area bandi.
+  // l'icona colorata: la scadenza nel corallo delle scadenze (solo a bando in
+  // corso: altrimenti come il resto), il resto nel blu dell'area bandi.
   const fatti: FattoTestata[] = [];
   if (bando.data_scadenza) {
     const urgenza = statoScadenza(bando.data_scadenza);
@@ -156,7 +157,7 @@ export default function BandoDetail() {
         </span>
       ) : undefined,
       icon: CalendarClock,
-      area: "scadenze",
+      area: inCorso ? "scadenze" : "bandi",
     });
   }
   if (bando.importo_totale_eur !== null) {
@@ -229,7 +230,7 @@ export default function BandoDetail() {
       >
         <CompatibilitaCard bando={bando} />
         <div className="border-t border-line pt-3">
-          <AiCheckCard slug={bando.slug} />
+          <AiCheckCard slug={bando.slug} revocato={stato === "revocato"} />
         </div>
         <ConsultoCard slug={bando.slug} />
       </Panel>
@@ -285,14 +286,19 @@ export default function BandoDetail() {
           indietro={INDIETRO}
           titolo={titolo}
           stato={stato}
+          daVerificare={bando.stato_da_verificare}
           tipologia={bando.tipologia?.nome}
           modalita={bando.modalita_erogazione?.nome}
           programma={bando.programma?.nome}
           ente={bando.ente_erogatore}
           cta={cta}
+          // Sospeso e revocato hanno la loro nota sotto la fascia, al posto di quella generica.
           notaSenzaCta={
-            inCorso ? undefined : "Il bando non è aperto: la candidatura non è disponibile."
+            inCorso || stato === "sospeso" || stato === "revocato"
+              ? undefined
+              : "Il bando non è aperto: la candidatura non è disponibile."
           }
+          nota={<NotaStatoBando stato={stato} daVerificare={bando.stato_da_verificare} />}
           azioni={<SaveBandoButton bando={{ id: bando.id, slug: bando.slug }} variant="fascia" />}
           fatti={fatti}
           azioneFatti={azioneCalendario}

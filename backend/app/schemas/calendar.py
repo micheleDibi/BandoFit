@@ -92,6 +92,10 @@ class CalendarEventOut(BaseModel):
     tipo: Literal["personale", "bando"]
     bando_id: int | None = None
     bando_slug: str | None = None
+    # Stato del bando (`stato_effettivo` del catalogo) all'ultimo allineamento
+    # della scadenza (migration 0048): NULL per gli eventi personali e finché
+    # non è noto. Stringa libera: il catalogo può introdurre stati nuovi.
+    bando_stato: str | None = None
     created_at: datetime
     updated_at: datetime
 

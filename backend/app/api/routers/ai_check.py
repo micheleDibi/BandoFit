@@ -22,7 +22,8 @@ async def request_ai_check(
     ai: AiDep,
 ) -> AiCheckOut:
     """Avvia l'analisi di compatibilità azienda ↔ bando (consuma 1 AI-check
-    del piano). L'analisi gira in background: lo stato si segue con la GET."""
+    del piano). L'analisi gira in background: lo stato si segue con la GET.
+    Su un bando revocato: 409 `bando_revocato`, senza consumo."""
     return await ai_check_service.request_check(
         primary, secondary, ai, user, active, payload.bando_slug
     )

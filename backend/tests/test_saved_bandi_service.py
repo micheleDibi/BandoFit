@@ -394,6 +394,31 @@ class TestListSaved:
         assert mancante.bando.titolo == "Bando 99"  # dallo snapshot
         assert mancante.bando.stato_bando == "sospeso"
 
+    async def test_stato_da_verificare_dal_catalogo(self):
+        # Contratto DB bandi §4.1: la colonna arriva per nome dalla select
+        # dell'elenco; la card dallo snapshot non ha motivo.
+        assert "stato_da_verificare" in saved_bandi_service.LIST_SELECT.split(",")
+        rows = [saved_row(42), saved_row(99)]
+        primary = FakeDb({"saved_bandi": rows, "calendar_events": []})
+        secondary = FakeDb({"bando_pubblico": [
+            {**BANDO_VIVO, "stato_da_verificare": "senza_conferma"}
+        ]})
+
+        page = await saved_bandi_service.list_saved(primary, secondary, USER_ID, _active(), 1, 20)
+        vivo, sparito = page.items
+        assert vivo.bando.stato_effettivo == "aperto"
+        assert vivo.bando.stato_da_verificare == "senza_conferma"
+        assert sparito.bando.stato_da_verificare is None
+
+    async def test_stato_da_verificare_sconosciuto_non_rompe_la_lista(self):
+        primary = FakeDb({"saved_bandi": [saved_row(42)], "calendar_events": []})
+        secondary = FakeDb({"bando_pubblico": [{**BANDO_VIVO, "stato_da_verificare": "nuovo"}]})
+
+        page = await saved_bandi_service.list_saved(primary, secondary, USER_ID, _active(), 1, 20)
+        [vivo] = page.items
+        assert vivo.disponibile is True
+        assert vivo.bando.stato_da_verificare is None
+
     async def test_spariti_per_fusione_rimandano_al_master(self):
         rows = [saved_row(42), saved_row(99), saved_row(100), saved_row(101)]
         primary = FakeDb({"saved_bandi": rows, "calendar_events": []})

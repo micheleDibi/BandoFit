@@ -2,7 +2,7 @@ import { Sparkles } from "lucide-react";
 import { useState } from "react";
 import { useAiChecksForBando, useRequestAiCheck } from "../../hooks/useAiCheck";
 import { useEntitlements } from "../../hooks/useEntitlements";
-import { apiErrorMessage } from "../../lib/api";
+import { apiErrorCode, apiErrorMessage } from "../../lib/api";
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { IconChip } from "../ui/IconChip";
@@ -13,10 +13,15 @@ import { Skeleton } from "../ui/states";
 import { TextLink } from "../ui/TextLink";
 import { AiEsitoBadge } from "./badges";
 
+/** Su un bando revocato l'AI-check non si avvia (409 `bando_revocato`). */
+const TESTO_REVOCATO = "Il bando è stato revocato: l'AI-check non è disponibile.";
+
 /** AI-check nel pannello «Fa per te?» della scheda del bando: avvio
  *  dell'analisi, stato dell'analisi in corso ed esito sintetico dell'ultimo
- *  report, con il rimando al report completo in fondo alla pagina. */
-export function AiCheckCard({ slug }: { slug: string }) {
+ *  report, con il rimando al report completo in fondo alla pagina. Con
+ *  `revocato` niente avvio (né quota né offerta di piani): le analisi già fatte
+ *  restano leggibili. */
+export function AiCheckCard({ slug, revocato = false }: { slug: string; revocato?: boolean }) {
   const { data, isPending, isError, refetch } = useAiChecksForBando(slug);
   const requestCheck = useRequestAiCheck(slug);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -42,7 +47,7 @@ export function AiCheckCard({ slug }: { slug: string }) {
       ? Math.max(0, membro.budget_membro - (membro.usati_membro ?? 0))
       : null; // null = illimitato
   const budgetEsaurito = membro !== null && budgetResiduo !== null && budgetResiduo <= 0;
-  const puoAvviare = editable || membro !== null;
+  const puoAvviare = (editable || membro !== null) && !revocato;
 
   const handleRequest = async () => {
     setActionError(null);
@@ -50,7 +55,9 @@ export function AiCheckCard({ slug }: { slug: string }) {
       await requestCheck.mutateAsync();
       setConfirmOpen(false);
     } catch (err) {
-      setActionError(apiErrorMessage(err));
+      setActionError(
+        apiErrorCode(err) === "bando_revocato" ? TESTO_REVOCATO : apiErrorMessage(err),
+      );
     }
   };
 
@@ -156,16 +163,19 @@ export function AiCheckCard({ slug }: { slug: string }) {
               {ctaDisabled && ctaHint && <p className="text-small text-ink-3">{ctaHint}</p>}
             </div>
           )}
+          {revocato && <p className="text-small text-ink-2">{TESTO_REVOCATO}</p>}
           {/* La quota anche con un report pronto: quanti ne restano prima di
               «Nuovo AI-check». */}
-          {fraseQuota && <p className="text-small text-ink-3">{fraseQuota}</p>}
+          {fraseQuota && !revocato && <p className="text-small text-ink-3">{fraseQuota}</p>}
         </>
       ) : (
         <>
           {latest?.status === "error" && (
             <InlineError>{latest.error_detail ?? "Analisi non riuscita: riprova."}</InlineError>
           )}
-          {puoAvviare ? (
+          {revocato ? (
+            <p className="text-small text-ink-2">{TESTO_REVOCATO}</p>
+          ) : puoAvviare ? (
             <>
               <Button
                 type="button"
@@ -182,15 +192,17 @@ export function AiCheckCard({ slug }: { slug: string }) {
           ) : (
             <p className="text-small text-ink-3">L'AI-check lo avvia il titolare dell'azienda.</p>
           )}
-          <p className="text-small text-ink-3">
-            L'AI confronta ogni requisito con i dati della tua azienda e cita i passaggi del
-            bando.
-            {fraseQuota ? ` ${fraseQuota}` : ""}
-          </p>
+          {!revocato && (
+            <p className="text-small text-ink-3">
+              L'AI confronta ogni requisito con i dati della tua azienda e cita i passaggi del
+              bando.
+              {fraseQuota ? ` ${fraseQuota}` : ""}
+            </p>
+          )}
         </>
       )}
 
-      {quota && quota.totale === 0 && !isPending && !isError && (
+      {quota && quota.totale === 0 && !revocato && !isPending && !isError && (
         <p className="text-small text-ink-3">
           Il tuo piano non include AI-check:{" "}
           <TextLink to="/app/abbonamento">passa a un piano superiore</TextLink> per usarli.

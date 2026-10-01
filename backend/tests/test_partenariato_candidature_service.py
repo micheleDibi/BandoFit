@@ -1479,6 +1479,25 @@ class TestRitiroEListe:
                                      direzione="ricevute")).items
         assert vista_x.call.titolo == f"Cerchiamo partner per {nome}"
 
+    async def test_stato_del_bando_nel_riferimento_alla_call(self, fondo):
+        # C4/Q18: candidature e conversazioni dicono se il bando è sospeso.
+        assert "bando_stato_effettivo" in svc.CALL_RIF_SELECT.split(",")
+        db, sec = await scenario_wp7()
+        await candida(db, sec)
+        [riga] = db.tabelle["partner_candidature"]
+        await svc.decidi(db, sec, attiva("X"), utente("X"), riga["id"], "accetta")
+        db.una("partner_calls", id=g.CALL_GUIDA_ID)["bando_stato_effettivo"] = "sospeso"
+        [vista_y] = (await svc.lista(db, sec, attiva("Y"), utente("Y"),
+                                     direzione="inviate")).items
+        assert vista_y.call.bando.stato_effettivo == "sospeso"
+        [conv] = (await chat.lista_conversazioni(db, sec, attiva("Y"), utente("Y"))).items
+        assert conv.call.bando.stato_effettivo == "sospeso"
+
+    def test_call_riferimento_senza_stato_del_bando(self):
+        out = svc.call_riferimento({"id": g.CALL_GUIDA_ID, "bando_slug": "b",
+                                    "bando_titolo": "Bando", "stato": "pubblicata"})
+        assert out.bando.stato_effettivo is None
+
     async def test_dettaglio_del_creatore_con_profilo_pubblico(self, fondo):
         db, sec = await scenario_wp7()
         out = await candida(db, sec)

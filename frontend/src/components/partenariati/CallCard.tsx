@@ -3,11 +3,13 @@ import { cn } from "../../lib/cn";
 import { CALL_COPY } from "../../lib/copy";
 import { formatDate } from "../../lib/format";
 import type { CallBacheca } from "../../types";
+import { bandoInCorso } from "../bandi/stato";
 import { Card } from "../ui/Card";
 import { Due } from "../ui/Due";
+import { Status } from "../ui/Status";
 import { LINK_ESTESO, SOPRA_LINK_ESTESO } from "../shared/linkEsteso";
 import { CLASSI_DIMENSIONALI } from "./AnteprimaPartnerCard";
-import { linkCall } from "./callDati";
+import { bandoCallSospeso, linkCall, statoBandoCall } from "./callDati";
 import { CallStatoBadge } from "./CallStatoBadge";
 import { AttenzioneBadge, MatchBadge } from "./MatchBadge";
 import { SalvaCallButton } from "./SalvaCallButton";
@@ -21,8 +23,9 @@ function conteggio(n: number, uno: string, molti: string) {
  *  (ruolo, posti, budget), date; a destra chi la propone (classe, regione,
  *  sezione ATECO; il nome solo per una call con il nome di un'azienda
  *  verificata, altrimenti «Azienda anonima»), il confronto con la tua azienda
- *  se c'è (`Fit`) e «Salva» per il titolare. La riga è un `<li>`: va dentro
- *  un `<ul>`. */
+ *  se c'è (`Fit`) e «Salva» per il titolare. Il conto alla rovescia solo con il
+ *  bando in corso; con il bando sospeso e la call aperta, «Bando sospeso»
+ *  accanto al bando. La riga è un `<li>`: va dentro un `<ul>`. */
 export function CallCard({ call, editable }: { call: CallBacheca; editable: boolean }) {
   const creatore = call.creatore;
   const classe = creatore.classe_dimensionale
@@ -32,6 +35,8 @@ export function CallCard({ call, editable }: { call: CallBacheca; editable: bool
   const titolo = call.titolo || "Call senza titolo";
   const posti = call.posti ?? call.posizioni_n;
   const candidature = call.candidature_ricevute ?? 0;
+  const sospeso =
+    (call.stato === "pubblicata" || call.stato === "bozza") && bandoCallSospeso(call.bando);
 
   const chiPropone = (
     <>
@@ -49,14 +54,17 @@ export function CallCard({ call, editable }: { call: CallBacheca; editable: bool
   return (
     <li>
       <Card interattiva area="partenariati" className="relative flex items-start gap-6">
-        <Due data={call.bando.scadenza} />
+        <Due data={call.bando.scadenza} conConto={bandoInCorso(statoBandoCall(call.bando))} />
         <div className="flex min-w-0 grow flex-col gap-1">
           <h3 className="font-sans text-row-title text-ink">
             <Link to={linkCall(call)} className={cn("rounded-mark hover:text-accent-hover", LINK_ESTESO)}>
               {titolo}
             </Link>
           </h3>
-          <p className="text-body text-ink-2">Bando: {call.bando.titolo}</p>
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-body text-ink-2">
+            <span>Bando: {call.bando.titolo}</span>
+            {sospeso && <Status tono="attenzione">{CALL_COPY.bandoSospesoChip}</Status>}
+          </p>
           <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-ink-2">
             {call.stato !== "pubblicata" && <CallStatoBadge stato={call.stato} />}
             <span>{CALL_COPY.ruoliCreatoreBrevi[call.ruolo_creatore]}</span>

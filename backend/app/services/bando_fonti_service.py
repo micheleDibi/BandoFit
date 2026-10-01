@@ -23,6 +23,7 @@ from typing import Any, Literal
 from urllib.parse import unquote, urlsplit
 
 from app.services.download_sicuro import url_negato
+from app.services.link_policy import senza_controlli
 from app.services.partenariato_prompts import scrub_menzioni
 
 logger = logging.getLogger("bandofit.partenariati")
@@ -323,12 +324,22 @@ def _nome_file(url: str) -> str:
         nome = unquote(urlsplit(url).path or "").rstrip("/").rsplit("/", 1)[-1]
     except ValueError:
         return ""
+    # La decodifica fa ricomparire caratteri di controllo e di direzione.
+    nome = senza_controlli(nome)
     nome = re.sub(r"\.(pdf|p7m)$", "", nome, flags=re.IGNORECASE)
     return " ".join(re.sub(r"[_\-+]+", " ", nome).split())
 
 
 def _etichetta(etichetta: str | None, url: str) -> str:
-    testo = " ".join((etichetta or "").split()) or _nome_file(url) or "Documento ufficiale"
+    """Etichetta del documento (esce dall'API ed entra nel prompt): senza
+    caratteri di controllo e di direzione del testo (`senza_controlli`, la
+    stessa pulizia degli allegati della scheda), spazi compressi, senza
+    menzioni dei domini esclusi, al massimo `MAX_ETICHETTA` caratteri."""
+    testo = (
+        " ".join(senza_controlli(etichetta or "").split())
+        or _nome_file(url)
+        or "Documento ufficiale"
+    )
     testo = scrub_menzioni(testo[: MAX_ETICHETTA * 4]).strip() or "Documento ufficiale"
     return testo[:MAX_ETICHETTA]
 

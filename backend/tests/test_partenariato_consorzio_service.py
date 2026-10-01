@@ -34,6 +34,7 @@ from app.schemas.partenariato_consorzio import (
     EsternoIn,
     MembroAggiornaIn,
     MembroConfermaIn,
+    RegolaOrigineOut,
 )
 from app.schemas.partner_call import RegoleCallSnapshot
 from app.services import partenariato_accesso as acc
@@ -1373,3 +1374,18 @@ class TestPrerequisiti:
                                                                      "proposto")
         assert (y["ruolo"], y["quota_percentuale"], y["posizione_id"]) == (
             "partner", "20.00", g.POS_P1)
+
+
+# -------------------------------------------- regola di origine in uscita
+
+
+@pytest.mark.parametrize("url", ["http://regione.example.it/a.pdf",
+                                 "https://regione.example.it/" + "a" * 5000, 7])
+def test_regola_origine_url_non_pubblicabile_none_senza_errori(url):
+    """Una citazione salvata prima del filtro (http, troppo lunga o non
+    stringa) esce senza link, mai un errore."""
+    cit = {"sezione": "D1-p3", "testo": "Almeno tre soggetti", "verificata": True,
+           "url_documento": url}
+    out = RegolaOrigineOut(fonte="bando", citazione=cit)
+    assert out.citazione.url_documento is None
+    assert out.citazione.testo == "Almeno tre soggetti"

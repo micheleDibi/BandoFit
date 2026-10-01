@@ -590,10 +590,35 @@ class TestCitazioneSnapshotOut:
             "https://regione.example.it/Avviso%20pubblico.pdf"
         )
 
-    def test_http_resta_un_errore_anche_nello_snapshot(self):
+    def test_http_nello_snapshot_diventa_none_senza_errori(self):
+        # Il validatore https di `CitazioneIn` non si eredita in uscita.
+        out = snapshot(modalita={**MODALITA, "citazione": {**citazione(),
+                                                            "url_documento": "http://x.it/a.pdf"}})
+        assert out.modalita.citazione.url_documento is None
+        assert out.modalita.citazione.testo == citazione()["testo"]
+
+    @pytest.mark.parametrize("url", ["http://regione.example.it/a.pdf",
+                                     "https://regione.example.it/" + "a" * 5000,
+                                     "HTTP://regione.example.it/a.pdf", "", 123, ["x"]])
+    def test_uscita_mai_un_errore(self, url):
+        # Righe salvate prima del filtro: http, troppo lunghe (oltre il massimo
+        # dell'ingresso) o non stringhe escono senza link, mai un errore.
+        out = pcs.CitazioneSnapshotOut(**citazione(), url_documento=url)
+        assert out.url_documento is None
+        if not isinstance(url, str):
+            return
+        cit = pcs.CitazioneIn.model_construct(**citazione(), url_documento=url)
+        req = pcs.RequisitoOut(testo="Testo", origine="manuale", citazione=cit)
+        assert req.citazione.url_documento is None
+        assert req.model_dump()["citazione"]["url_documento"] is None
+
+    def test_ingresso_invariato_http_e_troppo_lungo_sono_errori(self):
         with pytest.raises(ValidationError):
-            snapshot(modalita={**MODALITA, "citazione": {**citazione(),
-                                                          "url_documento": "http://x.it/a.pdf"}})
+            pcs.CitazioneIn(**citazione(), url_documento="http://x.it/a.pdf")
+        with pytest.raises(ValidationError) as exc:
+            pcs.CitazioneIn(**citazione(),
+                            url_documento="https://regione.example.it/" + "a" * 5000)
+        assert exc.value.errors()[0]["type"] == "string_too_long"
 
     @pytest.mark.parametrize("url", NON_AMMESSI)
     def test_requisito_out_accetta_una_citazione_in_e_la_filtra(self, url):

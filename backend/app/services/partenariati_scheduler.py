@@ -196,8 +196,12 @@ async def _call_aperte(primary) -> list[dict]:
         except APIError as exc:
             if exc.code != CODICE_INTERVALLO_NON_SODDISFACIBILE:
                 raise
-            # Le righe sono calate fra una pagina e l'altra: l'intervallo
-            # oltre la fine vale come pagina vuota, la lettura è finita.
+            # Controllo DIFENSIVO: la query non chiede il conteggio
+            # (`count`), e senza conteggio PostgREST risponde a un offset
+            # oltre la fine con una pagina vuota, non con `PGRST103`. Il ramo
+            # serve solo se un giorno la query chiedesse il conteggio (o
+            # PostgREST cambiasse comportamento): l'intervallo oltre la fine
+            # vale come pagina vuota, la lettura è finita.
             logger.info(
                 "partenariati scheduler: call aperte calate fra due pagine (offset %s), "
                 "lettura chiusa", offset,
@@ -362,9 +366,12 @@ async def _bandi_con_segnali(secondary, oggi: date) -> list[dict]:
         except APIError as exc:
             if exc.code != CODICE_INTERVALLO_NON_SODDISFACIBILE:
                 raise
-            # Il segmento si è ristretto fra una pagina e l'altra: per il
-            # catalogo l'intervallo non è soddisfacibile, per il batch è la
-            # fine della scansione.
+            # Controllo DIFENSIVO: la query non chiede il conteggio
+            # (`count`), e senza conteggio PostgREST risponde a un offset
+            # oltre la fine con una pagina vuota, non con `PGRST103`. Il ramo
+            # serve solo se un giorno la query chiedesse il conteggio (o
+            # PostgREST cambiasse comportamento): per il batch è la fine
+            # della scansione.
             logger.info(
                 "partenariati scheduler: bandi aperti calati fra due pagine (offset %s), "
                 "lettura chiusa", offset,

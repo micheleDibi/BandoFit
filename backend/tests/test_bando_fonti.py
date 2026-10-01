@@ -373,6 +373,32 @@ class TestSelezionaCandidati:
         assert "obiettivoeuropa" not in scelto.etichetta
         assert scelto.etichetta.startswith("Avviso")
 
+    @pytest.mark.parametrize(
+        ("grezza", "attesa"),
+        [
+            ("Avviso‮pubblico", "Avvisopubblico"),
+            ("Avviso\x07 pubblico\x00", "Avviso pubblico"),
+            ("Avviso​﻿ pubblico", "Avviso pubblico"),
+            ("  Avviso\n\tpubblico ", "Avviso pubblico"),
+            ("‮\x07​", "Bando 2026"),  # non resta nulla: il nome del file
+        ],
+    )
+    def test_etichetta_senza_caratteri_di_controllo(self, grezza, attesa):
+        # Stessa pulizia degli allegati della scheda: l'etichetta entra nel prompt.
+        links = [link("https://e.it/Bando_2026.pdf", etichetta=grezza)]
+        (scelto,) = seleziona_candidati(links, None, 4)
+        assert scelto.etichetta == attesa
+
+    def test_nome_del_file_senza_caratteri_di_controllo(self):
+        links = [link("https://e.it/Avviso%E2%80%AE_%07pubblico.pdf")]
+        (scelto,) = seleziona_candidati(links, None, 4)
+        assert scelto.etichetta == "Avviso pubblico"
+
+    def test_etichetta_del_jsonb_senza_caratteri_di_controllo(self):
+        allegati = [{"label": "Allegato‮ A\x07", "url": "https://e.it/a.pdf"}]
+        (scelto,) = seleziona_candidati(None, allegati, 4)
+        assert scelto.etichetta == "Allegato A"
+
     def test_dominio_dal_catalogo_o_dall_url(self):
         (a,) = seleziona_candidati([link("https://Www.Ente.it/a.pdf", dominio="Ente.it")], None, 1)
         assert a.dominio == "ente.it"

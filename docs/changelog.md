@@ -2,6 +2,16 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-10-01 — Ultimi rilievi minori: citazioni, etichette, menzioni, indici della rimappatura ⚠️ migration 0047
+
+Chiusura dei rilievi minori rimasti dalla revisione del giro precedente.
+- **Citazioni dei partenariati**: in uscita un `url_documento` non ammesso, `http`, più lungo di 2048 caratteri o non testuale esce `null`, senza errore, anche per le righe salvate prima del filtro (prima un dato storico fuori regola poteva dare un errore in lettura). Lo snapshot delle regole è anche il body della conferma: lì un URL `http` ora si salva senza link invece di dare 422. Le citazioni dei requisiti (`RequisitoIn`) non cambiano: `http` resta un errore 422.
+- **Etichette degli allegati**: un'etichetta ripetuta resta entro i 200 caratteri anche con il numero « (n)», perché si accorcia la base (prima arrivava a 204). Le etichette dei documenti ufficiali dei partenariati perdono i caratteri di controllo e di direzione del testo, come quelle della scheda (pulizia comune in `link_policy.senza_controlli`).
+- **Menzioni dei domini esclusi**: nei report AI-check storici e nelle etichette degli allegati si riconoscono anche scritte con caratteri Unicode compatibili (forma NFKC, punti a larghezza piena o ideografici). Il resto del testo non cambia.
+- **Rimappatura dei bandi fusi** (migration 0047, solo indici): quattro indici parziali su `audit_log` per le letture delle funzioni della 0044-0046. Solo prestazioni: senza, tutto funziona come prima.
+- **Scheduler dei partenariati**: il ramo per una pagina oltre la fine è segnato come controllo difensivo (con le query attuali non scatta); nessun cambio di comportamento.
+- **Azione manuale**: applicare la 0047 sul primario (dopo la 0046), poi deploy del backend. Non serve `notify pgrst`: non aggiunge funzioni.
+
 ## 2026-10-01 — Rilievi minori: rimappatura a catena, catalogo, partenariati, ritocchi della veste ⚠️ migration 0046
 
 Chiusura dei rilievi minori aperti dalle revisioni del giro 1 del catalogo e della nuova veste.

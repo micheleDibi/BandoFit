@@ -20,7 +20,6 @@ ripieghi: un warning nel log, mai un 5xx.
 """
 
 import logging
-import unicodedata
 from collections.abc import Iterator
 from typing import Any
 from urllib.parse import unquote, urlsplit
@@ -28,7 +27,12 @@ from urllib.parse import unquote, urlsplit
 from postgrest.exceptions import APIError
 
 from app.schemas.bando import AllegatoScheda, LinkScheda, OrigineLink
-from app.services.link_policy import host_pubblicabile, link_pubblicabile, scrub_text_mentions
+from app.services.link_policy import (
+    host_pubblicabile,
+    link_pubblicabile,
+    scrub_text_mentions,
+    senza_controlli,
+)
 
 logger = logging.getLogger("bandofit.bando_scheda_link")
 
@@ -106,24 +110,13 @@ def _testo(valore: Any) -> str | None:
     return valore or None
 
 
-def _senza_controlli(testo: str) -> str:
-    """Il testo senza caratteri di controllo e di direzione del testo
-    (categorie Cc e Cf): l'etichetta esce dall'API ed entra nel prompt. Quelli
-    di spaziatura (a capo, tabulazione) diventano uno spazio, per non unire
-    le parole."""
-    return "".join(
-        " " if c.isspace() else c
-        for c in testo
-        if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf")
-    )
-
-
 def _etichetta(valore: Any) -> str | None:
-    """Etichetta da mostrare: senza caratteri Cc/Cf, senza menzioni dei
-    domini esclusi, spazi compressi, al massimo `MAX_ETICHETTA` caratteri."""
+    """Etichetta da mostrare: senza caratteri Cc/Cf (`senza_controlli`),
+    senza menzioni dei domini esclusi, spazi compressi, al massimo
+    `MAX_ETICHETTA` caratteri."""
     if not isinstance(valore, str):
         return None
-    testo = scrub_text_mentions(_senza_controlli(valore))
+    testo = scrub_text_mentions(senza_controlli(valore))
     return _testo(" ".join(testo.split())[:MAX_ETICHETTA])
 
 
@@ -186,7 +179,7 @@ def _nome_file(url: str) -> str | None:
         return None
     # La decodifica fa ricomparire caratteri di controllo e di direzione
     # del testo (categorie Cc e Cf): via, prima di cercare l'estensione.
-    percorso = _senza_controlli(percorso)
+    percorso = senza_controlli(percorso)
     nome = percorso.rstrip("/").rsplit("/", 1)[-1]
     base, punto, estensione = nome.rpartition(".")
     if punto and estensione.lower() in _FORMATI_ESTENSIONE:
@@ -309,6 +302,13 @@ def _voci_jsonb(allegati: Any) -> Iterator[tuple[Any, str | None, str | None]]:
         yield url, etichetta, _formato_dichiarato(voce.get("tipo"))
 
 
+def _numerata(etichetta: str, n: int) -> str:
+    """«etichetta (n)» entro `MAX_ETICHETTA` caratteri: la base si accorcia
+    quanto serve per farci stare il numero."""
+    suffisso = f" ({n})"
+    return etichetta[: MAX_ETICHETTA - len(suffisso)].rstrip() + suffisso
+
+
 def calcola_allegati(
     riga: dict, link: list[dict], *, escludi: str | None = None
 ) -> list[AllegatoScheda]:
@@ -370,9 +370,9 @@ def calcola_allegati(
     for voce, etichetta in zip(visti.values(), etichette, strict=True):
         if etichetta in prime:
             n = 2
-            while f"{etichetta} ({n})" in usate:
+            while _numerata(etichetta, n) in usate:
                 n += 1
-            etichetta = f"{etichetta} ({n})"
+            etichetta = _numerata(etichetta, n)
             usate.add(etichetta)
         else:
             prime.add(etichetta)

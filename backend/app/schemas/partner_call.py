@@ -290,12 +290,20 @@ class CitazioneSnapshotOut(CitazioneIn):
     dello snapshot, regole di origine del validatore del consorzio. L'URL del
     documento ripassa dal filtro dei link della scheda
     (`url_documento_pubblicabile`), che vale pure per le righe salvate prima
-    del filtro: un URL non ammesso diventa None, mai un errore."""
+    del filtro: un URL non ammesso, `http`, più lungo di `_URL_CITAZIONE_MAX`
+    o non stringa diventa None, mai un errore. Lo snapshot è anche il body
+    della conferma delle regole (`RegoleConfermaIn`): lì vale la stessa
+    regola, senza 422."""
 
-    @field_validator("url_documento")
+    # Senza `max_length`: un URL troppo lungo lo scarta il validatore.
+    url_documento: str | None = None
+
+    # Stesso nome del validatore di `CitazioneIn`, che così non si eredita
+    # (con un nome diverso varrebbero entrambi, e `http` sarebbe un errore).
+    @field_validator("url_documento", mode="before")
     @classmethod
-    def _ammesso(cls, valore: str | None) -> str | None:
-        return _url_citazione(valore)
+    def _https(cls, valore: Any) -> str | None:
+        return _url_citazione(valore) if isinstance(valore, str) else None
 
 
 def _come_snapshot(valore: Any) -> Any:

@@ -11,6 +11,7 @@ seconda azienda di un Advisor), identità solo con la rivelazione accesa,
 segnalazione dei messaggi dell'altra azienda, riepilogo dei non letti."""
 
 import copy
+import re
 import uuid
 
 import pytest
@@ -44,7 +45,17 @@ from tests.test_partenariato_indice import (  # noqa: F401 — fixture autouse
 # Il numero intero (con lo spazio): una sua parte, come «333», può comparire
 # per caso nel token di disiscrizione dell'email.
 TELEFONO_Y = "333 1234567"
+# Il numero senza prefisso né spazi, da cercare nelle email senza i loro UUID.
+NUMERO_Y = TELEFONO_Y.split()[-1]
 TESTO_Y = f"Ciao, sono Laura del laboratorio: il mio numero è {TELEFONO_Y}."
+# Gli UUID dei link delle email (conversazione, token di disiscrizione) sono
+# casuali: tolti prima di cercare le cifre del numero, il controllo è
+# deterministico (il resto dell'email è fisso o in base32, senza la cifra 1).
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+
+
+def senza_uuid(testo: str) -> str:
+    return _UUID.sub("", testo)
 
 
 async def conversazione(fondo, *, rivela: bool = False, monkeypatch=None):
@@ -126,6 +137,9 @@ class TestMessaggi:
         for email in fondo.email:
             assert TELEFONO_Y not in email["text"] and "Laura" not in email["text"]
             assert TELEFONO_Y not in email["html"] and "Laura" not in email["html"]
+            # Nemmeno il numero senza spazi, in nessuna delle due forme.
+            assert NUMERO_Y not in senza_uuid(email["text"])
+            assert NUMERO_Y not in senza_uuid(email["html"])
             assert pseudo("Y") in email["text"]  # al creatore: lo pseudonimo della candidata
             assert RAGIONE["Y"] not in email["text"] and PIVA["Y"] not in email["text"]
         # seconda raffica senza lettura: nessun nuovo avviso

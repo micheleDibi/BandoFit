@@ -6,6 +6,7 @@ Il dominio bloccato non deve mai uscire dall'API: né dai link diretti
 fonti della scheda (`link_pubblicabile`, `host_pubblicabile`).
 """
 
+import unicodedata
 from types import SimpleNamespace
 
 import pytest
@@ -25,6 +26,7 @@ from app.services.link_policy import (
     normalizza_host,
     scrub_bando_row,
     scrub_text_mentions,
+    senza_controlli,
     url_documento_pubblicabile,
 )
 
@@ -629,6 +631,56 @@ class TestScrubTextMentions:
         )
         assert scrub_text_mentions(None) is None
         assert scrub_text_mentions(42) == 42
+
+    @pytest.mark.parametrize(
+        "menzione",
+        [
+            "obiettivoeuropa\uff0ecom",  # punto a larghezza piena
+            "obiettivoeuropa\u3002com",  # punto ideografico
+            "obiettivoeuropa\uff61com",  # punto ideografico a mezza larghezza
+            "\uff4f\uff42\uff49\uff45\uff54\uff54\uff49\uff56\uff4f"
+            "\uff45\uff55\uff52\uff4f\uff50\uff41\uff0e\uff43\uff4f\uff4d",
+            "\U0001d428biettivoeuropa.com",  # lettera matematica
+            "www\uff0eobiettivoeuropa.\uff23\uff2f\uff2d",
+            "https\uff1a//obiettivoeuropa\uff0ecom\uff0fbandi\uff0fx",
+        ],
+    )
+    def test_menzioni_in_forma_compatibile(self, menzione):
+        testo = f"Fonte: {menzione} — Bando à regia regionale ﬁnale"
+        pulito = scrub_text_mentions(testo)
+        assert "obiettivoeuropa" not in unicodedata.normalize("NFKC", pulito).lower()
+        # Il resto del testo resta com'era, legature e accenti compresi.
+        assert pulito.startswith("Fonte: ")
+        assert pulito.endswith(" — Bando à regia regionale ﬁnale")
+
+    def test_testo_non_normalizzato_senza_menzioni_intatto(self):
+        testo = "Ｂａｎｄｏ ﬁnale n° ½ — ｗｗｗ．regione．it e città\u3002"
+        assert scrub_text_mentions(testo) == testo
+
+    def test_struttura_con_menzione_compatibile(self):
+        dati = {"a": ["vedi obiettivoeuropa\uff0ecom ora", 3], "b": "pulito"}
+        assert scrub_text_mentions(dati) == {"a": ["vedi  ora", 3], "b": "pulito"}
+
+    def test_menzione_ascii_come_prima(self):
+        # Testo con una menzione ASCII e caratteri compatibili altrove: la
+        # sostituzione di sempre, il resto invariato.
+        testo = "ﬁ vedi https://www.obiettivoeuropa.com/x?y=1 e poi"
+        assert scrub_text_mentions(testo) == "ﬁ vedi  e poi"
+
+
+class TestSenzaControlli:
+    @pytest.mark.parametrize(
+        ("grezzo", "atteso"),
+        [
+            ("Avviso\u202epubblico", "Avvisopubblico"),
+            ("Avviso\x00 pubblico\x07", "Avviso pubblico"),
+            ("Avviso\u200b\ufeff pubblico", "Avviso pubblico"),
+            ("Avviso\n\tpubblico", "Avviso  pubblico"),
+            ("città — n° 3", "città — n° 3"),
+        ],
+    )
+    def test_via_controlli_e_direzione(self, grezzo, atteso):
+        assert senza_controlli(grezzo) == atteso
 
 
 class FakeSecondary:

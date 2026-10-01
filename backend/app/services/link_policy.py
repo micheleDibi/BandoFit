@@ -98,19 +98,63 @@ _MENTION = re.compile(
 )
 
 
+# Punti che un browser accetta fra le etichette di un host e che la forma
+# NFKC non riporta al punto ASCII (il «．» a larghezza piena sì).
+_PUNTI_IDEOGRAFICI = str.maketrans({"\u3002": ".", "\uff61": "."})
+
+
+def _senza_menzioni(testo: str) -> str:
+    """`_MENTION.sub("", testo)` e in più le menzioni visibili solo nella
+    forma NFKC del testo (es. «．» a larghezza piena al posto del punto,
+    lettere a larghezza piena o matematiche). La forma normalizzata, carattere
+    per carattere, serve solo a trovare le menzioni: dal testo originale si
+    tolgono i caratteri che le formano, il resto non cambia. Un testo senza
+    menzioni esce identico."""
+    testo = _MENTION.sub("", testo)
+    if "\u3002" not in testo and unicodedata.is_normalized("NFKC", testo):
+        return testo
+    normale: list[str] = []
+    origine: list[int] = []  # indice nel testo del carattere che ha dato ognuno
+    for indice, carattere in enumerate(testo):
+        forma = unicodedata.normalize("NFKC", carattere).translate(_PUNTI_IDEOGRAFICI)
+        normale.append(forma)
+        origine.extend([indice] * len(forma))
+    pezzi: list[str] = []
+    pos = 0
+    for menzione in _MENTION.finditer("".join(normale)):
+        pezzi.append(testo[pos : origine[menzione.start()]])
+        pos = max(pos, origine[menzione.end() - 1] + 1)
+    pezzi.append(testo[pos:])
+    return "".join(pezzi)
+
+
 def scrub_text_mentions(node: Any) -> Any:
     """Rimuove le menzioni testuali dei domini esclusi da una struttura
-    JSON-like. Serve ai report AI-check STORICI: le citazioni verbatim
-    (`testo_esatto`) di un report generato prima del filtro possono
-    contenere il dominio; i report nuovi nascono già puliti perché il
-    testo serializzato del bando è filtrato a monte."""
+    JSON-like, anche scritte con caratteri compatibili (forma NFKC). Serve ai
+    report AI-check STORICI: le citazioni verbatim (`testo_esatto`) di un
+    report generato prima del filtro possono contenere il dominio; i report
+    nuovi nascono già puliti perché il testo serializzato del bando è filtrato
+    a monte. Pulisce anche le etichette degli allegati della scheda."""
     if isinstance(node, str):
-        return _MENTION.sub("", node)
+        return _senza_menzioni(node)
     if isinstance(node, list):
         return [scrub_text_mentions(item) for item in node]
     if isinstance(node, dict):
         return {key: scrub_text_mentions(value) for key, value in node.items()}
     return node
+
+
+def senza_controlli(testo: str) -> str:
+    """Il testo senza caratteri di controllo e di direzione del testo
+    (categorie Cc e Cf), per le etichette dei documenti del catalogo che
+    escono dall'API ed entrano nei prompt (`bando_scheda_link`,
+    `bando_fonti_service`). Quelli di spaziatura (a capo, tabulazione)
+    diventano uno spazio, per non unire le parole."""
+    return "".join(
+        " " if c.isspace() else c
+        for c in testo
+        if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf")
+    )
 
 
 # Il renderer del frontend legge l'URL del segmento da `href ?? url`;

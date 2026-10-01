@@ -645,6 +645,30 @@ class TestEtichettaDelCatalogo:
         assert etichetta == " ".join(["parola"] * 1000)[:MAX_ETICHETTA].strip()
         assert len(etichetta) <= MAX_ETICHETTA and "  " not in etichetta
 
+    def test_numerata_entro_il_massimo(self):
+        # Il numero di ripetizione sta dentro `MAX_ETICHETTA`: la base si
+        # accorcia per fargli posto.
+        lunga = "x" * 250
+        link = [_link(i, "allegato", f"https://x.it/{i}.pdf", etichetta=lunga) for i in (1, 2, 3)]
+        etichette = [e for _, e, _, _ in _allegati(_riga(), link)]
+        assert etichette == ["x" * MAX_ETICHETTA, "x" * (MAX_ETICHETTA - 4) + " (2)",
+                             "x" * (MAX_ETICHETTA - 4) + " (3)"]
+        assert all(len(e) <= MAX_ETICHETTA for e in etichette)
+        assert len(set(etichette)) == len(etichette)
+
+    def test_numerata_lunga_senza_spazio_doppio(self):
+        # Base tagliata su uno spazio: niente spazio doppio prima del numero.
+        lunga = "a" * (MAX_ETICHETTA - 5) + " " + "b" * 50
+        link = [_link(i, "allegato", f"https://x.it/{i}.pdf", etichetta=lunga) for i in (1, 2)]
+        prima, seconda = (e for _, e, _, _ in _allegati(_riga(), link))
+        assert seconda == "a" * (MAX_ETICHETTA - 5) + " (2)"
+        assert len(prima) == MAX_ETICHETTA and prima != seconda
+
+    def test_menzione_a_larghezza_piena(self):
+        grezza = "Avviso da www.obiettivoeuropa．com/bandi"
+        link = [_link(1, "allegato", "https://x.it/a.pdf", etichetta=grezza)]
+        assert [e for _, e, _, _ in _allegati(_riga(), link)] == ["Avviso da"]
+
 
 class TestAllegatiEPulsante:
     """Un allegato con la stessa chiave del pulsante principale non si ripete

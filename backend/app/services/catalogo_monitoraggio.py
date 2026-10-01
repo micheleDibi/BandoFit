@@ -3,7 +3,8 @@
 
 Il DB del catalogo espone una funzione di sola lettura che restituisce un
 riepilogo neutro dello stato della raccolta dei bandi, protetta da una
-chiave consegnata per un canale privato (`MONITORAGGIO_CATALOGO_CHIAVE`).
+chiave generata sul server (`MONITORAGGIO_CATALOGO_CHIAVE`; nel catalogo è
+registrata solo la sua impronta).
 
 - Chiave non configurata → `non_configurato`, senza chiamare.
 - Chiamata: SOLO `POST /rest/v1/rpc/monitoraggio_catalogo` con

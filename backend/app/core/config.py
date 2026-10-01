@@ -164,8 +164,8 @@ class Settings(BaseSettings):
     rimappatura_fusi_intervallo_minuti: int = INTERVALLO_RIMAPPATURA_DEFAULT
 
     # Monitoraggio del catalogo (pannello admin «Catalogo», contratto DB bandi
-    # §14): chiave consegnata dal fornitore del catalogo per un canale
-    # privato. Vuota = pannello non configurato (il backend non chiama). Una
+    # §14): chiave generata sul server (nel catalogo va solo la sua
+    # impronta). Vuota = pannello non configurato (il backend non chiama). Una
     # chiave fuori da 32-256 caratteri vale come non configurata, con un log
     # WARNING che non la contiene. SecretStr: mai in repr, log o risposte.
     monitoraggio_catalogo_chiave: SecretStr | None = None

@@ -2,6 +2,10 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-10-01 — Doc: chiave del monitoraggio del catalogo
+
+Correzione della documentazione: la chiave del pannello «Catalogo» (`MONITORAGGIO_CATALOGO_CHIAVE`) non arriva dal fornitore del catalogo, si genera sul server di produzione senza mai stamparla e nel catalogo si registra solo la sua impronta sha256. Procedura (generazione, registrazione dell'impronta, rotazione) in `docs/deploy.md`, «Catalogo: monitoraggio»; aggiornati anche `docs/setup.md`, `.env.example` e due commenti del backend. Il pannello mostra «Dati non aggiornati» finché il catalogo non ha calcolato il primo riepilogo. Nessun cambio di codice.
+
 ## 2026-10-01 — Catalogo: bandi sospesi e revocati, stato da verificare, calendario allineato, monitoraggio ⚠️ migration 0048
 
 Il catalogo dei bandi si aggiorna più spesso e da solo: chiusure, proroghe e rettifiche delle date arrivano più volte al giorno, i doppioni si fondono in automatico e compaiono gli stati «sospeso» (può riaprire o chiudersi) e «revocato». BandoFit si prepara a mostrarli bene.

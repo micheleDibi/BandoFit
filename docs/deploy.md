@@ -45,7 +45,7 @@ Compila `.env`:
 | `REVOLUT_SECRET_KEY` + `REVOLUT_ENV` + `REVOLUT_WEBHOOK_SECRET` | pagamenti (Revolut Merchant API, migration 0026): chiave segreta del Merchant account (Revolut Business → APIs → Merchant API), ambiente (`production` in deploy: la **sandbox è un account Business separato** — sandbox-business.revolut.com — con chiavi **diverse**, da far corrispondere all'ambiente) e signing secret `wsk_...` restituito alla registrazione del webhook via API (verifica della firma HMAC — vedi «Pagamenti» sotto). Chiave vuota = modulo pagamenti disattivato (503), il resto dell'app funziona |
 | `PAYMENT_SCHEDULER_ATTIVO` / `PAYMENT_ORA_ESECUZIONE` | scheduler dei pagamenti (preavvisi, rinnovi automatici, retry, fine grazia, recupero righe del registro fatture): attivo di default, run giornaliera alle `06:00` locali (Europe/Rome). `false` = nessun rinnovo/downgrade automatico (utile in sviluppo) |
 | `RIMAPPATURA_FUSI_MODALITA` / `RIMAPPATURA_FUSI_INTERVALLO_MINUTI` | rimappatura periodica dei bandi fusi nel catalogo (migration 0043): **spenta di default**; `prova` conta senza modificare nulla, `attiva` scrive; un passo ogni 60 minuti. Nello stesso passo e con la stessa modalità gira il riallineamento delle scadenze in calendario (migration 0048, «Catalogo: riallineamento delle scadenze in calendario» sotto). Un valore non ammesso non blocca l'avvio e lascia un log ERROR: una modalità sconosciuta lascia la rimappatura spenta, un intervallo non intero o minore di 5 vale 60. `docker-compose.yml` le passa entrambe al container: si impostano nel `.env`. Procedura in «Accensione delle funzioni» sotto |
-| `MONITORAGGIO_CATALOGO_CHIAVE` | chiave del pannello admin «Catalogo» (monitoraggio della raccolta dei bandi, contratto DB bandi §14), consegnata dal fornitore del catalogo per un canale privato: **segreta**, 32-256 caratteri. Vuota = pannello «non configurato» e nessuna chiamata; una chiave di lunghezza non ammessa vale come vuota, con un log WARNING che non la riporta. `docker-compose.yml` la passa al container: si imposta nel `.env`. Mai nel frontend, in un URL o in un log; per controllarla vedi «Catalogo: monitoraggio» sotto |
+| `MONITORAGGIO_CATALOGO_CHIAVE` | chiave del pannello admin «Catalogo» (monitoraggio della raccolta dei bandi, contratto DB bandi §14), generata sul server e mai stampata (nel catalogo va solo la sua impronta sha256): **segreta**, 32-256 caratteri. Vuota = pannello «non configurato» e nessuna chiamata; una chiave di lunghezza non ammessa vale come vuota, con un log WARNING che non la riporta. `docker-compose.yml` la passa al container: si imposta nel `.env`. Mai nel frontend, in un URL o in un log; per controllarla vedi «Catalogo: monitoraggio» sotto |
 | `VITE_REVOLUT_MODE` | modalità del widget Revolut nel **browser**: `prod` in produzione — il default è `sandbox`, che non muove denaro vero e in produzione non funzionerebbe. Variabile `VITE_*`: cotta nel bundle, rebuild del frontend dopo la modifica |
 | `RATE_LIMIT_PEPPER` | **obbligatoria in deploy**: con `ENV=production` il backend si rifiuta di partire senza. Generarla con `openssl rand -hex 32`. Sceglierla **una volta sola** — cambiarla azzera i contatori anti-enumerazione in corso, perché i bucket derivano da lei; a modulo partenariati acceso rende da ricalcolare anche le chiavi dei collegamenti societari: finché il backfill notturno non le ricalcola (fino a 200 aziende per notte) quelle aziende non compaiono tra i suggerimenti né ricevono notifiche proattive |
 | `TRUSTED_PROXY_HOPS` | quanti proxy fidati stanno davanti al backend, default **2** (Cloudflare + reverse proxy). Vedi «IP del client» sotto: da regolare solo se la catena è diversa |
@@ -270,13 +270,39 @@ Il riassunto va nel log come `riallineamento calendario (<modalità>): {eventi, 
 
 Il pannello admin «Catalogo» (`/app/admin/catalogo`) mostra se la raccolta dei bandi sta funzionando, leggendo il riepilogo che il DB del catalogo espone (contratto DB bandi §14) con `GET /api/v1/admin/catalogo/monitoraggio`. Serve `MONITORAGGIO_CATALOGO_CHIAVE` nel `.env` (poi `docker compose up -d backend`). Il backend chiama il catalogo solo con un `POST` e la chiave nel corpo, al massimo **una volta al minuto per processo** (cache di 60 s di qualunque esito, errori compresi; il compose avvia un solo processo), con un timeout di 10 secondi.
 
+**Generare la chiave** (una volta; si rifà così anche per una rotazione). Sul server, nella cartella del progetto, come l'utente proprietario del `.env`: la chiave si scrive nel `.env` (una riga già presente viene sostituita, mai duplicata) e nel terminale esce **solo l'impronta**, mai la chiave. Prima conviene una copia del `.env` (`cp -p .env .env.bak`).
+
+```bash
+umask 077
+F='.env'
+CHIAVE=$(openssl rand -hex 32)
+{ grep -v '^MONITORAGGIO_CATALOGO_CHIAVE=' "$F" 2>/dev/null
+  printf 'MONITORAGGIO_CATALOGO_CHIAVE=%s\n' "$CHIAVE"
+} > "$F.nuovo" && cat "$F.nuovo" > "$F"
+shred -u "$F.nuovo" 2>/dev/null || rm -f "$F.nuovo"
+printf %s "$CHIAVE" | sha256sum | cut -c1-64
+unset CHIAVE
+docker compose up -d backend
+```
+
+Poi, nello SQL Editor del **DB del catalogo** (non del primario), si registra l'impronta (i 64 caratteri esadecimali stampati sopra):
+
+```sql
+INSERT INTO public.monitoraggio_chiave (nome, impronta)
+VALUES ('pannello', decode('<impronta>', 'hex'));
+```
+
+**Rotazione**: chiave nuova come sopra e riga nuova con un altro `nome`; quando il pannello funziona con la nuova, si chiude la vecchia con `UPDATE public.monitoraggio_chiave SET valida_fino = now() WHERE nome = '<vecchia>';`.
+
+Il riepilogo lo calcola il catalogo circa ogni 15 minuti: finché non ne ha calcolato uno, il pannello mostra «Dati non aggiornati» e «Il primo riepilogo non è ancora stato calcolato», anche con la chiave giusta.
+
 Per controllare che il container veda la chiave **senza stamparla**:
 
 ```bash
 docker compose exec backend sh -c 'test -n "$MONITORAGGIO_CATALOGO_CHIAVE" && echo impostata || echo vuota'
 ```
 
-Il pannello mostra l'esito della lettura: «Monitoraggio non configurato» (chiave vuota o di lunghezza non ammessa: il backend non chiama), «Chiave di monitoraggio non valida» (va corretta nel `.env`: dopo una rotazione si mette la chiave nuova e si conferma al fornitore), «Interfaccia non ancora disponibile», «Accesso al catalogo non valido» (chiave anon del catalogo), «Monitoraggio non raggiungibile» (rete, timeout, errori del catalogo), «Formato del monitoraggio non supportato» (versione del riepilogo diversa da quella che il backend conosce: serve un aggiornamento del backend). Nel log del backend (`bandofit.catalogo_monitoraggio`) compaiono solo l'esito e il codice d'errore, mai la chiave.
+Il pannello mostra l'esito della lettura: «Monitoraggio non configurato» (chiave vuota o di lunghezza non ammessa: il backend non chiama), «Chiave di monitoraggio non valida» (la chiave del `.env` non corrisponde a un'impronta valida nel catalogo: rigenerarla e registrare l'impronta come sopra), «Interfaccia non ancora disponibile», «Accesso al catalogo non valido» (chiave anon del catalogo), «Monitoraggio non raggiungibile» (rete, timeout, errori del catalogo), «Formato del monitoraggio non supportato» (versione del riepilogo diversa da quella che il backend conosce: serve un aggiornamento del backend). Nel log del backend (`bandofit.catalogo_monitoraggio`) compaiono solo l'esito e il codice d'errore, mai la chiave.
 
 ## Catalogo: come ottenere le richieste R1-R8
 

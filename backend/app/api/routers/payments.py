@@ -44,7 +44,7 @@ async def checkout(
 async def lista_acquisti(
     user: BillingAccount,
     primary: PrimaryClient,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> PurchasesPage:
     return await payment_service.lista_acquisti(primary, user["id"], page, page_size)

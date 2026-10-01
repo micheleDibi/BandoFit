@@ -11,7 +11,7 @@ router = APIRouter(prefix="/me/notifications", tags=["notifications"])
 async def list_notifications(
     user: CurrentUser,
     primary: PrimaryClient,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=20, ge=1, le=50),
     company_id: str | None = Query(
         default=None,

@@ -11,6 +11,11 @@ router = APIRouter(prefix="/lookups", tags=["lookups"])
 async def get_lookups(
     _user: CurrentUser, secondary: SecondaryClient, response: Response
 ) -> LookupsOut:
-    """Valori delle faccette di filtro (regioni, settori, ...). Cambiano di rado."""
-    response.headers["Cache-Control"] = "private, max-age=3600"
-    return await lookup_service.get_lookups(secondary)
+    """Valori delle faccette di filtro (regioni, settori, ...). Cambiano di rado.
+    In degrado (catalogo non leggibile: cache scaduta o liste vuote) la
+    risposta non va tenuta dal browser: il server ritenta dopo un minuto."""
+    lookups = await lookup_service.get_lookups(secondary, degrada=True)
+    response.headers["Cache-Control"] = (
+        "no-store" if lookup_service.in_degrado() else "private, max-age=3600"
+    )
+    return lookups

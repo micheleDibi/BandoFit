@@ -9,6 +9,7 @@ Semantica: OR dentro la stessa faccetta, AND tra faccette diverse.
 """
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -18,7 +19,7 @@ from zoneinfo import ZoneInfo
 from postgrest.exceptions import APIError
 
 from app.schemas.bando import BandoDetail, BandoListItem, Compatibilita
-from app.services.bandi_risoluzione import VISTA_BANDI, carica_per_slug
+from app.services.bandi_risoluzione import COLONNA_INESISTENTE, VISTA_BANDI, carica_per_slug
 from app.services.bando_scheda_link import (
     calcola_allegati,
     calcola_cta,
@@ -28,7 +29,10 @@ from app.services.bando_scheda_link import (
 )
 from app.services.compatibility import CompanyFacets, compute_compatibilita
 from app.services.link_policy import scrub_bando_row
+from app.services.paginazione import pagina
 from app.schemas.common import Page
+
+logger = logging.getLogger("bandofit.bandi_service")
 
 # Campi mostrati nelle card dell'elenco + embed di visualizzazione.
 LIST_SELECT = (
@@ -311,12 +315,30 @@ def _ora(value: Any) -> time | None:
         return None
 
 
+def _pulsante_mostrato(row: dict) -> bool:
+    """Il frontend mostra il pulsante principale solo su un bando in corso
+    (`bandoInCorso` in `components/bandi/stato.ts`: stato assente, `aperto` o
+    `in apertura prossimamente`); questa regola deve restare allineata a
+    quella. Lo stato è `stato_effettivo`, con ripiego su `stato_bando` solo
+    se manca (`??` nel frontend: un valore vuoto non è «in corso»)."""
+    stato = row.get("stato_effettivo")
+    if stato is None:
+        stato = row.get("stato_bando")
+    return stato is None or stato in STATI_APERTI
+
+
 def map_detail(row: dict, link: list[dict] | None = None) -> BandoDetail:
     """Dettaglio dalla riga (già filtrata da `scrub_bando_row`) e dalle righe
     `bando_link` del bando (None o [] = solo i ripieghi della riga)."""
     base = map_list_item(row).model_dump()
     link = link or []
     fonte_url, fonte_host = fonte_ufficiale_pubblicabile(row)
+    # Il pulsante si calcola prima: l'allegato con la sua stessa chiave non
+    # si ripete fra gli allegati (contratto DB bandi §5.1), ma solo quando il
+    # pulsante viene mostrato: su un bando non in corso il documento deve
+    # restare raggiungibile dagli allegati.
+    cta = calcola_cta(row, link)
+    escludi = cta.url if cta is not None and _pulsante_mostrato(row) else None
     return BandoDetail(
         **base,
         area_geografica=row.get("area_geografica"),
@@ -327,9 +349,9 @@ def map_detail(row: dict, link: list[dict] | None = None) -> BandoDetail:
         data_apertura_verificata=row.get("data_apertura_verificata"),
         data_scadenza_verificata=row.get("data_scadenza_verificata"),
         contenuto=normalize_contenuto(row.get("contenuto")),
-        cta=calcola_cta(row, link),
+        cta=cta,
         link_fonte=calcola_link_fonte(row),
-        allegati=calcola_allegati(row, link),
+        allegati=calcola_allegati(row, link, escludi=escludi),
         fonte_ufficiale_url=fonte_url,
         fonte_ufficiale_host=fonte_host,
         fonte_ufficiale_tipo=row.get("fonte_ufficiale_tipo"),
@@ -341,25 +363,6 @@ def map_detail(row: dict, link: list[dict] | None = None) -> BandoDetail:
         beneficiari=_flatten_junction(row.get("bando_beneficiari"), "beneficiari"),
         codici_ateco=_flatten_junction(row.get("bando_codici_ateco"), "codici_ateco"),
     )
-
-
-async def _pagina_segmento(costruisci, offset: int, quante: int) -> tuple[list[dict], int]:
-    """Righe `offset..offset+quante-1` di un segmento e suo conteggio esatto.
-
-    `costruisci` crea da zero la query del segmento a ogni chiamata: i builder
-    di postgrest-py accumulano i parametri e non si riusano. Con il conteggio
-    esatto, un offset oltre le righe del segmento fa rispondere al catalogo
-    «intervallo non soddisfacibile» (PGRST103): vale come pagina vuota, e il
-    conteggio si rilegge con una richiesta senza offset. Ogni altro errore
-    risale invariato."""
-    try:
-        resp = await costruisci().range(offset, offset + quante - 1).execute()
-    except APIError as exc:
-        if exc.code != "PGRST103":
-            raise
-        resp = await costruisci().limit(1).execute()
-        return [], resp.count or 0
-    return list(resp.data or []), resp.count or 0
 
 
 async def fetch_bandi(
@@ -391,7 +394,9 @@ async def fetch_bandi(
         q = tier(apply_filters(q, filters, today), today)
         return q.order(column, desc=desc, nullsfirst=False).order("id", desc=False)
 
-    rows, open_count = await _pagina_segmento(
+    # Pagina oltre le righe del segmento = pagina vuota con il conteggio
+    # riletto (`paginazione.pagina`, contratto DB bandi §8).
+    rows, open_count = await pagina(
         lambda: segmento(apply_open_tier, desc_open), offset, page_size
     )
 
@@ -400,7 +405,7 @@ async def fetch_bandi(
         # Offset dentro il segmento dei chiusi: 0 se la pagina è a cavallo del
         # confine, oltre se la pagina è tutta nel segmento dei chiusi.
         closed_offset = max(0, offset - open_count)
-        closed_rows, closed_count = await _pagina_segmento(
+        closed_rows, closed_count = await pagina(
             lambda: segmento(apply_closed_tier, desc_closed), closed_offset, need
         )
         rows.extend(closed_rows)
@@ -427,17 +432,44 @@ async def fetch_bandi(
     return Page.build(items, total, page, page_size)
 
 
+async def _carica_dettaglio(secondary, slug: str) -> dict:
+    """Riga di dettaglio per slug (`carica_per_slug` con `DETAIL_SELECT`),
+    con una cintura sulle colonne di ripiego (contratto DB bandi §5.1 e §8):
+    se il catalogo risponde 42703 (colonna inesistente) perché le colonne
+    deprecate non ci sono più, si rilegge una volta con la select senza
+    ripieghi e si scrive un WARNING, invece di un 502 (o di un falso 404
+    sulla riletta del master). Ogni altro errore risale invariato.
+
+    Cintura temporanea del passo c1: con `COLONNE_RIPIEGO_51` vuota (c2)
+    non fa nulla e si può togliere."""
+    try:
+        return await carica_per_slug(secondary, slug, DETAIL_SELECT)
+    except APIError as exc:
+        if exc.code != COLONNA_INESISTENTE or not COLONNE_RIPIEGO_51:
+            raise
+    logger.warning(
+        "colonne di ripiego (contratto DB bandi §5.1) assenti dal catalogo: codice=%s, "
+        "rilettura del dettaglio senza ripieghi",
+        COLONNA_INESISTENTE,
+    )
+    return await carica_per_slug(secondary, slug, _detail_select(()))
+
+
 async def fetch_bando_for_ai(secondary, slug: str) -> dict:
     """Riga grezza del bando per la pipeline AI-check (la chiave della
     cache estrazioni è l'hash del testo serializzato, vedi
     `compute_content_hash`). `contenuto` è già normalizzato (gestione
-    del doppio-encoding). Nessuna lettura di `bando_link`: l'input
-    dell'AI-check resta la riga, con `stato_bando` e il jsonb `allegati`.
+    del doppio-encoding). Nessuna lettura di `bando_link` qui: la lista
+    degli allegati per il [META] la costruisce `ai_check_service` con
+    `bando_scheda_link` (la stessa lista della scheda), i partenariati
+    leggono `bando_link` per conto loro; lo stato del [META] è
+    `stato_effettivo`.
 
     Stessa risoluzione del dettaglio (`carica_per_slug`): uno slug spostato
     restituisce la riga del master (id e slug canonici), uno ritirato solleva
-    `BandoRitiratoError` (410)."""
-    row = await carica_per_slug(secondary, slug, DETAIL_SELECT)
+    `BandoRitiratoError` (410). Stessa cintura del dettaglio sulle colonne
+    di ripiego (`_carica_dettaglio`)."""
+    row = await _carica_dettaglio(secondary, slug)
     row["contenuto"] = normalize_contenuto(row.get("contenuto"))
     # I link ai domini esclusi (concorrenti) non devono arrivare nemmeno
     # al testo del prompt: il modello li citerebbe nel report.
@@ -455,8 +487,9 @@ async def fetch_bando_by_slug(
     del master, con lo slug canonico in `slug`; ritirato → 410; altrimenti
     404 (vedi `bandi_risoluzione.carica_per_slug`). Pulsanti e allegati dalle
     righe `bando_link` del bando risolto più i ripieghi della riga; se quella
-    lettura non riesce, solo i ripieghi (`bando_scheda_link`)."""
-    row = await carica_per_slug(secondary, slug, DETAIL_SELECT)
+    lettura non riesce, solo i ripieghi (`bando_scheda_link`). Se il catalogo
+    non ha più le colonne di ripiego, si rilegge senza (`_carica_dettaglio`)."""
+    row = await _carica_dettaglio(secondary, slug)
     # Normalizzare PRIMA di filtrare: un `contenuto` doppio-encodato non
     # verrebbe attraversato dal filtro dei link (map_detail è idempotente).
     row["contenuto"] = normalize_contenuto(row.get("contenuto"))

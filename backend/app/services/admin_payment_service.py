@@ -5,6 +5,7 @@ import logging
 
 from app.schemas.common import Page
 from app.schemas.payment import PurchaseOut
+from app.services.paginazione import pagina
 from app.services.payment_service import _map_purchase
 
 logger = logging.getLogger("bandofit.admin_payments")
@@ -20,28 +21,36 @@ async def list_purchases(
     primary, status: str | None, kind: str | None, page: int, page_size: int
 ) -> Page[PurchaseOut]:
     start = (page - 1) * page_size
-    query = primary.table("purchases").select(_PURCHASE_SELECT, count="exact")
-    if status:
-        query = query.eq("status", status)
-    if kind:
-        query = query.eq("kind", kind)
-    resp = await query.order("created_at", desc=True).range(start, start + page_size - 1).execute()
-    items = [_map_purchase(r) for r in (resp.data or [])]
-    return Page.build(items, resp.count or 0, page, page_size)
+
+    def costruisci():
+        query = primary.table("purchases").select(_PURCHASE_SELECT, count="exact")
+        if status:
+            query = query.eq("status", status)
+        if kind:
+            query = query.eq("kind", kind)
+        return query.order("created_at", desc=True)
+
+    righe, totale = await pagina(costruisci, start, page_size)
+    items = [_map_purchase(r) for r in righe]
+    return Page.build(items, totale, page, page_size)
 
 
 async def list_invoices(primary, stato: str | None, page: int, page_size: int) -> dict:
     start = (page - 1) * page_size
-    query = primary.table("invoices").select(
-        "id,purchase_id,anno,serie,numero,data_documento,stato,provider_id,"
-        "totale_cents,tentativi,created_at,emessa_at",
-        count="exact",
-    )
-    if stato:
-        query = query.eq("stato", stato)
-    resp = await query.order("created_at", desc=True).range(start, start + page_size - 1).execute()
+
+    def costruisci():
+        query = primary.table("invoices").select(
+            "id,purchase_id,anno,serie,numero,data_documento,stato,provider_id,"
+            "totale_cents,tentativi,created_at,emessa_at",
+            count="exact",
+        )
+        if stato:
+            query = query.eq("stato", stato)
+        return query.order("created_at", desc=True)
+
+    righe, totale = await pagina(costruisci, start, page_size)
     return {
-        "items": resp.data or [], "total": resp.count or 0,
+        "items": righe, "total": totale,
         "page": page, "page_size": page_size,
     }
 

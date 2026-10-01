@@ -39,7 +39,7 @@ async def list_saved(
     active: ActiveCompanyDep,
     primary: PrimaryClient,
     secondary: SecondaryClient,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=20, ge=1, le=50),
 ) -> Page[SavedBandoItem]:
     return await saved_bandi_service.list_saved(

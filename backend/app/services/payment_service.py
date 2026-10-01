@@ -36,6 +36,7 @@ from app.services import (
     pricing,
 )
 from app.services.family_service import raise_from_rpc
+from app.services.paginazione import pagina
 
 logger = logging.getLogger("bandofit.payments")
 
@@ -552,16 +553,18 @@ async def sync_purchase(primary, revolut, user_id: str, purchase_id: str) -> Pur
 
 async def lista_acquisti(primary, user_id: str, page: int, page_size: int) -> PurchasesPage:
     start = (page - 1) * page_size
-    resp = (
-        await primary.table("purchases")
-        .select(_PURCHASE_SELECT, count="exact")
-        .eq("user_id", str(user_id))
-        .order("created_at", desc=True)
-        .range(start, start + page_size - 1)
-        .execute()
-    )
-    items = [_map_purchase(r) for r in (resp.data or [])]
-    return PurchasesPage.build(items, resp.count or 0, page, page_size)
+
+    def costruisci():
+        return (
+            primary.table("purchases")
+            .select(_PURCHASE_SELECT, count="exact")
+            .eq("user_id", str(user_id))
+            .order("created_at", desc=True)
+        )
+
+    righe, totale = await pagina(costruisci, start, page_size)
+    items = [_map_purchase(r) for r in righe]
+    return PurchasesPage.build(items, totale, page, page_size)
 
 
 async def dettaglio_acquisto(primary, user_id: str, purchase_id: str) -> PurchaseOut:

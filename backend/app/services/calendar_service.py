@@ -21,6 +21,7 @@ from app.schemas.calendar import (
 )
 from app.services import company_scope
 from app.services.bandi_risoluzione import carica_per_slug
+from app.services.bandi_service import _ora
 
 logger = logging.getLogger("bandofit.calendar")
 
@@ -33,7 +34,10 @@ EVENT_SELECT = (
     "id,titolo,data,tutto_il_giorno,ora_inizio,ora_fine,note,tipo,"
     "bando_id,bando_slug,created_at,updated_at"
 )
-SNAPSHOT_SELECT = "id,slug,titolo,titolo_breve,data_scadenza"
+# Snapshot della scadenza (contratto DB bandi §12, R6): `ora_scadenza` entra
+# nell'evento come ora di inizio; `data_scadenza_verificata` si legge ma non
+# si salva, perché `calendar_events` non ha una colonna per conservarla.
+SNAPSHOT_SELECT = "id,slug,titolo,titolo_breve,data_scadenza,ora_scadenza,data_scadenza_verificata"
 
 
 def _to_out(row: dict) -> CalendarEventOut:
@@ -144,16 +148,24 @@ async def create_bando_event(
 
     await _check_cap(primary, user_id, active)
     titolo = bando.get("titolo_breve") or bando.get("titolo") or bando["slug"]
+    # Scadenza con l'ora (di Roma, tollerante come nel dettaglio: «24:00» o
+    # un valore non valido = nessuna ora): l'evento la porta come ora di
+    # inizio; senza ora vale tutta la giornata. Niente in `note`: è il
+    # campo dell'utente e decide la sorte dell'evento nella rimappatura dei
+    # bandi fusi.
+    ora = _ora(bando.get("ora_scadenza"))
     row = {
         "user_id": str(user_id),
         "company_profile_id": company_scope.scope_value(active),
         "titolo": f"Scadenza: {titolo}"[:200],
         "data": bando["data_scadenza"],
-        "tutto_il_giorno": True,
+        "tutto_il_giorno": ora is None,
         "tipo": "bando",
         "bando_id": bando["id"],
         "bando_slug": bando["slug"],
     }
+    if ora is not None:
+        row["ora_inizio"] = ora.isoformat()
     try:
         insert = await primary.table("calendar_events").insert(row).execute()
         return _to_out(insert.data[0])

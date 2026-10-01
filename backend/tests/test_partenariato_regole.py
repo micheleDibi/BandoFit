@@ -8,7 +8,11 @@ import copy
 
 import pytest
 
-from app.schemas.partenariato import PartenariatoEstrazione, RegolePartenariatoOut
+from app.schemas.partenariato import (
+    CitazioneRegolaOut,
+    PartenariatoEstrazione,
+    RegolePartenariatoOut,
+)
 from app.services.partenariato_regole import _da_fonte_ufficiale, mappa_regioni, post_elabora
 
 SEZIONI = {
@@ -176,6 +180,41 @@ class TestCitazioni:
         regole = post_elabora(PartenariatoEstrazione.model_validate(estrazione_base()), SEZIONI,
                               fonti, LOOKUPS)
         assert regole["modalita"]["citazione"]["url_documento"] is None
+
+    @pytest.mark.parametrize(
+        ("url", "atteso"),
+        [
+            # Stessa cintura dei link della scheda: spazio codificato, il
+            # resto scartato (il testo della citazione resta).
+            ("https://regione.example.it/Avviso pubblico.pdf",
+             "https://regione.example.it/Avviso%20pubblico.pdf"),
+            ("https://regione.example.it/a.pdf https://fasi.eu/b.pdf", None),
+            ("https://regione.example.it/a\x01.pdf", None),
+            ("https://regione.example.it/a\\b.pdf", None),
+            ("https://www.fasi.eu/a.pdf", None),
+        ],
+    )
+    def test_url_del_documento_passa_dal_filtro_dei_link(self, url, atteso):
+        fonti = [{"n": 1, "etichetta": "Avviso", "url": url}]
+        regole = post_elabora(PartenariatoEstrazione.model_validate(estrazione_base()), SEZIONI,
+                              fonti, LOOKUPS)
+        citazione = regole["modalita"]["citazione"]
+        assert citazione["url_documento"] == atteso
+        assert citazione["testo"] == "in forma singola o associata mediante ATS"
+        RegolePartenariatoOut.model_validate(regole)
+
+    @pytest.mark.parametrize(
+        "url", ["http://regione.example.it/a.pdf", "https://www.fasi.eu/a.pdf", "ftp://x/a.pdf"]
+    )
+    def test_il_modello_della_citazione_porta_a_none_un_url_non_ammesso(self, url):
+        # Vale per chiunque costruisca il modello (estrazione, righe storiche,
+        # snapshot delle call): niente errore, solo il link in meno.
+        citazione = CitazioneRegolaOut(
+            sezione="D1-p3", fonte_etichetta="Avviso — pag. 3", testo="x", verificata=True,
+            url_documento=url, pagina=3,
+        )
+        assert citazione.url_documento is None
+        assert citazione.pagina == 3
 
     def test_sezione_ignota(self):
         dati = estrazione_base(modalita_citazione=cit("X9", "in forma singola"))

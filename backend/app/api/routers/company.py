@@ -75,8 +75,9 @@ async def company_facets(
     legale, e le divisioni ATECO secondarie oltre alla principale. Stessa
     funzione che alimenta il badge di compatibilità e l'AI-check.
 
-    Un figlio attivo vede i facet della famiglia, come per i dati aziendali."""
-    lookups = await lookup_service.get_lookups(secondary)
+    Un figlio attivo vede i facet della famiglia, come per i dati aziendali.
+    Solo lettura: in degrado dei lookup, liste vuote invece di un errore."""
+    lookups = await lookup_service.get_lookups(secondary, degrada=True)
     facets = await compatibility.load_company_facets(primary, active, lookups)
     if facets is None:
         return CompanyFacetsOut()

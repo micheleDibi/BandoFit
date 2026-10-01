@@ -6,12 +6,18 @@ from fastapi import APIRouter, Depends, Query
 from app.api.deps import ActiveCompanyDep, PrimaryClient, SecondaryClient
 from app.core.config import get_settings
 from app.core.errors import BadRequestError
-from app.schemas.bando import BandoDetail, BandoListItem
+from app.schemas.bando import BandoDetail, BandoListItem, LookupsOut
 from app.schemas.common import Page
-from app.services import bandi_service
+from app.services import bandi_service, lookup_service
 from app.services.bandi_service import DEFAULT_SORT, SORT_OPTIONS, BandiFilters
 from app.services.compatibility import get_company_facets
-from app.services.lookup_service import get_lookups
+
+
+async def get_lookups(secondary) -> LookupsOut:
+    """Lookup per elenco e dettaglio: il router legge e mostra, quindi in
+    degrado (catalogo non leggibile, nessuna cache) riceve liste vuote invece
+    di un errore."""
+    return await lookup_service.get_lookups(secondary, degrada=True)
 
 router = APIRouter(prefix="/bandi", tags=["bandi"])
 

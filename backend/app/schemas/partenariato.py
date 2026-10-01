@@ -38,7 +38,7 @@ import re
 import unicodedata
 from typing import Any, Literal, get_args, get_origin
 
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, PrivateAttr, field_validator
 
 from app.schemas.partenariato_vocabolario import (
     DocumentoPartenariato,
@@ -46,6 +46,7 @@ from app.schemas.partenariato_vocabolario import (
     TipoSoggetto,
 )
 from app.schemas.regole_finanziarie import AmbitoRegola, Operatore, RegolaFinanziaria
+from app.services.link_policy import url_documento_pubblicabile
 
 # ------------------------------------------------------- output del modello
 
@@ -501,9 +502,20 @@ class CitazioneRegolaOut(BaseModel):
     fonte_etichetta: str
     testo: str
     verificata: bool
-    # Solo https; solo per le citazioni dei documenti ufficiali.
+    # Solo per le citazioni dei documenti ufficiali: solo https e ammesso
+    # dal filtro dei link della scheda. Il validatore vale ovunque si
+    # costruisca il modello: all'estrazione (`partenariato_regole`), sulle
+    # regole storiche rilette dal DB (`_regole_out`) e sugli snapshot delle
+    # partner call (`partner_call_gap._citazione_out`); un URL non ammesso
+    # diventa None, mai un errore di validazione (scarterebbe tutte le
+    # regole o la citazione).
     url_documento: str | None = None
     pagina: int | None = None
+
+    @field_validator("url_documento", mode="after")
+    @classmethod
+    def _url_ammesso(cls, valore: str | None) -> str | None:
+        return url_documento_pubblicabile(valore)
 
 
 class _Voce(BaseModel):

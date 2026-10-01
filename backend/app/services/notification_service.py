@@ -13,6 +13,7 @@ from math import ceil
 
 from app.core.errors import BadRequestError
 from app.schemas.notification import MarkReadIn, NotificationOut, NotificationsPage
+from app.services.paginazione import pagina
 
 logger = logging.getLogger("bandofit.notifications")
 
@@ -68,21 +69,23 @@ async def list_notifications(
     primary, user_id: str, page: int, page_size: int, company_id: str | None = None
 ) -> NotificationsPage:
     offset = (page - 1) * page_size
-    query = (
-        primary.table("notifications")
-        .select(NOTIFICATION_SELECT, count="exact")
-        .eq("user_id", user_id)
-    )
-    # Filtro per azienda del centro alert (Advisor): tocca SOLO gli item della
-    # pagina, non il conteggio non-lette — il badge della campanella resta
-    # aggregato su tutte le aziende.
-    if company_id is not None:
-        query = query.eq("company_profile_id", company_id)
-    resp = (
-        await query.order("created_at", desc=True)
-        .range(offset, offset + page_size - 1)
-        .execute()
-    )
+
+    def costruisci():
+        query = (
+            primary.table("notifications")
+            .select(NOTIFICATION_SELECT, count="exact")
+            .eq("user_id", user_id)
+        )
+        # Filtro per azienda del centro alert (Advisor): tocca SOLO gli item
+        # della pagina, non il conteggio non-lette — il badge della campanella
+        # resta aggregato su tutte le aziende.
+        if company_id is not None:
+            query = query.eq("company_profile_id", company_id)
+        return query.order("created_at", desc=True)
+
+    # Una pagina oltre l'ultima è vuota con il totale reale; le non lette si
+    # contano comunque.
+    righe, total = await pagina(costruisci, offset, page_size)
     unread = (
         await primary.table("notifications")
         .select("id", count="exact")
@@ -91,9 +94,8 @@ async def list_notifications(
         .limit(1)
         .execute()
     )
-    total = resp.count or 0
     return NotificationsPage(
-        items=[NotificationOut(**row) for row in resp.data],
+        items=[NotificationOut(**row) for row in righe],
         total=total,
         page=page,
         page_size=page_size,

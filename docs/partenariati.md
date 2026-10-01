@@ -538,7 +538,7 @@ Il **caso peggiore** è limitato dai tetti fail-closed: WP3 $5 al giorno + altri
 | Oracolo sui valori esatti di bilancio | Valutazione dei terzi sulla fascia; niente regole finanziarie manuali; test d'inferenza (30 budget → l'esito cambia solo ai bordi di fascia) |
 | Spesa AI o openapi fuori controllo | Budget fail-closed unico, riserva al caso peggiore, usage allegato agli errori, heartbeat del claim, mai retry su esito ignoto, tetti in RPC |
 | SSRF, PDF, ZIP o XML ostili | §2.2 B11 e §2.3 R2-R3; test con resolver finto, proxy in ambiente, bombe |
-| Prompt injection dai PDF | Output vincolato, citazioni verificate, snapshot confermato dal creatore come unica fonte deterministica, URL solo https, testo LLM mostrato senza link automatici |
+| Prompt injection dai PDF | Output vincolato, citazioni verificate, snapshot confermato dal creatore come unica fonte deterministica, URL dei documenti (fonti e citazioni) solo https e ammessi dal filtro dei link della scheda, in lettura e quindi anche per le righe storiche (`link_policy.url_documento_pubblicabile`; ciò che non passa esce come `null`, il testo resta), testo LLM mostrato senza link automatici |
 | Copertura documentale del 61% | Estrazione anche dal catalogo, «non determinabile» dichiarato, correzione nel passo «Regole del bando» |
 | Deadlock tra RPC | Ordine di lock globale (owner → call → candidatura, profilo → inventario), testato con due connessioni |
 | Proxy più corto della catena dei tempi | T7 + Q23 |

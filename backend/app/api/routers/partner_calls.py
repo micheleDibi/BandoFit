@@ -84,7 +84,7 @@ async def lista_call(
     forma: str | None = Query(None, max_length=40),
     ruolo: Literal["capofila", "partner"] | None = Query(None),
     ordine: Literal["affinita", "recenti", "scadenza"] = Query("affinita"),
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=100_000),
     page_size: int = Query(20, ge=1, le=50),
 ) -> Page[CallBachecaOut]:
     """`mie`: le call dell'azienda attiva; `tutte`: la bacheca (call
@@ -136,7 +136,7 @@ async def suggeriti_call(
     active: ActiveCompanyDep,
     primary: PrimaryClient,
     secondary: SecondaryClient,
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=100_000),
     posizione: str | None = Query(None, max_length=40),
 ) -> SuggeritiOut:
     """Aziende suggerite per la call (azienda creatrice): pseudonimi, match

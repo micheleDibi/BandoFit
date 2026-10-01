@@ -1,10 +1,13 @@
 """Test dei bandi salvati: snapshot, idempotenza, cap, merge vivo/sparito —
 con fake di primario e catalogo secondario."""
 
+import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import httpx
 import pytest
+from postgrest.exceptions import APIError
 
 from app.api.deps import ActiveCompany
 from app.core.errors import BadRequestError, BandoRitiratoError, NotFoundError
@@ -12,6 +15,11 @@ from app.services import saved_bandi_service
 
 USER_ID = "a0000000-0000-0000-0000-000000000001"
 COMPANY = "c0000000-0000-0000-0000-000000000001"
+
+
+def errore_postgrest(codice: str) -> APIError:
+    return APIError({"message": "errore del catalogo", "code": codice, "hint": None,
+                     "details": None})
 
 
 def _active(company_id: str | None = None, is_multi: bool = False) -> ActiveCompany:
@@ -458,6 +466,66 @@ class TestListSaved:
         await saved_bandi_service.list_saved(primary, secondary, USER_ID, _active(), 3, 10)
         [(_, filters)] = primary.ops_for("saved_bandi", "select")
         assert filters["__range"] == (20, 29)
+
+    async def test_pagina_oltre_il_totale_vuota_con_il_totale_reale(self):
+        # Il totale è calato fra due letture (un'altra scheda ha rimosso dei
+        # preferiti): il primario rifiuta l'intervallo, l'elenco risponde
+        # vuoto con il totale reale e rilegge il conteggio con una sola
+        # richiesta senza offset. Il catalogo non si interroga.
+        salvati = [saved_row(42), saved_row(43), saved_row(44)]
+
+        def come_postgrest(filters):
+            intervallo = filters.get("__range")
+            if intervallo is not None and intervallo[0] > len(salvati):
+                raise errore_postgrest("PGRST103")
+            return salvati
+
+        primary = FakeDb({"saved_bandi": come_postgrest})
+        secondary = FakeDb({"bando_pubblico": [BANDO_VIVO]})
+        page = await saved_bandi_service.list_saved(primary, secondary, USER_ID, _active(), 5, 10)
+        assert (page.items, page.total, page.total_pages, page.page) == ([], 3, 1, 5)
+        assert [f.get("__range") for _, f in primary.ops_for("saved_bandi", "select")] == [
+            (40, 49), None
+        ]
+        assert not secondary.ops
+
+    @pytest.mark.parametrize("codice", ["42703", "42501", "PGRST205"])
+    async def test_errore_di_contratto_del_catalogo_card_dagli_snapshot(self, codice, caplog):
+        # Un cambio di contratto del catalogo (colonna o vista sparite,
+        # permesso negato) non dà 5xx: le card vengono dallo snapshot, non
+        # disponibili, e la risoluzione dei fusi non si interroga.
+        rows = [saved_row(42), saved_row(99)]
+        primary = FakeDb({"saved_bandi": rows, "calendar_events": [{"bando_id": 42}]})
+
+        def catalogo_rotto(filters):
+            raise errore_postgrest(codice)
+
+        secondary = FakeDb({"bando_pubblico": catalogo_rotto, "bando_fusione": []})
+        with caplog.at_level(logging.WARNING, logger="bandofit.saved_bandi"):
+            page = await saved_bandi_service.list_saved(
+                primary, secondary, USER_ID, _active(), 1, 20
+            )
+        assert page.total == 2 and [i.bando.id for i in page.items] == [42, 99]
+        assert all(i.disponibile is False and i.slug_aggiornato is None for i in page.items)
+        assert page.items[0].bando.titolo == "Bando 42" and page.items[0].in_calendario is True
+        assert [table for table, *_ in secondary.ops] == ["bando_pubblico"]
+        [record] = caplog.records
+        assert codice in record.getMessage() and "errore del catalogo" not in caplog.text
+
+    @pytest.mark.parametrize(
+        "guasto", [errore_postgrest("57014"), errore_postgrest("PGRST000"),
+                   httpx.ReadTimeout("timeout")],
+        ids=["timeout_sql", "connessione", "timeout_http"],
+    )
+    async def test_guasto_vero_del_catalogo_si_propaga(self, guasto):
+        primary = FakeDb({"saved_bandi": [saved_row(42)], "calendar_events": []})
+
+        def catalogo_giu(filters):
+            raise guasto
+
+        secondary = FakeDb({"bando_pubblico": catalogo_giu})
+        with pytest.raises(type(guasto)):
+            await saved_bandi_service.list_saved(primary, secondary, USER_ID, _active(), 1, 20)
 
 
 class TestSavedIds:

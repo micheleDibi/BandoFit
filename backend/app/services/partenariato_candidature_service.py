@@ -79,6 +79,7 @@ from app.services import partenariato_matching as pm
 from app.services import partner_call_service as pcs
 from app.services import partner_profile_service as pps
 from app.services.notification_service import notify
+from app.services.paginazione import pagina
 from app.services.partenariato_accesso import (
     RUOLI_AZIENDA,
     RUOLI_SCRITTURA,
@@ -1193,24 +1194,27 @@ async def lista(
     company_id = str(UUID(str(active.company_id)))
     await _scadenza_pigra(primary)
     offset = (page - 1) * page_size
-    query = (
-        primary.table("partner_candidature").select(CANDIDATURA_SELECT, count="exact")
-        .or_(_filtro_direzione(direzione, company_id))
-    )
-    if stato:
-        query = query.eq("stato", stato)
-    if tipo:
-        query = query.eq("tipo", tipo)
-    if call_id:
-        query = query.eq("partner_call_id", str(UUID(str(call_id))))
-    resp = await query.order("created_at", desc=True).range(offset, offset + page_size - 1) \
-        .execute()
-    righe = [r for r in resp.data or [] if isinstance(r, dict)]
+
+    def costruisci():
+        query = (
+            primary.table("partner_candidature").select(CANDIDATURA_SELECT, count="exact")
+            .or_(_filtro_direzione(direzione, company_id))
+        )
+        if stato:
+            query = query.eq("stato", stato)
+        if tipo:
+            query = query.eq("tipo", tipo)
+        if call_id:
+            query = query.eq("partner_call_id", str(UUID(str(call_id))))
+        return query.order("created_at", desc=True)
+
+    lette, totale = await pagina(costruisci, offset, page_size)
+    righe = [r for r in lette if isinstance(r, dict)]
     ctx = await _contesto(primary, righe, company_id)
     adesso = _adesso()
     items = [proietta(r, ctx, company_id=company_id, editable=bool(active.editable),
                       adesso=adesso) for r in righe if _lato(r, company_id)]
-    return Page.build(items, resp.count or len(items), page, page_size)
+    return Page.build(items, totale or len(items), page, page_size)
 
 
 async def dettaglio(primary, secondary, active, user: dict, candidatura_id: Any

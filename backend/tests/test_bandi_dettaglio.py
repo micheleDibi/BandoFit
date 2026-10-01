@@ -18,6 +18,7 @@ from app.api.deps import ActiveCompany
 from app.api.routers import bandi as bandi_router
 from app.core.errors import BandoRitiratoError, NotFoundError, register_exception_handlers
 from app.schemas.bando import LookupsOut
+from app.services import bandi_service
 from app.services.bandi_service import (
     COLONNE_RIPIEGO_51,
     DETAIL_SELECT,
@@ -27,7 +28,7 @@ from app.services.bandi_service import (
     map_detail,
 )
 from app.services.bando_scheda_link import BANDO_LINK_SELECT, TIPI_SCHEDA
-from tests.test_bandi_risoluzione import FakeSecondary
+from tests.test_bandi_risoluzione import FakeQuery, FakeSecondary
 
 USER_ID = "a0000000-0000-0000-0000-000000000001"
 
@@ -107,7 +108,44 @@ def _link_di(filters):
     return [r for r in LINK if r["bando_id"] == filters.get("bando_id")]
 
 
-def _catalogo(*, storico: list | None = None, fusione: list | None = None, fail=None):
+def _errore_colonna_inesistente() -> APIError:
+    return APIError({"message": "column x does not exist", "code": "42703", "hint": None,
+                     "details": None})
+
+
+class _QuerySenzaRipieghi(FakeQuery):
+    """Vista senza le colonne deprecate: una select che ne chiede una
+    risponde 42703 (colonna inesistente). Con `solo_riletta` succede solo
+    sulla lettura per id, come se la vista cambiasse fra le due letture."""
+
+    solo_riletta = False
+
+    async def execute(self):
+        colonne = _colonne_top(self.select_str or "")
+        deprecata = self._table == "bando_pubblico" and any(c in colonne for c in DEPRECATE)
+        if deprecata and (not self.solo_riletta or "id" in self.filters):
+            self._owner.ops.append((self._table, self.select_str, dict(self.filters)))
+            raise _errore_colonna_inesistente()
+        return await super().execute()
+
+
+class _QuerySenzaRipieghiSoloRiletta(_QuerySenzaRipieghi):
+    solo_riletta = True
+
+
+class _CatalogoSenzaRipieghi(FakeSecondary):
+    query = _QuerySenzaRipieghi
+
+    def table(self, name: str):
+        return self.query(self, name)
+
+
+class _CatalogoSenzaRipieghiSoloRiletta(_CatalogoSenzaRipieghi):
+    query = _QuerySenzaRipieghiSoloRiletta
+
+
+def _catalogo(*, storico: list | None = None, fusione: list | None = None, fail=None,
+              classe=FakeSecondary):
     """Secondario con due bandi vivi (`bando-a`, `bando-master`) letti per
     slug o per id, le loro righe `bando_link` e le tabelle di risoluzione."""
 
@@ -119,7 +157,7 @@ def _catalogo(*, storico: list | None = None, fusione: list | None = None, fail=
             or ("id" in filters and r["id"] == filters["id"])
         ]
 
-    return FakeSecondary(
+    return classe(
         {
             "bando_pubblico": bando,
             "bando_link": _link_di,
@@ -342,8 +380,9 @@ class TestFetchBandoForAi:
         assert db.ops[0][1] == DETAIL_SELECT
 
     async def test_riga_grezza_per_il_meta_invariata(self):
-        # D9: il META dell'AI-check legge `stato_bando` e il jsonb `allegati`
-        # dalla riga; nessun campo calcolato della scheda vi entra.
+        # D9: la riga resta grezza, con `stato_bando` e il jsonb `allegati`;
+        # nessun campo calcolato della scheda vi entra. La lista degli
+        # allegati per il META la costruisce `ai_check_service` a parte.
         allegati = [{"label": "Bando", "url": "https://www.regione.piemonte.it/b.pdf",
                      "tipo": "bando"}]
         db = FakeSecondary({"bando_pubblico": [_riga(1, "bando-a", allegati=allegati)]})
@@ -382,6 +421,89 @@ class TestFetchBandoForAi:
     async def test_non_muta_la_riga_del_client(self):
         await fetch_bando_for_ai(_catalogo(storico=STORICO_301), "vecchio")
         assert isinstance(MASTER["contenuto"], str)
+
+
+# -------------------------------------------- cintura sulle colonne di ripiego
+
+SELECT_SENZA_RIPIEGHI = _detail_select(())
+LOGGER_SERVIZIO = "bandofit.bandi_service"
+
+
+def _selects(db, tabella: str = "bando_pubblico") -> list[str]:
+    return [s for t, s, _ in db.ops if t == tabella]
+
+
+class TestCinturaColonneDiRipiego:
+    """Se la vista non ha più le colonne di ripiego (42703), dettaglio e
+    AI-check rileggono una volta senza ripieghi con un WARNING: né 502 né
+    falso 404. Cintura temporanea del passo c1."""
+
+    async def test_dettaglio_da_bando_link_e_fonte_con_warning(self, caplog):
+        db = _catalogo(classe=_CatalogoSenzaRipieghi)
+        with caplog.at_level(logging.WARNING, logger=LOGGER_SERVIZIO):
+            detail = await fetch_bando_by_slug(db, "bando-a")
+
+        assert detail.slug == "bando-a"
+        assert detail.cta.origine == "candidatura"
+        assert detail.link_fonte.origine == "fonte_ufficiale"
+        assert [a.etichetta for a in detail.allegati] == ["Delibera"]
+        assert _selects(db) == [DETAIL_SELECT, SELECT_SENZA_RIPIEGHI]
+        assert db.tabelle() == ["bando_pubblico", "bando_pubblico", "bando_link"]
+        [record] = [r for r in caplog.records if r.name == LOGGER_SERVIZIO]
+        assert record.levelno == logging.WARNING
+        assert "codice=42703" in record.getMessage()
+        assert "bando-a" not in record.getMessage()
+        assert "does not exist" not in record.getMessage()
+
+    async def test_riga_per_l_ai_check_senza_ripieghi(self, caplog):
+        db = _catalogo(classe=_CatalogoSenzaRipieghi)
+        with caplog.at_level(logging.WARNING, logger=LOGGER_SERVIZIO):
+            row = await fetch_bando_for_ai(db, "bando-a")
+        assert (row["id"], row["slug"]) == (1, "bando-a")
+        assert _selects(db) == [DETAIL_SELECT, SELECT_SENZA_RIPIEGHI]
+        assert db.tabelle() == ["bando_pubblico", "bando_pubblico"]
+        assert len([r for r in caplog.records if r.name == LOGGER_SERVIZIO]) == 1
+
+    async def test_slug_spostato_con_42703_sulla_sola_riletta_da_il_master(self):
+        # Vista cambiata fra la lettura per slug e la riletta del master:
+        # il master, non un falso 404.
+        db = _catalogo(storico=STORICO_301, classe=_CatalogoSenzaRipieghiSoloRiletta)
+        detail = await fetch_bando_by_slug(db, "vecchio")
+        assert (detail.id, detail.slug) == (42, "bando-master")
+        assert db.tabelle() == [
+            "bando_pubblico", "bando_slug_storico", "bando_pubblico",  # 42703 sulla riletta
+            "bando_pubblico", "bando_slug_storico", "bando_pubblico",  # senza ripieghi
+            "bando_link",
+        ]
+        assert _selects(db)[-1] == SELECT_SENZA_RIPIEGHI
+
+    async def test_slug_spostato_per_l_ai_check(self):
+        row = await fetch_bando_for_ai(
+            _catalogo(storico=STORICO_301, classe=_CatalogoSenzaRipieghi), "vecchio"
+        )
+        assert (row["id"], row["slug"]) == (42, "bando-master")
+
+    async def test_con_i_ripieghi_gia_tolti_l_errore_risale(self, monkeypatch):
+        # Passo c2: la tupla è vuota, una rilettura sarebbe identica.
+        monkeypatch.setattr(bandi_service, "COLONNE_RIPIEGO_51", ())
+        db = _catalogo(classe=_CatalogoSenzaRipieghi)
+        with pytest.raises(APIError) as exc:
+            await fetch_bando_by_slug(db, "bando-a")
+        assert exc.value.code == "42703"
+        assert db.tabelle() == ["bando_pubblico"]
+
+    @pytest.mark.parametrize("codice", ["42501", "57014", "PGRST205"])
+    async def test_altri_errori_risalgono_senza_rilettura(self, codice):
+        errore = APIError({"message": "x", "code": codice, "hint": None, "details": None})
+        db = _catalogo(fail={"bando_pubblico": errore})
+        with pytest.raises(APIError) as exc:
+            await fetch_bando_for_ai(db, "bando-a")
+        assert exc.value is errore
+        assert db.tabelle() == ["bando_pubblico"]
+
+    async def test_slug_sconosciuto_resta_404(self):
+        with pytest.raises(NotFoundError):
+            await fetch_bando_by_slug(_catalogo(classe=_CatalogoSenzaRipieghi), "inesistente")
 
 
 # ---------------------------------------------------------------- mappatura
@@ -485,6 +607,72 @@ class TestMapDetailFaseC:
         dump = map_detail(CORRENTE, LINK[:2]).model_dump(mode="json")
         assert "link_bando" not in dump
         assert "link_candidatura" not in dump
+
+
+MODULO = "https://www.regione.piemonte.it/modulo.docx"
+
+
+def _allegato(id_: int, url: str, etichetta: str | None = None) -> dict:
+    return {"id": id_, "bando_id": 1, "url": url, "dominio": "regione.piemonte.it",
+            "tipo": "allegato", "etichetta": etichetta, "content_type": None}
+
+
+LINK_MODULO = [
+    _allegato(30, MODULO + "/", "Modulo"),
+    _allegato(31, "https://www.regione.piemonte.it/avviso.pdf", "Avviso"),
+]
+JSONB_MODULO = [{"label": "Modulo", "url": "https://regione.piemonte.it/modulo.docx"}]
+
+
+class TestMapDetailPulsanteEAllegati:
+    @pytest.mark.parametrize("stato", ["aperto", "in apertura prossimamente", None])
+    def test_allegato_uguale_al_pulsante_non_si_ripete_su_un_bando_in_corso(self, stato):
+        riga = _riga(1, "bando-a", link_candidatura=MODULO, stato_effettivo=stato,
+                     stato_bando=stato, allegati=JSONB_MODULO)
+        detail = map_detail(riga, LINK_MODULO)
+        assert detail.cta.url == MODULO
+        assert [a.url for a in detail.allegati] == ["https://www.regione.piemonte.it/avviso.pdf"]
+
+    @pytest.mark.parametrize("stato", ["chiuso", "sospeso", "revocato"])
+    def test_su_un_bando_non_in_corso_l_allegato_resta(self, stato):
+        # La UI non mostra il pulsante: il documento resta raggiungibile.
+        riga = _riga(1, "bando-a", link_candidatura=MODULO, stato_effettivo=stato,
+                     allegati=JSONB_MODULO)
+        detail = map_detail(riga, LINK_MODULO)
+        assert detail.cta.url == MODULO
+        assert [a.url for a in detail.allegati] == [
+            MODULO + "/", "https://www.regione.piemonte.it/avviso.pdf"
+        ]
+
+    def test_senza_stato_effettivo_vale_lo_stato_salvato(self):
+        riga = _riga(1, "bando-a", link_candidatura=MODULO, stato_effettivo=None,
+                     stato_bando="chiuso", allegati=JSONB_MODULO)
+        assert [a.url for a in map_detail(riga, LINK_MODULO).allegati] == [
+            MODULO + "/", "https://www.regione.piemonte.it/avviso.pdf"
+        ]
+
+    def test_stato_effettivo_vuoto_non_e_in_corso(self):
+        # Come `??` nel frontend: con "" il pulsante non si mostra e il
+        # documento resta fra gli allegati.
+        riga = _riga(1, "bando-a", link_candidatura=MODULO, stato_effettivo="",
+                     stato_bando="aperto", allegati=JSONB_MODULO)
+        assert [a.url for a in map_detail(riga, LINK_MODULO).allegati] == [
+            MODULO + "/", "https://www.regione.piemonte.it/avviso.pdf"
+        ]
+
+    def test_senza_pulsante_l_allegato_resta(self):
+        riga = _riga(1, "bando-a", link_bando=None, fonte_ufficiale_stato="in_verifica")
+        detail = map_detail(riga, [_allegato(30, MODULO)])
+        assert detail.cta is None
+        assert [(a.url, a.etichetta) for a in detail.allegati] == [(MODULO, "modulo")]
+
+    def test_pulsante_diverso_dall_allegato(self):
+        detail = map_detail(_riga(1, "bando-a", link_candidatura=MODULO),
+                            [_allegato(30, "https://www.regione.piemonte.it/avviso.pdf")])
+        assert detail.cta.url == MODULO
+        assert [(a.url, a.etichetta) for a in detail.allegati] == [
+            ("https://www.regione.piemonte.it/avviso.pdf", "avviso")
+        ]
 
 
 # ----------------------------------------------------------------- endpoint

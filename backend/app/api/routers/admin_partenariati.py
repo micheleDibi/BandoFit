@@ -59,6 +59,7 @@ from app.services import (
     partenariato_moderazione_service,
     partenariato_service,
 )
+from app.services.paginazione import pagina
 
 router = APIRouter(
     prefix="/admin/partenariati",
@@ -84,21 +85,21 @@ async def list_estrazioni(
     primary: PrimaryClient,
     stato: Literal["in_corso", "pronta", "errore"] | None = None,
     esito: Literal["estratta", "nessun_segnale"] | None = None,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=50, ge=1, le=100),
 ) -> Page[EstrazioneAdminOut]:
     """Estrazioni per bando, dalla più recente (mai claim né output grezzo)."""
-    query = primary.table("bando_partenariato").select(ADMIN_SELECT, count="exact")
-    if stato:
-        query = query.eq("stato", stato)
-    if esito:
-        query = query.eq("esito", esito)
+
+    def costruisci():
+        query = primary.table("bando_partenariato").select(ADMIN_SELECT, count="exact")
+        if stato:
+            query = query.eq("stato", stato)
+        if esito:
+            query = query.eq("esito", esito)
+        return query.order("updated_at", desc=True)
+
     offset = (page - 1) * page_size
-    resp = (
-        await query.order("updated_at", desc=True)
-        .range(offset, offset + page_size - 1)
-        .execute()
-    )
+    righe, totale = await pagina(costruisci, offset, page_size)
     items = [
         EstrazioneAdminOut(
             **{
@@ -112,9 +113,9 @@ async def list_estrazioni(
                 },
             }
         )
-        for riga in resp.data or []
+        for riga in righe
     ]
-    return Page.build(items, resp.count or 0, page, page_size)
+    return Page.build(items, totale, page, page_size)
 
 
 @router.post("/estrazioni/{bando_id}", response_model=PartenariatoBandoOut)
@@ -172,7 +173,7 @@ async def coda_segnalazioni(
     user: AdminUser,
     primary: PrimaryClient,
     stato: FiltroCoda = "aperte",
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=50, ge=1, le=100),
 ) -> Page[SegnalazioneAdminOut]:
     """Coda delle segnalazioni: `aperte` (ricevute, in esame, con un ricorso
@@ -256,7 +257,7 @@ async def lista_call(
     primary: PrimaryClient,
     stato: StatoCall | None = None,
     q: str | None = Query(default=None, max_length=200),
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=50, ge=1, le=100),
 ) -> Page[CallAdminOut]:
     """Le call di tutte le aziende, dalla più recente (filtri: stato; testo
@@ -322,7 +323,7 @@ async def coda_identita(
     user: AdminUser,
     primary: PrimaryClient,
     stato: StatoIdentita | Literal["tutte"] = "richiesta",
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=50, ge=1, le=100),
 ) -> Page[IdentitaAdminOut]:
     """Richieste di verifica dell'identità in attesa (o le aziende in un altro

@@ -333,7 +333,7 @@ async def test_errore_apierror_sulla_fusione_404():
 
 
 @pytest.mark.parametrize("errore", [
-    _pg_error("42703"),
+    _pg_error("42501"),
     httpx.ReadTimeout("timeout"),
 ])
 async def test_errore_sulla_riletta_del_master_404(errore):
@@ -350,6 +350,29 @@ async def test_errore_sulla_riletta_del_master_404(errore):
 
     assert exc.value.message == "Bando non trovato"
     assert db.tabelle() == ["bando_pubblico", "bando_slug_storico", "bando_pubblico"]
+
+
+async def test_colonna_inesistente_sulla_riletta_del_master_risale(caplog):
+    # Un 42703 sulla riletta non è un miss: la select chiede una colonna che
+    # la vista non ha più. Risale al chiamante, che può rileggere con
+    # un'altra select, invece di diventare un falso 404.
+    assert bandi_risoluzione.COLONNA_INESISTENTE == "42703"
+    errore = _pg_error("42703")
+    db = FakeSecondary(
+        {
+            "bando_pubblico": _bando_per_id(),
+            "bando_slug_storico": [{"slug": "vecchio", "bando_id": 42, "esito": "301"}],
+        },
+        fail={"bando_pubblico": _solo_riletta(errore)},
+    )
+
+    with caplog.at_level(logging.WARNING, logger="bandofit.bandi_risoluzione"):
+        with pytest.raises(APIError) as exc:
+            await carica_per_slug(db, "vecchio", SELECT)
+
+    assert exc.value is errore
+    assert db.tabelle() == ["bando_pubblico", "bando_slug_storico", "bando_pubblico"]
+    assert not [r for r in caplog.records if r.name == "bandofit.bandi_risoluzione"]
 
 
 async def test_log_con_tabella_e_codice_slug_troncato(caplog):

@@ -5,6 +5,8 @@ hash della cache, company pack."""
 import json
 from pathlib import Path
 
+import pytest
+
 from app.services.ai_check_prompts import (
     NON_DISPONIBILE,
     build_bando_input,
@@ -12,6 +14,7 @@ from app.services.ai_check_prompts import (
     build_matching_input,
     compute_content_hash,
 )
+from app.services.bando_scheda_link import calcola_allegati
 from app.services.bandi_service import normalize_contenuto
 
 FIXTURES = Path(__file__).parent / "fixtures" / "ai_check"
@@ -95,6 +98,98 @@ class TestContentHash:
         text2, _ = build_bando_input(bando, bando["contenuto"])
         assert text1 == text2
         assert compute_content_hash(bando, text1) == compute_content_hash(bando, text2)
+
+
+DEPRECATE = ("link_candidatura", "link_bando", "allegati")
+
+
+def _link(id_: int, tipo: str, url: str, etichetta: str | None = None) -> dict:
+    return {"id": id_, "bando_id": 1, "url": url, "dominio": None, "tipo": tipo,
+            "etichetta": etichetta, "content_type": None}
+
+
+def _riga_meta(sezioni: dict, prefisso: str) -> str:
+    return next(r for r in sezioni["META"].splitlines() if r.startswith(prefisso))
+
+
+class TestAllegatiNelMeta:
+    """La riga «Allegati ufficiali» del [META] viene dalla stessa lista della
+    scheda (`calcola_allegati`); per chi non ha allegati in nessuna fonte
+    testo e hash non cambiano."""
+
+    @staticmethod
+    def _etichette(bando: dict, link: list[dict]) -> list[str]:
+        return [a.etichetta for a in calcola_allegati(bando, link)]
+
+    def test_senza_chiave_allegati_e_con_lista_vuota_stesso_testo(self):
+        bando = load_bando("bando_flash")
+        senza = {k: v for k, v in bando.items() if k != "allegati"}
+        con_vuoto = {**bando, "allegati": []}
+        testi = {
+            build_bando_input(b, b["contenuto"], allegati_etichette=e)[0]
+            for b in (senza, con_vuoto)
+            for e in (None, [])
+        }
+        [testo] = testi
+        assert "Allegati ufficiali (NON inclusi in questo testo): non indicato" in testo
+
+    @pytest.mark.parametrize("nome", ["bando_flash", "bando_guida_faq", "bando_double_encoded"])
+    def test_stessa_lista_della_scheda_stesso_testo_e_hash(self, nome):
+        # Senza righe `bando_link` la lista della scheda coincide con il
+        # jsonb: la chiave della cache non cambia.
+        bando = load_bando(nome)
+        storico, _ = build_bando_input(bando, bando["contenuto"])
+        nuovo, _ = build_bando_input(
+            bando, bando["contenuto"], allegati_etichette=self._etichette(bando, [])
+        )
+        assert nuovo == storico
+        assert compute_content_hash(bando, nuovo) == compute_content_hash(bando, storico)
+
+    def test_etichette_dalle_righe_bando_link_filtrate(self):
+        bando = load_bando("bando_guida_faq")
+        link = [
+            _link(1, "atto", "https://www.lazioeuropa.it/x/Decreto.pdf", "Decreto dirigenziale"),
+            _link(2, "allegato", "https://www.youtube.com/watch?v=1", "Video"),
+            _link(3, "allegato", "https://www.lazioeuropa.it/x/Allegato%20A.pdf"),
+        ]
+        _, sezioni = build_bando_input(
+            bando, bando["contenuto"], allegati_etichette=self._etichette(bando, link)
+        )
+        riga = _riga_meta(sezioni, "Allegati ufficiali")
+        # Righe per id (l'URL scartato dal filtro dei link non c'è), poi il jsonb.
+        assert riga.startswith(
+            "Allegati ufficiali (NON inclusi in questo testo): Decreto dirigenziale, Allegato A, "
+        )
+        assert riga.endswith("Avviso pubblico, Modulistica e istruzioni")
+        assert "Video" not in riga and "youtube" not in riga
+
+    def test_riga_senza_colonne_deprecate_nessun_errore(self):
+        # Forma della riga con la select senza ripieghi (passo c2): stesso
+        # testo di oggi per un bando senza allegati.
+        bando = load_bando("bando_flash")
+        riga = {k: v for k, v in bando.items() if k not in DEPRECATE}
+        testo, sezioni = build_bando_input(
+            riga, riga["contenuto"], allegati_etichette=self._etichette(riga, [])
+        )
+        assert _riga_meta(sezioni, "Allegati ufficiali").endswith(": non indicato")
+        assert testo == build_bando_input(bando, bando["contenuto"])[0]
+
+    @pytest.mark.parametrize(
+        ("effettivo", "atteso"),
+        [(None, "aperto"), ("", "aperto"), ("chiuso", "chiuso"), ("sospeso", "sospeso")],
+    )
+    def test_stato_da_stato_effettivo_con_ripiego_su_stato_bando(self, effettivo, atteso):
+        bando = {**load_bando("bando_flash"), "stato_effettivo": effettivo}
+        assert bando["stato_bando"] == "aperto"
+        _, sezioni = build_bando_input(bando, bando["contenuto"])
+        assert _riga_meta(sezioni, "Stato:") == f"Stato: {atteso}"
+
+    def test_stato_effettivo_uguale_allo_stato_salvato_stesso_testo(self):
+        bando = load_bando("bando_flash")
+        con = {**bando, "stato_effettivo": bando["stato_bando"]}
+        assert build_bando_input(con, con["contenuto"])[0] == (
+            build_bando_input(bando, bando["contenuto"])[0]
+        )
 
 
 PROFILE = {"nome": "Michele", "cognome": "Rossi", "codice_fiscale": "RSSMRA80A01H501U",

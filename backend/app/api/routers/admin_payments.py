@@ -16,7 +16,7 @@ async def list_purchases(
     primary: PrimaryClient,
     status: str | None = Query(default=None),
     kind: str | None = Query(default=None),
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> Page[PurchaseOut]:
     return await admin_payment_service.list_purchases(
@@ -29,7 +29,7 @@ async def list_invoices(
     _admin: AdminUser,
     primary: PrimaryClient,
     stato: str | None = Query(default=None),
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> dict:
     return await admin_payment_service.list_invoices(primary, stato, page, page_size)

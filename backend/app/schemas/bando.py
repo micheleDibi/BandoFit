@@ -69,12 +69,13 @@ class LinkScheda(BaseModel):
 
 
 class AllegatoScheda(BaseModel):
-    """Un allegato della scheda, già filtrato e senza doppioni. `tipo`:
-    `atto`, `allegato` o il tipo dichiarato dal catalogo; `formato`: es.
-    `pdf`, se noto."""
+    """Un allegato della scheda, già filtrato e senza doppioni. `etichetta`
+    non è mai vuota (etichetta del catalogo, poi nome del file, poi
+    «Allegato»); `tipo`: `atto`, `allegato` o il tipo dichiarato dal
+    catalogo; `formato`: es. `pdf`, se noto."""
 
     url: str
-    etichetta: str | None = None
+    etichetta: str
     tipo: str | None = None
     formato: str | None = None
 

@@ -2,6 +2,18 @@
 
 Storico delle funzionalità e delle modifiche rilevanti. Formato: data — descrizione.
 
+## 2026-09-30 — Catalogo, giro 1: allegati, AI-check, paginazione, calendario, separazioni dei fusi ⚠️ migration 0045
+
+Secondo giro di allineamento alla fase (c) del contratto del catalogo (dopo le correzioni del 30/09). Solo backend, più una migration additiva.
+- **Scheda del bando**: chiave dei doppioni normalizzata (`chiave_url_catalogo`: schema e host minuscoli, senza `www.`, porta di default, frammento, parametri di tracciamento e barra finale); l'allegato uguale al pulsante non viene ripetuto, ma solo quando il pulsante è mostrato; ordine per id delle righe del catalogo, poi il jsonb; `etichetta` mai vuota (voce, doppione, nome del file senza caratteri di controllo, «Allegato»; le ripetizioni sono numerate) e tipata `str`; la colonna `ultimo_visto_at` non viene più letta.
+- **AI-check**: la riga «Allegati ufficiali» del prompt usa la stessa lista della scheda (senza dipendere dal jsonb deprecato) e lo stato viene da `stato_effettivo`; cambia l'hash del testo per i bandi la cui lista cambia, quindi per quelli la cache delle estrazioni si rinnova una volta. Se la lettura dei link del catalogo fallisce due volte, l'AI-check procede con i soli ripieghi e non salva in cache l'estrazione così ottenuta. Cintura temporanea sull'errore 42703 (colonne di ripiego sparite): rilettura senza ripieghi, WARNING con il solo codice, niente falso 404 sulla riletta del master.
+- **Paginazione senza 5xx**: helper `paginazione.pagina` condiviso da 13 liste del DB primario (preferiti, notifiche, acquisti, utenti, call, candidature, code admin e moderazione, AI-check…): una pagina oltre l'ultima risponde vuota con il totale esatto; `page` con tetto `100_000` su tutti i router; gli alert email chiudono la scansione su PGRST103; i lookup servono la cache scaduta (WARNING); a cache vuota l'elenco dei bandi e i filtri ricevono liste vuote (ERROR), mentre i percorsi che scrivono o spendono credito (import da P.IVA, dati aziendali, preferenze, profilo partner, call, alert, proposte AI delle call, bozze dei documenti, estrazione delle regole di partenariato) rispondono 503 ritentabile, o chiudono il giro con esito «errore» a costo zero, senza scrivere né spendere; i preferiti degradano a `disponibile=false` se il catalogo cambia contratto.
+- **Calendario**: l'evento-scadenza porta l'ora quando il catalogo la indica (`ora_scadenza` → `ora_inizio`); `data_scadenza_verificata` viene letta ma non salvata.
+- **Filtro dei link**: porta validata; gli URL dei documenti dei partenariati (fonti, citazioni e snapshot delle call, anche storici) passano dallo stesso filtro della scheda: quelli non ammessi escono `null`, senza errori.
+- **Rimappatura dei bandi fusi** (migration 0045 `fn_doppioni_rimappati`, additiva): il passo orario rileva le separazioni e in modalità `attiva` ripristina da solo un doppione tornato nel catalogo, senza cancellazioni; conflitti con un WARNING al giorno; riassunto con `coppie_catalogo`, `separazioni_rilevate`, `ripristinate`, `in_conflitto`. Procedura in `docs/deploy.md`.
+- **Sviluppo**: `backend/scripts/stampa_richieste_catalogo.py` stampa le richieste R1-R8 verso il catalogo senza rete né credenziali, per il confronto con il contratto.
+- **Azione manuale**: applicare la 0045 sul primario prima del deploy (senza, il passo della rimappatura registra un errore a ogni giro e rimappa lo stesso).
+
 ## 2026-09-30 — Correzioni del catalogo: paginazione e link
 
 Un errore nell'elenco dei bandi e tre allineamenti al contratto del catalogo sui link della scheda.

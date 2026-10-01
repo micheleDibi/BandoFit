@@ -79,6 +79,7 @@ from app.services import (
 )
 from app.services import partenariato_moderazione_testi as testi
 from app.services.notification_service import notify
+from app.services.paginazione import pagina
 from app.services.partenariato_errori import RPC_ERRORS, raise_from_rpc
 
 logger = logging.getLogger("bandofit.partenariati")
@@ -561,21 +562,20 @@ async def coda(primary, *, stato: str = "aperte", page: int = 1, page_size: int 
                ) -> Page[SegnalazioneAdminOut]:
     """Coda dell'admin: `aperte` (ricevute, in esame e con un ricorso da
     decidere) dalla più vecchia; uno stato o `tutte` dalla più recente."""
-    query = primary.table("partner_segnalazioni").select(SEGNALAZIONE_SELECT, count="exact")
-    if stato == "aperte":
-        query = query.in_("stato", list(STATI_APERTI))
-    elif stato != "tutte":
-        query = query.eq("stato", stato)
+    def costruisci():
+        query = primary.table("partner_segnalazioni").select(SEGNALAZIONE_SELECT, count="exact")
+        if stato == "aperte":
+            query = query.in_("stato", list(STATI_APERTI))
+        elif stato != "tutte":
+            query = query.eq("stato", stato)
+        return query.order("created_at", desc=stato != "aperte")
+
     offset = (page - 1) * page_size
-    resp = await (
-        query.order("created_at", desc=stato != "aperte")
-        .range(offset, offset + page_size - 1)
-        .execute()
-    )
-    righe = [r for r in resp.data or [] if isinstance(r, dict)]
+    lette, totale = await pagina(costruisci, offset, page_size)
+    righe = [r for r in lette if isinstance(r, dict)]
     denominazioni = await _denominazioni(
         primary, [r.get("autore_company_profile_id") for r in righe])
-    return Page.build([_admin_out(r, denominazioni) for r in righe], resp.count or 0, page,
+    return Page.build([_admin_out(r, denominazioni) for r in righe], totale, page,
                       page_size)
 
 

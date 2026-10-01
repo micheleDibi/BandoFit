@@ -7,7 +7,9 @@ dello snapshot è `stato_effettivo` al momento del salvataggio, nella colonna
 storica `stato_bando`. La lista pagina sul PRIMARIO (ordine di salvataggio) e
 idrata i dati vivi dalla vista `bando_pubblico` con una sola query per pagina
 (≤ 50 id: dentro il timeout di 3s del ruolo anon e sotto le 1000 righe di
-PostgREST), più una su `bando_fusione` solo se qualche id manca.
+PostgREST), più una su `bando_fusione` solo se qualche id manca. Un errore di
+contratto del catalogo sull'elenco degrada alle card dallo snapshot, senza
+5xx; il salvataggio, che senza catalogo non può leggere il bando, no.
 """
 
 import logging
@@ -21,6 +23,8 @@ from app.schemas.saved_bando import SavedBandoItem, SavedIdsOut
 from app.services import company_scope
 from app.services.bandi_risoluzione import VISTA_BANDI, carica_per_slug, risolvi_fusioni
 from app.services.bandi_service import LIST_SELECT, map_list_item
+from app.services.lookup_service import errore_di_contratto
+from app.services.paginazione import pagina
 
 logger = logging.getLogger("bandofit.saved_bandi")
 
@@ -179,38 +183,48 @@ async def list_saved(
 ) -> Page[SavedBandoItem]:
     """Elenco paginato dei preferiti dell'azienda attiva, dal salvataggio più
     recente. I dati vivi arrivano dal catalogo; i bandi spariti restano
-    visibili dallo snapshot con disponibile=False."""
+    visibili dallo snapshot con disponibile=False. Una pagina oltre l'ultima
+    è vuota, con il totale reale. Se il catalogo risponde con un errore di
+    contratto (`errore_di_contratto`), tutte le card vengono dallo snapshot,
+    non disponibili, senza interrogare la risoluzione dei fusi; un guasto di
+    rete o un timeout risalgono come prima."""
     offset = (page - 1) * page_size
-    resp = (
-        await company_scope.filter_read(
+
+    def costruisci():
+        return company_scope.filter_read(
             primary.table("saved_bandi")
             .select(SAVED_SELECT, count="exact")
             .eq("user_id", str(user_id)),
             active,
-        )
-        .order("created_at", desc=True)
-        .range(offset, offset + page_size - 1)
-        .execute()
-    )
-    rows = resp.data or []
-    total = resp.count or 0
+        ).order("created_at", desc=True)
+
+    rows, total = await pagina(costruisci, offset, page_size)
     if not rows:
         return Page.build([], total, page, page_size)
 
     ids = [row["bando_id"] for row in rows]
-    live_resp = (
-        await secondary.table(VISTA_BANDI)
-        .select(LIST_SELECT)
-        .in_("id", ids)
-        .not_.is_("slug", "null")
-        .execute()
-    )
-    live_by_id = {row["id"]: row for row in (live_resp.data or [])}
-    # Solo per gli id spariti: se confluiti in un altro bando, la card (sempre
-    # dallo snapshot, non disponibile) rimanda alla scheda del master. Nessuna
-    # scrittura sul primario: la riga salvata resta sul bando_id originale.
-    mancanti = [bando_id for bando_id in ids if bando_id not in live_by_id]
-    fusioni = await risolvi_fusioni(secondary, mancanti) if mancanti else {}
+    live_by_id: dict[int, dict] = {}
+    fusioni: dict = {}
+    try:
+        live_resp = (
+            await secondary.table(VISTA_BANDI)
+            .select(LIST_SELECT)
+            .in_("id", ids)
+            .not_.is_("slug", "null")
+            .execute()
+        )
+    except APIError as exc:
+        if not errore_di_contratto(exc):
+            raise
+        logger.warning("preferiti: catalogo non leggibile (%s), card dagli snapshot", exc.code)
+    else:
+        live_by_id = {row["id"]: row for row in (live_resp.data or [])}
+        # Solo per gli id spariti: se confluiti in un altro bando, la card
+        # (sempre dallo snapshot, non disponibile) rimanda alla scheda del
+        # master. Nessuna scrittura sul primario: la riga salvata resta sul
+        # bando_id originale.
+        mancanti = [bando_id for bando_id in ids if bando_id not in live_by_id]
+        fusioni = await risolvi_fusioni(secondary, mancanti) if mancanti else {}
     in_calendar = await _in_calendar_ids(primary, user_id, active, ids)
 
     items = []

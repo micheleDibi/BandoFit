@@ -69,6 +69,18 @@ class UpstreamError(AppError):
         super().__init__(502, "upstream_error", message)
 
 
+class CatalogoNonDisponibileError(AppError):
+    """I lookup del catalogo bandi non si leggono (cambio di contratto) e
+    non c'è una cache: chi scrive o paga si ferma invece di procedere con
+    dati parziali. Ritentabile: il servizio riprova dopo un minuto."""
+
+    def __init__(
+        self,
+        message: str = "Catalogo dei bandi momentaneamente non disponibile: riprova tra un minuto",
+    ):
+        super().__init__(503, "catalogo_non_disponibile", message)
+
+
 class OpenapiNotConfiguredError(AppError):
     """Credenziali openapi.it assenti: integrazione disattivata su questo ambiente."""
 

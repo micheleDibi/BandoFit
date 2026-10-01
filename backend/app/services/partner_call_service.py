@@ -149,6 +149,7 @@ from app.services.bandi_risoluzione import carica_per_slug
 from app.services.bilanci_indicatori import calcola_fasce
 from app.services.notification_service import notify
 from app.services.openapi_mapping import build_dossier
+from app.services.paginazione import pagina
 from app.services.partenariati_ai_budget import budget_cents_gruppo
 from app.services.partenariato_accesso import (
     CALL_SELECT,
@@ -1255,18 +1256,20 @@ async def lista_mie(
     if not active.company_id:
         return Page.build([], 0, page, page_size)
     offset = (page - 1) * page_size
-    resp = (
-        await primary.table("partner_calls")
-        .select(LISTA_SELECT, count="exact")
-        .eq("company_profile_id", str(active.company_id))
-        .eq("family_parent_id", str(active.owner_id))
-        .order("created_at", desc=True)
-        .range(offset, offset + page_size - 1)
-        .execute()
-    )
-    calls = [c for c in resp.data or [] if isinstance(c, dict)]
+
+    def costruisci():
+        return (
+            primary.table("partner_calls")
+            .select(LISTA_SELECT, count="exact")
+            .eq("company_profile_id", str(active.company_id))
+            .eq("family_parent_id", str(active.owner_id))
+            .order("created_at", desc=True)
+        )
+
+    righe, totale = await pagina(costruisci, offset, page_size)
+    calls = [c for c in righe if isinstance(c, dict)]
     if not calls:
-        return Page.build([], resp.count or 0, page, page_size)
+        return Page.build([], totale, page, page_size)
     ids = [str(c["id"]) for c in calls]
     az = await carica_azienda(primary, active.company_id, active.owner_id)
     cercati, posizioni, lookups = await asyncio.gather(
@@ -1309,7 +1312,7 @@ async def lista_mie(
         )
         for c in calls
     ]
-    return Page.build(items, resp.count or len(items), page, page_size)
+    return Page.build(items, totale or len(items), page, page_size)
 
 
 # Candidature ricevute (WP8, prerequisito): spontanee, in attesa o accettate.
@@ -1961,8 +1964,11 @@ async def _avvia_job(primary, secondary, ai, active, user: dict, call_id: Any, s
     if not ai.enabled:
         raise AiNotConfiguredError(MSG_AI_NON_CONFIGURATA)
     az = await carica_azienda(primary, active.company_id, active.owner_id)
-    requisiti, posizioni, lookups = await asyncio.gather(
-        _requisiti(primary, call["id"]), _posizioni(primary, call["id"]), _lookups(secondary)
+    # Lookup fail-closed, PRIMA della prenotazione e della chiamata pagata:
+    # senza (cache vuota, catalogo non leggibile) niente proposta (503).
+    lookups = await lookup_service.get_lookups(secondary)
+    requisiti, posizioni = await asyncio.gather(
+        _requisiti(primary, call["id"]), _posizioni(primary, call["id"])
     )
     regioni = nomi_regioni(lookups)
     creatore = creatore_pubblico(az.dati_registro, az.dossier, regioni)

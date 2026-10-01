@@ -31,6 +31,7 @@ from app.schemas.user import (
     SubscriptionOut,
 )
 from app.services import family_service, job_position_service
+from app.services.paginazione import pagina
 
 logger = logging.getLogger("bandofit.users")
 
@@ -381,31 +382,28 @@ async def admin_list_users(
     page_size: int,
 ) -> Page[AdminUserOut]:
     offset = (page - 1) * page_size
-    query = (
-        primary.table("profiles")
-        .select(
-            f"{PROFILE_SELECT},{SUBSCRIPTION_EMBED},"
-            "company_profiles(ragione_sociale,deleted_at,created_at)",
-            count="exact",
+    term = _sanitize_search(q) if q else ""
+
+    def costruisci():
+        query = (
+            primary.table("profiles")
+            .select(
+                f"{PROFILE_SELECT},{SUBSCRIPTION_EMBED},"
+                "company_profiles(ragione_sociale,deleted_at,created_at)",
+                count="exact",
+            )
+            .eq("user_subscriptions.status", "active")
         )
-        .eq("user_subscriptions.status", "active")
-    )
-    if q:
-        term = _sanitize_search(q)
         if term:
             query = query.or_(
                 f"email.ilike.*{term}*,nome.ilike.*{term}*,"
                 f"cognome.ilike.*{term}*,azienda.ilike.*{term}*"
             )
-    if role:
-        query = query.eq("role", role)
-    resp = (
-        await query.order("created_at", desc=True)
-        .range(offset, offset + page_size - 1)
-        .execute()
-    )
+        if role:
+            query = query.eq("role", role)
+        return query.order("created_at", desc=True)
 
-    rows = resp.data
+    rows, total = await pagina(costruisci, offset, page_size)
     user_ids = [row["id"] for row in rows]
     memberships_by_member, counts_by_parent = await _family_context(primary, user_ids)
 
@@ -496,7 +494,7 @@ async def admin_list_users(
                 azienda_nome=azienda_nome,
             )
         )
-    return Page.build(items, resp.count or 0, page, page_size)
+    return Page.build(items, total, page, page_size)
 
 
 async def _family_context(

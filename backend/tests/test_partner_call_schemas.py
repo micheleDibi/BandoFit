@@ -560,3 +560,67 @@ def test_api_buona_fede(client):
     assert client.post("/segnalazioni", json={**base, "buona_fede": True}).status_code == 200
     assert client.post("/segnalazioni", json={**base, "buona_fede": False}).status_code == 400
     assert client.post("/segnalazioni", json={**base, "buona_fede": 1}).status_code == 422
+
+
+# ---------------------------------------- citazioni in uscita (filtro dei link)
+
+
+class TestCitazioneSnapshotOut:
+    """In uscita (requisiti, voci e regole finanziarie dello snapshot) l'URL
+    del documento passa dal filtro dei link della scheda, anche sulle righe
+    salvate prima del filtro: un URL non ammesso diventa None, mai un errore.
+    `RequisitoIn` resta con il solo controllo https."""
+
+    NON_AMMESSI = ["https://www.fasi.eu/a.pdf", "https://x.it/a\x01.pdf",
+                   "https://x.it/a.pdf https://fasi.eu/b.pdf", "https://x.it:99999/a.pdf"]
+
+    @pytest.mark.parametrize("url", NON_AMMESSI)
+    def test_voce_dello_snapshot_con_url_non_ammesso(self, url):
+        out = snapshot(modalita={**MODALITA, "citazione": {**citazione(), "url_documento": url}})
+        assert isinstance(out.modalita.citazione, pcs.CitazioneSnapshotOut)
+        assert out.modalita.citazione.url_documento is None
+        assert out.modalita.citazione.testo == citazione()["testo"]
+        assert out.modalita.citazione.verificata is True
+
+    def test_voce_dello_snapshot_con_url_ammesso(self):
+        url = "https://regione.example.it/Avviso pubblico.pdf"
+        out = snapshot(modalita={**MODALITA, "citazione": {**citazione(), "url_documento": url}})
+        assert out.modalita.citazione.url_documento == (
+            "https://regione.example.it/Avviso%20pubblico.pdf"
+        )
+
+    def test_http_resta_un_errore_anche_nello_snapshot(self):
+        with pytest.raises(ValidationError):
+            snapshot(modalita={**MODALITA, "citazione": {**citazione(),
+                                                          "url_documento": "http://x.it/a.pdf"}})
+
+    @pytest.mark.parametrize("url", NON_AMMESSI)
+    def test_requisito_out_accetta_una_citazione_in_e_la_filtra(self, url):
+        # La gap analysis costruisce `RequisitoOut` con una `CitazioneIn`.
+        cit = pcs.CitazioneIn(**citazione(), url_documento=url)
+        out = pcs.RequisitoOut(testo="Testo", origine="manuale", citazione=cit)
+        assert isinstance(out.citazione, pcs.CitazioneSnapshotOut)
+        assert out.citazione.url_documento is None
+        assert out.citazione.sezione == "D1-p3"
+        assert out.model_dump()["citazione"]["url_documento"] is None
+
+    def test_requisito_out_con_url_ammesso_invariato(self):
+        cit = pcs.CitazioneIn(**citazione(), url_documento="https://regione.example.it/a.pdf")
+        out = pcs.RequisitoOut(testo="Testo", origine="manuale", citazione=cit)
+        assert out.citazione.url_documento == "https://regione.example.it/a.pdf"
+
+    def test_requisito_in_invariato(self):
+        with pytest.raises(ValidationError):
+            pcs.RequisitoIn(testo="Testo valido",
+                            citazione={**citazione(), "url_documento": "http://x.it/a.pdf"})
+        dentro = pcs.RequisitoIn(testo="Testo valido", citazione=citazione())
+        assert type(dentro.citazione) is pcs.CitazioneIn
+
+    def test_regola_finanziaria_dello_snapshot(self):
+        s = snapshot(regole_finanziarie=[
+            regola(citazione={**citazione(), "url_documento": "https://www.fasi.eu/a.pdf"}),
+        ])
+        [regola_out] = s.regole_finanziarie
+        assert isinstance(regola_out.citazione, pcs.CitazioneSnapshotOut)
+        assert regola_out.citazione.url_documento is None
+        assert regola_out.origine_voce == "confermata"

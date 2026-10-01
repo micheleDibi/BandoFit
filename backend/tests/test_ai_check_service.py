@@ -2,6 +2,7 @@
 cache delle estrazioni, registro consumi e failsafe — con fake di primario,
 catalogo e client Anthropic."""
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -310,6 +311,17 @@ def fake_bando(monkeypatch):
     return bando
 
 
+@pytest.fixture(autouse=True)
+def fake_link(monkeypatch):
+    """Nessuna riga `bando_link` (il catalogo dei test è `None`): la riga
+    «Allegati ufficiali» del [META] usa i soli ripieghi della riga."""
+
+    async def nessuna(secondary, bando_id):
+        return []
+
+    monkeypatch.setattr(ai_check_service, "carica_link_scheda", nessuna)
+
+
 @pytest.fixture
 def spawned(monkeypatch):
     """Cattura le pipeline lanciate in background (senza eseguirle)."""
@@ -477,6 +489,104 @@ class TestRequestCheck:
         ]
         assert stale_updates and stale_updates[0][0]["status"] == "error"
 
+    @staticmethod
+    def _registra_meta(monkeypatch) -> dict:
+        """Cattura i kwargs con cui `request_check` costruisce l'input."""
+        ricevuti: dict = {}
+
+        def registra(bando, contenuto, allegati_texts=None, **kw):
+            ricevuti.update(kw)
+            return build_bando_input(bando, contenuto, allegati_texts, **kw)
+
+        monkeypatch.setattr(ai_check_service, "build_bando_input", registra)
+        return ricevuti
+
+    async def test_meta_con_gli_allegati_della_scheda(self, spawned, fake_bando, monkeypatch):
+        # La riga «Allegati ufficiali» viene dalla stessa lista della scheda:
+        # righe `bando_link` del bando risolto, filtrate, più il jsonb.
+        letture: list = []
+
+        async def link(secondary, bando_id):
+            letture.append((secondary, bando_id))
+            return [
+                {"id": 1, "bando_id": bando_id, "tipo": "allegato", "etichetta": "Modulo",
+                 "url": "https://www.regione.lombardia.it/modulo.pdf",
+                 "dominio": "regione.lombardia.it", "content_type": None},
+                {"id": 2, "bando_id": bando_id, "tipo": "allegato", "etichetta": "Video",
+                 "url": "https://www.youtube.com/watch?v=1", "dominio": "youtube.com",
+                 "content_type": None},
+            ]
+
+        monkeypatch.setattr(ai_check_service, "carica_link_scheda", link)
+        ricevuti = self._registra_meta(monkeypatch)
+        primary = FakePrimary(base_selects())
+        out = await ai_check_service.request_check(primary, None, FakeAi(), USER, _active(), SLUG)
+
+        assert out.status == "pending"
+        assert letture == [(None, fake_bando["id"])]
+        assert ricevuti["allegati_etichette"] == ["Modulo"]  # bando_flash: jsonb vuoto
+
+    @staticmethod
+    def _registra_pipeline(monkeypatch) -> dict:
+        """Cattura i kwargs con cui `request_check` avvia la pipeline."""
+        ricevuti: dict = {}
+
+        def finta(primary, ai, **kw):
+            ricevuti.update(kw)
+            return asyncio.sleep(0)
+
+        monkeypatch.setattr(ai_check_service, "_run_pipeline", finta)
+        return ricevuti
+
+    async def test_lettura_dei_link_fallita_due_volte_prosegue_senza_cache(
+        self, spawned, fake_bando, monkeypatch
+    ):
+        letture: list = []
+
+        async def fallita(secondary, bando_id):
+            letture.append(bando_id)
+            return None
+
+        monkeypatch.setattr(ai_check_service, "carica_link_scheda", fallita)
+        ricevuti = self._registra_meta(monkeypatch)
+        pipeline = self._registra_pipeline(monkeypatch)
+        out = await ai_check_service.request_check(
+            FakePrimary(base_selects()), None, FakeAi(), USER, _active(), SLUG
+        )
+        assert out.status == "pending"
+        assert letture == [fake_bando["id"]] * 2  # una seconda lettura, poi i ripieghi
+        assert ricevuti["allegati_etichette"] == []
+        assert pipeline["scrivi_cache"] is False
+        assert len(spawned) == 1
+
+    async def test_seconda_lettura_riuscita_scrive_in_cache(self, spawned, fake_bando, monkeypatch):
+        esiti = iter([None, []])
+
+        async def link(secondary, bando_id):
+            return next(esiti)
+
+        monkeypatch.setattr(ai_check_service, "carica_link_scheda", link)
+        pipeline = self._registra_pipeline(monkeypatch)
+        await ai_check_service.request_check(
+            FakePrimary(base_selects()), None, FakeAi(), USER, _active(), SLUG
+        )
+        assert pipeline["scrivi_cache"] is True
+
+    async def test_lettura_riuscita_una_sola_chiamata(self, spawned, fake_bando, monkeypatch):
+        letture: list = []
+
+        async def link(secondary, bando_id):
+            letture.append(bando_id)
+            return []
+
+        monkeypatch.setattr(ai_check_service, "carica_link_scheda", link)
+        pipeline = self._registra_pipeline(monkeypatch)
+        await ai_check_service.request_check(
+            FakePrimary(base_selects()), None, FakeAi(), USER, _active(), SLUG
+        )
+        assert letture == [fake_bando["id"]]
+        assert pipeline["scrivi_cache"] is True
+
 
 # ----------------------------------------------------------------- pipeline
 
@@ -496,6 +606,33 @@ def pipeline_args(bando, primary, ai, check_id="check-1"):
 
 
 class TestRunPipeline:
+    async def test_input_degradato_estrae_ma_non_scrive_la_cache(self, fake_bando, caplog):
+        # Righe `bando_link` non lette: la cache si legge ma non si
+        # sovrascrive con un'estrazione dal [META] degradato.
+        primary = FakePrimary({"bando_requirements": []})
+        ai = FakeAi()
+        with caplog.at_level("WARNING", logger="bandofit.ai_check"):
+            await ai_check_service._run_pipeline(
+                primary, ai, **pipeline_args(fake_bando, primary, ai), scrivi_cache=False
+            )
+        assert len(ai.extract_calls) == 1
+        assert not primary.ops_for("bando_requirements", "upsert")
+        [(update, _)] = primary.ops_for("ai_checks", "update")
+        assert update["status"] == "ready"
+        assert update["input_tokens"] == 12000  # i token spesi restano nel registro
+        assert any("non salvata in cache" in r.getMessage() for r in caplog.records)
+
+    async def test_input_degradato_usa_la_cache_se_valida(self, fake_bando):
+        cache = [{"extraction": canned_extraction().model_dump(), "content_hash": "hash-attuale",
+                  "prompt_version": PROMPT_VERSION}]
+        primary = FakePrimary({"bando_requirements": cache})
+        ai = FakeAi()
+        await ai_check_service._run_pipeline(
+            primary, ai, **pipeline_args(fake_bando, primary, ai), scrivi_cache=False
+        )
+        assert ai.extract_calls == []
+        assert not primary.ops_for("bando_requirements", "upsert")
+
     async def test_happy_path_scrive_report_e_registro(self, fake_bando):
         primary = FakePrimary({"bando_requirements": []})
         ai = FakeAi()

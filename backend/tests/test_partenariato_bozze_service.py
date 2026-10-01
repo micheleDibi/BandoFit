@@ -41,6 +41,7 @@ from app.core.errors import (
     AiTimeoutError,
     AiUpstreamError,
     AppError,
+    CatalogoNonDisponibileError,
     ForbiddenError,
     NotFoundError,
 )
@@ -459,6 +460,20 @@ async def avvia(db, sec, ai, lavori, nome="X", tipo="nda", **k):
 
 
 class TestInput:
+    async def test_lookup_non_disponibili_503_senza_prenotazione(self, fondo, lavori,
+                                                                monkeypatch):
+        # Fail-closed come il P1 dei lookup: senza cache e con il catalogo non
+        # leggibile niente prenotazione, niente job, niente chiamata pagata.
+        db, sec = await scenario_xy(fondo)
+
+        async def non_disponibili(secondary):
+            raise CatalogoNonDisponibileError()
+
+        monkeypatch.setattr("app.services.lookup_service.get_lookups", non_disponibili)
+        with pytest.raises(CatalogoNonDisponibileError):
+            await svc.avvia(db, sec, FakeAi(), attiva("X"), utente("X"), CALL, "nda")
+        assert db.chiamate("fn_partner_bozza_prenota") == [] and lavori == []
+
     async def test_messaggio_senza_dati_vietati(self, fondo, lavori):
         db, sec = await scenario_xy(fondo)
         ai = FakeAi()

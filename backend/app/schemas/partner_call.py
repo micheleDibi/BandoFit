@@ -28,11 +28,12 @@ import math
 import re
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StrictBool,
@@ -70,6 +71,7 @@ from app.schemas.partenariato_vocabolario import (
 )
 from app.schemas.partner_profile import PAESI_ISO2, AtecoSezioneOut
 from app.schemas.regole_finanziarie import RegolaFinanziaria
+from app.services.link_policy import url_documento_pubblicabile
 # Forma canonica e testi senza caratteri invisibili: definiti con i controlli
 # anti-contatti (stessa difesa per profilo, call e messaggi), riesportati qui.
 from app.services.partenariato_anonimato import forma_canonica, senza_invisibili  # noqa: F401
@@ -270,6 +272,31 @@ class CitazioneIn(BaseModel):
         return valore
 
 
+class CitazioneSnapshotOut(CitazioneIn):
+    """`CitazioneIn` come esce dall'API: requisiti, voci e regole finanziarie
+    dello snapshot. L'URL del documento passa anche dal filtro dei link
+    della scheda (`url_documento_pubblicabile`), che vale pure per le righe
+    salvate prima del filtro: un URL non ammesso diventa None, mai un
+    errore. Il solo controllo https di `CitazioneIn` resta per l'ingresso
+    dei requisiti (`RequisitoIn`)."""
+
+    @field_validator("url_documento")
+    @classmethod
+    def _ammesso(cls, valore: str | None) -> str | None:
+        return url_documento_pubblicabile(valore)
+
+
+def _come_snapshot(valore: Any) -> Any:
+    """Accetta anche una `CitazioneIn` già costruita (gap analysis): si
+    riconvalida come `CitazioneSnapshotOut`."""
+    if isinstance(valore, CitazioneIn) and not isinstance(valore, CitazioneSnapshotOut):
+        return valore.model_dump()
+    return valore
+
+
+CitazioneSnapshot = Annotated[CitazioneSnapshotOut, BeforeValidator(_come_snapshot)]
+
+
 # ------------------------------------------------- snapshot delle regole
 
 
@@ -283,7 +310,7 @@ class _VoceSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     origine_voce: OrigineVoce
-    citazione: CitazioneIn | None = None
+    citazione: CitazioneSnapshot | None = None
 
     @model_validator(mode="after")
     def _citazione_coerente(self):
@@ -443,7 +470,7 @@ class RegolaFinanziariaSnapshot(RegolaFinanziaria):
 
     id: str = Field(min_length=1, max_length=ID_VOCE_MAX)
     origine_voce: OrigineVoce
-    citazione: CitazioneIn | None = None
+    citazione: CitazioneSnapshot | None = None
 
     @field_validator("origine_voce")
     @classmethod
@@ -940,7 +967,7 @@ class RequisitoOut(BaseModel):
     cercato: bool = False
     origine: OrigineRequisito
     rif_origine: str | None = None
-    citazione: CitazioneIn | None = None
+    citazione: CitazioneSnapshot | None = None
     copertura_creatore: EsitoCopertura | None = None
     copertura_fonte: FonteCopertura | None = None
     copertura_nota: str | None = None

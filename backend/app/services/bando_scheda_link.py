@@ -10,11 +10,17 @@ nome) e, come ripiego, le colonne deprecate della riga. Ogni URL passa dal
 filtro dei link su tutte le fonti (`link_policy.link_pubblicabile`): un URL
 scartato non si mostra e si passa al candidato successivo.
 
+Gli allegati non hanno doppioni: la chiave è la normalizzazione degli URL
+del catalogo replicata qui (`chiave_url_catalogo`), e con la stessa chiave
+si toglie l'allegato uguale al pulsante principale, quando il chiamante dice
+che il pulsante viene mostrato (`bandi_service.map_detail`).
+
 Se la lettura di `bando_link` non riesce, la scheda si calcola con i soli
 ripieghi: un warning nel log, mai un 5xx.
 """
 
 import logging
+import unicodedata
 from collections.abc import Iterator
 from typing import Any
 from urllib.parse import unquote, urlsplit
@@ -26,10 +32,16 @@ from app.services.link_policy import host_pubblicabile, link_pubblicabile, scrub
 
 logger = logging.getLogger("bandofit.bando_scheda_link")
 
-BANDO_LINK_SELECT = "id,bando_id,url,dominio,tipo,etichetta,content_type,ultimo_visto_at"
+# `ultimo_visto_at` non si legge: avanza a ogni verifica e non decide nulla.
+BANDO_LINK_SELECT = "id,bando_id,url,dominio,tipo,etichetta,content_type"
 TIPI_SCHEDA = ("candidatura", "portale", "atto", "allegato")
 # Tetto della lettura: un bando ne ha di norma poche decine.
 LIMITE_RIGHE = 200
+# Etichetta di un allegato che non ha né etichetta, né label, né nome del file.
+ETICHETTA_RIPIEGO = "Allegato"
+MAX_ETICHETTA = 200
+# Parametri di query che non distinguono due URL (oltre a `utm_*`).
+_PARAMETRI_TRACCIAMENTO = frozenset({"fbclid", "gclid", "msclkid", "_ga"})
 
 # Formati riconosciuti, dal content-type dichiarato o dall'estensione.
 _FORMATI_CONTENT_TYPE = {
@@ -114,9 +126,57 @@ def _per_id(righe: list[dict]) -> list[dict]:
     return sorted(righe, key=_id_riga)
 
 
-def _chiave_url(url: str) -> str:
-    """URL uguali = identici dopo aver tolto la sola barra finale."""
-    return url[:-1] if url.endswith("/") else url
+def _parametro_di_tracciamento(segmento: str) -> bool:
+    nome = segmento.split("=", 1)[0]
+    return nome.startswith("utm_") or nome in _PARAMETRI_TRACCIAMENTO
+
+
+def chiave_url_catalogo(url: str) -> str:
+    """Chiave dei doppioni: la normalizzazione degli URL del catalogo
+    replicata (contratto DB bandi §5.1). Trim; schema e host minuscoli; via
+    `www.` iniziale, porta 80 o 443, frammento, parametri `utm_*`, `fbclid`,
+    `gclid`, `msclkid`, `_ga` e una barra finale; `http` e `https` restano
+    diversi. I parametri rimasti restano nell'ordine e nella forma
+    originali. Un URL non analizzabile resta con il solo trim."""
+    url = url.strip()
+    try:
+        parti = urlsplit(url)
+        porta = parti.port
+    except ValueError:
+        return url
+    host = (parti.hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if porta is not None and porta not in (80, 443):
+        host = f"{host}:{porta}"
+    percorso = parti.path[:-1] if parti.path.endswith("/") else parti.path
+    query = "&".join(
+        segmento
+        for segmento in parti.query.split("&")
+        if not _parametro_di_tracciamento(segmento)
+    )
+    chiave = f"{parti.scheme.lower()}://{host}{percorso}"
+    return f"{chiave}?{query}" if query else chiave
+
+
+def _nome_file(url: str) -> str | None:
+    """Nome del file dal percorso dell'URL, come etichetta di ripiego: ultimo
+    segmento decodificato, senza query né estensione nota (il formato la
+    scheda lo mostra a parte), spazi compressi, senza menzioni dei domini
+    esclusi, al massimo `MAX_ETICHETTA` caratteri. None se non resta nulla."""
+    try:
+        percorso = unquote(urlsplit(url).path)
+    except ValueError:
+        return None
+    # La decodifica fa ricomparire caratteri di controllo e di direzione
+    # del testo (categorie Cc e Cf): via, l'etichetta esce dall'API e entra
+    # nel prompt.
+    percorso = "".join(c for c in percorso if unicodedata.category(c) not in ("Cc", "Cf"))
+    nome = percorso.rstrip("/").rsplit("/", 1)[-1]
+    base, punto, estensione = nome.rpartition(".")
+    if punto and estensione.lower() in _FORMATI_ESTENSIONE:
+        nome = base
+    return _etichetta(" ".join(nome.split())[:MAX_ETICHETTA])
 
 
 def _formato_dichiarato(valore: Any) -> str | None:
@@ -234,35 +294,65 @@ def _voci_jsonb(allegati: Any) -> Iterator[tuple[Any, str | None, str | None]]:
         yield url, etichetta, _formato_dichiarato(voce.get("tipo"))
 
 
-def calcola_allegati(riga: dict, link: list[dict]) -> list[AllegatoScheda]:
-    """Allegati della scheda: righe `bando_link` `atto` poi `allegato` (per
-    id), poi il jsonb `allegati` nel suo ordine (tipo `allegato`), senza
-    doppioni per URL. A parità di URL vince la prima voce (quindi la riga di
-    `bando_link`), e un'etichetta vuota si completa con quella di un doppione."""
+def calcola_allegati(
+    riga: dict, link: list[dict], *, escludi: str | None = None
+) -> list[AllegatoScheda]:
+    """Allegati della scheda (contratto DB bandi §5.1): righe `bando_link`
+    `atto`/`allegato` per id, poi il jsonb `allegati` nel suo ordine (tipo
+    `allegato`), senza doppioni per URL (`chiave_url_catalogo`). A parità di
+    chiave vince la prima voce (quindi la riga di `bando_link`); l'etichetta
+    è quella della voce, poi quella di un doppione, poi il nome del file,
+    infine «Allegato»: mai vuota e sempre distinta nella scheda (una
+    ripetuta prende il primo numero libero: «scarica», «scarica (2)»…).
+    `escludi` è
+    l'URL del pulsante principale quando questo viene mostrato: ogni
+    candidato con la sua chiave si salta prima del dedup (anche le
+    varianti); con None nessun candidato si salta."""
+    righe = _per_id(
+        [r for r in link if isinstance(r, dict) and r.get("tipo") in ("atto", "allegato")]
+    )
     candidati: list[tuple[Any, str | None, str, Any, str | None]] = [
-        (r.get("url"), _etichetta(r.get("etichetta")), tipo, r.get("content_type"), None)
-        for tipo in ("atto", "allegato")
-        for r in _per_id(_righe(link, tipo))
+        (r.get("url"), _etichetta(r.get("etichetta")), r["tipo"], r.get("content_type"), None)
+        for r in righe
     ]
     candidati += [
         (url, etichetta, "allegato", None, formato)
         for url, etichetta, formato in _voci_jsonb(riga.get("allegati"))
     ]
+    chiave_esclusa = chiave_url_catalogo(escludi) if escludi else None
 
-    visti: dict[str, AllegatoScheda] = {}
+    # Dedup su record grezzi: il modello (etichetta obbligatoria) si
+    # costruisce alla fine, quando l'etichetta è risolta.
+    visti: dict[str, dict[str, Any]] = {}
     for url, etichetta, tipo, content_type, formato in candidati:
         ammesso = link_pubblicabile(url)
         if ammesso is None:
             continue
         url_ok = ammesso[0]
-        chiave = _chiave_url(url_ok)
+        chiave = chiave_url_catalogo(url_ok)
+        if chiave == chiave_esclusa:
+            continue
         gia = visti.get(chiave)
         if gia is not None:
-            if gia.etichetta is None and etichetta:
-                gia.etichetta = etichetta
+            if gia["etichetta"] is None and etichetta:
+                gia["etichetta"] = etichetta
             continue
-        visti[chiave] = AllegatoScheda(
-            url=url_ok, etichetta=etichetta, tipo=tipo,
-            formato=_formato(url_ok, content_type, formato),
-        )
-    return list(visti.values())
+        visti[chiave] = {
+            "url": url_ok, "etichetta": etichetta, "tipo": tipo,
+            "formato": _formato(url_ok, content_type, formato),
+        }
+    # Etichette sempre distinte nella scheda: una ripetuta (del catalogo o
+    # di ripiego) prende il primo «(n)» libero, contando anche quelle già
+    # numerate.
+    usate: set[str] = set()
+    allegati: list[AllegatoScheda] = []
+    for voce in visti.values():
+        etichetta = voce["etichetta"] or _nome_file(voce["url"]) or ETICHETTA_RIPIEGO
+        if etichetta in usate:
+            n = 2
+            while f"{etichetta} ({n})" in usate:
+                n += 1
+            etichetta = f"{etichetta} ({n})"
+        usate.add(etichetta)
+        allegati.append(AllegatoScheda(**{**voce, "etichetta": etichetta}))
+    return allegati

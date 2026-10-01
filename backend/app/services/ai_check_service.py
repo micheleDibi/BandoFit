@@ -51,9 +51,11 @@ from app.services.ai_check_prompts import (
 )
 from app.services.ai_check_scoring import facet_prechecks, score_report
 from app.services.bandi_risoluzione import carica_per_slug
+from app.services.bando_scheda_link import calcola_allegati, carica_link_scheda
 from app.services.family_service import owner_and_editable
 from app.services.openapi_mapping import build_dossier
 from app.services.openapi_service import _acquire_lock, _release_lock, record_usage
+from app.services.paginazione import pagina
 
 logger = logging.getLogger("bandofit.ai_check")
 
@@ -314,7 +316,21 @@ async def request_check(
 
     # Input costruiti PRIMA del lock e del task: la pipeline in background
     # riceve tutto in memoria e il lock resta brevissimo.
-    bando_text, sections = build_bando_input(bando, bando.get("contenuto"))
+    # La riga «Allegati ufficiali» del [META] è la stessa lista della scheda:
+    # righe `bando_link` (filtro dei link compreso) più i ripieghi della
+    # riga. Lettura non riuscita → soli ripieghi, mai un 5xx. Senza `escludi`:
+    # il modello legge anche l'allegato uguale al pulsante; è la scheda a non
+    # ripeterlo.
+    link = await carica_link_scheda(secondary, bando["id"])
+    if link is None:
+        # Un guasto transitorio cambierebbe il [META] e quindi l'hash: una
+        # seconda lettura; se fallisce ancora si prosegue con i soli ripieghi
+        # SENZA salvare in cache l'estrazione degradata.
+        link = await carica_link_scheda(secondary, bando["id"])
+    etichette = [a.etichetta for a in calcola_allegati(bando, link or [])]
+    bando_text, sections = build_bando_input(
+        bando, bando.get("contenuto"), allegati_etichette=etichette
+    )
     content_hash = compute_content_hash(bando, bando_text)
     raw = (company_data or {}).get("raw") or {}
     company_pack = build_company_pack(
@@ -395,6 +411,7 @@ async def request_check(
             content_hash=content_hash,
             company_pack=company_pack,
             prechecks=prechecks,
+            scrivi_cache=link is not None,
         )
     )
 
@@ -421,14 +438,23 @@ async def request_check(
 # ----------------------------------------------------------------- pipeline
 
 async def _get_extraction(
-    primary, ai: AiCheckClient, bando: dict, bando_text: str, content_hash: str
+    primary,
+    ai: AiCheckClient,
+    bando: dict,
+    bando_text: str,
+    content_hash: str,
+    *,
+    scrivi_cache: bool = True,
 ) -> tuple[ExtractionResult, bool, int, int]:
     """Estrazione con cache per bando: (risultato, cache_hit, in_tok, out_tok).
 
     Scelta consapevole: nessun lock cross-azienda sulla cache — due prime
     analisi CONCORRENTI sullo stesso bando pagano entrambe lo stadio A
     (spesa doppia limitata, ~centesimi; l'upsert è last-write-wins con lo
-    stesso contenuto). Serializzarle costerebbe più complessità del danno."""
+    stesso contenuto). Serializzarle costerebbe più complessità del danno.
+    Con `scrivi_cache=False` (input degradato: righe `bando_link` non lette)
+    la cache si legge ma non si sovrascrive, altrimenti la richiesta
+    successiva con lettura riuscita ripagherebbe l'estrazione."""
     cache_resp = (
         await primary.table("bando_requirements")
         .select("extraction,content_hash,prompt_version")
@@ -448,6 +474,12 @@ async def _get_extraction(
             logger.warning("cache estrazione non valida per bando %s: rigenero", bando["id"])
 
     extraction, usage = await ai.extract(SYSTEM_EXTRACT, bando_text)
+    if not scrivi_cache:
+        logger.warning(
+            "estrazione non salvata in cache per bando %s: lista degli allegati degradata",
+            bando["id"],
+        )
+        return extraction, False, usage.input_tokens, usage.output_tokens
     # Best-effort: l'estrazione (già pagata) è in memoria — perdere la
     # scrittura della cache non deve far fallire l'analisi né azzerare il
     # conteggio dei token già spesi nel registro.
@@ -495,6 +527,7 @@ async def _run_pipeline(
     content_hash: str,
     company_pack: str,
     prechecks: dict,
+    scrivi_cache: bool = True,
 ) -> None:
     """Estrazione → matching → scoring → persistenza. Non solleva MAI fuori:
     ogni esito viene scritto sulla riga e nel registro consumi."""
@@ -502,7 +535,7 @@ async def _run_pipeline(
     meta_base = {"bando_slug": bando["slug"], "check_id": check_id, "model": ai.model}
     try:
         extraction, cache_hit, in_a, out_a = await _get_extraction(
-            primary, ai, bando, bando_text, content_hash
+            primary, ai, bando, bando_text, content_hash, scrivi_cache=scrivi_cache
         )
         input_tokens += in_a
         output_tokens += out_a
@@ -677,36 +710,40 @@ async def list_checks(
     owner_id, editable = active.owner_id, active.editable
     await _close_stale(primary, owner_id)
 
-    query = (
-        primary.table("ai_checks")
-        .select(CHECK_SELECT, count="exact")
-        .eq("family_parent_id", str(owner_id))
+    # Il bando dello slug si risolve una volta sola, prima della query: la
+    # factory qui sotto costruisce solo la query (e può essere richiamata).
+    bando_ids = (
+        await _ids_del_bando(secondary, bando_slug)
+        if bando_slug and secondary is not None
+        else None
     )
-    # La quota resta condivisa dall'azienda (family_parent_id); lo STORICO è
-    # però dell'azienda attiva (per l'Advisor multi-azienda).
-    if active.company_id is not None:
-        query = query.eq("company_profile_id", active.company_id)
-    if bando_slug:
-        bando_ids = (
-            await _ids_del_bando(secondary, bando_slug) if secondary is not None else None
+
+    def costruisci():
+        query = (
+            primary.table("ai_checks")
+            .select(CHECK_SELECT, count="exact")
+            .eq("family_parent_id", str(owner_id))
         )
-        if bando_ids:
-            query = query.in_("bando_id", bando_ids)
-        else:
-            query = query.eq("bando_slug", bando_slug)
+        # La quota resta condivisa dall'azienda (family_parent_id); lo STORICO
+        # è però dell'azienda attiva (per l'Advisor multi-azienda).
+        if active.company_id is not None:
+            query = query.eq("company_profile_id", active.company_id)
+        if bando_slug:
+            if bando_ids:
+                query = query.in_("bando_id", bando_ids)
+            else:
+                query = query.eq("bando_slug", bando_slug)
+        return query.order("created_at", desc=True)
+
     offset = (page - 1) * page_size
-    resp = (
-        await query.order("created_at", desc=True)
-        .range(offset, offset + page_size - 1)
-        .execute()
-    )
+    righe, totale = await pagina(costruisci, offset, page_size)
     quota = await get_quota(primary, owner_id)
     include_report = bando_slug is not None
     return AiChecksResponse(
         editable=editable,
         quota=quota,
-        items=[_to_out(row, include_report=include_report) for row in (resp.data or [])],
-        total=resp.count or 0,
+        items=[_to_out(row, include_report=include_report) for row in righe],
+        total=totale,
     )
 
 

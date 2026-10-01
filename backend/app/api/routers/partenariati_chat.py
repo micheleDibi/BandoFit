@@ -45,7 +45,7 @@ async def lista(
     active: ActiveCompanyDep,
     primary: PrimaryClient,
     secondary: SecondaryClient,
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=100_000),
     page_size: int = Query(20, ge=1, le=50),
 ) -> Page[ConversazioneRigaOut]:
     """Conversazioni dell'azienda attiva con i non letti dell'utente."""

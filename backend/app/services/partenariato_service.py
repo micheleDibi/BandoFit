@@ -67,6 +67,7 @@ from app.services import (
 )
 from app.services.ai_check_prompts import serializza_sezioni
 from app.services.bandi_risoluzione import carica_per_slug, risolvi_fusioni
+from app.services.link_policy import url_documento_pubblicabile
 from app.services.ai_prezzi import costo_cents, stima_cents
 from app.services.openapi_service import record_usage
 from app.services.partenariato_errori import raise_from_rpc
@@ -161,10 +162,6 @@ def _ts(valore) -> datetime | None:
 def _iso(valore) -> str | None:
     parsed = _ts(valore)
     return parsed.isoformat() if parsed else None
-
-
-def _https(url) -> str | None:
-    return url if isinstance(url, str) and url.lower().startswith("https://") else None
 
 
 @lru_cache(maxsize=1)
@@ -368,7 +365,9 @@ def _fonti_out(fonti_usate) -> list[FonteOut]:
                     n=voce.get("n"),
                     etichetta=voce.get("etichetta") or "Documento ufficiale",
                     dominio=voce.get("dominio"),
-                    url=_https(voce.get("url")),
+                    # Cintura dei link in lettura: vale anche per le righe
+                    # storiche di `fonti_usate` (il testo resta, il link no).
+                    url=url_documento_pubblicabile(voce.get("url")),
                     stato=voce.get("stato"),
                     pagine_totali=int(voce.get("pagine_totali") or 0),
                     pagine_incluse=[n for n in incluse if isinstance(n, int)]
@@ -884,7 +883,12 @@ def documenti_letti(candidati, scaricati, testi) -> tuple[list[DocumentoLetto], 
             "dominio": candidato.dominio,
             # Bloccato dal download (redirect verso un dominio escluso, IP non
             # pubblico…): il link non si mostra, il browser ci arriverebbe.
-            "url": None if scaricato.stato == "bloccato_policy" else _https(candidato.url),
+            # Altrimenti l'URL come può uscire dall'API (filtro dei link).
+            "url": (
+                None
+                if scaricato.stato == "bloccato_policy"
+                else url_documento_pubblicabile(candidato.url)
+            ),
             "tipo": candidato.tipo,
             "origine": candidato.origine,
             "stato": stato_download,
@@ -1121,10 +1125,16 @@ def non_transitorio(stato: int | None) -> bool:
     return stato is not None and 400 <= stato < 500 and stato not in STATI_4XX_TRANSITORI
 
 
-async def regole_da_estrazione(secondary, estrazione, sezioni: dict, fonti: list) -> dict:
+async def regole_da_estrazione(
+    secondary, estrazione, sezioni: dict, fonti: list, *, lookups=None
+) -> dict:
     """Post-elaborazione deterministica (verifica delle citazioni sul testo
-    inviato, coerenza, regioni dalle lookup del catalogo)."""
-    return post_elabora(estrazione, sezioni, fonti, await _lookups(secondary))
+    inviato, coerenza, regioni dalle lookup del catalogo). `lookups` sono
+    quelli già letti fail-closed dalla pipeline prima della chiamata pagata;
+    senza, si leggono qui (None se non disponibili)."""
+    if lookups is None:
+        lookups = await _lookups(secondary)
+    return post_elabora(estrazione, sezioni, fonti, lookups)
 
 
 @dataclass
@@ -1260,6 +1270,12 @@ async def _pipeline(
         if _riusabile(precedente, content_hash, forza):
             return await _chiudi_senza_modello(primary, ctx, "riusata", comuni)
 
+        # Lookup del catalogo fail-closed PRIMA della chiamata pagata: senza
+        # (cache vuota, catalogo non leggibile) la post-elaborazione perderebbe
+        # le regioni e l'estrazione sarebbe pagata per niente: esito «errore»
+        # a costo 0, si riprova al prossimo giro.
+        lookups = await lookup_service.get_lookups(secondary)
+
         # ---- fase analisi: heartbeat SUBITO prima della chiamata pagata
         if not await _rinnova(primary, bando_id, claim_token, "analisi"):
             return await _claim_perso(primary, ctx)
@@ -1272,7 +1288,9 @@ async def _pipeline(
         inviata = True
         estrazione, usage = await genera_estrazione(ai, testo, settings=settings)
         costo = costo_cents(modello, usage.input_tokens, usage.output_tokens)
-        regole = await regole_da_estrazione(secondary, estrazione, sezioni, fonti)
+        regole = await regole_da_estrazione(
+            secondary, estrazione, sezioni, fonti, lookups=lookups
+        )
         vinto = await _concludi(
             primary,
             bando_id,

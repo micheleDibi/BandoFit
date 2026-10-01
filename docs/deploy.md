@@ -10,7 +10,7 @@ Internet ──HTTPS──▶ reverse proxy del server ──▶ 127.0.0.1:FRONT
 ## Prerequisiti
 
 - Docker + plugin Compose sul server (`docker compose version`).
-- Progetto Supabase **primario** con tutte le migration di `supabase/migrations/` eseguite in ordine di numero, oggi dalla 0001 alla 0044 (vedi [setup.md](setup.md) e «Migration del DB primario» sotto).
+- Progetto Supabase **primario** con tutte le migration di `supabase/migrations/` eseguite in ordine di numero, oggi dalla 0001 alla 0045 (vedi [setup.md](setup.md) e «Migration del DB primario» sotto).
 - Credenziali del **secondario** (URL + anon key).
 - Un dominio puntato al server, con il reverse proxy già in uso (nginx/caddy/traefik).
 
@@ -248,9 +248,20 @@ Cosa fa un passo in modalità `attiva`:
 - **eventi del calendario** del bando: passano al master; se l'evento del master c'è già, quello del doppione si elimina se non ha note, altrimenti diventa un evento personale;
 - **call di partenariato attive**: passano al master; se l'azienda ha già una call attiva sul master restano dove sono e compaiono nel log come «in collisione» a ogni passo. Le call chiuse non cambiano;
 - storico degli AI-check, alert inviati, estrazioni, consulenze e acquisti conservano il bando originale;
-- ogni riga modificata o eliminata lascia una voce in `audit_log` (`catalogo.rimappatura_fuso`) con i valori precedenti: se il catalogo separa di nuovo il doppione, le righe si riportano indietro con la funzione della 0044 (vedi «Ripristino dopo la separazione di un doppione» in «Accensione delle funzioni»).
+- ogni riga modificata o eliminata lascia una voce in `audit_log` (`catalogo.rimappatura_fuso`) con i valori precedenti: se il catalogo separa di nuovo il doppione **e il doppione è di nuovo in `bando_pubblico`**, il passo successivo riporta indietro le righe con la funzione della 0044 (serve la 0045; altrimenti restano sul master e si riprova al passo dopo). La funzione non cancella mai righe; quelle in conflitto restano sul master e si vedono a mano (vedi «Ripristino dopo la separazione di un doppione» in «Accensione delle funzioni»);
+- il riassunto di ogni passo conta anche le righe di `bando_fusione` del catalogo intero (`coppie_catalogo`), per il confronto con il produttore: `fusi` conta solo le coppie fra gli id in uso nel primario (un doppione che nessun utente ha salvato non compare e non ha nulla da rimappare).
 
 Accensione, controlli e spegnimento: «Accensione delle funzioni» qui sotto, punto 1.
+
+## Catalogo: come ottenere le richieste R1-R8
+
+La conferma scritta del passo c2 (contratto DB bandi §10.1) elenca le otto richieste del §12 che il backend manda al catalogo. I log dell'applicazione non riportano la query string (per scelta: le query del DB primario contengono dati riservati), quindi le richieste si prendono dal codice, senza rete e senza credenziali:
+
+```bash
+cd backend && .venv/bin/python -m scripts.stampa_richieste_catalogo
+```
+
+Lo script esegue le funzioni reali dei servizi (elenco, dettaglio con la risoluzione degli slug, preferiti, calendario, alert, cataloghi) contro un client PostgREST vero con un trasporto finto, che registra ogni richiesta e risponde vuoto: per ogni Rn stampa metodo, percorso, query string e l'header `Prefer`. Nessuna chiave compare (l'indirizzo è fittizio, nessun `.env` letto) e i valori sono d'esempio (slug `esempio-di-slug`, id 1 e 2, la data di Roma del giorno). Di default la query è decodificata come nel §12; con `--come-inviata` è quella sul filo (`,` `(` `)` codificati), cioè la forma che compare nei log del gateway del catalogo. Il confronto con la «Versione (c)» del §12 e con i log di produzione si fa a mano; nella conferma si indicano commit e data della stampa. Cambia il codice, cambia la stampa: non c'è nessuna copia a mano delle query.
 
 ## Accensione delle funzioni
 
@@ -269,28 +280,55 @@ Tre funzioni nascono spente e si accendono in produzione una alla volta, in ques
 
 ### 1. Rimappatura dei bandi fusi
 
-Prerequisiti: la migration **0043** applicata sul primario, con il reload dello schema («Migration del DB primario» sotto); senza, ogni passo registra l'errore «fn_bandi_in_uso assente … la migration 0043 va applicata» e non fa nulla. Prima di passare ad `attiva` va applicata anche la **0044**, che permette di annullare un passo (vedi «Ripristino dopo la separazione di un doppione» sotto).
+Prerequisiti: la migration **0043** applicata sul primario, con il reload dello schema («Migration del DB primario» sotto); senza, ogni passo registra l'errore «fn_bandi_in_uso assente … la migration 0043 va applicata» e non fa nulla. Prima di passare ad `attiva` vanno applicate anche la **0044**, che permette di annullare un passo, e la **0045**, che dà al passo l'elenco dei doppioni rimappati per rilevare le separazioni (senza, ogni passo registra l'errore «fn_doppioni_rimappati assente … la migration 0045 va applicata» e conta un errore, ma rimappa lo stesso; vedi «Ripristino dopo la separazione di un doppione» sotto).
 
 1. Nel `.env`: `RIMAPPATURA_FUSI_MODALITA=prova`. L'intervallo resta di 60 minuti se `RIMAPPATURA_FUSI_INTERVALLO_MINUTI` non si imposta. Poi `docker compose up -d backend` e il controllo con `env | grep`.
-2. Controllare i log: `docker compose logs backend | grep "rimappatura fusi"`. Il primo passo parte all'avvio, poi uno a ogni intervallo. Ogni passo scrive un riassunto: modalità, id in uso, coppie trovate e scartate, errori, totali per tabella e le prime 50 coppie (doppione → master). In `prova` nulla viene modificato. Il riassunto è a **WARNING** quando il passo ha errori o coppie scartate, altrimenti a INFO: `docker compose logs backend | grep "WARNING bandofit.catalogo_scheduler"` mostra solo i passi da guardare. Gli errori di una singola coppia (per esempio un salvataggio concorrente dello stesso bando) si ripetono al passo dopo.
+2. Controllare i log: `docker compose logs backend | grep "rimappatura fusi"`. Il primo passo parte all'avvio, poi uno a ogni intervallo. Ogni passo scrive un riassunto: modalità, id in uso, coppie trovate fra gli id in uso (`fusi`) e nel catalogo intero (`coppie_catalogo`: tutte le righe di `bando_fusione`; `None` se la lettura non è riuscita), scartate, errori, totali per tabella, le prime 50 coppie (doppione → master) e le separazioni (`separazioni_rilevate`, righe `ripristinate` e `in_conflitto`). In `prova` nulla viene modificato. Il riassunto è a **WARNING** quando il passo ha errori, coppie scartate o righe ripristinate (in `prova`: da ripristinare), altrimenti a INFO: `docker compose logs backend | grep "WARNING bandofit.catalogo_scheduler"` mostra solo i passi da guardare. Gli errori di una singola coppia (per esempio un salvataggio concorrente dello stesso bando) si ripetono al passo dopo.
 3. Se i numeri sono plausibili e non ci sono errori che si ripetono, `RIMAPPATURA_FUSI_MODALITA=attiva`, `docker compose up -d backend` e il controllo con `env | grep`.
 4. Dopo l'accensione: il primo passo in `attiva` parte all'avvio: il suo riassunto inizia con `rimappatura fusi (attiva)` e riporta i totali delle righe spostate. Dal passo successivo i totali tornano a zero, salvo le call «in collisione», che ricompaiono a ogni passo finché l'azienda ha una call attiva anche sul master.
-5. **Prima di ogni lotto di fusioni o di una separazione nel catalogo** si torna a `prova` (`.env` e `docker compose up -d backend`). Si controllano i riassunti dei passi con il catalogo aggiornato e solo dopo si torna ad `attiva`.
+5. **Prima di ogni lotto di fusioni o di una separazione nel catalogo** si torna a `prova` (`.env` e `docker compose up -d backend`). Si controllano i riassunti dei passi con il catalogo aggiornato (in `prova` il passo rileva anche le separazioni e riporta a WARNING le righe che ripristinerebbe, senza scrivere) e solo dopo si torna ad `attiva`.
 
 Per spegnerla: `RIMAPPATURA_FUSI_MODALITA=spenta` e `docker compose up -d backend`. Le righe già spostate restano sul master.
 
 #### Ripristino dopo la separazione di un doppione
 
-Serve la migration 0044, applicata dopo la 0043 (aggiunge solo la funzione `fn_ripristina_rimappatura`). Si lavora dallo SQL Editor del primario:
+Servono le migration 0044 (la funzione `fn_ripristina_rimappatura`) e 0045 (`fn_doppioni_rimappati`), applicate dopo la 0043. **Lo fa il passo periodico.** A ogni passo, dopo la rimappatura, legge i doppioni con righe rimappate non ancora ripristinate (`fn_doppioni_rimappati`) e li cerca in `bando_fusione`: chi manca è stato separato. Si ripristina **solo se il doppione è di nuovo in `bando_pubblico`** (lettura per id), mai verso un id assente dalla vista: se non c'è ancora, le righe restano sul master e il passo successivo riprova (riga INFO «separato ma non ancora nella vista»). In `attiva` il passo rilegge `bando_fusione` per quel doppione subito prima di scrivere e chiama la funzione della 0044 in scrittura; in `prova` la chiama in prova e il riassunto riporta a WARNING le righe che ripristinerebbe. La funzione non cancella mai righe: reinserisce quelle eliminate e riporta al doppione quelle aggiornate o convertite. Le righe `in_conflitto` restano sul master, si contano nel riassunto e non fermano il passo; un doppione che resta in conflitto per più di 24 passi consecutivi compare nel log a WARNING una volta al giorno («da vedere a mano»): si segue il punto 4 della procedura qui sotto.
+
+La procedura manuale resta come ripiego (per esempio con la 0045 non ancora applicata, o con la rimappatura spenta). Si lavora dallo SQL Editor del primario:
 
 1. Nel `.env` `RIMAPPATURA_FUSI_MODALITA=prova` (o `spenta`), poi `docker compose up -d backend`. Verificare che il catalogo non elenchi più il doppione in `bando_fusione`, altrimenti il passo successivo lo rimappa di nuovo. Il catalogo si legge solo con la chiave anon, dal container del backend; il comando deve stampare `[]`:
    ```bash
    docker compose exec backend python -c "import os, urllib.request as u; r = u.Request(os.environ['SECONDARY_SUPABASE_URL'] + '/rest/v1/bando_fusione?select=bando_id&bando_id=eq.<doppione>', headers={'apikey': os.environ['SECONDARY_SUPABASE_ANON_KEY']}); print(u.urlopen(r).read().decode())"
    ```
+   Verificare anche che il doppione sia **di nuovo in `bando_pubblico`**: lo stesso comando con `/rest/v1/bando_pubblico?select=id&id=eq.<doppione>` deve stampare una riga (`[{"id": <doppione>}]`). Se stampa `[]` **non si ripristina**: le righe restano sul master e si ricontrolla al passo successivo o dopo l'avviso del produttore del catalogo. Si può tornare ad `attiva`: senza la riga in `bando_fusione` la rimappatura non tocca più il doppione, e il passo ripristinerà da solo quando il bando tornerà nella vista.
 2. Prova, che non scrive nulla (è il default): `select public.fn_ripristina_rimappatura(<doppione>, '<dal>'::timestamptz);`. Il risultato riporta, per tabella, i conteggi `{ripristinate, in_conflitto}`. `<dal>` è un istante anteriore alla prima rimappatura del doppione; nel dubbio `'-infinity'`.
-3. Scrittura: `select public.fn_ripristina_rimappatura(<doppione>, '<dal>'::timestamptz, false);`. Deve restituire gli stessi conteggi della prova. Rilanciarla non riapplica nulla. Ogni riga ripristinata lascia una voce `catalogo.ripristino_rimappatura` in `audit_log`.
+3. Ripetere il controllo su `bando_pubblico` del punto 1 (fra la prova e la scrittura può passare tempo), poi la scrittura: `select public.fn_ripristina_rimappatura(<doppione>, '<dal>'::timestamptz, false);`. Deve restituire gli stessi conteggi della prova. Rilanciarla non riapplica nulla. Ogni riga ripristinata lascia una voce `catalogo.ripristino_rimappatura` in `audit_log`.
 4. Le righe `in_conflitto` non vengono toccate e restano da vedere a mano. Sono le voci `catalogo.rimappatura_fuso` del doppione che nessuna voce `catalogo.ripristino_rimappatura` cita (in quest'ultima, `payload->'voce'` è l'id della voce d'origine). Se più doppioni dello stesso master tornano separati, si ripristinano tutti, poi si rilancia il ripristino (prova, poi scrittura) di quelli con righe `in_conflitto`. Un preferito o una scadenza restano sul master finché non è ripristinata la riga di un altro doppione dello stesso master che la rimappatura aveva eliminato per causa loro. Se quell'altro doppione resta fuso, la riga resta sul master e va vista a mano.
+
+   **Chiusura a mano di un conflitto permanente.** Alcuni conflitti non si risolvono da soli: la riga è stata cancellata dall'utente, l'evento convertito è stato modificato dopo, l'utente o l'azienda non esistono più. Finché una voce resta non citata, il passo riprova a ogni giro (letture sul catalogo e una chiamata alla funzione) e dopo 24 passi avvisa una volta al giorno. Si elencano le voci aperte del doppione:
+   ```sql
+   select v.id, v.created_at, v.payload->>'tabella' as tabella, v.payload->>'operazione' as operazione,
+          v.payload->>'id' as riga, v.target_user_id, v.payload->>'company_profile_id' as azienda
+   from public.audit_log v
+   where v.action = 'catalogo.rimappatura_fuso' and v.payload->'doppione' = to_jsonb(<doppione>::int)
+     and not exists (select 1 from public.audit_log r
+                     where r.action = 'catalogo.ripristino_rimappatura' and r.payload->'voce' = to_jsonb(v.id))
+   order by v.id;
+   ```
+   Per ciascuna si controlla la riga nella sua tabella (`riga` è l'id). Se non deve tornare indietro, si chiude la voce scrivendo a mano la voce di ripristino che la cita: da quel momento né la funzione né il passo la riprovano, e quando tutte le voci del doppione sono citate il doppione esce da `fn_doppioni_rimappati`.
+   ```sql
+   insert into public.audit_log (actor_id, action, target_user_id, family_parent_id, payload)
+   select null, 'catalogo.ripristino_rimappatura', v.target_user_id, v.family_parent_id,
+          jsonb_build_object('tabella', v.payload->'tabella', 'id', v.payload->'id',
+                             'operazione', 'chiusa_a_mano', 'company_profile_id', v.payload->'company_profile_id',
+                             'doppione', v.payload->'doppione', 'master', v.payload->'master',
+                             'voce', v.id, 'prima', null, 'motivo', '<perché non si ripristina>')
+   from public.audit_log v where v.id = <id della voce>;
+   ```
+   Attenzione: chiudere una voce `eliminata` sblocca il ripristino delle righe `aggiornata` degli altri doppioni dello stesso master nello stesso ambito (il vincolo descritto sopra): si chiude solo se quella riga non deve davvero tornare.
 5. Solo dopo, se serve, si torna ad `attiva`.
+
+**Limite noto: il ripristino automatico e le scelte dell'utente.** Il passo riprova il ripristino a ogni giro finché resta una voce non citata. Se dopo una separazione un utente, che aveva il doppione tra i preferiti (portato sul master dalla rimappatura), lo **risalva** (per esempio nella finestra in `prova` del punto 5 dell'accensione), il ripristino va in conflitto («doppione già nell'ambito»); quando poi l'utente **toglie** quel preferito, al passo successivo il conflitto non c'è più e la riga torna dal master al doppione: l'utente si ritrova il doppione che aveva appena tolto e non ha più il master. Lo stesso vale per una scadenza in calendario. Come accorgersene: nel log, per lo stesso doppione, righe INFO «righe in conflitto restano sul master» seguite da un WARNING «righe ripristinate». Come evitarlo: appena compaiono conflitti dopo una separazione, elencare le voci con la query qui sopra, controllare in `saved_bandi` o `calendar_events` se il doppione è già nello stesso ambito (stesso utente e stessa azienda della voce) e, se è una scelta dell'utente, chiudere la voce a mano. Come rimediare se è già successo: la voce `catalogo.ripristino_rimappatura` scritta dal passo ha in `payload->'prima'` lo stato sovrascritto (`bando_id` e `bando_slug` del master): si riporta la riga `payload->>'id'` a quei valori con un `update`; la voce d'origine resta citata e il passo non la riprova. Una voce marcatore che renda definitivo questo conflitto nel percorso automatico è rinviata a un giro successivo.
 
 ### 2. Storico dei bilanci e bilancio ufficiale
 
@@ -374,7 +412,7 @@ docker compose down
 
 ### Migration del DB primario (prima del deploy)
 
-Le migration nuove (`supabase/migrations/NNNN_nome.sql`, segnalate con ⚠️ nel changelog) si eseguono dallo SQL Editor del primario, in ordine di numero, **prima** del deploy del backend che le usa. Per il rilascio dei bilanci e del modulo partenariati (branch `feat/partenariati`) servono **tutte** le migration dalla 0032 alla 0042, in ordine, prima del deploy e qualunque sia lo stato dei flag: il backend legge colonne della 0036, 0041 e 0042 anche a modulo spento. Poi la **0043** (rimappatura dei bandi fusi), che serve prima di impostare `RIMAPPATURA_FUSI_MODALITA` diversa da `spenta`, e la **0044** (ripristino della rimappatura: aggiunge solo una funzione), da applicare prima di passare ad `attiva` (vedi «Accensione delle funzioni» sopra). Ogni file va eseguito dentro una transazione, con un limite all'attesa dei lock subito dopo `begin;`:
+Le migration nuove (`supabase/migrations/NNNN_nome.sql`, segnalate con ⚠️ nel changelog) si eseguono dallo SQL Editor del primario, in ordine di numero, **prima** del deploy del backend che le usa. Per il rilascio dei bilanci e del modulo partenariati (branch `feat/partenariati`) servono **tutte** le migration dalla 0032 alla 0042, in ordine, prima del deploy e qualunque sia lo stato dei flag: il backend legge colonne della 0036, 0041 e 0042 anche a modulo spento. Poi la **0043** (rimappatura dei bandi fusi), che serve prima di impostare `RIMAPPATURA_FUSI_MODALITA` diversa da `spenta`, e la **0044** (ripristino della rimappatura: aggiunge solo una funzione), da applicare prima di passare ad `attiva`, e la **0045** (doppioni rimappati non ancora ripristinati: aggiunge solo una funzione di lettura), che serve al passo per rilevare le separazioni; senza, il passo conta un errore a ogni giro ma rimappa lo stesso (vedi «Accensione delle funzioni» sopra). Ogni file va eseguito dentro una transazione, con un limite all'attesa dei lock subito dopo `begin;`:
 
 ```sql
 begin;

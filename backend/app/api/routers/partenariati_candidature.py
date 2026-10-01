@@ -82,7 +82,7 @@ async def lista(
         None),
     tipo: Literal["candidatura", "invito"] | None = Query(None),
     call_id: UUID | None = Query(None),
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=100_000),
     page_size: int = Query(20, ge=1, le=50),
 ) -> Page[CandidaturaOut]:
     """Candidature e inviti inviati o ricevuti dall'azienda attiva (`call_id`:

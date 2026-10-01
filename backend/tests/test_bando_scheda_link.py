@@ -9,13 +9,17 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from postgrest.exceptions import APIError
+from pydantic import ValidationError
 
+from app.schemas.bando import AllegatoScheda
 from app.services.bando_scheda_link import (
     BANDO_LINK_SELECT,
+    ETICHETTA_RIPIEGO,
     calcola_allegati,
     calcola_cta,
     calcola_link_fonte,
     carica_link_scheda,
+    chiave_url_catalogo,
     fonte_ufficiale_pubblicabile,
 )
 
@@ -310,23 +314,28 @@ def _allegati(riga: dict, link: list[dict] | None = None) -> list[tuple]:
 
 
 class TestAllegati:
-    def test_ordine_atto_allegato_poi_jsonb(self):
+    def test_ordine_righe_per_id_poi_jsonb(self):
+        # Le righe `atto` e `allegato` insieme, per id: il tipo non raggruppa.
         link = [
-            _link(7, "allegato", "https://x.it/b.pdf"),
-            _link(3, "allegato", "https://x.it/a.pdf"),
-            _link(9, "atto", "https://x.it/delibera.pdf"),
-            _link(1, "candidatura", "https://x.it/domanda"),
+            _link(5, "allegato", "https://x.it/b.pdf"),
+            _link(1, "allegato", "https://x.it/a.pdf"),
+            _link(2, "atto", "https://x.it/delibera.pdf"),
+            _link(0, "candidatura", "https://x.it/domanda"),
         ]
         riga = _riga(allegati=[
             {"label": "Z", "url": "https://x.it/z.pdf", "tipo": "modulo"},
             {"label": "Y", "url": "https://x.it/y.pdf", "tipo": None},
         ])
-        assert [u for u, *_ in _allegati(riga, link)] == [
-            "https://x.it/delibera.pdf",
+        allegati = _allegati(riga, link)
+        assert [u for u, *_ in allegati] == [
             "https://x.it/a.pdf",
+            "https://x.it/delibera.pdf",
             "https://x.it/b.pdf",
             "https://x.it/z.pdf",
             "https://x.it/y.pdf",
+        ]
+        assert [t for _, _, t, _ in allegati] == [
+            "allegato", "atto", "allegato", "allegato", "allegato"
         ]
 
     def test_tipo_dalla_riga_allegato_per_il_jsonb(self):
@@ -350,8 +359,9 @@ class TestAllegati:
         riga = _riga(allegati=[{"label": " Decreto ", "url": "https://x.it/a.pdf"}])
         assert _allegati(riga, link) == [("https://x.it/a.pdf", "Decreto", "atto", "pdf")]
 
-    def test_solo_la_barra_finale_conta(self):
-        # Maiuscole, query e doppia barra fanno URL diversi.
+    def test_percorso_query_e_doppia_barra_distinguono(self):
+        # Maiuscole nel percorso, query non di tracciamento e doppia barra
+        # fanno URL diversi; una sola barra finale no.
         riga = _riga(allegati=[
             {"label": "1", "url": "https://x.it/a"},
             {"label": "2", "url": "https://x.it/A"},
@@ -438,22 +448,228 @@ class TestAllegati:
         assert [e for _, e, _, _ in _allegati(riga, link)] == ["Buono"]
 
     @pytest.mark.parametrize(
-        ("etichetta", "attesa"),
+        ("etichetta", "attese"),
         [
-            ("Scarica da www.obiettivoeuropa.com/bandi/x", "Scarica da"),
-            ("obiettivoeuropa.com", None),
-            ("Delibera n. 12", "Delibera n. 12"),
+            # Stessa etichetta su due allegati: la seconda prende un numero.
+            ("Scarica da www.obiettivoeuropa.com/bandi/x", ["Scarica da", "Scarica da (2)"]),
+            # Etichetta che resta vuota dopo la pulizia: vale il nome del file.
+            ("obiettivoeuropa.com", ["a", "b"]),
+            ("Delibera n. 12", ["Delibera n. 12", "Delibera n. 12 (2)"]),
         ],
     )
-    def test_etichetta_senza_menzioni_dei_domini_esclusi(self, etichetta, attesa):
+    def test_etichetta_senza_menzioni_dei_domini_esclusi(self, etichetta, attese):
         link = [_link(1, "atto", "https://x.it/a.pdf", etichetta=etichetta)]
         riga = _riga(allegati=[{"label": etichetta, "url": "https://x.it/b.pdf"}])
-        assert [e for _, e, _, _ in _allegati(riga, link)] == [attesa, attesa]
+        assert [e for _, e, _, _ in _allegati(riga, link)] == attese
 
-    def test_etichetta_assente(self):
+    def test_etichetta_assente_nome_del_file(self):
         assert _allegati(_riga(allegati=[{"url": "https://x.it/a.pdf"}])) == [
-            ("https://x.it/a.pdf", None, "allegato", "pdf")
+            ("https://x.it/a.pdf", "a", "allegato", "pdf")
         ]
+
+    def test_doppione_normalizzato_vince_bando_link_con_etichetta_del_jsonb(self):
+        # Riga senza etichetta e voce del jsonb equivalente dopo la
+        # normalizzazione: un solo allegato, URL della riga, etichetta del jsonb.
+        link = [_link(1, "allegato", "https://www.ente.it/a.pdf")]
+        riga = _riga(allegati=[
+            {"label": "Avviso", "url": "https://ENTE.it/a.pdf#p2"},
+            {"label": "Altro", "url": "https://ente.it/a.pdf?utm_source=x"},
+            {"label": "Ancora", "url": "https://ente.it:443/a.pdf"},
+        ])
+        assert _allegati(riga, link) == [
+            ("https://www.ente.it/a.pdf", "Avviso", "allegato", "pdf")
+        ]
+
+
+class TestEtichettaDiRipiego:
+    """Etichetta: `etichetta` della riga, poi `label` del jsonb, poi il nome
+    del file dall'URL, infine «Allegato»: mai vuota."""
+
+    @pytest.mark.parametrize(
+        ("url", "attesa"),
+        [
+            ("https://ente.it/doc/Avviso%20pubblico.pdf", "Avviso pubblico"),
+            ("https://ente.it/doc/Avviso pubblico.pdf", "Avviso pubblico"),
+            ("https://x.it/modulo.DOCX", "modulo"),
+            ("https://x.it/archivio.tar.gz", "archivio.tar.gz"),  # estensione non nota
+            ("https://x.it/scarica?id=1", "scarica"),  # senza query
+            ("https://x.it/cartella/", "cartella"),
+            ("https://x.it/a.pdf#p2", "a"),
+            ("https://x.it/", ETICHETTA_RIPIEGO),
+            ("https://x.it", ETICHETTA_RIPIEGO),
+            ("https://x.it/.pdf", ETICHETTA_RIPIEGO),
+            ("https://x.it/docs/bando%20obiettivoeuropa.com.pdf", "bando"),
+            # Caratteri di controllo e di direzione del testo (Cc, Cf) via.
+            ("https://x.it/bando%E2%80%AEfdp.exe", "bandofdp.exe"),
+            ("https://x.it/a%00b%07c.pdf", "abc"),
+            ("https://x.it/%E2%80%AE.pdf", ETICHETTA_RIPIEGO),
+            ("https://x.it/a%E2%80%8Bb.pdf", "ab"),
+        ],
+    )
+    def test_nome_del_file(self, url, attesa):
+        [(_, etichetta, _, _)] = _allegati(_riga(allegati=[{"url": url}]))
+        assert etichetta == attesa
+
+    def test_ripieghi_uguali_numerati(self):
+        riga = _riga(allegati=[
+            {"url": "https://x.it/scarica?id=1"},
+            {"url": "https://x.it/scarica?id=2"},
+            {"url": "https://x.it/"},
+            {"url": "https://x.it/scarica?id=3"},
+            {"url": "https://x.it/?v=2"},
+        ])
+        assert [e for _, e, _, _ in _allegati(riga)] == [
+            "scarica", "scarica (2)", ETICHETTA_RIPIEGO, "scarica (3)", f"{ETICHETTA_RIPIEGO} (2)"
+        ]
+
+    def test_etichette_sempre_distinte_anche_quelle_del_catalogo(self):
+        link = [
+            _link(1, "allegato", "https://x.it/a.pdf", etichetta="scarica"),
+            _link(2, "allegato", "https://x.it/b.pdf", etichetta="scarica"),
+            _link(3, "allegato", "https://x.it/scarica?id=1"),
+        ]
+        assert [e for _, e, _, _ in _allegati(_riga(), link)] == [
+            "scarica", "scarica (2)", "scarica (3)"
+        ]
+
+    def test_ripiego_prima_e_catalogo_dopo(self):
+        link = [
+            _link(1, "allegato", "https://x.it/scarica?id=1"),
+            _link(2, "allegato", "https://x.it/a.pdf", etichetta="scarica"),
+        ]
+        assert [e for _, e, _, _ in _allegati(_riga(), link)] == ["scarica", "scarica (2)"]
+
+    def test_primo_numero_libero_contando_quelle_gia_numerate(self):
+        link = [
+            _link(1, "allegato", "https://x.it/a.pdf", etichetta="scarica"),
+            _link(2, "allegato", "https://x.it/b.pdf", etichetta="scarica (2)"),
+            _link(3, "allegato", "https://x.it/c.pdf", etichetta="scarica"),
+            _link(4, "allegato", "https://x.it/d.pdf", etichetta="scarica (4)"),
+            _link(5, "allegato", "https://x.it/scarica?id=9"),
+        ]
+        etichette = [e for _, e, _, _ in _allegati(_riga(), link)]
+        assert etichette == ["scarica", "scarica (2)", "scarica (3)", "scarica (4)", "scarica (5)"]
+        assert len(set(etichette)) == len(etichette)
+
+    def test_nome_del_file_lungo_troncato(self):
+        url = "https://x.it/" + "a" * 300 + ".pdf"
+        [(_, etichetta, _, _)] = _allegati(_riga(allegati=[{"url": url}]))
+        assert etichetta == "a" * 200
+
+    def test_label_del_doppione_vince_sul_nome_del_file(self):
+        link = [_link(1, "allegato", "https://x.it/Avviso.pdf")]
+        riga = _riga(allegati=[{"label": "Avviso pubblico 2026", "url": "https://x.it/Avviso.pdf"}])
+        assert _allegati(riga, link) == [
+            ("https://x.it/Avviso.pdf", "Avviso pubblico 2026", "allegato", "pdf")
+        ]
+
+    def test_riga_con_etichetta_non_usa_il_nome_del_file(self):
+        link = [_link(1, "atto", "https://x.it/DD_123.pdf", etichetta="Determina 123")]
+        assert _allegati(_riga(), link) == [
+            ("https://x.it/DD_123.pdf", "Determina 123", "atto", "pdf")
+        ]
+
+    @pytest.mark.parametrize("etichetta", [None, 42])
+    def test_il_modello_esige_l_etichetta(self, etichetta):
+        # L'API promette un'etichetta sempre presente: il modello lo impone.
+        with pytest.raises(ValidationError):
+            AllegatoScheda(url="https://x.it/a.pdf", etichetta=etichetta)
+        with pytest.raises(ValidationError):
+            AllegatoScheda(url="https://x.it/a.pdf")
+        assert all(isinstance(a.etichetta, str) and a.etichetta for a in calcola_allegati(
+            _riga(allegati=[{"url": "https://x.it/"}, {"url": "https://x.it/b.pdf"}]),
+            [_link(1, "allegato", "https://x.it/c.pdf")],
+        ))
+
+
+class TestAllegatiEPulsante:
+    """Un allegato con la stessa chiave del pulsante principale non si ripete
+    fra gli allegati; se escluderlo lo decide il chiamante (`map_detail`:
+    solo quando il pulsante viene mostrato)."""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            MODULO,
+            MODULO + "/",
+            MODULO + "#p1",
+            "https://www.servizi.regione.it/modulo",
+            "https://servizi.regione.it/modulo?utm_source=x",
+        ],
+    )
+    def test_riga_uguale_al_pulsante_esclusa(self, url):
+        link = [_link(1, "allegato", url, etichetta="Modulo"), _link(2, "atto", "https://x.it/a.pdf")]
+        assert [a.url for a in calcola_allegati(_riga(), link, escludi=MODULO)] == [
+            "https://x.it/a.pdf"
+        ]
+
+    def test_voce_del_jsonb_uguale_al_pulsante_esclusa(self):
+        riga = _riga(allegati=[
+            {"label": "Modulo", "url": MODULO},
+            {"label": "Avviso", "url": "https://x.it/a.pdf"},
+        ])
+        assert [a.etichetta for a in calcola_allegati(riga, [], escludi=MODULO)] == ["Avviso"]
+
+    def test_le_varianti_non_completano_l_etichetta(self):
+        # Esclusione prima del dedup: nessuna variante del pulsante resta.
+        link = [_link(1, "allegato", MODULO)]
+        riga = _riga(allegati=[{"label": "Modulo", "url": MODULO + "#p1"}])
+        assert calcola_allegati(riga, link, escludi=MODULO) == []
+
+    @pytest.mark.parametrize("escludi", [None, "https://x.it/altro.pdf"])
+    def test_senza_pulsante_o_con_pulsante_diverso_resta(self, escludi):
+        link = [_link(1, "allegato", MODULO, etichetta="Modulo")]
+        assert [a.url for a in calcola_allegati(_riga(), link, escludi=escludi)] == [MODULO]
+
+
+class TestChiaveUrlCatalogo:
+    """Chiave dei doppioni: la normalizzazione del catalogo replicata
+    (contratto DB bandi §5.1)."""
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            ("https://www.ente.it/a.pdf", "https://ente.it/a.pdf"),
+            ("https://ENTE.it/a.pdf", "https://ente.it/a.pdf"),
+            ("HTTPS://ente.it/a.pdf", "https://ente.it/a.pdf"),
+            ("https://ente.it:443/a.pdf", "https://ente.it/a.pdf"),
+            ("http://ente.it:80/a.pdf", "http://ente.it/a.pdf"),
+            ("https://ente.it/a.pdf#p2", "https://ente.it/a.pdf"),
+            ("https://ente.it/a.pdf?utm_source=x", "https://ente.it/a.pdf"),
+            ("https://ente.it/a.pdf?utm_source=x&a=1", "https://ente.it/a.pdf?a=1"),
+            ("https://ente.it/a?a=1&fbclid=z&gclid=y&msclkid=w&_ga=v", "https://ente.it/a?a=1"),
+            ("https://ente.it/a/", "https://ente.it/a"),
+            ("  https://ente.it/a.pdf  ", "https://ente.it/a.pdf"),
+        ],
+    )
+    def test_uguali(self, a, b):
+        assert chiave_url_catalogo(a) == chiave_url_catalogo(b)
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            ("http://ente.it/a.pdf", "https://ente.it/a.pdf"),
+            ("https://ente.it/A.pdf", "https://ente.it/a.pdf"),
+            ("https://ente.it/a?v=1", "https://ente.it/a?v=2"),
+            ("https://ente.it/a?v=1", "https://ente.it/a"),
+            ("https://ente.it/a?a", "https://ente.it/a?a="),
+            ("https://ente.it/a?q=a/b", "https://ente.it/a?q=a%2Fb"),
+            ("https://ente.it/a//", "https://ente.it/a"),
+            ("https://ente.it:8443/a", "https://ente.it/a"),
+            ("https://ente.it/a?utm=1", "https://ente.it/a"),  # non è `utm_*`
+            ("https://sub.ente.it/a", "https://ente.it/a"),
+        ],
+    )
+    def test_diversi(self, a, b):
+        assert chiave_url_catalogo(a) != chiave_url_catalogo(b)
+
+    def test_parametri_nell_ordine_originale_senza_ricodifica(self):
+        assert chiave_url_catalogo("https://ente.it/a?b=2&utm_medium=m&a=1%202") == (
+            "https://ente.it/a?b=2&a=1%202"
+        )
+
+    def test_url_non_analizzabile_resta_col_solo_trim(self):
+        assert chiave_url_catalogo(" https://ente.it:abc/a ") == "https://ente.it:abc/a"
 
 
 class TestFormato:
@@ -570,6 +786,8 @@ class TestCaricaLinkScheda:
         )]
         # Colonne per nome: `select=*` su bando_link risponde 42501.
         assert "*" not in BANDO_LINK_SELECT
+        # `ultimo_visto_at` non decide nulla nella scheda: non si legge.
+        assert "ultimo_visto_at" not in BANDO_LINK_SELECT
 
     async def test_scarta_righe_di_altri_bandi_e_malformate(self, postgrest_reale):
         db, _, stato = postgrest_reale

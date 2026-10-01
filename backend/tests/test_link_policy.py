@@ -25,6 +25,7 @@ from app.services.link_policy import (
     normalizza_host,
     scrub_bando_row,
     scrub_text_mentions,
+    url_documento_pubblicabile,
 )
 
 
@@ -802,6 +803,16 @@ class TestLinkPubblicabile:
     def test_host_normalizzato(self, url, host):
         assert link_pubblicabile(url)[1] == host
 
+    @pytest.mark.parametrize("porta", ["99999", "abc", "-1", "65536", "+1", "1:2"])
+    def test_porta_non_valida_scarta(self, porta):
+        # Un browser non analizza l'URL: nella scheda non deve comparire.
+        assert link_pubblicabile(f"https://www.regione.it:{porta}/x") is None
+
+    @pytest.mark.parametrize("porta", ["8443", "443", "0", "65535", ""])
+    def test_porta_valida_o_vuota_ammessa(self, porta):
+        url = f"https://www.regione.it:{porta}/x"
+        assert link_pubblicabile(url) == (url, "www.regione.it")
+
     @pytest.mark.parametrize(
         "url",
         [
@@ -978,6 +989,44 @@ class TestLinkPubblicabile:
     @pytest.mark.parametrize("valore", [None, "", "   ", 42, ["https://www.regione.it"]])
     def test_valori_non_stringa_o_vuoti(self, valore):
         assert link_pubblicabile(valore) is None
+
+
+class TestUrlDocumentoPubblicabile:
+    """URL dei documenti mostrati nei partenariati (fonti e citazioni): solo
+    https e la stessa cintura della scheda."""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://ente.it/a.pdf https://fasi.eu/b.pdf",
+            "https://ente.it/a\x01.pdf",
+            "https://ente.it/a\\b.pdf",
+            "http://www.regione.example.it/x.pdf",
+            "HTTP://www.regione.example.it/x.pdf",
+            "https://www.fasi.eu/x.pdf",
+            "https://www.obiettivoeuropa.com/x.pdf",
+            "https://ente.it:99999/x.pdf",
+            "ftp://ente.it/x.pdf",
+            "",
+            None,
+            42,
+        ],
+    )
+    def test_scartati(self, url):
+        assert url_documento_pubblicabile(url) is None
+
+    @pytest.mark.parametrize(
+        ("url", "atteso"),
+        [
+            ("https://www.regione.example.it/x.pdf", "https://www.regione.example.it/x.pdf"),
+            ("  https://www.regione.example.it/x.pdf\n", "https://www.regione.example.it/x.pdf"),
+            ("HTTPS://www.regione.example.it/x.pdf", "HTTPS://www.regione.example.it/x.pdf"),
+            ("https://ente.it/Avviso pubblico.pdf", "https://ente.it/Avviso%20pubblico.pdf"),
+            ("https://ente.it:8443/x.pdf", "https://ente.it:8443/x.pdf"),
+        ],
+    )
+    def test_ammessi(self, url, atteso):
+        assert url_documento_pubblicabile(url) == atteso
 
 
 class TestHostPubblicabile:

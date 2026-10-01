@@ -30,6 +30,7 @@ from app.core.errors import (
     AiNotConfiguredError,
     AiTimeoutError,
     AiUpstreamError,
+    CatalogoNonDisponibileError,
     AppError,
     NotFoundError,
     UpstreamError,
@@ -2519,6 +2520,18 @@ class TestAvvioJob:
         with pytest.raises(AiNotConfiguredError):
             await pcs.avvia_proposta_testi(db, FakeSecondary(), FakeAi(enabled=False),
                                            titolare(), USER_OWNER, bozza["id"])
+        assert db.chiamate("fn_partner_call_ai_prenota") == [] and spawned == []
+
+    async def test_lookup_non_disponibili_503_senza_prenotazione(self, spawned, catalogo):
+        # Fail-closed come il P1 dei lookup: senza cache e con il catalogo non
+        # leggibile niente prenotazione né chiamata pagata, per entrambi i
+        # servizi.
+        catalogo.lookups_errore = CatalogoNonDisponibileError()
+        db = FakeDb()
+        bozza = call_per_ai(db)
+        for avvio in (pcs.avvia_proposta_posizioni, pcs.avvia_proposta_testi):
+            with pytest.raises(CatalogoNonDisponibileError):
+                await avvio(db, FakeSecondary(), FakeAi(), titolare(), USER_OWNER, bozza["id"])
         assert db.chiamate("fn_partner_call_ai_prenota") == [] and spawned == []
 
     async def test_in_corso_409(self, spawned):

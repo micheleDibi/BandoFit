@@ -38,6 +38,7 @@ from app.services.bandi_service import (
     bando_facet_ids,
 )
 from app.services.compatibility import CompanyFacets, build_company_facets, compute_compatibilita
+from app.services.paginazione import CODICE_INTERVALLO_NON_SODDISFACIBILE
 
 logger = logging.getLogger("bandofit.bando_alerts")
 
@@ -240,7 +241,20 @@ async def carica_candidati(
             f"data_pubblicazione.gte.{cutoff.isoformat()},"
             f"and(data_pubblicazione.is.null,created_at.gte.{cutoff.isoformat()})"
         )
-        resp = await query.order("id").range(offset, offset + PAGINA_CANDIDATI - 1).execute()
+        try:
+            resp = (
+                await query.order("id").range(offset, offset + PAGINA_CANDIDATI - 1).execute()
+            )
+        except APIError as exc:
+            if exc.code != CODICE_INTERVALLO_NON_SODDISFACIBILE:
+                raise
+            # Il segmento si è ristretto sotto le righe già lette fra una
+            # pagina e l'altra: per il catalogo l'intervallo non è
+            # soddisfacibile (contratto §8), per la run è una pagina vuota.
+            logger.info(
+                "alert bandi: candidati calati fra due pagine (offset %s), lettura chiusa", offset
+            )
+            break
         dati = resp.data or []
         offset += len(dati)
         # Fra una pagina e l'altra il catalogo può cambiare: niente doppioni.

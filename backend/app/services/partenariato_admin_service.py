@@ -52,6 +52,7 @@ from app.schemas.partenariato_admin import (
 from app.services import partenariato_indice
 from app.services import partenariato_moderazione_testi as testi
 from app.services.notification_service import notify
+from app.services.paginazione import pagina
 from app.services.partenariato_errori import RPC_ERRORS, raise_from_rpc
 from app.services.partner_profile_service import richiedi_non_sandbox
 
@@ -280,17 +281,18 @@ async def lista_call(primary, *, stato: str | None = None, q: str | None = None,
         righe, totale = await _pagina_per_testo_o_creatori(
             primary, testo or "", creatori, stato, offset, page_size)
     else:
-        query = primary.table("partner_calls").select(CALL_ADMIN_SELECT, count="exact")
-        if stato:
-            query = query.eq("stato", stato)
-        if per_id is not None:
-            query = query.eq("id", per_id)
-        elif testo:
-            query = query.or_(f"titolo.ilike.*{testo}*,bando_titolo.ilike.*{testo}*")
-        resp = await (query.order("created_at", desc=True)
-                      .range(offset, offset + page_size - 1).execute())
-        righe = [r for r in resp.data or [] if isinstance(r, dict)]
-        totale = resp.count or 0
+        def costruisci():
+            query = primary.table("partner_calls").select(CALL_ADMIN_SELECT, count="exact")
+            if stato:
+                query = query.eq("stato", stato)
+            if per_id is not None:
+                query = query.eq("id", per_id)
+            elif testo:
+                query = query.or_(f"titolo.ilike.*{testo}*,bando_titolo.ilike.*{testo}*")
+            return query.order("created_at", desc=True)
+
+        lette, totale = await pagina(costruisci, offset, page_size)
+        righe = [r for r in lette if isinstance(r, dict)]
     ids = [str(r["id"]) for r in righe]
     conteggi = await _conteggi_candidature(primary, ids)
     membri = await _membri_attivi(primary, ids)
@@ -399,16 +401,17 @@ async def coda_identita(primary, *, stato: str = "richiesta", page: int = 1,
     """Richieste di verifica (default: in attesa, dalla più vecchia) o le
     aziende in un altro stato (`verificata` per le revoche), con i dati del
     registro e il titolare da contattare."""
-    query = primary.table("company_identita_stato").select(IDENTITA_SELECT, count="exact")
-    if stato != "tutte":
-        query = query.eq("stato", stato)
-    if stato == "richiesta":
-        query = query.order("richiesta_at")
-    else:
-        query = query.order("aggiornato_at", desc=True)
+    def costruisci():
+        query = primary.table("company_identita_stato").select(IDENTITA_SELECT, count="exact")
+        if stato != "tutte":
+            query = query.eq("stato", stato)
+        if stato == "richiesta":
+            return query.order("richiesta_at")
+        return query.order("aggiornato_at", desc=True)
+
     offset = (page - 1) * page_size
-    resp = await query.range(offset, offset + page_size - 1).execute()
-    righe = [r for r in resp.data or [] if isinstance(r, dict)]
+    lette, totale = await pagina(costruisci, offset, page_size)
+    righe = [r for r in lette if isinstance(r, dict)]
     ids = [str(r["company_profile_id"]) for r in righe]
     aziende = await _per_id(primary, "company_profiles",
                             "id,parent_id,ragione_sociale,partita_iva", "id", ids)
@@ -456,7 +459,7 @@ async def coda_identita(primary, *, stato: str = "richiesta", page: int = 1,
                 telefono=(dati or {}).get("telefono") if coerente else None,
             ),
         ))
-    return Page.build(items, resp.count or 0, page, page_size)
+    return Page.build(items, totale, page, page_size)
 
 
 async def _motivo_attuale(primary, company_id: str) -> str | None:

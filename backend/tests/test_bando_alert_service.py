@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
+from postgrest.exceptions import APIError
 
 from app.schemas.bando import LookupsOut
 from app.schemas.common import AtecoItem, LookupItem
@@ -336,6 +337,34 @@ class FakeClient:
 
     def rpc(self, fn: str, params: dict) -> FakeRpc:
         return FakeRpc(self, fn, params)
+
+
+def errore_postgrest(codice: str) -> APIError:
+    return APIError({"message": "errore del catalogo", "code": codice, "hint": None,
+                     "details": None})
+
+
+class FakeQueryConErrori(FakeQuery):
+    """Esaurite le risposte in coda, ogni select solleva il prossimo errore."""
+
+    async def execute(self):
+        if self._action == "select" and not self._owner.select_queues.get(self._table):
+            self._owner.ops.append((self._table, self._action, None, list(self.filters)))
+            raise self._owner.errori.pop(0)
+        return await super().execute()
+
+
+class FakeClientConErrori(FakeClient):
+    """Catalogo che risponde alla prima pagina (senza conteggio) e poi con gli
+    errori dati, uno per richiesta."""
+
+    def __init__(self, prima: list[dict], *errori: Exception):
+        super().__init__()
+        self.select_queues["bando_pubblico"] = [prima]
+        self.errori = list(errori)
+
+    def table(self, name: str) -> FakeQuery:
+        return FakeQueryConErrori(self, name)
 
 
 @pytest.fixture(autouse=True)
@@ -763,6 +792,26 @@ class TestEseguiRun:
         assert riepilogo["esito"] == "errore"
         assert "secondario giù" in riepilogo["dettagli"]["errore"]
 
+    async def test_lookup_non_disponibili_run_in_errore_senza_invii(
+        self, email_calls, notify_calls, monkeypatch
+    ):
+        # Senza i lookup (cache vuota, catalogo non leggibile) la run si
+        # ferma come con l'errore del catalogo di prima: nessuna email con
+        # facet e compatibilità calcolati su liste vuote.
+        from app.core.errors import CatalogoNonDisponibileError
+
+        async def non_disponibili(secondary):
+            raise CatalogoNonDisponibileError()
+
+        monkeypatch.setattr(svc.lookup_service, "get_lookups", non_disponibili)
+        primary = primary_per_run()
+        secondary = FakeClient(selects={"bando_pubblico": [bando_row()]})
+        riepilogo = await svc.esegui_run(primary, secondary, OGGI)
+        assert riepilogo["esito"] == "errore"
+        assert riepilogo["bandi_candidati"] == 1
+        assert "catalogo" in riepilogo["dettagli"]["errore"].lower()
+        assert email_calls == [] and notify_calls == []
+
 
 class TestCaricaCandidati:
     """Candidati dalla vista `bando_pubblico`, a pagine: PostgREST del catalogo
@@ -835,6 +884,27 @@ class TestCaricaCandidati:
         # `bando` non passerebbe inosservata.
         with pytest.raises(AssertionError, match="tabella inattesa: bando_pubblico"):
             await self._carica(FakeClient(selects={"bando": [bando_row()]}))
+
+    async def test_conteggio_calato_fra_due_pagine_chiude_la_lettura(self, caplog):
+        # Fra la prima e la seconda pagina il segmento si è ristretto sotto le
+        # righe già lette: il catalogo rifiuta l'intervallo (contratto §8) e
+        # la lettura finisce con le righe della prima pagina, senza errore.
+        prima = self._righe(1000)
+        secondary = FakeClientConErrori(prima, errore_postgrest("PGRST103"))
+        with caplog.at_level(logging.INFO, logger="bandofit.bando_alerts"):
+            candidati = await self._carica(secondary)
+        assert len(candidati) == 1000
+        assert [f for op in secondary.ops for f in op[3] if f[0] == "range"] == [
+            ("range", 0, 999), ("range", 1000, 1999)
+        ]
+        assert not any(r.levelno >= logging.WARNING for r in caplog.records)
+        assert any("calati" in r.getMessage() for r in caplog.records)
+
+    async def test_altro_errore_alla_seconda_pagina_si_propaga(self):
+        secondary = FakeClientConErrori(self._righe(1000), errore_postgrest("57014"))
+        with pytest.raises(APIError) as info:
+            await self._carica(secondary)
+        assert info.value.code == "57014"
 
 
 class TestCaricaLimiti:

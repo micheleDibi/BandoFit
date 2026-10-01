@@ -151,6 +151,40 @@ class TestCreateBandoEvent:
         assert filters["slug"] == "bando-x"
         assert "stato_processing" not in filters
 
+    def test_snapshot_legge_ora_e_verifica_della_scadenza(self):
+        # Contratto DB bandi §12, R6 «Versione (c)». Il FakeQuery non registra
+        # la select: si verifica la costante.
+        colonne = calendar_service.SNAPSHOT_SELECT.split(",")
+        assert colonne == ["id", "slug", "titolo", "titolo_breve", "data_scadenza",
+                           "ora_scadenza", "data_scadenza_verificata"]
+
+    @pytest.mark.parametrize(
+        ("ora_scadenza", "attesa"),
+        [("12:00:00", "12:00:00"), ("18:30", "18:30:00"), ("12:00:00+02", "12:00:00")],
+    )
+    async def test_scadenza_con_ora_evento_con_ora_di_inizio(self, ora_scadenza, attesa):
+        primary = FakeDb({"calendar_events": []})
+        secondary = FakeDb({"bando_pubblico": [{**BANDO_VIVO, "ora_scadenza": ora_scadenza,
+                                                 "data_scadenza_verificata": True}]})
+        await calendar_service.create_bando_event(primary, secondary, USER_ID, _active(), "bando-x")
+        [(inserted, _)] = primary.ops_for("calendar_events", "insert")
+        assert inserted["tutto_il_giorno"] is False
+        assert inserted["ora_inizio"] == attesa
+        assert "ora_fine" not in inserted
+        assert inserted["data"] == "2026-09-15"
+        # Letta ma senza colonna: mai nelle note, che sono dell'utente.
+        assert "data_scadenza_verificata" not in inserted
+        assert "note" not in inserted
+
+    @pytest.mark.parametrize("ora_scadenza", [None, "", "24:00", "24:00:00", "boh"])
+    async def test_scadenza_senza_ora_evento_tutto_il_giorno(self, ora_scadenza):
+        primary = FakeDb({"calendar_events": []})
+        secondary = FakeDb({"bando_pubblico": [{**BANDO_VIVO, "ora_scadenza": ora_scadenza}]})
+        await calendar_service.create_bando_event(primary, secondary, USER_ID, _active(), "bando-x")
+        [(inserted, _)] = primary.ops_for("calendar_events", "insert")
+        assert inserted["tutto_il_giorno"] is True
+        assert "ora_inizio" not in inserted
+
     async def test_bando_senza_scadenza(self):
         secondary = FakeDb({"bando_pubblico": [{**BANDO_VIVO, "data_scadenza": None}]})
         with pytest.raises(BadRequestError):

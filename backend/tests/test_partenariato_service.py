@@ -29,12 +29,14 @@ from app.core.errors import (
     NotFoundError,
 )
 from app.schemas.partenariato import PartenariatoEstrazione, convalida_tollerante
+from app.core.errors import CatalogoNonDisponibileError
 from app.services import partenariato_service as ps
 from app.services.ai_prezzi import costo_cents
 from app.services.bando_fonti_service import LinkDocumento, StatoBando
 from app.services.download_sicuro import DocumentoScaricato
 from app.services.pdf_testo import TestoPdf as _TestoPdf
 from app.services.pdf_testo import estrai_testo as estrai_testo_vero
+from tests.test_partenariato_regole import elabora, estrazione_base
 
 USER = {"id": "a0000000-0000-0000-0000-000000000001", "role": "cliente", "is_active": True}
 OWNER = USER["id"]
@@ -489,6 +491,7 @@ class Catalogo:
         self.letture = 0
         self.ultimo_cambiamento = adesso() - timedelta(days=30)
         self.link_errore: Exception | None = None
+        self.lookups_errore: Exception | None = None
 
 
 @pytest.fixture
@@ -526,6 +529,8 @@ def catalogo(monkeypatch):
                         caratteri=sum(len(t) for _, t in stato.pagine))
 
     async def lookups(secondary):
+        if stato.lookups_errore is not None:
+            raise stato.lookups_errore
         return SimpleNamespace(regioni=[{"id": 1, "nome": "Piemonte"}])
 
     monkeypatch.setattr("app.services.bandi_service.fetch_bando_for_ai", fetch)
@@ -1043,6 +1048,23 @@ class TestCostiErrori:
             await avvia(db, FakeAi(), catalogo)
         assert (exc.value.status_code, exc.value.code) == (429, "ai_sospesa_oggi")
 
+    async def test_lookup_non_disponibili_errore_a_costo_zero_senza_chiamata(
+        self, catalogo, spawned
+    ):
+        # Fail-closed come il P1 dei lookup: senza cache e con il catalogo non
+        # leggibile il modello non si chiama; esito «errore» a costo 0, la
+        # riserva torna nel budget, si riprova al giro dopo.
+        catalogo.lookups_errore = CatalogoNonDisponibileError()
+        db, ai = FakeDb(), FakeAi()
+        await avvia(db, ai, catalogo)
+        assert await esegui(spawned) == "errore"
+        assert ai.chiamate == []
+        [esecuzione] = db.esecuzioni.values()
+        assert esecuzione["stato"] == "errore" and esecuzione["cost_cents"] == 0
+        assert db.spesa_oggi() == 0
+        assert db.righe[BANDO_ID]["stato"] == "errore"
+        assert db.righe[BANDO_ID].get("regole") is None
+
     async def test_timeout_costo_riservato(self, catalogo, spawned):
         db, ai = FakeDb(), FakeAi(errore=AiTimeoutError())
         await avvia(db, ai, catalogo)
@@ -1518,3 +1540,53 @@ class TestIntegrazionePdf:
         assert out.regole.modalita.citazione.pagina == 1
         assert out.regole.partner_min.stato == "verificata"
         assert out.regole.quote[0].stato == "verificata"
+
+
+# ------------------------------------------- cintura sui documenti mostrati
+
+URL_NON_AMMESSI = [
+    "https://ente.it/a.pdf https://fasi.eu/b.pdf",
+    "https://ente.it/a\x01.pdf",
+    "https://ente.it/a\\b.pdf",
+    "http://regione.example.it/a.pdf",
+]
+
+
+def _fonte_usata(url) -> dict:
+    return {"n": 1, "etichetta": "Avviso", "dominio": "regione.example.it", "url": url,
+            "stato": "letto", "pagine_totali": 2, "pagine_incluse": [1, 2], "troncato": False}
+
+
+class TestCinturaDocumentiMostrati:
+    """Gli URL dei documenti mostrati (fonti e citazioni) passano dal filtro
+    dei link della scheda in lettura, anche sulle righe salvate prima del
+    filtro: il testo resta, il link no."""
+
+    @pytest.mark.parametrize("url", URL_NON_AMMESSI)
+    def test_fonte_storica_con_url_non_ammesso_senza_link(self, url):
+        [fonte] = ps._fonti_out([_fonte_usata(url)])
+        assert fonte.url is None
+        assert (fonte.etichetta, fonte.stato, fonte.pagine_incluse) == ("Avviso", "letto", [1, 2])
+
+    def test_fonte_con_spazio_codificata_e_fonte_ammessa_invariata(self):
+        fonti = ps._fonti_out([
+            _fonte_usata("https://regione.example.it/Avviso pubblico.pdf"),
+            {**_fonte_usata("https://www.regione.example.it/x.pdf"), "n": 2},
+        ])
+        assert [f.url for f in fonti] == [
+            "https://regione.example.it/Avviso%20pubblico.pdf",
+            "https://www.regione.example.it/x.pdf",
+        ]
+
+    @pytest.mark.parametrize("url", URL_NON_AMMESSI)
+    def test_regole_storiche_con_citazione_non_ammessa_restano_leggibili(self, url):
+        regole = elabora(estrazione_base())
+        regole["modalita"]["citazione"]["url_documento"] = url
+        out = ps._regole_out({"regole": regole, "bando_id": 1})
+        assert out is not None
+        assert out.modalita.citazione.url_documento is None
+        assert out.modalita.citazione.testo == "in forma singola o associata mediante ATS"
+
+    def test_regole_storiche_con_citazione_ammessa_invariata(self):
+        out = ps._regole_out({"regole": elabora(estrazione_base()), "bando_id": 1})
+        assert out.modalita.citazione.url_documento == "https://regione.example.it/avviso.pdf"

@@ -34,7 +34,7 @@ async def list_ai_checks(
     primary: PrimaryClient,
     secondary: SecondaryClient,
     bando_slug: str | None = Query(default=None, max_length=255),
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=100_000),
     page_size: int = Query(default=20, ge=1, le=50),
 ) -> AiChecksResponse:
     # `secondary`: con `bando_slug` lo storico comprende i doppioni fusi nel bando.

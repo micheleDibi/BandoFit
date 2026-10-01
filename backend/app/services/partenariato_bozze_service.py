@@ -691,14 +691,9 @@ async def _membri(primary, call_id: str) -> list[dict]:
     return [r for r in resp.data or [] if isinstance(r, dict)]
 
 
-async def _programmi(secondary) -> dict[int, str]:
-    """Nomi dei programmi del catalogo; vuoto se le lookup non rispondono
-    (il programma è facoltativo nell'input)."""
-    try:
-        lookups = await lookup_service.get_lookups(secondary)
-    except Exception as exc:  # noqa: BLE001 — serve solo al nome del programma
-        logger.warning("bozze: lookup del catalogo non disponibili (%s)", type(exc).__name__)
-        return {}
+def _nomi_programmi(lookups) -> dict[int, str]:
+    """Nomi dei programmi del catalogo dai lookup (il programma è facoltativo
+    nell'input: le voci malformate si saltano)."""
     programmi: dict[int, str] = {}
     for voce in getattr(lookups, "programmi", None) or []:
         id_, nome = getattr(voce, "id", None), getattr(voce, "nome", None)
@@ -811,9 +806,11 @@ async def avvia(primary, secondary, ai, active, user: dict, call_id: Any, tipo: 
     if not ai.enabled:
         raise AiNotConfiguredError(MSG_AI_NON_CONFIGURATA)
     company_id = str(active.company_id)
-    membri, programmi, az = await asyncio.gather(
+    # Lookup fail-closed, PRIMA della prenotazione e della chiamata pagata:
+    # senza (cache vuota, catalogo non leggibile) niente bozza (503).
+    programmi = _nomi_programmi(await lookup_service.get_lookups(secondary))
+    membri, az = await asyncio.gather(
         _membri(primary, str(call["id"])),
-        _programmi(secondary),
         pcs.carica_azienda(primary, company_id, active.owner_id),
     )
     nome = _nome_azienda(az) if includi_nome_azienda else None

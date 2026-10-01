@@ -11,9 +11,12 @@ miss: il caso normale resta una sola richiesta.
 
 Regola difensiva: gli errori delle letture di risoluzione (storico, fusione,
 riletta del master) finiscono nel log e valgono come «non risolto». Una di
-queste letture non deve mai trasformare un 404 in un 502/504. Nel log vanno
-solo tabella e codice dell'errore: il messaggio di PostgREST può riportare lo
-slug richiesto, che arriva dall'URL.
+queste letture non deve mai trasformare un 404 in un 502/504. Eccezione: un
+42703 (colonna inesistente) sulla riletta del master non è un miss ma un
+cambio di contratto del catalogo, e risale al chiamante, che può rileggere
+con un'altra select (`bandi_service`); trasformarlo in 404 nasconderebbe un
+bando che esiste. Nel log vanno solo tabella e codice dell'errore: il
+messaggio di PostgREST può riportare lo slug richiesto, che arriva dall'URL.
 
 Il modulo non importa `bandi_service` (lo usa, non il contrario).
 """
@@ -35,6 +38,9 @@ logger = logging.getLogger("bandofit.bandi_risoluzione")
 VISTA_BANDI = "bando_pubblico"
 STORICO_SELECT = "slug,bando_id,esito"
 FUSIONE_SELECT = "bando_id,master_id,master_slug"
+# Codice PostgREST/Postgres di «colonna inesistente»: la select chiede una
+# colonna che la vista non ha più.
+COLONNA_INESISTENTE = "42703"
 
 # Lunghezza massima del riferimento (slug) scritto nel log.
 _LOG_RIF_MAX = 100
@@ -58,12 +64,17 @@ def _intero(valore: Any) -> bool:
     return isinstance(valore, int) and not isinstance(valore, bool)
 
 
-async def _leggi(query, tabella: str, rif: str) -> list | None:
+async def _leggi(
+    query, tabella: str, rif: str, *, rilancia: tuple[str, ...] = ()
+) -> list | None:
     """Esegue una lettura di risoluzione. Su errore scrive un WARNING con
-    tabella e codice (mai il messaggio di PostgREST) e restituisce None."""
+    tabella e codice (mai il messaggio di PostgREST) e restituisce None;
+    un `APIError` con codice in `rilancia` risale invece al chiamante."""
     try:
         resp = await query.execute()
     except APIError as exc:
+        if exc.code in rilancia:
+            raise
         codice = exc.code or "sconosciuto"
     except httpx.HTTPError as exc:
         codice = type(exc).__name__
@@ -165,7 +176,9 @@ async def carica_per_slug(secondary, slug: str, select: str) -> dict:
     - altrimenti → `NotFoundError` (404).
 
     Gli errori della prima lettura NON si intercettano (vanno all'handler
-    globale come prima di R0-b); quelli della risoluzione sì.
+    globale come prima di R0-b); quelli della risoluzione sì, tranne un
+    42703 sulla riletta del master (colonna della select inesistente: non
+    è un miss, risale come `APIError`).
     """
     resp = await secondary.table(VISTA_BANDI).select(select).eq("slug", slug).limit(1).execute()
     if resp.data:
@@ -186,6 +199,7 @@ async def carica_per_slug(secondary, slug: str, select: str) -> dict:
         .limit(1),
         VISTA_BANDI,
         slug,
+        rilancia=(COLONNA_INESISTENTE,),
     )
     if not righe or not isinstance(righe[0], dict):
         raise NotFoundError("Bando non trovato")

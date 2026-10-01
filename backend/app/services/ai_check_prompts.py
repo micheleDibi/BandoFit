@@ -199,26 +199,36 @@ def build_bando_input(
     bando: dict,
     contenuto: dict | None,
     allegati_texts: list[tuple[str, str]] | None = None,
+    *,
+    allegati_etichette: list[str] | None = None,
 ) -> tuple[str, dict[str, str]]:
     """Serializza TUTTI i dati del bando in testo indicizzato per sezione.
 
     Ritorna (testo completo, mappa indice→testo della sezione) — la mappa
     serve alla verifica in codice delle citazioni. `allegati_texts` è il
-    gancio per la futura ingestione dei PDF ufficiali ([A1]..[An])."""
+    gancio per la futura ingestione dei PDF ufficiali ([A1]..[An]).
+
+    `allegati_etichette` sono le etichette degli allegati della scheda
+    (`bando_scheda_link.calcola_allegati`: righe `bando_link` filtrate più
+    i ripieghi della riga), nella stessa riga «Allegati ufficiali» del
+    [META]; con None la riga si costruisce dal solo jsonb `allegati` della
+    riga (forma storica). Lo stato è `stato_effettivo`, con ripiego su
+    `stato_bando` se manca. Il testo è la chiave della cache delle
+    estrazioni: a parità di etichette e di stato non cambia."""
     lookup = bando.get("tipologie_bando") or {}
     modalita = bando.get("modalita_erogazione") or {}
     programma = bando.get("programmi") or {}
-    allegati = bando.get("allegati") or []
-    allegati_labels = [
-        str(a.get("label") or a.get("nome") or a.get("url") or "allegato")
-        for a in allegati
-        if isinstance(a, dict)
-    ]
+    if allegati_etichette is None:
+        allegati_etichette = [
+            str(a.get("label") or a.get("nome") or a.get("url") or "allegato")
+            for a in (bando.get("allegati") or [])
+            if isinstance(a, dict)
+        ]
 
     meta_lines = [
         f"Titolo: {_fmt(bando.get('titolo') or bando.get('titolo_breve'))}",
         f"Ente erogatore: {_fmt(bando.get('ente_erogatore'))}",
-        f"Stato: {_fmt(bando.get('stato_bando'))}",
+        f"Stato: {_fmt(bando.get('stato_effettivo') or bando.get('stato_bando'))}",
         f"Data pubblicazione: {_fmt(bando.get('data_pubblicazione'))}",
         f"Data apertura: {_fmt(bando.get('data_apertura'))}",
         f"Data scadenza: {_fmt(bando.get('data_scadenza'))}",
@@ -234,7 +244,7 @@ def build_bando_input(
         f"Beneficiari (catalogo): {_fmt(_junction_names(bando, 'bando_beneficiari', 'beneficiari'))}",
         f"Codici ATECO (catalogo): {_fmt(_junction_names(bando, 'bando_codici_ateco', 'codici_ateco'))}",
         f"Sintesi: {_fmt(bando.get('descrizione_breve'))}",
-        f"Allegati ufficiali (NON inclusi in questo testo): {_fmt(allegati_labels)}",
+        f"Allegati ufficiali (NON inclusi in questo testo): {_fmt(allegati_etichette)}",
     ]
 
     sections: dict[str, str] = {"META": "\n".join(meta_lines)}

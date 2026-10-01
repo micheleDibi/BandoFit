@@ -290,11 +290,12 @@ def link_pubblicabile(url: Any) -> tuple[str, str] | None:
     """`(url, host normalizzato)` se l'URL può uscire dall'API come pulsante,
     allegato o link nel testo della scheda, altrimenti None.
 
-    Solo `http`/`https` con un host; niente spazi Unicode, tabulazioni, a
-    capo, caratteri di controllo, backslash o credenziali; host fuori dai
-    domini esclusi, sottodomini compresi. L'URL restituito è quello ricevuto,
-    senza spazi ai bordi e con gli spazi semplici dopo l'host codificati
-    `%20`: è quello da mostrare e da confrontare."""
+    Solo `http`/`https` con un host e una porta valida (vuota, o un numero
+    da 0 a 65535); niente spazi Unicode, tabulazioni, a capo, caratteri di
+    controllo, backslash o credenziali; host fuori dai domini esclusi,
+    sottodomini compresi. L'URL restituito è quello ricevuto, senza spazi ai
+    bordi e con gli spazi semplici dopo l'host codificati `%20`: è quello da
+    mostrare e da confrontare."""
     if not isinstance(url, str):
         return None
     url = _spazi_codificati(url.strip())
@@ -304,6 +305,9 @@ def link_pubblicabile(url: Any) -> tuple[str, str] | None:
         parti = urlsplit(url)
         grezzo = parti.hostname
         credenziali = parti.username is not None or parti.password is not None
+        # La porta si convalida solo leggendola: non numerica o fuori
+        # intervallo è un URL che un browser non analizza.
+        _porta = parti.port
     except ValueError:
         return None
     if parti.scheme.lower() not in _FONTE_SCHEMI or credenziali or not grezzo:
@@ -312,3 +316,15 @@ def link_pubblicabile(url: Any) -> tuple[str, str] | None:
     if host is None or _dominio_escluso(host) or is_blocked_link(url):
         return None
     return url, host
+
+
+def url_documento_pubblicabile(url: Any) -> str | None:
+    """URL di un documento ufficiale dei partenariati come può uscire
+    dall'API (fonti e citazioni delle regole): solo `https`, e ammesso da
+    `link_pubblicabile`, la stessa cintura della scheda. L'URL restituito è
+    quello del filtro (spazi codificati); None altrimenti: il testo resta,
+    il link no."""
+    if not isinstance(url, str) or not url.strip().lower().startswith("https://"):
+        return None
+    ammesso = link_pubblicabile(url)
+    return ammesso[0] if ammesso is not None else None

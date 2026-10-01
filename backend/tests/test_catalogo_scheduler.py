@@ -108,6 +108,29 @@ class TestModalita:
         assert [r.levelno for r in righe] == [livello]
         assert "rimappatura fusi (prova)" in righe[0].getMessage()
 
+    @pytest.mark.parametrize(("separazioni", "livello"), [
+        ({"separazioni_rilevate": 1, "ripristinate": 3, "in_conflitto": 0}, logging.WARNING),
+        ({"separazioni_rilevate": 2, "ripristinate": 0, "in_conflitto": 2}, logging.INFO),
+        ({"separazioni_rilevate": 1, "ripristinate": 0, "in_conflitto": 0}, logging.INFO),
+        ({}, logging.INFO),  # report di una versione senza le chiavi nuove
+    ])
+    async def test_riassunto_con_le_separazioni(self, monkeypatch, caplog, separazioni, livello):
+        # Righe ripristinate (in prova: da ripristinare) vanno guardate; le
+        # separazioni in attesa della vista e i conflitti no.
+        imposta(monkeypatch, RIMAPPATURA_FUSI_MODALITA="attiva")
+
+        async def passo(primary, secondary, *, prova):
+            return {"modalita": "attiva", "in_uso": 3, "fusi": 1, "coppie_catalogo": 6,
+                    "scartate": 0, "errori": 0, **separazioni, "totali": {}, "coppie": []}
+
+        monkeypatch.setattr(rimappatura_fusi, "passo", passo)
+        with caplog.at_level(logging.INFO, logger="bandofit.catalogo_scheduler"):
+            report = await cs.esegui_passo(object(), object())
+        righe = [r for r in caplog.records if r.name == "bandofit.catalogo_scheduler"]
+        assert [r.levelno for r in righe] == [livello]
+        assert "'coppie_catalogo': 6" in righe[0].getMessage()
+        assert report["coppie_catalogo"] == 6
+
 
 class TestLoop:
     async def test_sopravvive_agli_errori_e_attende_l_intervallo(self, monkeypatch, caplog):
